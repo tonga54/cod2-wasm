@@ -64,7 +64,7 @@
       button.disabled = false;
     } catch (error) {
       log(`Owner data unavailable: ${error.message}.`);
-      log('Rebuild with COD2_OWNER_DATA set to the legally owned main directory.');
+      log('Rebuild with COD2_OWNER_DATA set to the required main directory.');
     }
   }
 

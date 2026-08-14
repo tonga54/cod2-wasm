@@ -12,8 +12,7 @@
 > [!IMPORTANT]
 > **No game content is included — bring your own data.** This repository is
 > *source code only*: no executables, archives, maps, models, textures, sounds,
-> or scripts. To run anything you must supply data files from a copy of the game
-> that **you legally own**.
+> or scripts. To run anything you must supply the required game data files.
 
 ## Status
 
@@ -151,8 +150,7 @@ caveats above apply.
 
 ## Running
 
-This reconstructs the engine, not the content. Point it at data from a copy of
-the game you legally own:
+This reconstructs the engine, not the content. Point it at the game data:
 
 ```sh
 ./build-native/cod2_linux +set fs_basepath /path/to/your/game
@@ -164,7 +162,7 @@ On Windows (native MSVC client):
 build\msvc\cod2_win32.exe +set fs_basepath "C:\path\to\your\game"
 ```
 
-Without legally-obtained data the build runs but has nothing to load.
+Without the game data the build runs but has nothing to load.
 
 ## Notice
 
@@ -177,9 +175,8 @@ Inc. They are used in this repository only for identification and
 interoperability, to describe what the code reconstructs. No claim is made to
 those marks.
 
-This project does not provide or help obtain copyrighted game data. To use it
-with real game content, you must supply data files from a copy of Call of Duty 2
-that you legally own.
+This project contains no game data. Supply the required Call of Duty 2 files at
+runtime.
 
 The reconstructed engine source is a derivative work created for the purposes of
 preservation, interoperability, research, and education. It is provided as-is,

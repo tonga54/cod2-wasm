@@ -254,7 +254,7 @@ Do not begin renderer polish or claim a menu until the link model is repaired.
 6. Keep networking private/loopback until the old parser and protocol surfaces
    receive a security review.
 
-Single-player requires a different, complete and legally reviewable source base;
+Single-player requires a different, complete source base;
 it cannot be created from this repository by adding a menu option.
 
 ## Handoff template
