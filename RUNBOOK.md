@@ -21,9 +21,10 @@ The following rules are mandatory:
 - Do not submit patches, issues, pull requests, or messages upstream.
 
 The inherited web directories were removed from this branch by path without
-opening their contents. The repository's root CMake entry point now fails closed
-when configured by Emscripten, directing developers to `scripts/build-web.sh`.
-The active downstream build names its native source files explicitly and never
+opening their contents, and the unreachable inherited Emscripten block was
+removed from the root CMake file. The root entry point fails closed when
+configured by Emscripten, directing developers to `scripts/build-web.sh`. The
+active downstream build names its native source files explicitly and never
 configures the repository's root build system.
 
 ## Source and publication gate

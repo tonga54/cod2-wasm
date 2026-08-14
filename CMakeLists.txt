@@ -81,73 +81,7 @@ if(COD2_X64)
 endif()
 
 # =============================================================================
-if(EMSCRIPTEN)
-# ----------------------------------------------------------------------------
-# WEB (WebAssembly via Emscripten)
-# ----------------------------------------------------------------------------
-option(COD2_WEB_WASMFS  "OPFS-backed WASMFS variant (-pthread; needs COOP/COEP)" OFF)
-option(COD2_WEB_WORKERFS "True zero-copy WORKERFS variant (-pthread; needs COOP/COEP)" OFF)
-
-set(WEB_GEN ${CMAKE_SOURCE_DIR}/build/web_gen)
-
-set(WEB_GEN_C
-  ${WEB_GEN}/wasm_asm_replacements.c ${WEB_GEN}/bss.c
-  ${WEB_GEN}/data.c ${WEB_GEN}/link_stubs.c
-  ${WEB_GEN}/missing_c_syms.c ${WEB_GEN}/import_pointers.c)
-
-# --- web source set (mirrors WEB_SRCS) ---------------------------------------
-file(GLOB_RECURSE WEB_PC_C    RELATIVE ${CMAKE_SOURCE_DIR} "${COD2_SRC_DIR}/PC/*.c")
-file(GLOB_RECURSE WEB_MAC_C   RELATIVE ${CMAKE_SOURCE_DIR} "${COD2_SRC_DIR}/Mac/*.c")
-file(GLOB_RECURSE WEB_STUBS_C RELATIVE ${CMAKE_SOURCE_DIR} "${COD2_SRC_DIR}/stubs/*.c")
-file(GLOB         WEB_ROOT_C  RELATIVE ${CMAKE_SOURCE_DIR} "${COD2_SRC_DIR}/*.c")
-set(WEB_C ${WEB_PC_C} ${WEB_MAC_C} ${WEB_STUBS_C} ${WEB_ROOT_C})
-# native asm-data .c, and the blobs replaced by the generated web versions.
-list(FILTER WEB_C EXCLUDE REGEX "^src/(data|import_pointers|literals|bss|rodata|strings)\\.c$")
-list(FILTER WEB_C EXCLUDE REGEX "^src/stubs/(link_stubs|missing_c_syms)\\.c$")
-# the Linux platform layer + bundled zlib + web glue are added explicitly.
-list(APPEND WEB_C
-  src/unix/linux_common.c src/unix/linux_input.c src/unix/linux_net.c src/unix/sysdiff_statehash.c
-  src/PC/zlib/adler32.c src/PC/zlib/infblock.c src/PC/zlib/infcodes.c src/PC/zlib/inffast.c
-  src/PC/zlib/inflate.c src/PC/zlib/inftrees.c src/PC/zlib/infutil.c src/PC/zlib/zutil.c
-  src/web/webgl2_compat.c src/web/wasm_aliases.c src/web/cod2_wasmfs_mount.c)
-
-add_executable(cod2 ${WEB_C} ${WEB_GEN_C})
-target_compile_definitions(cod2 PRIVATE WEB_BUILD=1 SDL_DISABLE_IMMINTRIN_H)
-target_include_directories(cod2 PRIVATE
-  ${COD2_SRC_DIR}/PC/speex ${COD2_SRC_DIR}/PC/zlib ${COD2_SRC_DIR}
-  ${COD2_SRC_DIR}/headers ${CMAKE_SOURCE_DIR})
-target_compile_options(cod2 PRIVATE -w -O0 -gsource-map -flto ${COD2_WNO})
-set_source_files_properties(src/PC/qcommon/crash_handler.c PROPERTIES
-  COMPILE_DEFINITIONS "COD2_GIT_HASH=\"${COD2_GIT_HASH}\"")
-
-set(WEB_LINK
-  -flto -sUSE_SDL=2 -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 -sFULL_ES3=1
-  -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB -sSTACK_SIZE=5242880
-  -sFORCE_FILESYSTEM=1 -sASSERTIONS=1 -sEXIT_RUNTIME=0 -sERROR_ON_UNDEFINED_SYMBOLS=0
-  -sEXPORTED_RUNTIME_METHODS=callMain,FS,ccall
-  --shell-file ${COD2_SRC_DIR}/web/shell.html
-  -Wl,--allow-multiple-definition)
-if(COD2_WEB_WASMFS)
-  target_compile_options(cod2 PRIVATE -DWEB_WASMFS -pthread)
-  list(APPEND WEB_LINK -sWASMFS -pthread -sPTHREAD_POOL_SIZE=2
-       -sEXPORTED_FUNCTIONS=_main,_cod2_mount_opfs)
-elseif(COD2_WEB_WORKERFS)
-  target_compile_options(cod2 PRIVATE -pthread)
-  list(APPEND WEB_LINK -pthread -sPTHREAD_POOL_SIZE=4 -sPROXY_TO_PTHREAD=1
-       -sOFFSCREENCANVAS_SUPPORT=1 "-sOFFSCREENCANVASES_TO_PTHREAD=#canvas" -lworkerfs.js)
-else()
-  list(APPEND WEB_LINK -lidbfs.js)   # legacy MEMFS default (matches `make web`)
-endif()
-target_link_options(cod2 PRIVATE ${WEB_LINK})
-set_target_properties(cod2 PROPERTIES SUFFIX ".html"
-  RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
-
-# the browser-side loader sits next to cod2.html (shell.html loads it as a sibling).
-add_custom_command(TARGET cod2 POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy ${COD2_SRC_DIR}/web/cod2_fs.js ${CMAKE_BINARY_DIR}/cod2_fs.js)
-
-# =============================================================================
-elseif(WIN32 AND MSVC)
+if(WIN32 AND MSVC)
 # ----------------------------------------------------------------------------
 # WINDOWS / MSVC (cl.exe) -- additive native-Windows client build.
 # Self-contained in cmake/win32-msvc.cmake so the MinGW path below is untouched.
