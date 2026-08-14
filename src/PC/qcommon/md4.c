@@ -1,5 +1,9 @@
+#ifdef COD2_DOWNSTREAM_WASM_CORE_PROBE
+#include "cod2_wasm_core_types.h"
+#else
 #include "common_types.h"
 #include "imports.h"
+#endif
 #include <string.h>
 
 extern void Com_Memcpy(void *dest, const void *src, int count);

@@ -5,9 +5,8 @@
 #     cmake -S . -B build/native && cmake --build build/native -j
 #       -> build/native/cod2_linux   build/native/cod2_lnxded
 #
-#   Web (WebAssembly, requires the Emscripten SDK):
-#     emcmake cmake -S . -B build/web && cmake --build build/web -j
-#       -> build/web/cod2.html (+ cod2.js / cod2.wasm / cod2_fs.js)
+#   Downstream WebAssembly work is intentionally isolated from this upstream
+#   build. Use scripts/build-web.sh; configuring this file with Emscripten fails.
 #
 #   Windows (MinGW cross-compile):
 #     cmake -S . -B build/win32 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-mingw32.cmake
@@ -46,6 +45,12 @@ if(COD2_WIN_MSVC)
   project(cod2 LANGUAGES C CXX)
 else()
   project(cod2 LANGUAGES C ASM)
+endif()
+
+if(EMSCRIPTEN)
+  message(FATAL_ERROR
+    "The inherited OpenCoD2 web target is outside the downstream source boundary. "
+    "Run scripts/build-web.sh instead.")
 endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)

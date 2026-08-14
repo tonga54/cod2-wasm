@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Call of Duty 2 WASM core probe</title>
+  <style>
+    :root { color-scheme: dark; font-family: ui-monospace, monospace; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #111; color: #ddd; }
+    main { width: min(56rem, calc(100vw - 3rem)); }
+    pre { min-height: 9rem; padding: 1rem; overflow: auto; border: 1px solid #555; background: #080808; }
+    strong { color: #ffca66; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Call of Duty 2 native-core WASM probe</h1>
+    <p><strong>This is an engineering compile probe, not a game launcher.</strong></p>
+    <pre id="log">Loading reconstructed native checksum code…</pre>
+  </main>
+  <script>
+    const output = document.getElementById('log');
+    output.textContent = '';
+    var Module = {
+      print(text) { output.textContent += `${text}\n`; console.log(text); },
+      printErr(text) { output.textContent += `${text}\n`; console.error(text); }
+    };
+  </script>
+  <script src="cod2_core_probe.js"></script>
+</body>
+</html>
