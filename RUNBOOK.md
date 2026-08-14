@@ -146,7 +146,10 @@ shows the four deterministic log lines above. Verify the console has the same
 lines and no WASM load error. This test needs no retail assets and makes no game
 runtime claim. Stop the HTTP server before testing another project.
 
-Chromium has not been run for this checkpoint, by design.
+Chrome loaded the probe and displayed all four expected deterministic lines,
+including checksums `9028dc2c` and `4cdcd263`, with no retail data involved.
+This confirms browser execution of the isolated native MD4 module only; it does
+not advance the project to an engine milestone.
 
 ## Owner Steam assets
 
