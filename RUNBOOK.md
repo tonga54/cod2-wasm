@@ -57,6 +57,44 @@ networking, platform, generated-data, and compatibility sources compile to 395
 WebAssembly object files. Native assembly and duplicate bundled zlib sources
 are excluded; the browser target uses Emscripten SDL2 and zlib.
 
+## Multiplayer bot foundation
+
+The source tree contains a clean-room control seam for the existing native
+test-client lifecycle. It does not supply bot AI, waypoint graphs, or a bot
+population script.
+
+`SV_AddTestClient` still owns admission and `ClientBegin`. Bot intent lives in
+the fixed 64-entry `s_botCmdState` sidecar rather than `client_t`, preserving
+the reconstruction's pinned 32-bit layouts. `SV_BotUserMove` now emits a normal
+`usercmd_t` with `svs.time`, the current offhand, the selected weapon, encoded
+view angles, and clamped forward/right movement before calling
+`SV_ClientThink`.
+
+The server exposes these GSC player methods:
+
+```text
+self isBot()
+self botStop()
+self botMovement(forward, right)
+self botAngles((pitch, yaw, roll))
+self botWeapon("weapon_name")
+self botAction("+fire") / self botAction("-fire")
+```
+
+Actions use the reconstructed native `CL_CmdButtons` contract: fire, melee,
+activate, reload, use/reload, lean, prone, crouch, stand/jump, ADS, binoculars,
+hold breath, frag, and smoke. The ABI rejects non-test clients and clamps each
+movement axis to `[-127, 127]`. Add/drop resets the sidecar so intent cannot
+leak when a client slot is reused.
+
+The post-link target is an 8-player population with `sv_maxclients 12`.
+Independently authored server logic should count humans plus bots, fill to
+eight, and drop a bot after each human admission. Do not set `sv_maxclients` to
+eight: a full bot population would leave no slot in which a human can connect.
+No third-party bot scripts or waypoint graphs may be copied, fetched, tracked,
+or included in an image; a future AI/navigation layer must have its own source
+and data boundary.
+
 ## Exact native blocker
 
 The explicit `cod2_client` target reaches `wasm-ld` and fails because the
@@ -136,6 +174,8 @@ under ignored `out/` output.
 These checks cover:
 
 - the full reconstructed object compile and native diagnostic output;
+- clean-room bot ABI registration, exact native input masks, current-time
+  command submission, slot-reset behavior, and absence of bot scripts/waypoints;
 - framework v0.7.3 package and adapter validation;
 - exact state transitions and safe repeat start;
 - canonical PWA metadata and neutral ready-state copy;

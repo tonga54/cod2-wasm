@@ -16,10 +16,7 @@ extern void LargeLocal_LargeLocal(LargeLocal *ll, int size);
 extern void *LargeLocal_GetBuf(LargeLocal *ll);
 extern void ZN10LargeLocalD1Ev(LargeLocal *ll);
 extern playerState_t *SV_GameClientNum(int num);
-extern int G_GetClientArchiveTime(int clientNum);
 extern void SV_ClientThink(client_t *cl, usercmd_t *cmd);
-extern float randomf(void);
-extern float crandom(void);
 extern const char *Dvar_InfoString(int bit);
 extern Bool Dvar_GetBool(const char *dvarName);
 extern int Dvar_GetInt(const char *dvarName);
@@ -132,6 +129,13 @@ void SV_PacketEvent(netadr_t from, msg_t *msg);
 void SV_FreeClientScriptId(client_t *cl);
 void SV_RunFrame(void);
 void SV_BotUserMove(client_t *cl);
+qboolean SV_BotIsTestClient(int clientNum);
+void SV_BotResetClient(int clientNum);
+qboolean SV_BotStop(int clientNum);
+qboolean SV_BotSetMovement(int clientNum, int forward, int right);
+qboolean SV_BotSetAngles(int clientNum, const vec_t *angles);
+qboolean SV_BotSetWeapon(int clientNum, int weapon);
+qboolean SV_BotSetAction(int clientNum, const char *action);
 void SV_SendServerCommand(client_t *cl, svscmd_type type, const char *fmt, ...);
 void SV_Frame(int msec);
 
@@ -803,50 +807,205 @@ void SV_RunFrame(void)
     G_RunFrame(*(int *)((char *)&svs + 4));
 }
 
+#define COD2_BOT_MAX_CLIENTS 64
+
+typedef struct cod2BotCommandState_s {
+    int buttons;
+    signed char forwardmove;
+    signed char rightmove;
+    byte weapon;
+    qboolean hasWeapon;
+    vec3_t angles;
+    qboolean hasAngles;
+} cod2BotCommandState_t;
+
+typedef struct cod2BotActionDef_s {
+    const char *name;
+    int buttonMask;
+} cod2BotActionDef_t;
+
+/* These masks are the native CL_CmdButtons/CL_KeyMove usercmd contract. */
+static const cod2BotActionDef_t s_botActions[] = {
+    { "fire",        0x00001 },
+    { "melee",       0x00004 },
+    { "activate",    0x00008 },
+    { "reload",      0x00010 },
+    { "usereload",   0x00020 },
+    { "leanleft",    0x00040 },
+    { "leanright",   0x00080 },
+    { "goprone",     0x00100 },
+    { "gocrouch",    0x00200 },
+    { "gostand",     0x00400 },
+    { "jump",        0x00400 },
+    { "ads",         0x01000 },
+    { "binoculars",  0x04000 },
+    { "holdbreath",  0x08000 },
+    { "frag",        0x10000 },
+    { "smoke",       0x20000 },
+    { NULL,            0x00000 },
+};
+
+/*
+ * Test clients share client_t with network clients, and that reconstructed
+ * layout is pinned to the original 32-bit ABI. Keep bot intent out-of-line so
+ * adding browser/server bot support cannot move any reconstructed field.
+ */
+static cod2BotCommandState_t s_botCmdState[COD2_BOT_MAX_CLIENTS];
+
+static qboolean SV_BotClientNumInRange(int clientNum)
+{
+    return clientNum >= 0 && clientNum < COD2_BOT_MAX_CLIENTS &&
+           svs.clients && sv_maxclients &&
+           clientNum < sv_maxclients->current.integer;
+}
+
+qboolean SV_BotIsTestClient(int clientNum)
+{
+    client_t *cl;
+
+    if (!SV_BotClientNumInRange(clientNum))
+        return 0;
+
+    cl = &svs.clients[clientNum];
+    return cl->state != 0 && cl->bIsTestClient &&
+           cl->netchan.remoteAddress.type == NA_BOT;
+}
+
+void SV_BotResetClient(int clientNum)
+{
+    if (clientNum < 0 || clientNum >= COD2_BOT_MAX_CLIENTS)
+        return;
+
+    memset(&s_botCmdState[clientNum], 0, sizeof(s_botCmdState[clientNum]));
+}
+
+qboolean SV_BotStop(int clientNum)
+{
+    cod2BotCommandState_t *state;
+
+    if (!SV_BotIsTestClient(clientNum))
+        return 0;
+
+    state = &s_botCmdState[clientNum];
+    state->buttons = 0;
+    state->forwardmove = 0;
+    state->rightmove = 0;
+    return 1;
+}
+
+static signed char SV_BotClampMove(int value)
+{
+    if (value > 127)
+        return 127;
+    if (value < -127)
+        return -127;
+    return (signed char)value;
+}
+
+qboolean SV_BotSetMovement(int clientNum, int forward, int right)
+{
+    cod2BotCommandState_t *state;
+
+    if (!SV_BotIsTestClient(clientNum))
+        return 0;
+
+    state = &s_botCmdState[clientNum];
+    state->forwardmove = SV_BotClampMove(forward);
+    state->rightmove = SV_BotClampMove(right);
+    return 1;
+}
+
+qboolean SV_BotSetAngles(int clientNum, const vec_t *angles)
+{
+    cod2BotCommandState_t *state;
+
+    if (!angles || !SV_BotIsTestClient(clientNum))
+        return 0;
+
+    state = &s_botCmdState[clientNum];
+    state->angles[0] = angles[0];
+    state->angles[1] = angles[1];
+    state->angles[2] = angles[2];
+    state->hasAngles = 1;
+    return 1;
+}
+
+qboolean SV_BotSetWeapon(int clientNum, int weapon)
+{
+    cod2BotCommandState_t *state;
+
+    if (weapon < 0 || weapon > 255 || !SV_BotIsTestClient(clientNum))
+        return 0;
+
+    state = &s_botCmdState[clientNum];
+    state->weapon = (byte)weapon;
+    state->hasWeapon = 1;
+    return 1;
+}
+
+qboolean SV_BotSetAction(int clientNum, const char *action)
+{
+    const cod2BotActionDef_t *def;
+    cod2BotCommandState_t *state;
+    qboolean pressed;
+
+    if (!SV_BotIsTestClient(clientNum) || !action ||
+        (action[0] != '+' && action[0] != '-') || !action[1]) {
+        return 0;
+    }
+
+    pressed = action[0] == '+';
+    state = &s_botCmdState[clientNum];
+
+    for (def = s_botActions; def->name; ++def) {
+        if (!strcmp(action + 1, def->name)) {
+            if (pressed)
+                state->buttons |= def->buttonMask;
+            else
+                state->buttons &= ~def->buttonMask;
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 void SV_BotUserMove(client_t *cl)
 {
-    usercmd_t nullcmd;
+    cod2BotCommandState_t *state;
+    playerState_t *ps;
+    usercmd_t cmd;
     int clientNum;
+    int i;
+    const float angleToShort = 65536.0f / 360.0f;
 
     if (!cl->gentity)
         return;
 
-    memset(&nullcmd, 0, sizeof(nullcmd));
-
     clientNum = (int)(cl - svs.clients);
-    nullcmd.weapon = (byte)SV_GameClientNum(clientNum)->weapon;
+    if (!SV_BotIsTestClient(clientNum))
+        return;
 
-    if (!G_GetClientArchiveTime(clientNum)) {
-        if (randomf() < 0.5f)
-            nullcmd.buttons |= 1;
+    state = &s_botCmdState[clientNum];
+    ps = SV_GameClientNum(clientNum);
+    if (!ps)
+        return;
 
-        if (randomf() < 0.5f)
-            nullcmd.buttons |= 0x28;
+    memset(&cmd, 0, sizeof(cmd));
+    cmd.serverTime = svs.time;
+    cmd.buttons = state->buttons;
+    cmd.forwardmove = state->forwardmove;
+    cmd.rightmove = state->rightmove;
+    cmd.weapon = state->hasWeapon ? state->weapon : (byte)ps->weapon;
+    cmd.offHandIndex = (byte)ps->offHandIndex;
 
-        if (randomf() < 0.33000001311302185f) {
-            nullcmd.forwardmove = 127;
-        } else if (randomf() < 0.5f) {
-            nullcmd.forwardmove = -127;
-        }
-
-        if (randomf() < 0.33000001311302185f) {
-            nullcmd.rightmove = 127;
-        } else if (randomf() < 0.5f) {
-            nullcmd.rightmove = -127;
-        }
-
-        if (randomf() < 0.33000001311302185f)
-            nullcmd.angles[0] = (int)(crandom() * 360.0f);
-
-        if (randomf() < 0.33000001311302185f)
-            nullcmd.angles[1] = (int)(crandom() * 360.0f);
-
-        if (randomf() < 0.33000001311302185f)
-            nullcmd.angles[2] = (int)(crandom() * 360.0f);
+    for (i = 0; i < 3; ++i) {
+        float angle = state->hasAngles ? state->angles[i] : ps->viewangles[i];
+        cmd.angles[i] = ((int)(angle * angleToShort) & 0xffff) - ps->delta_angles[i];
     }
 
     cl->deltaMessage = cl->netchan.outgoingSequence - 1;
-    SV_ClientThink(cl, &nullcmd);
+    SV_ClientThink(cl, &cmd);
 }
 
 void SV_SendServerCommand(client_t *cl, svscmd_type type, const char *fmt, ...)

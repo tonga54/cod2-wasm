@@ -10,6 +10,7 @@ framework_dir="$(cd "${framework_dir}" && pwd)"
 node --check "${site_dir}/game-adapter.js"
 node --check "${site_dir}/cod2_core_probe.js"
 node "${repo_root}/scripts/test-adapter.js" "${site_dir}"
+node "${repo_root}/scripts/test-bot-foundation.js" "${repo_root}"
 node "${framework_dir}/scripts/check-game-package.js" "${site_dir}"
 
 node - "${site_dir}" <<'NODE'

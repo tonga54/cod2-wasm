@@ -46,6 +46,13 @@ void SV_BeginDownload_f(client_t *cl);
 void SV_UserMove(client_t *cl, msg_t *msg, qboolean delta);
 void SV_ExecuteClientMessage(client_t *cl, msg_t *msg);
 gentity_t *SV_AddTestClient(void);
+qboolean SV_BotIsTestClient(int clientNum);
+void SV_BotResetClient(int clientNum);
+qboolean SV_BotStop(int clientNum);
+qboolean SV_BotSetMovement(int clientNum, int forward, int right);
+qboolean SV_BotSetAngles(int clientNum, const vec_t *angles);
+qboolean SV_BotSetWeapon(int clientNum, int weapon);
+qboolean SV_BotSetAction(int clientNum, const char *action);
 
 gentity_t *SV_GentityNum(int num);
 playerState_t *SV_GameClientNum(int num);

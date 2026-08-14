@@ -56,6 +56,7 @@ extern void Z_VirtualFreeInternal(void *ptr);
 
 extern void ClientDisconnect(int clientNum);
 extern void SV_SetUserinfo(int index, const char *val);
+extern void SV_BotResetClient(int clientNum);
 extern int FS_FOpenFileByMode(const char *qpath, fileHandle_t *f, fsMode_t mode);
 extern void FS_Printf(fileHandle_t h, const char *fmt, ...);
 extern char *I_CleanStr(char *string);
@@ -1127,13 +1128,16 @@ challenge_found:
 
 void SV_FreeClient(client_t *cl)
 {
+    int clientNum = SV_ClientNumForClient(cl);
+
     SV_CloseDownload(cl);
 
     if (SV_Loaded()) {
-        ClientDisconnect(SV_ClientNumForClient(cl));
+        ClientDisconnect(clientNum);
     }
 
-    SV_SetUserinfo(SV_ClientNumForClient(cl), "");
+    SV_BotResetClient(clientNum);
+    SV_SetUserinfo(clientNum, "");
     SV_FreeClientScriptId(cl);
 }
 
@@ -1744,6 +1748,7 @@ gentity_t *SV_AddTestClient(void)
         return NULL;
 
     cl->bIsTestClient = 1;
+    SV_BotResetClient(clientNum);
     SV_SendClientGameState(cl);
 
     memset(&nullcmd, 0, sizeof(nullcmd));

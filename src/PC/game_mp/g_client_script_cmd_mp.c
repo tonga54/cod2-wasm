@@ -110,6 +110,12 @@ extern Bool BG_IsWeaponValid(const playerState_t *ps, int weaponIndex);
 extern qboolean G_GivePlayerWeapon(playerState_t *pPS, int iWeaponIndex);
 extern void G_SelectWeaponIndex(int clientNum, int iWeaponIndex);
 extern void G_SetEquippedOffHand(int clientNum, int offHandIndex);
+extern qboolean SV_BotIsTestClient(int clientNum);
+extern qboolean SV_BotStop(int clientNum);
+extern qboolean SV_BotSetMovement(int clientNum, int forward, int right);
+extern qboolean SV_BotSetAngles(int clientNum, const vec_t *angles);
+extern qboolean SV_BotSetWeapon(int clientNum, int weapon);
+extern qboolean SV_BotSetAction(int clientNum, const char *action);
 extern void BG_PlayerStateToEntityState(playerState_t *ps, gentity_t *ent, qboolean snap, qboolean forceSnap);
 extern void SetClientViewAngle(gentity_t *ent, const vec_t *angles);
 extern void Cmd_Score_f(gentity_t *ent);
@@ -958,6 +964,127 @@ unsigned int PlayerCmd_GetGuid(scr_entref_t entref)
     return Scr_AddInt(SV_GetGuid(entref.entnum));
 }
 
+static gentity_t *PlayerCmd_GetBotEntity(scr_entref_t entref)
+{
+    gentity_t *pSelf = PlayerCmd_GetPlayerEntity(entref);
+
+    if (!pSelf)
+        return NULL;
+
+    if (!SV_BotIsTestClient(entref.entnum)) {
+        Scr_ObjectError(va("entity %i is not a test client", (int)entref.entnum));
+        return NULL;
+    }
+
+    return pSelf;
+}
+
+static qboolean PlayerCmd_BotParamCount(unsigned int expected, const char *usage)
+{
+    if (Scr_GetNumParam() == expected)
+        return 1;
+
+    Scr_Error(usage);
+    return 0;
+}
+
+static void PlayerCmd_BotIsBot(scr_entref_t entref)
+{
+    if (!PlayerCmd_BotParamCount(0, "USAGE: self isBot()\n"))
+        return;
+
+    if (!PlayerCmd_GetPlayerEntity(entref))
+        return;
+
+    Scr_AddBool(SV_BotIsTestClient(entref.entnum));
+}
+
+static void PlayerCmd_BotStop(scr_entref_t entref)
+{
+    if (!PlayerCmd_BotParamCount(0, "USAGE: self botStop()\n") ||
+        !PlayerCmd_GetBotEntity(entref)) {
+        return;
+    }
+
+    Scr_AddBool(SV_BotStop(entref.entnum));
+}
+
+static void PlayerCmd_BotMovement(scr_entref_t entref)
+{
+    int forward;
+    int right;
+
+    if (!PlayerCmd_BotParamCount(2, "USAGE: self botMovement(<forward>, <right>)\n") ||
+        !PlayerCmd_GetBotEntity(entref)) {
+        return;
+    }
+
+    forward = Scr_GetInt(0);
+    right = Scr_GetInt(1);
+    Scr_AddBool(SV_BotSetMovement(entref.entnum, forward, right));
+}
+
+static void PlayerCmd_BotAngles(scr_entref_t entref)
+{
+    gentity_t *pSelf;
+    vec3_t angles;
+
+    if (!PlayerCmd_BotParamCount(1, "USAGE: self botAngles(<angles>)\n"))
+        return;
+
+    pSelf = PlayerCmd_GetBotEntity(entref);
+    if (!pSelf)
+        return;
+
+    Scr_GetVector(0, angles);
+    SetClientViewAngle(pSelf, angles);
+    Scr_AddBool(SV_BotSetAngles(entref.entnum, angles));
+}
+
+static void PlayerCmd_BotWeapon(scr_entref_t entref)
+{
+    gentity_t *pSelf;
+    const char *weaponName;
+    int weaponIndex;
+
+    if (!PlayerCmd_BotParamCount(1, "USAGE: self botWeapon(<weapon name>)\n"))
+        return;
+
+    pSelf = PlayerCmd_GetBotEntity(entref);
+    if (!pSelf)
+        return;
+
+    weaponName = Scr_GetString(0);
+    weaponIndex = G_GetWeaponIndexForName(weaponName);
+    if (!weaponIndex)
+        Scr_ParamError(0, va("unknown weapon '%s'", weaponName));
+
+    if (!PlayerCmd_HasWeapon(&pSelf->client->ps, weaponIndex)) {
+        Scr_AddBool(0);
+        return;
+    }
+
+    Scr_AddBool(SV_BotSetWeapon(entref.entnum, weaponIndex));
+}
+
+static void PlayerCmd_BotAction(scr_entref_t entref)
+{
+    const char *action;
+
+    if (!PlayerCmd_BotParamCount(1, "USAGE: self botAction(<+/-action>)\n") ||
+        !PlayerCmd_GetBotEntity(entref)) {
+        return;
+    }
+
+    action = Scr_GetString(0);
+    if (!SV_BotSetAction(entref.entnum, action)) {
+        Scr_ParamError(0, va("unknown bot action '%s'", action));
+        return;
+    }
+
+    Scr_AddBool(1);
+}
+
 void PlayerCmd_giveWeapon(scr_entref_t entref)
 {
     gentity_t *pSelf = PlayerCmd_GetPlayerEntity(entref);
@@ -1517,6 +1644,12 @@ static const BuiltinMethodDef player_methods[] __attribute__((used)) = {
     { "setorigin", (BuiltinMethod)PlayerCmd_setOrigin, 0 },
     { "setplayerangles", (BuiltinMethod)PlayerCmd_setAngles, 0 },
     { "getplayerangles", (BuiltinMethod)PlayerCmd_getAngles, 0 },
+    { "isbot", (BuiltinMethod)PlayerCmd_BotIsBot, 0 },
+    { "botstop", (BuiltinMethod)PlayerCmd_BotStop, 0 },
+    { "botmovement", (BuiltinMethod)PlayerCmd_BotMovement, 0 },
+    { "botangles", (BuiltinMethod)PlayerCmd_BotAngles, 0 },
+    { "botweapon", (BuiltinMethod)PlayerCmd_BotWeapon, 0 },
+    { "botaction", (BuiltinMethod)PlayerCmd_BotAction, 0 },
     { "usebuttonpressed", (BuiltinMethod)PlayerCmd_useButtonPressed, 0 },
     { "attackbuttonpressed", (BuiltinMethod)PlayerCmd_attackButtonPressed, 0 },
     { "meleebuttonpressed", (BuiltinMethod)PlayerCmd_meleeButtonPressed, 0 },

@@ -17,6 +17,7 @@ the source-built diagnostic, and an original diagnostic icon.
 - 395 reconstructed multiplayer client translation units compile as WebAssembly objects.
 - The native MD4/checksum diagnostic builds and executes in Node and the browser adapter.
 - The framework package exposes one honest `cod2-mp` variant.
+- A clean-room native test-client command ABI compiles with the full source graph.
 - Single-player is not offered because this source tree has no SP client,
   server, game, cgame, or UI source families.
 - The game executable does not link; no menu, level, renderer, input, network,
@@ -27,6 +28,21 @@ It represents some names as both code pointers and linear-memory data. Native
 ELF link options reconcile those aliases, while WebAssembly has separate
 function-table and data symbol kinds and rejects the collision. Repair requires
 a wasm-aware data/import generator, not undefined-symbol suppression.
+
+## Multiplayer bot foundation
+
+The reconstructed multiplayer server now keeps bot command intent in a
+layout-safe sidecar and exposes GSC methods for test-client identity, stop,
+movement, view angles, weapon selection, and native input actions. The server
+submits those commands through the normal player movement path with the current
+server time; it no longer generates random test-client input.
+
+This foundation does not supply bot AI, navigation graphs, or population
+scripts, and it does not change the current link-blocked status. The post-link
+target is an 8-player population with `sv_maxclients 12`: independently
+authored server logic will add bots up to eight total participants and remove
+one as each human connects, while the extra four slots provide admission
+headroom.
 
 ## Build and test
 
@@ -82,6 +98,7 @@ build the reconstructed source graph.
 
 The browser target uses reconstructed native source only. It does not restore
 the removed inherited web target or import a third-party WebAssembly build.
+It also does not include or fetch third-party bot scripts or waypoint data.
 Generated JavaScript/WebAssembly and IWD archives remain outside Git and no
 downstream HTML, CSS, service worker, or web manifest is authored here.
 
