@@ -3,15 +3,31 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 build_dir="${COD2_WASM_BUILD_DIR:-${repo_root}/out/cod2-wasm-core}"
+site_dir="${build_dir}/site"
+framework_source_dir="${COD2_WASM_FRAMEWORK_DIR:-${repo_root}/../wasm-game-framework}"
+expected_version="0.7.3"
+expected_commit="be0b81301c5f12f09e445a3bc765b7709603265e"
+
+actual_version="$(git -C "${framework_source_dir}" show "${expected_commit}:package.json" | node -pe 'JSON.parse(fs.readFileSync(0)).version')"
+actual_commit="$(git -C "${framework_source_dir}" rev-parse 'v0.7.3^{}')"
+[[ "${actual_version}" == "${expected_version}" ]] || { echo "expected framework ${expected_version}, found ${actual_version}" >&2; exit 1; }
+[[ "${actual_commit}" == "${expected_commit}" ]] || { echo "framework v0.7.3 resolves to ${actual_commit}, expected ${expected_commit}" >&2; exit 1; }
+
+framework_parent="$(mktemp -d -t cod2-wasm-framework.XXXXXX)"
+framework_dir="${framework_parent}/framework"
+git -C "${framework_source_dir}" worktree add --quiet --detach "${framework_dir}" "${expected_commit}"
+cleanup() {
+    git -C "${framework_source_dir}" worktree remove --force "${framework_dir}" >/dev/null 2>&1 || true
+    rm -rf -- "${framework_parent}" "${metadata_dir:-}"
+}
+trap cleanup EXIT
 
 if ! command -v emcmake >/dev/null 2>&1; then
-    if [[ -z "${EMSDK:-}" || ! -f "${EMSDK}/emsdk_env.sh" ]]; then
-        echo "error: activate Emscripten or set EMSDK to an emsdk checkout" >&2
-        exit 1
-    fi
+    emsdk_root="${COD2_WASM_EMSDK:-${EMSDK:-/home/ted/emsdk}}"
+    [[ -f "${emsdk_root}/emsdk_env.sh" ]] || { echo "activate Emscripten or set COD2_WASM_EMSDK" >&2; exit 1; }
     export EMSDK_QUIET=1
     # shellcheck disable=SC1091
-    source "${EMSDK}/emsdk_env.sh"
+    source "${emsdk_root}/emsdk_env.sh"
 fi
 
 emcmake cmake \
@@ -20,18 +36,26 @@ emcmake cmake \
     -DCMAKE_BUILD_TYPE=Release
 cmake --build "${build_dir}" --target cod2_client_objects cod2_core_probe --parallel
 
-manifest="${build_dir}/site/owner-manifest.json"
-if [[ -n "${COD2_OWNER_DATA:-}" ]]; then
-    "${repo_root}/scripts/generate-owner-manifest.sh" "${COD2_OWNER_DATA}" > "${manifest}"
-    echo "Generated a private owner-data manifest from ${COD2_OWNER_DATA}"
-else
-    cmake -E rm -f "${manifest}"
-    echo "No owner-data manifest generated (set COD2_OWNER_DATA to the local main directory)."
-fi
-
 if [[ "${COD2_ATTEMPT_CLIENT_LINK:-0}" == "1" ]]; then
     cmake --build "${build_dir}" --target cod2_client --parallel
 fi
 
-echo "Compiled the reconstructed multiplayer client object graph and diagnostic site."
-echo "The client link remains blocked; this artifact is not a playable game build."
+mkdir -p "${site_dir}"
+rm -f -- "${site_dir}/index.html" "${site_dir}/asset-validator.js" \
+    "${site_dir}/owner-manifest.json" "${site_dir}/service-worker.js" "${site_dir}/app.webmanifest"
+install -m 0644 \
+    "${repo_root}/site/cod2-diagnostic.svg" \
+    "${repo_root}/site/game-adapter.js" \
+    "${repo_root}/site/wasm-game-data.json" \
+    "${repo_root}/site/wasm-game.json" \
+    "${site_dir}/"
+
+metadata_dir="$(mktemp -d -t cod2-wasm-framework-metadata.XXXXXX)"
+"${framework_dir}/scripts/install-browser-package.sh" "${metadata_dir}" copy >/dev/null
+install -m 0644 "${metadata_dir}/wasm-game-framework.json" "${site_dir}/wasm-game-framework.json"
+
+node "${framework_dir}/scripts/check-game-package.js" "${site_dir}"
+"${repo_root}/scripts/test-static.sh" "${site_dir}" "${framework_dir}"
+
+echo "Compiled the reconstructed multiplayer object graph and canonical diagnostic package."
+echo "The client link remains blocked; this build does not launch the game."

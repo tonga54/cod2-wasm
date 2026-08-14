@@ -89,6 +89,8 @@ target_compile_options(cod2_core_probe PRIVATE
 target_link_options(cod2_core_probe PRIVATE
   "SHELL:-s WASM=1"
   "SHELL:-s ENVIRONMENT=web,node"
+  "SHELL:-s MODULARIZE=1"
+  "SHELL:-s EXPORT_NAME=createCod2Diagnostic"
   "SHELL:-s EXIT_RUNTIME=1"
   "SHELL:-s ASSERTIONS=1"
   "SHELL:-s ALLOW_MEMORY_GROWTH=1"
@@ -97,6 +99,3 @@ target_link_options(cod2_core_probe PRIVATE
 set_target_properties(cod2_core_probe PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/site"
   SUFFIX ".js")
-
-configure_file(index.html "${CMAKE_BINARY_DIR}/site/index.html" COPYONLY)
-configure_file(asset-validator.js "${CMAKE_BINARY_DIR}/site/asset-validator.js" COPYONLY)

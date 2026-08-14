@@ -34,6 +34,6 @@ int main(void)
         return 1;
     }
 
-    puts("[cod2-wasm] probe complete; this is not a playable game build");
+    puts("[cod2-wasm] probe complete; engine unavailable; status is Still in development");
     return 0;
 }

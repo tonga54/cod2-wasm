@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "framework": {
+    "repository": "https://github.com/theodorecharles/wasm-game-framework.git",
+    "tag": "v0.7.3",
+    "version": "0.7.3",
+    "commit": "be0b81301c5f12f09e445a3bc765b7709603265e"
+  },
+  "reconstruction": {
+    "repository": "https://github.com/opencod2/opencod2.git",
+    "baselineCommit": "f70e697476fceeb4f53de677e1c5d5fe12a00b36",
+    "use": "Native reconstructed source; no inherited browser target or WebAssembly artifact is used."
+  },
+  "status": "Still in development"
+}

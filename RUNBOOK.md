@@ -1,271 +1,134 @@
-# Call of Duty 2 downstream WASM runbook
+# Call of Duty 2 WASM runbook
 
-## Scope and non-negotiable boundaries
+Status: **Still in development**
 
-This checkout is a local-only feasibility lane for a new browser integration
-around OpenCoD2's reconstructed native source. It is not currently a playable
-browser port and must never be presented as one.
+## Immutable inputs
 
-- Do not inspect, restore, copy, build, or derive from the removed inherited
-  `src/web` implementation, removed `build/web_gen` output, or any other
-  existing WebAssembly port.
-- Do not invoke the repository's inherited/root Emscripten target. The only web
-  build is `downstream/wasm/CMakeLists.txt`, entered by `scripts/build-web.sh`.
-- `wolfet-wasm` is a product/architecture reference only. Call of Duty 2
-  browser platform code is implemented independently in this checkout.
-- Never commit, package, upload, or publicly serve owner IWDs.
-- Do not publish this source, a binary, a container, or a hosted runtime until
-  the source reconstruction's license and provenance have been reviewed.
-- Do not submit patches, issues, pull requests, or messages upstream.
+`source-lock.json` pins wasm-game-framework 0.7.3 at
+`be0b81301c5f12f09e445a3bc765b7709603265e` and records reconstructed-source
+baseline `f70e697476fceeb4f53de677e1c5d5fe12a00b36`. Builds create an isolated
+framework worktree at that exact commit.
 
-The remote is deliberately fetch-only:
+Do not restore or use the removed inherited `src/web` implementation,
+`build/web_gen` output, another Call of Duty 2 WebAssembly port, or a compiled
+third-party browser artifact. Do not contact or submit anything upstream.
 
-```text
-upstream fetch: https://github.com/opencod2/opencod2.git
-upstream push:  DISABLED
-```
+The pinned reconstruction baseline contains no repository-level `LICENSE` or
+`COPYING` file. Keep the Docker images local until the repository maintainer
+documents the distribution terms; this publication boundary is independent of
+the native link blocker below.
 
-All downstream work is local on branch `devel`.
+## Source and mode audit
 
-## Source-completeness and license audit
+The reconstructed source contains multiplayer `client_mp`, `server_mp`,
+`game_mp`, `cgame_mp`, and `ui_mp` families. It contains no corresponding SP
+families or SP target. The framework therefore exposes only `cod2-mp`.
 
-Baseline `f70e697476fceeb4f53de677e1c5d5fe12a00b36` is a work-in-progress
-source-level reconstruction. Its README says the native client can build and
-boot but may crash or omit subsystems. That native claim was not re-verified in
-this lane because the host lacks the documented 32-bit multilib environment.
+The selected reconstructed client, renderer, UI, scripting, qcommon, input,
+networking, platform, generated-data, and compatibility sources compile to 395
+WebAssembly object files. Native assembly and duplicate bundled zlib sources
+are excluded; the browser target uses Emscripten SDL2 and zlib.
 
-The tree contains the complete-looking multiplayer families `client_mp`,
-`server_mp`, `game_mp`, `cgame_mp`, and `ui_mp`. It contains **zero** files in
-corresponding `*_sp` families. Shared directories named `game`, `cgame`, and
-`ui` do not constitute a single-player engine. Therefore:
+## Exact native blocker
 
-| Mode | Honest status | Evidence |
-| --- | --- | --- |
-| Single-player | Unavailable from this source base | No SP client/server/game/cgame/UI source families or SP target exist. |
-| Multiplayer | Substantial source compiles; no executable links | All 395 selected native/generated translation units compile to wasm objects; the fixed-address data model does not link. |
+The explicit `cod2_client` target reaches `wasm-ld` and fails because the
+reconstruction's native generated data representation relies on symbol aliases
+which WebAssembly cannot encode:
 
-No repository-wide `LICENSE` or `COPYING` file was found. The README has a
-notice describing reconstruction and intended research/interoperability uses,
-but it does not provide an explicit redistribution license grant. That is a
-publication blocker independent of the technical blockers.
+- `data32.c` and `literals32.c` contain a native 32-bit data image with both
+  data addresses and code pointers;
+- `import_pointers_native.c` represents targets uniformly as functions,
+  including symbols which are data;
+- compatibility placeholders collide with reconstructed functions and statics;
+- the native build relies on `--defsym`, multiple definitions, and common-symbol
+  merging;
+- WebAssembly separates linear-memory data from function-table references and
+  rejects cross-kind symbols.
 
-The reconstruction is strongly tied to a 32-bit native layout. The source has
-over a thousand fixed-address-looking constants, hundreds of explicit
-size/field assertions, generated ILP32 data images, BSS blobs, and symbol alias
-tables. WebAssembly is ILP32, which is sufficient for compilation, but it does
-not reproduce ELF's unified code/data symbol model.
-
-## Verified implementation status (2026-08-14)
-
-### Full client compile
-
-The downstream CMake target now selects the real reconstructed multiplayer
-client, renderer, UI, scripting, qcommon, input, networking, SDL/platform,
-generated data, and compatibility sources. It excludes native assembly and the
-duplicate bundled zlib implementation, uses Emscripten SDL2/zlib, and provides
-a downstream OpenGL declaration/wrapper seam without restoring inherited web
-code.
-
-`cod2_client_objects` successfully compiles **395 WebAssembly object files**.
-This is materially beyond the old MD4-only probe and establishes an honest
-compile milestone. It does not establish engine startup.
-
-The decompiler-faithful source still needs the same relaxed implicit-declaration,
-pointer-conversion, aliasing, and overflow assumptions used by its native build.
-Those warnings are not treated as proof of correctness; several emitted bounds
-and size warnings require later runtime/security review.
-
-The selected native entry path is also compiled. `web_main.c` enters the
-reconstructed `WinMain`; `mac_main.c` already contains a guarded Emscripten
-cooperative `emscripten_set_main_loop` frame path. Neither boundary has executed
-because the engine does not link.
-
-### Exact client-link blocker
-
-The explicit `cod2_client` target reaches `wasm-ld` and fails. This is not a
-list of ordinary missing platform calls. The generated reconstruction relies on
-native linker behavior that WebAssembly intentionally cannot express:
-
-- `build/native_gen/data32.c` and `literals32.c` encode a native 32-bit data
-  image containing both data addresses and code pointers, often declaring the
-  targets uniformly as byte arrays.
-- `import_pointers_native.c` declares targets uniformly as functions, including
-  symbols which are actually data.
-- `src/stubs/link_stubs.c` contains data placeholders for symbols which are
-  implemented as functions elsewhere.
-- The native CMake path depends on `--defsym`, `--allow-multiple-definition`,
-  and common-symbol merging to reconcile these representations.
-- Wasm has separate linear-memory data and function-table references. The
-  linker rejects a symbol used as both `WASM_SYMBOL_TYPE_FUNCTION` and
-  `WASM_SYMBOL_TYPE_DATA`; broad undefined-symbol suppression cannot fix this.
-
-Representative diagnostics include:
-
-```text
-CreateObjSpecifier: function in MacAppleEvents.c, data in link_stubs.c
-MacDisplay_CreateScreenContext: function in macos_compat.c, data in data32.c
-ZN11CColorArrayD1Ev: function in COpenGL.c, data in literals32.c
-sv: data in bss.c, function in import_pointers_native.c
-CSoundObject::sReadCallback: duplicate data in MacMSS_Object.c and data32.c
-```
-
-The remaining task is a wasm-aware reconstruction-data generator, not a linker
-flag or a handful of no-op stubs. The explicit diagnostic can be reproduced by
-setting `COD2_ATTEMPT_CLIENT_LINK=1`; failure is currently expected.
-
-### Browser artifact
-
-The generated site is deliberately labeled **not playable**. It contains:
-
-- the old isolated native MD4/checksum diagnostic, clearly separated from the
-  engine compile result;
-- a loopback-only validator for the owner-mounted retail IWD inventory;
-- no fake Play button, menu, level, renderer, input, or multiplayer claim.
-
-The diagnostic remains useful as a minimal proof that generated JS/WASM loads
-and executes in the browser. It is not counted as the client milestone.
-
-## Owner-data boundary
-
-The staged owner data used by the local portal is:
-
-```text
-/home/ted/Development/wasm/data/cod2/main
-```
-
-It contains the exact current Steam inventory: 16 `iw_00.iwd` through
-`iw_15.iwd` archives plus 12 `localized_english_iw00.iwd` through
-`localized_english_iw11.iwd` archives, 28 files totaling 3,685,129,248 bytes.
-No archive is tracked by git or copied into the generated site.
-
-`scripts/generate-owner-manifest.sh` accepts an explicit absolute owner `main`
-directory. It rejects missing files, symlinks, and non-ZIP headers, then emits a
-private manifest with the exact allowlisted path, byte size, SHA-256, and
-`504b0304` header for each archive. The manifest is generated under ignored
-build output only; it is not committed.
-
-The portal mounts the owner data read-only at `/owner-data` and exposes it as
-same-origin `/local-data/` from a service bound to `127.0.0.1`. The browser:
-
-1. refuses asset validation on non-loopback hostnames;
-2. validates the manifest schema and exact ordered 28-file allowlist;
-3. sends `HEAD` for the expected size;
-4. sends a four-byte range request and validates the ZIP/IWD header;
-5. never fetches an entire IWD during validation.
-
-The SHA-256 values prove what the local build-time generator inspected. The
-browser does not re-hash 3.7 GB. The read-only mount, exact served sizes, and
-headers form the runtime handoff.
-
-All 28 IWDs cannot be copied into main-thread MEMFS: their 3.685 GB payload
-nearly exhausts wasm32's 4 GB address space before the engine heap, stack,
-renderer allocations, or decompression buffers exist. A playable runtime needs
-an archive-aware lazy filesystem or a worker/pthread-backed synchronous bridge.
-Pretending to preload the whole install would guarantee an out-of-memory
-failure.
-
-## Reproducible build
-
-Known toolchain used here:
-
-```text
-Emscripten 6.0.6
-CMake 4.3.4
-Node 24.x
-```
-
-Activate Emscripten, or set `EMSDK` to an emsdk checkout. From the repository
-root:
-
-```bash
-COD2_OWNER_DATA=/absolute/path/to/Call-of-Duty-2/main \
-  ./scripts/build-web.sh
-```
-
-Without `COD2_OWNER_DATA`, the source still compiles and the site is produced,
-but no owner manifest is emitted. The build never guesses a Steam path.
-
-The default build compiles the full object graph plus the diagnostic site. To
-reproduce the expected link failure:
+Set `COD2_ATTEMPT_CLIENT_LINK=1` when intentionally reproducing that failure:
 
 ```bash
 COD2_ATTEMPT_CLIENT_LINK=1 ./scripts/build-web.sh
 ```
 
-Output is under the ignored directory:
+Do not claim a native menu or gameplay until this generator model is repaired
+and an engine executable reaches `Com_Init`.
+
+## Framework package
+
+The staged public directory contains only:
 
 ```text
-out/cod2-wasm-core/site/index.html
-out/cod2-wasm-core/site/asset-validator.js
-out/cod2-wasm-core/site/cod2_core_probe.js
-out/cod2-wasm-core/site/cod2_core_probe.wasm
-out/cod2-wasm-core/site/owner-manifest.json  # only with COD2_OWNER_DATA
+cod2-diagnostic.svg
+cod2_core_probe.js
+cod2_core_probe.wasm
+game-adapter.js
+wasm-game-data.json
+wasm-game-framework.json
+wasm-game.json
 ```
 
-There is intentionally no `cod2.js`/`cod2.wasm` engine artifact yet.
+The JS/WASM pair is built locally from `core_probe.c` and the reconstructed MD4
+source. It is a diagnostic, not the engine. The adapter reports `launcher`,
+then `loading`, then `crashed`; it never reports `menu` or `gameplay` and never
+requests input capture, fullscreen, identity, or graphics controls.
 
-## Automated and Chromium checks
-
-Run:
+The framework owns the document, CSS, service worker, PWA manifest, setup UI,
+and viewport. The package checker is mandatory:
 
 ```bash
-COD2_OWNER_DATA=/absolute/path/to/main ./scripts/test-web.sh
+node ../wasm-game-framework/scripts/check-game-package.js \
+  out/cod2-wasm-core/site
 ```
 
-It verifies:
+## Required data boundary
 
-- the 395-object full source graph still compiles;
-- the native MD4/checksum diagnostic returns its expected deterministic values;
-- `asset-validator.js` passes Node syntax checking;
-- the downstream entrypoint object exists;
-- `index.html`, JavaScript, and WASM are served successfully over loopback HTTP.
+`site/wasm-game-data.json` pins 28 `main/*.iwd` paths, sizes, ZIP signatures,
+and SHA-256 values totaling 3,685,129,248 bytes. Docker stores this tree under
+`/data/main`. The framework setup endpoint is the only write path, and the
+allowlisted `/game-data/files/:key` endpoint is the only read path. `/data`,
+`/local-data`, and direct `main/*.iwd` URLs must remain inaccessible.
 
-The local portal is already configured at:
+The adapter uses the canonical container-to-IndexedDB client for only the
+706-byte `localized_english_iw11.iwd` diagnostic representative. Do not load
+the complete archive set into MEMFS. A runnable engine needs an archive-aware
+lazy filesystem or another bounded synchronous bridge.
 
-```text
-http://127.0.0.1:8014/
+No IWD enters Git, the public site, or a Docker image. Generated JS/WASM stays
+under ignored `out/` output.
+
+## Verification
+
+```bash
+./scripts/test-web.sh
+./scripts/build-docker.sh
+./scripts/test-http.sh
 ```
 
-The serialized Chrome smoke on 2026-08-14 verified:
+These checks cover:
 
-- the page title and visible “Not playable” status;
-- private manifest discovery for all 28 files / 3,685,129,248 bytes;
-- successful `[28/28]` size/header validation through the read-only mount;
-- the two deterministic native checksum values;
-- zero browser-console errors.
+- the full reconstructed object compile and native diagnostic output;
+- framework v0.7.3 package and adapter validation;
+- exact state transitions and safe repeat start;
+- canonical PWA metadata and neutral ready-state copy;
+- suite and `cod2-mp` locked images;
+- COOP/COEP, WASM range requests, setup status, exact mounted-data validation,
+  private cache headers, and inaccessible `/data` routes;
+- absence of tracked/generated IWD, WASM, data, HTML, CSS, service-worker, and
+  web-manifest artifacts.
 
-Chrome did not receive or retain the IWD bodies, and the smoke tab was closed.
+Chromium testing is intentionally deferred until the shared serialized browser
+slot is granted. At this milestone it can verify only launcher, setup/cache,
+diagnostic output, PWA, and security behavior; it cannot verify gameplay.
 
-## Next honest milestone
+## Next milestone
 
-Do not begin renderer polish or claim a menu until the link model is repaired.
-
-1. Replace the native data/import conversion with a downstream wasm-aware
-   generator that classifies every relocation as function-table or linear-data.
-2. Generate typed code-pointer fields and data-pointer fields for data/literal
-   images, eliminating cross-kind symbol collisions instead of suppressing them.
-3. Replace placeholder byte arrays with named behavioral functions only where
-   the native implementation is truly absent; remove duplicate reconstructed
-   statics deterministically.
-4. Link an engine WASM and reach `Com_Init` with a minimal, lazy subset of owner
-   archives. Record the exact archive dependency graph before adding more data.
-5. Only after initialization runs, validate SDL canvas creation, the cooperative
-   main loop, WebGL compatibility, keyboard/mouse input, and audio in that order.
-6. Keep networking private/loopback until the old parser and protocol surfaces
-   receive a security review.
-
-Single-player requires a different, complete source base;
-it cannot be created from this repository by adding a menu option.
-
-## Handoff template
-
-```text
-Repository: /home/ted/Development/wasm/cod2-wasm
-Branch: devel
-Milestone: 395-object full multiplayer client compile; link blocked
-Playable: no
-Owner assets committed/copied: no
-Browser URL: http://127.0.0.1:8014/
-Upstream contacted: no
-Published/pushed: no
-```
+1. Build a wasm-aware generated-data/import tool that classifies each
+   relocation as function-table or linear-memory data.
+2. Eliminate every cross-kind and duplicate symbol deterministically.
+3. Link `cod2.js`/`cod2.wasm` and reach `Com_Init` using a bounded lazy archive
+   subset.
+4. Add authoritative native state and capture-intent exports only after a real
+   menu and controllable snapshot exist.
+5. Then validate WebGL, resize/projection, menu pointer mapping, WASD/mouse,
+   Escape, network parsing, audio, persistence, and recovery in that order.
