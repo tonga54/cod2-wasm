@@ -1,7 +1,7 @@
 # Call of Duty 2 WASM
 
-Call of Duty 2 WASM is an Emscripten integration for the reconstructed
-OpenCoD2 multiplayer client. Status: **Still in development**. The current
+Call of Duty 2 WASM is an Emscripten integration for a reconstructed IW 2.0
+multiplayer client. Status: **Still in development**. The current
 checkpoint compiles the complete selected client source graph to WebAssembly
 objects and runs a small native checksum diagnostic, but the game does not
 link or launch yet.
@@ -67,6 +67,18 @@ would exhaust the wasm32 address space; the future engine runtime needs a lazy,
 archive-aware filesystem.
 
 ## Source boundary
+
+Call of Duty 2 is identified here by its conventional IW 2.0 engine-family
+label. IW 3.0 refers to the later Call of Duty 4 generation and must not appear
+in this launcher's metadata.
+
+The current browser checkpoint uses the technically more complete OpenCoD2
+reconstruction because it compiles 395 selected translation units to
+WebAssembly objects. That repository has no repository-level license file, so
+the images remain local. The GPL-2.0 `xtnded/cod2` reconstruction is pinned and
+evaluated in [SOURCE_BASE_AUDIT.md](SOURCE_BASE_AUDIT.md); its current native
+and Emscripten CMake targets fail in the first translation unit and do not yet
+build the reconstructed source graph.
 
 The browser target uses reconstructed native source only. It does not restore
 the removed inherited web target or import a third-party WebAssembly build.

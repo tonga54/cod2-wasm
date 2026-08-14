@@ -18,11 +18,39 @@ The pinned reconstruction baseline contains no repository-level `LICENSE` or
 documents the distribution terms; this publication boundary is independent of
 the native link blocker below.
 
+## Source-base audit
+
+`xtnded/cod2` is pinned at
+`8eccf06c80423f099fb01745529bee6bb43cc84a` and carries `COPYING.txt` with
+GPL-2.0. It has no Git commit ancestry with the current OpenCoD2 baseline. Its
+`reconstruction_summary.txt` reports 383 reconstructed source files, but its
+CMake file adds `CoD2SP_s`, `CoD2MP_s`, and `cod2_lnxded` from the same lone
+`unix/unix_main.cpp` file. Fresh native GCC and Emscripten builds both fail in
+that first file on undeclared engine symbols before any reconstructed source
+family compiles.
+
+The GPL tree contains `client_mp` and `server_mp`, plus partial `game`, `cgame`,
+and `ui` directories; it has no single-player `client` or `server` directory.
+Its named SP executable is therefore not evidence of a complete SP engine. The
+tree also retains decompiler-style global names and raw 32-bit assumptions. It
+does not contain the current reconstruction's generated data/import model, but
+it has not yet replaced that model with typed portable state.
+
+The current OpenCoD2 baseline remains the local technical checkpoint because
+395 selected translation units compile as WebAssembly objects. Do not publish
+it without a documented source license. A future GPL restart must begin from
+the pinned `xtnded/cod2` tree and recreate portable declarations, source-set
+selection, platform seams, and typed state without copying unlicensed generated
+transformations. See [SOURCE_BASE_AUDIT.md](SOURCE_BASE_AUDIT.md).
+
 ## Source and mode audit
 
 The reconstructed source contains multiplayer `client_mp`, `server_mp`,
 `game_mp`, `cgame_mp`, and `ui_mp` families. It contains no corresponding SP
 families or SP target. The framework therefore exposes only `cod2-mp`.
+
+The engine-family label is IW 2.0. IW 3.0 belongs to the later Call of Duty 4
+generation and is rejected by the static contract test.
 
 The selected reconstructed client, renderer, UI, scripting, qcommon, input,
 networking, platform, generated-data, and compatibility sources compile to 395

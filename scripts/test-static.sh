@@ -24,6 +24,7 @@ const expected = [
 assert.deepEqual(fs.readdirSync(site).sort(), expected);
 const config = JSON.parse(fs.readFileSync(path.join(site, 'wasm-game.json')));
 assert.deepEqual(Object.keys(config.variants), ['cod2-mp']);
+assert.equal(config.engine, 'IW 2.0 reconstruction');
 assert.equal(config.identity, false);
 assert.equal(config.graphics, false);
 assert.equal(config.pointerLock, false);
@@ -42,6 +43,21 @@ for (const file of files) {
 }
 const framework = JSON.parse(fs.readFileSync(path.join(site, 'wasm-game-framework.json')));
 assert.equal(framework.version, '0.7.3');
+NODE
+
+node - "${repo_root}" <<'NODE'
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const root = process.argv[2];
+const lock = JSON.parse(fs.readFileSync(path.join(root, 'source-lock.json')));
+assert.equal(lock.reconstruction.baselineCommit, 'f70e697476fceeb4f53de677e1c5d5fe12a00b36');
+assert.equal(lock.reconstruction.licenseFilePresent, false);
+assert.equal(lock.auditedAlternative.repository, 'https://github.com/xtnded/cod2.git');
+assert.equal(lock.auditedAlternative.commit, '8eccf06c80423f099fb01745529bee6bb43cc84a');
+assert.equal(lock.auditedAlternative.license, 'GPL-2.0');
+assert.equal(lock.auditedAlternative.licenseSha256, 'fac9da110d1433f4df0cb9f5dda9449e9aff6ee236ed240fa29e3e92926c363a');
+assert.equal(lock.auditedAlternative.selected, false);
 NODE
 
 node - "${site_dir}" <<'NODE'
@@ -83,5 +99,7 @@ while IFS= read -r tracked; do
   fi
 done < <(git -C "${repo_root}" ls-files | grep -Ei '\.(iwd|wasm|data)$|(^|/)index\.html$|(^|/).*\.css$|service-worker|\.webmanifest$' || true)
 ! rg -n '/local-data/|owner-manifest|asset-validator|WolfWasmShell|wolfwasm-' "${site_dir}" "${repo_root}/site"
+! rg -n '"engine"[[:space:]]*:[[:space:]]*"IW 3|description=.*IW 3' \
+  "${repo_root}/Dockerfile" "${repo_root}/site"
 git -C "${repo_root}" diff --check
 echo "Call of Duty 2 static, package, adapter, diagnostic, and data-boundary contracts passed"

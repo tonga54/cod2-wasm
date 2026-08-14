@@ -9,7 +9,17 @@
   "reconstruction": {
     "repository": "https://github.com/opencod2/opencod2.git",
     "baselineCommit": "f70e697476fceeb4f53de677e1c5d5fe12a00b36",
-    "use": "Native reconstructed source; no inherited browser target or WebAssembly artifact is used."
+    "licenseFilePresent": false,
+    "use": "Local technical checkpoint only; no inherited browser target or WebAssembly artifact is used."
+  },
+  "auditedAlternative": {
+    "repository": "https://github.com/xtnded/cod2.git",
+    "commit": "8eccf06c80423f099fb01745529bee6bb43cc84a",
+    "license": "GPL-2.0",
+    "licenseFile": "COPYING.txt",
+    "licenseSha256": "fac9da110d1433f4df0cb9f5dda9449e9aff6ee236ed240fa29e3e92926c363a",
+    "selected": false,
+    "reason": "Fresh native and Emscripten CMake builds fail in unix/unix_main.cpp before the reconstructed source graph is compiled."
   },
   "status": "Still in development"
 }

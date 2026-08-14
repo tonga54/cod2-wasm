@@ -6,7 +6,7 @@ FROM ${FRAMEWORK_IMAGE}
 ARG GAME_VARIANT=suite
 ARG VCS_REF=local
 LABEL org.opencontainers.image.title="Call of Duty 2 WASM development checkpoint" \
-      org.opencontainers.image.description="Call of Duty 2 native reconstruction WebAssembly diagnostic" \
+      org.opencontainers.image.description="Call of Duty 2 IW 2.0 reconstruction WebAssembly diagnostic" \
       org.opencontainers.image.revision="$VCS_REF"
 
 COPY out/cod2-wasm-core/site/ /opt/game-site/
