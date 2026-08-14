@@ -730,8 +730,9 @@ char tr[64] __attribute__((aligned(4))) = { 0 };
 char TXNSetTypeAttributes[64] __attribute__((aligned(4))) = { 0 };
 extern unsigned char __ZN12UI_Component1gE[];
 #ifdef __EMSCRIPTEN__
-
-unsigned char UI_Component_g[224] __attribute__((alias("__ZN12UI_Component1gE")));
+/* WebAssembly has no cross-object ELF-style aliases.  The reconstructed C UI
+ * module provides UI_Component_g directly; the generated BSS blob retains the
+ * separately named C++ storage symbol for address-table compatibility. */
 #elif defined(_MSC_VER)
 /* alias UI_Component_g -> the C++ member symbol. The C identifier
  * __ZN12UI_Component1gE emits MSVC symbol ___ZN12UI_Component1gE (one extra

@@ -1,11 +1,16 @@
 #ifndef IMPORTS_OPENGL_H
 #define IMPORTS_OPENGL_H
 
-#ifdef __EMSCRIPTEN__
+#if defined(__EMSCRIPTEN__)
 
+#if defined(COD2_DOWNSTREAM_WASM)
+#include "downstream/wasm/web_gl_compat.h"
+#else
 #include "web/webgl2_compat.h"
+#endif
 
 void glBegin(unsigned int mode);
+void glBindTexture(unsigned int target, unsigned int texture);
 int glBindVertexArrayAPPLE(unsigned int array);
 int glBlendEquationEXT(unsigned int mode);
 int glBlendFuncSeparateEXT(unsigned int srcRGB, unsigned int dstRGB, unsigned int srcAlpha, unsigned int dstAlpha);

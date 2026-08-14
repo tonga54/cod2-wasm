@@ -1783,9 +1783,13 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
 
     if (1)
     {
+#ifndef __EMSCRIPTEN__
         extern void glBindTexture(unsigned int, unsigned int);
+#endif
         {
+#ifndef __EMSCRIPTEN__
             extern void glBindTexture(unsigned int, unsigned int);
+#endif
             DWORD colorOp = g_textureStageState[0][D3DTSS_COLOROP];
             unsigned int glTexID;
             GfxImage *materialImage = NULL;

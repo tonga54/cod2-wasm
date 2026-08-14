@@ -18,7 +18,20 @@ emcmake cmake \
     -S "${repo_root}/downstream/wasm" \
     -B "${build_dir}" \
     -DCMAKE_BUILD_TYPE=Release
-cmake --build "${build_dir}" --parallel
+cmake --build "${build_dir}" --target cod2_client_objects cod2_core_probe --parallel
 
-echo "Built honest native-core probe under ${build_dir}/site"
-echo "This artifact is not a playable Call of Duty 2 build."
+manifest="${build_dir}/site/owner-manifest.json"
+if [[ -n "${COD2_OWNER_DATA:-}" ]]; then
+    "${repo_root}/scripts/generate-owner-manifest.sh" "${COD2_OWNER_DATA}" > "${manifest}"
+    echo "Generated a private owner-data manifest from ${COD2_OWNER_DATA}"
+else
+    cmake -E rm -f "${manifest}"
+    echo "No owner-data manifest generated (set COD2_OWNER_DATA to the local main directory)."
+fi
+
+if [[ "${COD2_ATTEMPT_CLIENT_LINK:-0}" == "1" ]]; then
+    cmake --build "${build_dir}" --target cod2_client --parallel
+fi
+
+echo "Compiled the reconstructed multiplayer client object graph and diagnostic site."
+echo "The client link remains blocked; this artifact is not a playable game build."
