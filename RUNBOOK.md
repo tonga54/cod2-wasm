@@ -4,8 +4,8 @@ Status: **Still in development**
 
 ## Immutable inputs
 
-`source-lock.json` pins wasm-game-framework 0.7.3 at
-`be0b81301c5f12f09e445a3bc765b7709603265e` and records reconstructed-source
+`source-lock.json` pins wasm-game-framework 0.7.5 at
+`11b9af479e40927336d18f5ddfc41d9cc2b224c7` and records reconstructed-source
 baseline `f70e697476fceeb4f53de677e1c5d5fe12a00b36`. Builds create an isolated
 framework worktree at that exact commit.
 
@@ -176,7 +176,7 @@ These checks cover:
 - the full reconstructed object compile and native diagnostic output;
 - clean-room bot ABI registration, exact native input masks, current-time
   command submission, slot-reset behavior, and absence of bot scripts/waypoints;
-- framework v0.7.3 package and adapter validation;
+- framework v0.7.5 package and adapter validation;
 - exact state transitions and safe repeat start;
 - canonical PWA metadata and neutral ready-state copy;
 - suite and `cod2-mp` locked images;

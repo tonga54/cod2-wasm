@@ -6,8 +6,8 @@ checkpoint compiles the complete selected client source graph to WebAssembly
 objects and runs a small native checksum diagnostic, but the game does not
 link or launch yet.
 
-The browser package uses wasm-game-framework 0.7.3 at immutable commit
-`be0b81301c5f12f09e445a3bc765b7709603265e`. The framework supplies the HTML,
+The browser package uses wasm-game-framework 0.7.5 at immutable commit
+`11b9af479e40927336d18f5ddfc41d9cc2b224c7`. The framework supplies the HTML,
 CSS, responsive canvas, setup gate, PWA metadata, service worker, and container
 data service. This repository supplies only declarative manifests, an adapter,
 the source-built diagnostic, and an original diagnostic icon.
