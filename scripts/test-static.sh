@@ -30,6 +30,8 @@ assert.equal(config.identity, false);
 assert.equal(config.graphics, false);
 assert.equal(config.pointerLock, false);
 assert.equal(config.fullscreen, false);
+assert.equal(config.controller?.mode, 'disabled');
+assert.equal(config.persistence, false);
 assert.equal(config.variants['cod2-mp'].description, 'Still in development — Call of Duty 2 does not launch in this build.');
 const data = JSON.parse(fs.readFileSync(path.join(site, 'wasm-game-data.json')));
 const files = data.variants['cod2-mp'].files;
@@ -43,7 +45,7 @@ for (const file of files) {
   assert.deepEqual(file.magic, [80, 75, 3, 4]);
 }
 const framework = JSON.parse(fs.readFileSync(path.join(site, 'wasm-game-framework.json')));
-assert.equal(framework.version, '0.7.6');
+assert.equal(framework.version, '0.9.1');
 NODE
 
 node - "${repo_root}" <<'NODE'

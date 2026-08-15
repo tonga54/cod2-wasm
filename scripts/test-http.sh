@@ -38,7 +38,7 @@ test_image() {
   base="http://127.0.0.1:${port}"
   curl -fsS "${base}/" | grep -q '/shared-shell/wasm-game-framework.css'
   curl -fsS "${base}/" | grep -q '/shared-shell/wasm-game-bootstrap.js'
-  test "$(curl -fsS "${base}/wasm-game-framework.json" | node -pe 'JSON.parse(fs.readFileSync(0)).version')" = "0.7.6"
+  test "$(curl -fsS "${base}/wasm-game-framework.json" | node -pe 'JSON.parse(fs.readFileSync(0)).version')" = "0.9.1"
   test "$(curl -fsS "${base}/wasm-game-config.js" | sed -n 's/.*= "\([^"]*\)";.*/\1/p')" = "${expected_variant}"
   test "$(curl -fsS "${base}/app.webmanifest?variant=cod2-mp" | node -pe 'JSON.parse(fs.readFileSync(0)).short_name')" = "CoD2 WASM"
   headers="$(curl -fsSI "${base}/cod2_core_probe.wasm")"

@@ -5,8 +5,8 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 framework_source_dir="${COD2_WASM_FRAMEWORK_DIR:-${repo_root}/../wasm-game-framework}"
 repository="${COD2_WASM_IMAGE_REPO:-local/cod2-wasm}"
 tag="${COD2_WASM_IMAGE_TAG:-dev}"
-framework_image="${COD2_WASM_FRAMEWORK_IMAGE:-wasm-game-framework:0.7.6}"
-expected_commit="e617f090deaa294dacd033afa52c09f811a3e690"
+framework_image="${COD2_WASM_FRAMEWORK_IMAGE:-wasm-game-framework:0.9.1}"
+expected_commit="68bfbd1dbc0104084c7760e486b7437d4c7bb90e"
 revision="$(git -C "${repo_root}" rev-parse --verify HEAD 2>/dev/null || printf local)"
 
 "${repo_root}/scripts/build-web.sh"
@@ -19,7 +19,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-test "$(node -p "require('${framework_dir}/package.json').version")" = "0.7.6"
+test "$(node -p "require('${framework_dir}/package.json').version")" = "0.9.1"
 test "$(git -C "${framework_dir}" rev-parse HEAD)" = "${expected_commit}"
 "${framework_dir}/scripts/build-base-image.sh" "${framework_image}"
 
@@ -29,7 +29,7 @@ docker build --build-arg "FRAMEWORK_IMAGE=${framework_image}" --build-arg GAME_V
   --build-arg "VCS_REF=${revision}" -t "${repository}:cod2-mp-${tag}" "${repo_root}"
 
 for image in "${repository}:${tag}" "${repository}:cod2-mp-${tag}"; do
-  test "$(docker run --rm --entrypoint node "${image}" -p "require('/opt/wasm-game-framework/package.json').version")" = "0.7.6"
+  test "$(docker run --rm --entrypoint node "${image}" -p "require('/opt/wasm-game-framework/package.json').version")" = "0.9.1"
   docker run --rm --entrypoint sh "${image}" -c \
     "test -f /opt/game-site/cod2_core_probe.wasm && \
      test -f /opt/game-site/wasm-game.json && \

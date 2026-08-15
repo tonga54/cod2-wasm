@@ -6,8 +6,8 @@ checkpoint compiles the complete selected client source graph to WebAssembly
 objects and runs a small native checksum diagnostic, but the game does not
 link or launch yet.
 
-The browser package uses wasm-game-framework 0.7.6 at immutable commit
-`e617f090deaa294dacd033afa52c09f811a3e690`. The framework supplies the HTML,
+The browser package uses wasm-game-framework 0.9.1 at immutable commit
+`68bfbd1dbc0104084c7760e486b7437d4c7bb90e`. The framework supplies the HTML,
 CSS, responsive canvas, setup gate, PWA metadata, service worker, and container
 data service. This repository supplies only declarative manifests, an adapter,
 the source-built diagnostic, and an original diagnostic icon.
@@ -22,6 +22,8 @@ the source-built diagnostic, and an original diagnostic icon.
   server, game, cgame, or UI source families.
 - The game executable does not link; no menu, level, renderer, input, network,
   or audio behavior is claimed.
+- Controller input and save/config persistence are explicitly disabled until
+  the multiplayer engine links and exposes native runtime seams.
 
 The exact link blocker is the reconstruction's generated native data model.
 It represents some names as both code pointers and linear-memory data. Native
