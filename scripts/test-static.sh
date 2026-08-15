@@ -45,7 +45,7 @@ for (const file of files) {
   assert.deepEqual(file.magic, [80, 75, 3, 4]);
 }
 const framework = JSON.parse(fs.readFileSync(path.join(site, 'wasm-game-framework.json')));
-assert.equal(framework.version, '0.9.1');
+assert.equal(framework.version, '0.9.2');
 NODE
 
 node - "${repo_root}" <<'NODE'
