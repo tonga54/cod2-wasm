@@ -6,6 +6,7 @@
 #include <string.h>
 
 extern const dvar_t *cg_drawHealth;
+extern const dvar_t *cg_blood;
 extern const dvar_t *cg_hudCompassSize;
 extern const dvar_t *cg_hudStanceHintPrints;
 
@@ -28,7 +29,8 @@ extern const dvar_t *hud_health_pulserate_critical;
 extern const dvar_t *hud_deathQuoteFadeTime;
 static vec4_t color;
 static char szErrorString[1024];
-static const float pulseMags[4];
+/* Fade successive pulses; an uninitialized table makes every pulse invisible. */
+static const float pulseMags[4] = {1.0f, 0.8f, 0.6f, 0.4f};
 static vec4_t color_00302d80;
 static vec4_t color_00302d80;
 static const dvar_t *hud_fadeout_speed;
@@ -1391,7 +1393,7 @@ static inline __attribute__((always_inline)) void CG_DrawLowHealthOverlay(const 
     float alpha;
     int elapsed;
 
-    if (!cg_drawHealth->current.enabled) {
+    if (!cg_blood->current.enabled) {
         return;
     }
 

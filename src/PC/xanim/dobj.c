@@ -715,16 +715,8 @@ void DObjGetHierarchyBits(DObj *obj, int boneIndex, int *partBits)
     }
 }
 
-void DObjSetLocalTagInternal(const DObj *obj, const vec_t *trans, const vec_t *angles, int boneIndex)
+static void DObjAnglesToQuatLocal(const vec_t *angles, float *quat)
 {
-    DObjAnimMat *rotTrans;
-
-    if (!obj->skel) {
-        return;
-    }
-
-    rotTrans = &obj->skel->mat[boneIndex];
-
     if (angles) {
         const float halfDegToRad = 0.008726646259971648f;
         float sy = sinf(angles[1] * halfDegToRad);
@@ -738,16 +730,28 @@ void DObjSetLocalTagInternal(const DObj *obj, const vec_t *trans, const vec_t *a
         float syCp = sy * cp;
         float cyCp = cy * cp;
 
-        rotTrans->quat[0] = sr * cyCp + cr * negSpSy;
-        rotTrans->quat[1] = cr * spCy + sr * syCp;
-        rotTrans->quat[2] = cr * syCp - sr * spCy;
-        rotTrans->quat[3] = cr * cyCp - sr * negSpSy;
+        quat[0] = sr * cyCp + cr * negSpSy;
+        quat[1] = cr * spCy + sr * syCp;
+        quat[2] = cr * syCp - sr * spCy;
+        quat[3] = cr * cyCp - sr * negSpSy;
     } else {
-        rotTrans->quat[0] = 0.0f;
-        rotTrans->quat[1] = 0.0f;
-        rotTrans->quat[2] = 0.0f;
-        rotTrans->quat[3] = 1.0f;
+        quat[0] = 0.0f;
+        quat[1] = 0.0f;
+        quat[2] = 0.0f;
+        quat[3] = 1.0f;
     }
+}
+
+void DObjSetLocalTagInternal(const DObj *obj, const vec_t *trans, const vec_t *angles, int boneIndex)
+{
+    DObjAnimMat *rotTrans;
+
+    if (!obj->skel) {
+        return;
+    }
+
+    rotTrans = &obj->skel->mat[boneIndex];
+    DObjAnglesToQuatLocal(angles, rotTrans->quat);
 
     rotTrans->transWeight = 0.0f;
     rotTrans->trans[0] = trans[0];
@@ -803,14 +807,28 @@ qboolean DObjSetControlTagAngles(const DObj *obj, int *partBits, unsigned int ta
     {
         DSkel *skel = obj->skel;
 
-        if (skel->skelPartBits[boneIndexHigh] & boneIndexLow) {
+        if ((skel->skelPartBits[boneIndexHigh] | skel->controlPartBits[boneIndexHigh]) & boneIndexLow) {
             return 0;
         }
 
+        /* Controllers add aim/lean to the sampled pose. Replacing it with a
+         * zero translation and the controller rotation collapses the spine
+         * and erases the walk/run animation, even for a zero-angle control. */
+        if (!(skel->animPartBits[boneIndexHigh] & boneIndexLow)) {
+            DObjCalcAnim(obj, partBits);
+        }
+        DObjAnimMat *mat = &skel->mat[boneIndex];
+        float control[4];
+        float animated[4];
+        DObjAnglesToQuatLocal(angles, control);
+        memcpy(animated, mat->quat, sizeof(animated));
+        mat->quat[0] = control[3] * animated[0] + control[0] * animated[3] + control[1] * animated[2] - control[2] * animated[1];
+        mat->quat[1] = control[3] * animated[1] - control[0] * animated[2] + control[1] * animated[3] + control[2] * animated[0];
+        mat->quat[2] = control[3] * animated[2] + control[0] * animated[1] - control[1] * animated[0] + control[2] * animated[3];
+        mat->quat[3] = control[3] * animated[3] - control[0] * animated[0] - control[1] * animated[1] - control[2] * animated[2];
         skel->controlPartBits[boneIndexHigh] |= boneIndexLow;
         skel->animPartBits[boneIndexHigh] |= boneIndexLow;
     }
-    DObjSetLocalTagInternal(obj, (const vec_t *)imp_vec3_origin, angles, boneIndex);
     return 1;
 }
 

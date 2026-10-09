@@ -5,6 +5,42 @@ the internal browser have verified movement, aiming, damage, death, respawn and
 synchronized scores, including the normal room. This is two-client coverage,
 not a 64-player load or long-duration stability result.**
 
+## Fullscreen, damage blood and player animation (2026-10-09)
+
+A trusted primary click on the canvas requests document fullscreen without
+consuming game input. The in-app browser expanded from 1280×720 to the screen
+size on the click and returned with Escape. The input regression covers
+synthetic/right clicks, concurrent requests and clicks already in fullscreen.
+
+The low-health overlay now follows `cg_blood`, whose default is enabled, rather
+than the disabled health-bar setting. Its previously zero-initialized pulse
+table now has descending strengths (1.0, 0.8, 0.6, 0.4). This uses the original
+blood material and pulse timing with reconstructed strengths. Two real clients
+on an isolated native Toujane server verified a Sten hit, the red blood overlay
+and recovery to a clear image and 100 health. Local evidence:
+`out/gameplay-blood-damage.png` and `out/gameplay-blood-recovered.png`.
+`python3 scripts/test-low-health-overlay.py` exercises severe damage, preference
+off/on, interpolation, recovery and another hit; restoring either former
+invisible-overlay defect fails.
+
+Aim/lean controllers now compose their rotation with the sampled animation
+and preserve bone translation. They formerly erased the animation and reset
+the controlled bone's position to zero. An already-applied controller is cached
+within the skeleton frame, while root placement remains an absolute override.
+`python3 scripts/test-animation-controllers.py` covers six controlled bones
+over 120 moving poses, noncommuting aim rotations, cache/part masks and root
+placement under ASan/UBSan; pose and translation overwrite mutants fail.
+Two clients verified both original body models and the advancing
+`pb_combatrun_forward_loop` (e.g. time 0.66→0.70), nonzero hip/spine offsets and
+changing rotations. Evidence: `out/gameplay-running-pose.txt` and
+`out/gameplay-running-2.png`. This establishes the rigid-pose repair; overall
+animation fidelity still needs broader playtesting.
+
+Recreating the isolated server while those clients were connected, then using
+the native reconnect command, produced a client script compile error. Reloading
+the browser and joining again worked. Deploy only with rooms empty; the browser
+update notice reloads the page rather than invoking native reconnect.
+
 ## LAN access during testing
 
 The current host address is `http://192.168.1.10:8088/` (DHCP may change it;

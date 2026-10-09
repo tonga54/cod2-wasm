@@ -26,6 +26,13 @@ The page loads directly into the original main menu without a launcher form or
 automatic server connection. The tab title is **Call of Duty 2 Multiplayer**;
 its favicon is extracted from the owner's original MP executable.
 
+A primary click on the game enters fullscreen when the browser supports it;
+Escape exits fullscreen. Severe damage now draws the original blood overlay,
+with fading pulses below 35% health, controlled by `cg_blood`. Aim and lean
+controllers preserve the sampled walk/run pose and bone lengths instead of
+replacing them. Regression checks are `scripts/test-animation-controllers.py`,
+`scripts/test-low-health-overlay.py` and `scripts/test-input-capture.cjs`.
+
 Join Game discovers the host's live dedicated servers. Start New Server creates
 another Toujane/TDM dedicated instance, with 64 player slots. Up to three
 instances are allowed; additional instances empty for five minutes are stopped.

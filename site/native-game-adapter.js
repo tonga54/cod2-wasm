@@ -8,6 +8,7 @@
   let traceInput = () => {};
   let hadInputCapture = false;
   let updateNotifier;
+  let fullscreenPending = false;
   const startupStyle = document.createElement('link');
   startupStyle.rel = 'stylesheet';
   startupStyle.href = '/startup.css';
@@ -204,6 +205,16 @@
   globalThis.WasmGameAdapter = Object.freeze({
     async init(context) {
       startUpdateNotifier(context);
+      context.elements.canvas.addEventListener('pointerdown', event => {
+        if (!event.isTrusted || event.button !== 0 || document.fullscreenElement ||
+            fullscreenPending || !document.documentElement.requestFullscreen) return;
+        // Fullscreen needs a real click. Do not consume the game's pointer input.
+        fullscreenPending = true;
+        try {
+          Promise.resolve(document.documentElement.requestFullscreen({ navigationUI: 'hide' }))
+            .catch(() => {}).finally(() => { fullscreenPending = false; });
+        } catch { fullscreenPending = false; }
+      });
       // Keep right-click available to the game, including before pointer lock.
       context.elements.canvas.addEventListener('contextmenu', event => event.preventDefault());
       // Window capture runs before the framework's document key guard. A

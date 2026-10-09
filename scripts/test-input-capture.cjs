@@ -18,6 +18,7 @@ let escapes = 0;
 let starts = 0;
 let loadingShown = 0;
 let nativeState = 2;
+let fullscreenRequests = 0;
 let shellState = 'launcher';
 const publishedStates = [];
 const window = {
@@ -28,6 +29,12 @@ const window = {
 };
 const document = {
   pointerLockElement: null,
+  fullscreenElement: null,
+  documentElement: {requestFullscreen(options) {
+    assert.equal(options.navigationUI, 'hide');
+    ++fullscreenRequests;
+    return Promise.resolve();
+  }},
   createElement: () => ({}),
   head: {appendChild(style) {
     assert.equal(style.rel, 'stylesheet');
@@ -77,6 +84,18 @@ const context = {
 (async () => {
   await adapter.init(context);
   assert.equal(starts, 1, 'initialization starts the actual engine without a Play click');
+  const fullscreenClick = canvasListeners.get('pointerdown');
+  fullscreenClick({isTrusted:false,button:0});
+  fullscreenClick({isTrusted:true,button:2});
+  assert.equal(fullscreenRequests, 0, 'only an actual primary click requests fullscreen');
+  fullscreenClick({isTrusted:true,button:0});
+  fullscreenClick({isTrusted:true,button:0});
+  assert.equal(fullscreenRequests, 1, 'concurrent clicks share the pending request');
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  document.fullscreenElement = document.documentElement;
+  fullscreenClick({isTrusted:true,button:0});
+  assert.equal(fullscreenRequests, 1, 'clicks in fullscreen do not request it again');
+  document.fullscreenElement = null;
   assert.equal(loadingShown, 1);
   assert.equal(context.elements.console.hidden, true, 'diagnostic output is hidden during normal loading');
   for (const captured of [false, true]) {
