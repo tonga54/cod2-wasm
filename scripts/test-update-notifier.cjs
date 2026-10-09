@@ -12,12 +12,13 @@ class Element {
 const body = new Element('body');
 const listeners = {};
 const old = 'a'.repeat(64), deployed = 'b'.repeat(64);
-let current = old, available = false, notify = false, reloads = 0, poll, offline = false;
+let current = old, available = false, notify = false, reloads = 0, poll, draw, offline = false;
 const document = { body, hidden: false, createElement: tag => new Element(tag),
   addEventListener: (type, fn) => { listeners[type] = fn; }, removeEventListener() {} };
 const sandbox = { document, AbortSignal,
   location: { reload: () => { ++reloads; } },
   setInterval: fn => { poll = fn; return 1; }, clearInterval() {}, addEventListener() {},
+  requestAnimationFrame: fn => { draw = fn; return 1; }, cancelAnimationFrame() {},
   fetch: async url => {
     if (offline) throw new Error('offline');
     return { ok: true, json: async () => url === '/build-info.json' ? { buildId: current } :
@@ -34,11 +35,12 @@ vm.runInContext(fs.readFileSync('site/update-notifier.js', 'utf8'), sandbox);
   assert.equal(panel.hidden, true);
   available = true; await poll();
   assert.equal(panel.hidden, true, 'never display during a match/loading');
-  notify = true; notifier.render();
+  notify = true; draw();
   assert.equal(panel.hidden, false);
   assert.match(message.textContent, /anfitrión/);
   assert.equal(action.hidden, true, 'a push is not a deployed build');
   assert.equal(help.hidden, false);
+  assert.equal(panel.hidden, false, 'menu transition is observed without keyboard/pointer interaction');
   later.listeners.click(); assert.equal(panel.hidden, true);
   await poll(); assert.equal(panel.hidden, true, 'dismissal lasts for this version');
   current = deployed; await poll();

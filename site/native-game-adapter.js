@@ -347,7 +347,6 @@
       }
     },
     readEngineState() {
-      updateNotifier?.render();
       if (failed) return 'crashed';
       if (!native) return 'launcher';
       const state = native._web_client_state();

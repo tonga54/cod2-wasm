@@ -52,6 +52,15 @@
       action.textContent = 'Recargar';
       help.hidden = reload;
     }
+    // The framework samples engine state after interactions, not continuously.
+    // Observe menu/disconnect transitions even when nobody presses a key.
+    let frame;
+    function draw() {
+      if (stopped) return;
+      render();
+      frame = requestAnimationFrame(draw);
+    }
+    frame = requestAnimationFrame(draw);
     async function poll() {
       if (stopped || busy || document.hidden || !loadedBuild) return;
       busy = true;
@@ -74,6 +83,7 @@
     document.addEventListener('visibilitychange', visible);
     globalThis.addEventListener('pagehide', () => {
       stopped = true; clearInterval(timer);
+      cancelAnimationFrame(frame);
       document.removeEventListener('visibilitychange', visible);
     }, { once: true });
     return { ready, render };
