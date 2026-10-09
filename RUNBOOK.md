@@ -92,7 +92,7 @@ update notice reloads the page rather than invoking native reconnect.
 
 The current host address is `http://192.168.1.10:8088/` (DHCP may change it;
 check `ipconfig getifaddr en0`). Clients on the same LAN open this address,
-then choose **Join Game → Toujane + Carentan | TDM**. There is no web account or login.
+then choose **Join Game → Toujane - Carentan | TDM**. There is no web account or login.
 The former `10.14.9.235` address is no longer assigned to this host.
 
 Each room now accepts 64 clients, including browsers still loading the map.

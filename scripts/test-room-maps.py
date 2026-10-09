@@ -21,11 +21,12 @@ with tempfile.TemporaryDirectory(prefix='cod2-room-maps-') as directory:
          patch.object(rooms.shutil, 'copyfile', side_effect=lambda _, dest: Path(dest).write_text((root / 'server.cfg').read_text())), \
          patch.object(rooms.subprocess, 'Popen') as launch:
         for room_id, mapname in enumerate(rooms.SUPPORTED_MAPS):
-            rooms.start_room(room_id, 'Test;quit\nexec hacked', mapname)
+            rooms.start_room(room_id, 'Test;quit\nexec hacked+quit', mapname)
             args = launch.call_args.args[0]
             assert args[-2:] == ['+map', mapname], args
             assert args[args.index('sv_maxclients') + 1] == '64'
             assert ';' not in args[args.index('sv_hostname') + 1]
+            assert '+' not in args[args.index('sv_hostname') + 1]
             config = (profile / f'room-{room_id}/raw/server.cfg').read_text()
             assert 'set scr_allies ""' in config and 'set scr_axis ""' in config
             assert 'set scr_tdm_scorelimit "100"' in config

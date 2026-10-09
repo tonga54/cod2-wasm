@@ -17,7 +17,7 @@ MAX_ROOMS = 3
 BASE_PORT = 28960
 IDLE_SECONDS = 300
 SUPPORTED_MAPS = ('mp_toujane', 'mp_carentan')
-DEFAULT_NAME = 'Toujane + Carentan | TDM'
+DEFAULT_NAME = 'Toujane - Carentan | TDM'
 rooms = {}
 lock = threading.Lock()
 stopping = threading.Event()
@@ -62,7 +62,7 @@ def start_room(room_id, name, mapname='mp_toujane'):
         config.write(f'\nset sv_mapRotationCurrent "{rotation}"\n')
     # Names are one console argument. No arbitrary commands, paths,
     # launch options, UDP destinations or shell interpretation are accepted.
-    name = re.sub(r'[^A-Za-z0-9 _|.+-]', '', name).strip()[:32] or DEFAULT_NAME
+    name = re.sub(r'[^A-Za-z0-9 _|.-]', '', name).strip()[:32] or DEFAULT_NAME
     args = ['/usr/local/bin/cod2_lnxded', '+set', 'dedicated', '1',
             '+set', 'fs_basepath', '/game', '+set', 'fs_homepath', str(profile),
             '+set', 'net_ip', '0.0.0.0', '+set', 'net_port', str(BASE_PORT + room_id),
