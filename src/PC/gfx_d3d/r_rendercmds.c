@@ -146,7 +146,7 @@ static void R_DumpCommandListForMenu(const GfxCmdArray *cl)
     int limit;
     int count;
 
-    if (dumped || !cl || cl->usedTotal <= 0) {
+    if (!getenv("DBGSPAM") || dumped || !cl || cl->usedTotal <= 0) {
         return;
     }
 

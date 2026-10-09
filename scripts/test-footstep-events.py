@@ -49,7 +49,7 @@ int main(void){
  return 0;
 }
 '''
-assert 'pm->xyspeed = PM_VectorLength2D(ps->velocity);\n            PM_Footsteps' in source
+assert re.search(r'pm->xyspeed\s*=\s*PM_VectorLength2D\(ps->velocity\);\s+PM_Footsteps\(pm,\s*&pml\);', source)
 with tempfile.TemporaryDirectory(prefix='cod2-footsteps-') as folder:
     path = Path(folder)
     (path / 'test.c').write_text(support + body + checks)

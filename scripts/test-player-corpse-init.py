@@ -21,8 +21,12 @@ static struct { struct { struct { void *anims; } animTree; } animScriptData;clie
 static scr_data_t data;
 static void *imp_g_scr_data=&data;
 static XAnimTree pool[72];
-static int allocated,loaded;
+static int allocated,loaded,mantleLoaded;
+typedef void *(*MantleAnimAlloc)();
 static void Hunk_AllocXAnimServer(void) {}
+static void Mantle_CreateAnims(MantleAnimAlloc alloc) {
+ assert(alloc==(MantleAnimAlloc)Hunk_AllocXAnimServer);mantleLoaded++;
+}
 static void BG_LoadAnim(void) { loaded++;level_bgs.animScriptData.animTree.anims=pool; }
 static void *XAnimCreateTree(void *anims,void *alloc) {
  assert(anims==pool && allocated<72 && alloc==Hunk_AllocXAnimServer);
@@ -32,8 +36,8 @@ static void *XAnimCreateTree(void *anims,void *alloc) {
 checks = r'''
 int main(void) {
  for(int round=0;round<12;round++) {
-  memset(&data,0,sizeof(data));memset(&level_bgs,0,sizeof(level_bgs));allocated=loaded=0;
-  G_InitPlayerAnimTrees(0);assert(loaded==1 && allocated==72);
+  memset(&data,0,sizeof(data));memset(&level_bgs,0,sizeof(level_bgs));allocated=loaded=mantleLoaded=0;
+  G_InitPlayerAnimTrees(0);assert(loaded==1 && mantleLoaded==1 && allocated==72);
   for(int i=0;i<64;i++) assert(level_bgs.clientinfo[i].pXAnimTree==&pool[i]);
   for(int restart=0;restart<8;restart++) {
    for(int i=0;i<8;i++) {
@@ -42,7 +46,7 @@ int main(void) {
     assert(c->entnum==-1 && c->time==0 && c->falling==0);
     c->entnum=100+i;c->time=123;c->falling=1;
    }
-   G_InitPlayerAnimTrees(1);assert(loaded==1 && allocated==72);
+   G_InitPlayerAnimTrees(1);assert(loaded==1 && mantleLoaded==1 && allocated==72);
   }
  }
  return 0;

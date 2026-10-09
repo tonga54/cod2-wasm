@@ -60,7 +60,12 @@ EM_JS(void, WebNet_Open, (int room), {
                     const list = await response.json();
                     const selected = list.rooms?.find(candidate => candidate.id === room);
                     if (!selected) message = 'This game is no longer available. Choose another server from Join Game.';
-                    else if (selected.players >= 2 || selected.connections >= 2) message = 'EXE_SERVERISFULL';
+                    else {
+                        const capacity = Number.isInteger(selected.maxPlayers) && selected.maxPlayers > 0
+                            ? selected.maxPlayers : 64;
+                        if (selected.players >= capacity || selected.connections >= capacity)
+                            message = 'EXE_SERVERISFULL';
+                    }
                 }
             } catch (_) { /* Keep the connection error when the host is unreachable. */ }
             finally { clearTimeout(timeout); }
@@ -190,18 +195,40 @@ EMSCRIPTEN_KEEPALIVE void web_add_room(int room, const char *info, int ping) {
 EM_JS(void, Web_DiscoverServers, (), {
     const generation = (Module.roomListGeneration || 0) + 1;
     Module.roomListGeneration = generation;
-    fetch('/servers', {cache:'no-store'}).then(response => {
-        if (!response.ok) throw new Error('Server list unavailable');
-        return response.json();
-    }).then(list => {
-        if (Module.roomListGeneration !== generation) return;
-        for (const room of list.rooms || []) {
-            if (!Number.isInteger(room.id) || room.id < 0 || room.id > 2 || typeof room.info !== 'string') continue;
-            const info = stringToNewUTF8(room.info.slice(0, 1023));
-            _web_add_room(room.id, info, room.ping);
-            _free(info);
+    // Cached clients can reach Join Game while the dedicated room is still
+    // starting. An empty first reply must not leave discovery stuck forever.
+    return (async () => {
+        const deadline = Date.now() + 12000;
+        for (let attempt = 0; attempt < 16; ++attempt) {
+            if (Module.roomListGeneration !== generation) return;
+            const remaining = deadline - Date.now();
+            if (remaining <= 0) return;
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), Math.min(3000, remaining));
+            try {
+                const response = await fetch('/servers', {cache:'no-store', signal:controller.signal});
+                if (!response.ok) throw new Error('Server list unavailable');
+                const list = await response.json();
+                if (Module.roomListGeneration !== generation) return;
+                if (!Array.isArray(list.rooms)) throw new Error('Invalid server list');
+                const seen = new Set();
+                for (const room of list.rooms) {
+                    if (!room || !Number.isInteger(room.id) || room.id < 0 || room.id > 2 ||
+                        typeof room.info !== 'string' || seen.has(room.id)) continue;
+                    seen.add(room.id);
+                    const info = stringToNewUTF8(room.info.slice(0, 1023));
+                    try { _web_add_room(room.id, info, room.ping); }
+                    finally { _free(info); }
+                }
+                if (seen.size) return;
+            } catch (error) {
+                if (Module.roomListGeneration !== generation) return;
+                if (attempt === 15 || Date.now() >= deadline) err('[servers] ' + error.message);
+            } finally { clearTimeout(timeout); }
+            if (attempt < 15 && Module.roomListGeneration === generation && Date.now() < deadline)
+                await new Promise(resolve => setTimeout(resolve, Math.min(750, deadline - Date.now())));
         }
-    }).catch(error => err('[servers] ' + error.message));
+    })();
 });
 
 EMSCRIPTEN_KEEPALIVE void web_created_room(int room, const char *error) {

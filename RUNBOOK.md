@@ -1312,3 +1312,38 @@ recorded. Evidence: `out/muzzle-fx-hip-0.png` through `out/muzzle-fx-hip-7.png`,
 `out/muzzle-fx-bren-0.png` through `out/muzzle-fx-bren-5.png`. The selected
 proof is `out/muzzle-fx-verified.png`. Other weapon transforms are covered by
 the shared-path tests; they were not individually tested in the browser.
+
+## 2026-10-09: regression audit and browser discovery recovery
+
+Reviewed the running services and the existing 68-script regression suite.
+Three stale fixtures were repaired: footstep checking now tolerates whitespace,
+corpse initialization includes the mantle animation dependency, and the bot
+foundation test no longer requires obsolete eight-player/12-slot prose. Their
+runtime and sanitizer checks pass. Audio parsing of all 470 files and the
+32-bit snapshot-layout test pass in the Linux native builder; the host lacks
+ffprobe and does not provide the required 32-bit Linux headers. Other scripts
+passed, including 12 real map rotations. Evidence: `out/audit-regressions.json`
+and `out/audit-linux-tests.log`. The six gateway tests and three WebAssembly C
+harnesses for light bounds, pixel uploads and font callbacks also passed.
+
+Found a stale two-player limit in the WebSocket rejection diagnostic. It now
+uses the room's advertised capacity, falling back to 64, so a connection error
+with two occupants is not mislabeled as a full 64-slot server. Discovery now
+retries empty/transient room replies within a 12-second deadline, with request
+timeouts, stale-generation rejection and bounded allocations. New tests cover
+startup delays, malformed/duplicate rooms, stale refreshes, unavailable hosts
+and the total deadline. Command-list debug dumps now require DBGSPAM, preventing
+partial diagnostic lines from leaking into ordinary browser logs.
+
+In the isolated Toujane match, the scoped Lee-Enfield stayed centered after a
+turn, fired five shots (10 to 5 rounds), and began its original five-round
+reload without disappearing. Stopping the isolated dedicated server returned
+the client to a normal connection-error dialog. No WebAssembly trap was seen.
+The native and browser builds and canonical package checks passed before the
+concurrent Carentan integration. Final compilation/deployment is coordinated
+with that work to preserve its assets and shared-file changes.
+
+This audit does not establish zero bugs. Existing missing-material/technique
+warnings remain, and the opt-in meter varied roughly 20–60 FPS across menu,
+scoped/outdoor views and background compilation on this Mac. Longer sessions,
+more real players and other devices remain outside this verification.

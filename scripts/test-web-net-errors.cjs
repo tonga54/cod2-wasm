@@ -43,12 +43,26 @@ async function reject(f) {
   await closed;
 }
 (async()=>{
-  const full = fixture([{id:0,players:2}]);
+  const full = fixture([{id:0,players:64,maxPlayers:64}]);
   await reject(full);
   assert.equal(full.error(), 'error\nEXE_SERVERISFULL\0');
-  const loading = fixture([{id:0,players:0,connections:2}]);
+  const loading = fixture([{id:0,players:0,connections:64,maxPlayers:64}]);
   await reject(loading);
   assert.equal(loading.error(), 'error\nEXE_SERVERISFULL\0');
+  const partiallyOccupied = fixture([{id:0,players:2,connections:2,maxPlayers:64}]);
+  await reject(partiallyOccupied);
+  assert.match(partiallyOccupied.error(), /Could not connect/);
+  const smallRoom = fixture([{id:0,players:2,maxPlayers:2}]);
+  await reject(smallRoom);
+  assert.equal(smallRoom.error(), 'error\nEXE_SERVERISFULL\0');
+  for (const maxPlayers of [undefined, 0, -1, '64']) {
+    const fallback = fixture([{id:0,players:2,connections:2,maxPlayers}]);
+    await reject(fallback);
+    assert.match(fallback.error(), /Could not connect/);
+  }
+  const fallbackFull = fixture([{id:0,players:64}]);
+  await reject(fallbackFull);
+  assert.equal(fallbackFull.error(), 'error\nEXE_SERVERISFULL\0');
   const gone = fixture([]);
   await reject(gone);
   assert.match(gone.error(), /no longer available/);
