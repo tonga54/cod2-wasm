@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Prepare private startup and Toujane assets; gameplay still needs verification."""
+"""Prepare private startup and Toujane/Carentan TDM assets."""
 from pathlib import Path
+import argparse
 import hashlib
 import json
 import re
@@ -10,8 +11,14 @@ from browser_sound_assets import collect_sound_assets
 from weapon_balance import apply_weapon_balance, load_profile
 
 root = Path(__file__).resolve().parent.parent
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--main-dir', type=Path, default=root / 'data/browser/main')
+parser.add_argument('--manifest', type=Path, default=root / 'site/wasm-game-data.json')
+args = parser.parse_args()
 balance_profile = load_profile()
-main = root / "data/browser/main"
+maps = {"mp_toujane": "Toujane, Tunisia", "mp_carentan": "Carentan, France"}
+soldiertypes = ("british_africa", "german_africa", "american_normandy", "german_normandy")
+main = args.main_dir
 main.mkdir(parents=True, exist_ok=True)
 archives = {}
 with zipfile.ZipFile(root / "data/main/iw_00.iwd") as original:
@@ -73,13 +80,14 @@ try:
     pending.extend(re.findall(r'"(fx/[^\"]+\.efx)"', graphics_source))
     pending.extend(("shock/default.shock", "shock/hold_breath.shock"))
     pending.append("info/mp_lochit_dmgtable")
-    # _menus.gsc builds these names from the fixed factions and gametype.
+    # _menus.gsc builds these names from each map's factions and gametype.
     pending.extend("ui_mp/scriptmenus/" + menu + ".menu" for menu in (
-        "team_britishgerman", "weapon_british", "weapon_german", "serverinfo_tdm"
+        "team_britishgerman", "team_americangerman", "weapon_british",
+        "weapon_american", "weapon_german", "serverinfo_tdm"
     ))
     pending.extend(name for name in asset_index if name.endswith(".csv")
                    and (name.count("/") == 1 and name.startswith("fx/")
-                        or name.startswith("fx/maps/mp/mp_toujane/")))
+                        or any(name.startswith(f"fx/maps/mp/{mapname}/") for mapname in maps)))
     pending.extend((
         "materials/$raw", "fonts/consolefont", "fonts/smalldevfont",
         "fonts/bigdevfont", "fonts/smalldevfont", "fonts/bigfont",
@@ -90,15 +98,18 @@ try:
         "codescripts/delete.gsc", "codescripts/struct.gsc",
         # Entity keys drive gametype filtering, including overlapping MG42s.
         "radiant/keys.txt",
-        "maps/mp/gametypes/tdm.txt", "maps/mp/mp_toujane.csv",
+        "maps/mp/gametypes/tdm.txt",
         "ui_mp/menus.txt", "ui_mp/hud.txt", "ui_mp/ingame.txt"
     ))
-    # Add the selected BSP and follow its real material/entity dependencies.
-    # Other map names occurring in menus must never pull in another BSP.
-    pending.extend(("maps/mp/mp_toujane.d3dbsp", "maps/mp/mp_toujane.gsc",
-                    "maps/mp/mp_toujane_fx.gsc", "mp/playeranim.script",
-                    "mp/playeranimtypes.txt", "animtrees/multiplayer.atr"))
-    # British/Afrika Korps loadouts used by the original Toujane TDM scripts.
+    # Follow both maps' real material/entity dependencies, plus their
+    # dynamically named loading screens and native map-selection artwork.
+    for mapname in maps:
+        pending.extend(f"maps/mp/{mapname}{suffix}"
+                       for suffix in (".d3dbsp", ".gsc", "_fx.gsc", ".csv"))
+        pending.extend((f"materials/loadscreen_{mapname}",
+                        f"materials/background_{mapname}", f"sun/{mapname}.sun"))
+    pending.extend(("mp/playeranim.script", "mp/playeranimtypes.txt", "animtrees/multiplayer.atr"))
+    # Original British/Afrika Korps and American/Normandy loadouts.
     weapons = (
         "frag_grenade_british_mp", "smoke_grenade_british_mp", "webley_mp",
         "enfield_mp", "sten_mp", "bren_mp", "enfield_scope_mp", "m1garand_mp",
@@ -106,6 +117,8 @@ try:
         "smoke_grenade_german_mp", "luger_mp", "kar98k_mp", "g43_mp",
         "mp40_mp", "mp44_mp", "kar98k_sniper_mp", "binoculars_mp",
         "defaultweapon_mp", "mg42_bipod_stand_mp",
+        "frag_grenade_american_mp", "smoke_grenade_american_mp", "colt_mp",
+        "m1carbine_mp", "bar_mp", "springfield_mp", "greasegun_mp",
     )
     pending.extend("weapons/mp/" + weapon for weapon in weapons)
     renderer = {}
@@ -153,7 +166,7 @@ try:
                 lambda match: match[0] if match[0].startswith(b'"') else b" ",
                 data, flags=re.S)
         if name.endswith(".d3dbsp"):
-            if name != "maps/mp/mp_toujane.d3dbsp":
+            if name not in {f"maps/mp/{mapname}.d3dbsp" for mapname in maps}:
                 raise ValueError("Unexpected map dependency: " + name)
             if data[:8] != b"IBSP\x04\x00\x00\x00":
                 raise ValueError("Expected the original CoD2 BSP version 4")
@@ -162,7 +175,7 @@ try:
             if (material_length % 72 or material_offset < 320
                     or material_offset + material_length > len(data)
                     or entity_offset < 320 or entity_offset + entity_length > len(data)):
-                raise ValueError("Invalid Toujane BSP material/entity lump")
+                raise ValueError("Invalid BSP material/entity lump: " + name)
             tokens = [data[offset:offset + 64].split(b"\0", 1)[0]
                       for offset in range(material_offset, material_offset + material_length, 72)]
             tokens += re.findall(rb'"([^"\r\n]+)"',
@@ -181,9 +194,9 @@ try:
                     raise ValueError(f"Missing script {dependency} required by {name}")
                 pending.append(dependency)
             # Keep all compile-time script dependencies but do not load models
-            # for teams/uniforms which the fixed Toujane match never selects.
+            # for teams/uniforms which neither supported map selects.
             if name.startswith(("mptype/", "character/", "xmodelalias/")):
-                if "british_africa" not in name and "german_africa" not in name:
+                if not any(soldiertype in name for soldiertype in soldiertypes):
                     tokens = []
         if name.startswith("xmodel/"):
             # LOD names are length-delimited by NUL following a float distance.
@@ -239,10 +252,11 @@ try:
             pending.extend(candidate for candidate in candidates
                            if candidate in asset_index and candidate not in renderer)
     archives["cod2_browser_renderer.iwd"] = renderer
-    archives["cod2_browser_audio.iwd"] = collect_sound_assets(root, asset_index, originals, renderer)
-    archives["cod2_browser_bootstrap.iwd"]["mp/toujane.arena"] = (
-        b'{ map "mp_toujane" longname "Toujane, Tunisia" gametype "tdm" }\n'
-    )
+    archives["cod2_browser_audio.iwd"] = collect_sound_assets(root, asset_index, originals, renderer, maps)
+    for mapname, longname in maps.items():
+        archives["cod2_browser_bootstrap.iwd"][f"mp/{mapname[3:]}.arena"] = (
+            f'{{ map "{mapname}" longname "{longname}" gametype "tdm" }}\n'.encode()
+        )
 finally:
     for original in originals.values():
         original.close()
@@ -267,11 +281,11 @@ version = "bootstrap-" + hashlib.sha256(
 policy = {
     "namespace": "cod2-browser", "version": version,
     "variants": {"cod2-mp": {
-        "namespace": "cod2-toujane-tdm", "version": version,
-        "phase": "toujane-dependencies-unverified", "files": files
+        "namespace": "cod2-lan-tdm", "version": version,
+        "phase": "lan-maps-dependencies-unverified", "files": files
     }}
 }
-(root / "site/wasm-game-data.json").write_text(json.dumps(policy, indent=2) + "\n")
-print(f"Private Toujane archives: {sum(item['size'] for item in files)} bytes; "
+args.manifest.write_text(json.dumps(policy, indent=2) + "\n")
+print(f"Private Toujane/Carentan archives: {sum(item['size'] for item in files)} bytes; "
       f"asset closure: {len(renderer)} files; gameplay still unverified")
 print(f"Weapon balance: {balance_profile['id']} ({len(balance_profile['weapons'])} automatic weapons)")

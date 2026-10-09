@@ -240,11 +240,11 @@ EMSCRIPTEN_KEEPALIVE void web_created_room(int room, const char *error) {
     Cbuf_ExecuteText(2, va("connect 127.0.0.%d:28960\n", room + 1));
 }
 
-EM_JS(void, Web_CreateServer, (const char *name), {
+EM_JS(void, Web_CreateServer, (const char *name, const char *mapName), {
     if (Module.roomCreationPending) return;
     Module.roomCreationPending = true;
     fetch('/servers', {method:'POST', headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({name:UTF8ToString(name).slice(0, 128)})})
+        body:JSON.stringify({name:UTF8ToString(name).slice(0, 128), map:UTF8ToString(mapName)})})
       .then(async response => {
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'No se pudo crear la partida.');

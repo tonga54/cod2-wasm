@@ -16,7 +16,7 @@ const manager = http.createServer(async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   if (req.method === 'POST') {
     let body=''; for await (const chunk of req) body += chunk;
-    assert.deepEqual(JSON.parse(body), {name:'Second room'});
+    assert.deepEqual(JSON.parse(body), {name:'Second room', map:creates === 0 ? 'mp_toujane' : 'mp_carentan'});
     ++creates; res.writeHead(201); res.end(JSON.stringify({id:1, port:udpPort+1}));
   } else res.end(JSON.stringify({rooms:[{id:0,port:udpPort},{id:1,port:udpPort+1}]}));
 });
@@ -49,6 +49,12 @@ try {
   assert.equal(response.status,403); assert.equal(creates,0);
   response=await fetch(origin+'/servers',{method:'POST',headers:{Origin:origin},body:JSON.stringify({name:'Second room',command:'ignored'})});
   assert.equal(response.status,201); assert.equal(creates,1);
+  response=await fetch(origin+'/servers',{method:'POST',headers:{Origin:origin},body:JSON.stringify({name:'Second room',map:'mp_carentan'})});
+  assert.equal(response.status,201); assert.equal(creates,2);
+  for (const map of ['mp_dawnville', 'mp_carentan;quit', {}, 1]) {
+    response=await fetch(origin+'/servers',{method:'POST',headers:{Origin:origin},body:JSON.stringify({name:'Second room',map})});
+    assert.equal(response.status,400); assert.equal(creates,2);
+  }
   const first=await open(0); await Promise.all(Array.from({length:63},()=>open(0)));
   response=await fetch(origin+'/servers');
   const occupied = (await response.json()).rooms;

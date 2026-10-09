@@ -76,7 +76,11 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
           if (!body || typeof body.name !== 'string' || body.name.length > 128) {
             json(response, 400, {error:'Nombre de partida inválido.'}); return;
           }
-          body = {name:body.name};
+          const map = body.map ?? 'mp_toujane';
+          if (!['mp_toujane', 'mp_carentan'].includes(map)) {
+            json(response, 400, {error:'Elegí Toujane o Carentan.'}); return;
+          }
+          body = {name:body.name, map};
         }
         const result = await manager(request.method, body);
         if (request.method === 'GET' && Array.isArray(result.value.rooms)) {

@@ -3,7 +3,12 @@
 Work in progress: the reconstructed engine targets WebAssembly and WebGL 2.
 Each browser executes its own client. The previous Wine/noVNC runtime is stopped.
 
-The final scope is Toujane, Tunisia (`mp_toujane`), TDM, and up to 64 human clients per server on a LAN.
+The supported maps are Toujane, Tunisia (`mp_toujane`) and Carentan, France
+(`mp_carentan`), with TDM and up to 64 human clients per server on a LAN.
+Rounds end at 100 team points or 15 minutes. The main room rotates between
+the two maps; Start New Server uses the map selected in the original menu.
+Toujane uses British/Afrika Korps teams and Carentan uses American/German
+Normandy teams. Other retail modes, including CTF, are not packaged/enabled.
 Two real browser clients have connected, chosen opposing teams, moved, aimed,
 fired, caused damage, killed each other and respawned with synchronized scores.
 The complete combat check also passed in the normal room after walking from
@@ -36,7 +41,7 @@ replacing them. Regression checks are `scripts/test-animation-controllers.py`,
 `scripts/test-low-health-overlay.py` and `scripts/test-input-capture.cjs`.
 
 Join Game discovers the host's live dedicated servers. Start New Server creates
-another Toujane/TDM dedicated instance, with 64 player slots. Up to three
+another dedicated TDM instance on the selected map, with 64 player slots. Up to three
 instances are allowed; additional instances empty for five minutes are stopped.
 The native menu creation/discovery/join flow has been checked with two browser
 clients. Sustained gameplay stability and the remaining graphics work
@@ -52,8 +57,8 @@ with `python3 scripts/update-local.py --apply`. Local changes and active players
 block installation. See [the update and asset delivery guide](docs/UPDATES.md).
 
 Original owner assets stay untouched in ignored `data/main/`. The script
-`scripts/prepare-browser-bootstrap.py` prepares a private Toujane asset subset
-(165.6 MB, including 470 original sound files). Archives stay outside the
+`scripts/prepare-browser-bootstrap.py` prepares a private Toujane/Carentan asset subset
+(271.7 MB, including 496 original sound files). Archives stay outside the
 public site and image. The canonical launcher pins wasm-game-framework 0.9.2
 at `53bc7e6eeef1ae35dcf3b25dea4e3ec0ab46726f`.
 

@@ -5,6 +5,53 @@ the internal browser have verified movement, aiming, damage, death, respawn and
 synchronized scores, including the normal room. This is two-client coverage,
 not a 64-player load or long-duration stability result.**
 
+## Carentan and match limits (2026-10-09)
+
+The supported TDM maps are now Toujane (`mp_toujane`) and Carentan
+(`mp_carentan`). Rounds end at 100 points per team or 15 minutes, whichever
+comes first. The main room starts on Toujane and rotates to Carentan. Creating
+a room uses the map selected in the native menu and starts rotation after
+that map. Both the gateway and room supervisor accept only these two map IDs.
+The room list continues to discover the room when it rotates to Carentan.
+The retail engine includes other modes, but the derived package still includes
+only TDM; CTF/DM/HQ/SD are not enabled by this change.
+
+Faction overrides are empty so the original map scripts choose the teams:
+British/German Africa on Toujane, American/German Normandy on Carentan.
+The private closure includes both BSPs, map/FX scripts, loading artwork,
+American menus/loadouts/models and France ambience/US quick messages.
+The original owner archives remain unchanged. The generated set is
+271,696,420 bytes, with 4,240 entries and 496 sound files. Public manifests
+contain only file metadata/hashes, and caches use the new asset version.
+The generator and resource audit accept `--main-dir` and `--manifest` for
+staging assets before installation. The hash regression honors
+`COD2_WEB_DATA_DIR`, matching the Compose data-root override.
+
+Native UI creation and map/type-map voting now index `mapList` as an array;
+the old 168-byte calculation was inconsistent with the 164-byte 32-bit
+structure and selected an invalid pointer for the second map. The browser
+arena allowlist also includes Carentan.
+
+Verification: `scripts/check-private-assets.py` validates both BSP material
+sets, faction models/loadouts/menus and original resource bytes/reviewed
+overrides. `scripts/test-room-maps.py`, `scripts/test-web-room-create.cjs`,
+`scripts/test-ui-map-selection.py` and the gateway suites cover selection,
+discovery, input allowlists, next-map configuration and failure handling.
+Four real server rotations alternated Carentan/Toujane successfully and
+queried the configured 100/15 limits after each load; the isolated container
+used 138.9 MiB at the end. The complete WASM build/static package checks and
+gateway suites passed with the staged asset directory.
+
+The in-app browser created a Carentan room through Start New Server, selected
+American and spawned with the original Grease Gun. Movement changed the view
+and four shots reduced the magazine from 32 to 28. The opening TDM screen
+showed 100 points/15 minutes. A voted change to Toujane preserved the connection
+and opened the British/German team menu, with no browser error logs. Evidence:
+`out/carentan-map-menu.jpg`, `out/carentan-limits.jpg`,
+`out/carentan-gameplay.jpg` and `out/carentan-to-toujane-teams.jpg`.
+This is single-client map/selection/movement/fire/transition coverage;
+two-client combat and long matches specifically on Carentan remain unverified.
+
 ## Fullscreen, damage blood and player animation (2026-10-09)
 
 A trusted primary click on the canvas requests document fullscreen without
@@ -45,7 +92,7 @@ update notice reloads the page rather than invoking native reconnect.
 
 The current host address is `http://192.168.1.10:8088/` (DHCP may change it;
 check `ipconfig getifaddr en0`). Clients on the same LAN open this address,
-then choose **Join Game → Toujane | TDM**. There is no web account or login.
+then choose **Join Game → Toujane + Carentan | TDM**. There is no web account or login.
 The former `10.14.9.235` address is no longer assigned to this host.
 
 Each room now accepts 64 clients, including browsers still loading the map.
@@ -156,10 +203,11 @@ Both corrected targets build; browser movement validation is pending.
 
 The client runs locally in each browser as WebAssembly and WebGL 2. Docker
 serves the web package and will run the native dedicated server and a
-WebSocket/UDP gateway. The only intended match is Toujane, Tunisia
-(`mp_toujane`), Team Deathmatch, with up to 64 human players per LAN server.
+WebSocket/UDP gateway. The supported maps are Toujane, Tunisia
+(`mp_toujane`) and Carentan, France (`mp_carentan`), Team Deathmatch, with
+up to 64 human players per LAN server.
 The minimum gameplay acceptance check still uses two independent browsers.
-Singleplayer, bots, other maps, and other modes are excluded. The previous
+Singleplayer, bots, additional maps, and other modes are excluded. The previous
 Wine/noVNC container is stopped and is not used by this port.
 
 ## Immutable inputs

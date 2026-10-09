@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {sha256Blob} = require('../site/asset-sha256.js');
 const root = path.resolve(__dirname, '..');
+const dataRoot = process.env.COD2_WEB_DATA_DIR ? path.resolve(process.env.COD2_WEB_DATA_DIR) : path.join(root, 'data/browser');
 async function check(bytes) {
   assert.equal(await sha256Blob(new Blob([bytes])), createHash('sha256').update(bytes).digest('hex'));
 }
@@ -17,7 +18,7 @@ async function check(bytes) {
   }
   const policy = JSON.parse(fs.readFileSync(path.join(root, 'site/wasm-game-data.json'))).variants['cod2-mp'];
   for (const file of policy.files) {
-    const bytes = fs.readFileSync(path.join(root, 'data/browser', file.path));
+    const bytes = fs.readFileSync(path.join(dataRoot, file.path));
     assert.equal(await sha256Blob(new Blob([bytes])), file.sha256, file.name);
     if (bytes.length < 10000) {
       bytes[bytes.length - 1] ^= 1;

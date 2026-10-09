@@ -3305,8 +3305,11 @@ void UI_RunMenuScript(const char **args)
 
     if (I_stricmp(name, "StartServer") == 0) {
 #ifdef __EMSCRIPTEN__
-        extern void Web_CreateServer(const char *name);
-        Web_CreateServer(Dvar_GetString("sv_hostname"));
+        extern void Web_CreateServer(const char *name, const char *mapName);
+        int mapIdx = (ui_currentNetMap)->current.integer;
+        if (mapIdx < 0 || mapIdx >= sharedUiInfo.mapCount)
+            return;
+        Web_CreateServer(Dvar_GetString("sv_hostname"), sharedUiInfo.mapList[mapIdx].mapLoadName);
         return;
 #endif
         Dvar_SetBoolByName("cg_thirdPerson", 0);
@@ -3316,8 +3319,9 @@ void UI_RunMenuScript(const char **args)
                              sharedUiInfo.gameTypes[(ui_netGameType)->current.integer].gameType);
         {
             int mapIdx = (ui_currentNetMap)->current.integer;
-            int offset = mapIdx * 41 + mapIdx;
-            const char *mapName = *(const char **)((byte *)&sharedUiInfo.mapList[0].mapLoadName + offset * 4);
+            if (mapIdx < 0 || mapIdx >= sharedUiInfo.mapCount)
+                return;
+            const char *mapName = sharedUiInfo.mapList[mapIdx].mapLoadName;
             Cbuf_ExecuteText(2, va("wait ; wait ; map %s\n", mapName));
         }
         return;
@@ -3475,8 +3479,9 @@ void UI_RunMenuScript(const char **args)
 
     if (I_stricmp(name, "voteTypeMap") == 0) {
         int mapIdx = (ui_currentNetMap)->current.integer;
-        int offset = mapIdx * 41 + mapIdx;
-        const char *mapName = *(const char **)((byte *)&sharedUiInfo.mapList[0].mapLoadName + offset * 4);
+        if (mapIdx < 0 || mapIdx >= sharedUiInfo.mapCount)
+            return;
+        const char *mapName = sharedUiInfo.mapList[mapIdx].mapLoadName;
         const char *gtName = sharedUiInfo.gameTypes[(ui_netGameType)->current.integer].gameType;
         Cbuf_ExecuteText(2, va("callvote typemap %s %s\n", gtName, mapName));
         return;
@@ -3487,8 +3492,7 @@ void UI_RunMenuScript(const char **args)
         if (mapIdx < 0 || mapIdx >= sharedUiInfo.mapCount)
             return;
         {
-            int offset = mapIdx * 41 + mapIdx;
-            const char *mapName = *(const char **)((byte *)&sharedUiInfo.mapList[0].mapLoadName + offset * 4);
+            const char *mapName = sharedUiInfo.mapList[mapIdx].mapLoadName;
             Cbuf_ExecuteText(2, va("callvote map %s\n", mapName));
         }
         return;

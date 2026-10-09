@@ -25,7 +25,7 @@ try {
   assert(body.startsWith('infoResponse\n'), body);
   const tokens = body.split('\n')[1].replace(/\0+$/, '').split('\\').slice(1);
   const info = Object.fromEntries(Array.from({length: tokens.length / 2}, (_, i) => tokens.slice(i * 2, i * 2 + 2)));
-  assert.equal(info.mapname, 'mp_toujane');
+  assert.ok(['mp_toujane', 'mp_carentan'].includes(info.mapname), info.mapname);
   assert.equal(info.gametype, 'tdm');
   assert.equal(info.sv_maxclients, '64');
   assert.equal(info.challenge, 'cod2-browser-check');

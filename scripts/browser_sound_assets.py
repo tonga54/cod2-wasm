@@ -1,10 +1,10 @@
-"""Follow the original Toujane/TDM sound aliases without campaign audio."""
+"""Follow the supported multiplayer maps' original sound aliases."""
 import csv
 import io
 import re
 
 
-def collect_sound_assets(root, asset_index, originals, renderer):
+def collect_sound_assets(root, asset_index, originals, renderer, maps):
     def read(name):
         path, original_name = asset_index[name]
         return originals[path].read(original_name)
@@ -24,7 +24,7 @@ def collect_sound_assets(root, asset_index, originals, renderer):
                 aliases.setdefault(alias, []).append((name, row, fields))
 
     # Authored weapon/animation/FX/menu/script references and engine constants.
-    references = {'null', 'ambient_africa', 'music_mainmenu'}
+    references = {'null', 'ambient_africa', 'ambient_france', 'music_mainmenu'}
     for name, data in renderer.items():
         if not name.startswith(('images/', 'xmodelsurfs/', 'xmodelparts/', 'materials/')):
             references.update(token.decode('ascii').lower() for token in
@@ -37,7 +37,7 @@ def collect_sound_assets(root, asset_index, originals, renderer):
     references.update(alias for alias in aliases
                       if any(alias.startswith(prefix + '_') for prefix in surface_prefixes))
     # Dynamic quick-message names are assembled by faction at runtime.
-    references.update(alias for alias in aliases if alias.startswith(('uk_mp_', 'ge_mp_')))
+    references.update(alias for alias in aliases if alias.startswith(('uk_mp_', 'us_mp_', 'ge_mp_')))
     pending = sorted(references & aliases.keys())
     chosen, files, missing = set(), {}, set()
     while pending:
@@ -47,9 +47,9 @@ def collect_sound_assets(root, asset_index, originals, renderer):
         chosen.add(alias)
         for table, row, fields in aliases[alias]:
             spec = fields.get('loadspec', '').lower().split()
-            if spec and not spec[0].startswith('!') and not set(spec) & {'all_mp', 'mp_toujane', 'menu'}:
+            if spec and not spec[0].startswith('!') and not set(spec) & {'all_mp', 'menu', *maps}:
                 continue
-            if any(token in {'!all_mp', '!mp_toujane'} for token in spec):
+            if '!all_mp' in spec or all('!' + mapname in spec for mapname in maps):
                 continue
             sound = 'sound/' + fields.get('file', '').replace('\\', '/').lower()
             if sound not in asset_index:
@@ -72,6 +72,6 @@ def collect_sound_assets(root, asset_index, originals, renderer):
     for name in asset_index:
         if name.startswith('soundaliases/') and name.endswith(('.vfcurve', '.spkrmap', '.def')):
             files[name] = read(name)
-    print(f'Toujane sounds: {sum(name.startswith("sound/") for name in files)} files, '
+    print(f'Multiplayer sounds: {sum(name.startswith("sound/") for name in files)} files, '
           f'{sum(len(data) for data in files.values())} uncompressed bytes')
     return files
