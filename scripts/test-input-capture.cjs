@@ -52,13 +52,13 @@ const native = {
     ++starts;
     assert.ok(!args.includes('+connect'), 'automatic launch stops at the native main menu');
     assert.ok(args.includes('ui_netSource'), 'Join Game defaults to LAN discovery');
-    assert.ok(!args.includes('name'), 'player identity belongs to the native game settings');
+    assert.equal(args[args.indexOf('name') + 1], '"Test"', 'gametag reaches the native player name');
   },
   _web_client_state: () => nativeState,
   _web_capture_lost: () => { ++escapes; }
 };
 const sandbox = {
-  document, window, location: {search: ''}, URLSearchParams,
+  document, window, location: {search: ''}, URLSearchParams, TextEncoder,
   addEventListener() {},
   crypto: {subtle: {}},
   fetch: async () => ({ok: true, json: async () => ({variants: {test: {files: [

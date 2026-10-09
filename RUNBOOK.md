@@ -1234,3 +1234,48 @@ build and both Docker images succeeded. Served WASM SHA256:
 `92525d3969afebd0c2b0a07276598b284f73319ff4c3359b6f4e8e340c314f48`.
 The isolated loopback test clients and Docker project were closed/removed.
 The normal LAN stack remains running at port 8088 with the balanced assets.
+
+## 2026-10-09: gametag, kill feed, final scores and killcam
+
+The browser requests a gametag before loading the engine when no valid saved
+name exists. It accepts an existing framework nickname and saves new names in
+localStorage for that origin. Names are limited to the native 31-byte payload;
+console command separators and control characters are rejected. Quoted startup
+arguments preserve spaces. Disabled storage still allows the current session.
+The JS loader and WASM now share a build-specific URL, selected from uncached
+build metadata, so page reloads cannot combine a new loader with an old binary.
+
+`CL_InitCGame` now passes the snapshot sequence, command sequence and local
+client number in the order expected by `CG_Init`. Obituaries use typed client
+records and the actual names and teams. The upper-left game message window
+is drawn below the team scores. Browser deaths show readable white
+`attacker > victim` text; native builds retain weapon icons. Original console
+icon control decoding is corrected, but those materials still render black in
+the current web renderer, hence the browser text presentation.
+
+Hidden scoreboards now return false instead of suppressing the subsequent HUD.
+Intermission displays the summary automatically and requests fresh scores on
+entry, even without Tab. Average team ping is placed in the Ping column.
+
+The dedicated server enables the original `scr_killcam` flow. Archive deltas
+use a recent full base and periodically create fresh bases, preventing the
+history from becoming unreadable after ring eviction. The script's PS-offset
+getter returns its own field. HUD horizontal and vertical anchors use the
+correct argument order, centering the original KILLCAM title and skip prompt.
+Original rules still omit replay for world deaths and a match-ending death;
+shortly after joining, unavailable history can shorten a replay.
+
+New checks cover nickname persistence/validation, coherent JS/WASM build URLs,
+all 64 local identities, 4,096 killer/victim combinations, console icon decoding,
+16 scoreboard states, HUD placement at three scales and 10,000 archive frames.
+Sanitizers and deliberately broken variants reject the name/stride, alignment,
+hidden-scoreboard and expired-base regressions. Existing snapshot, anti-lag,
+player lifecycle and bundled browser package checks pass. Native and WASM
+builds succeeded; original private archive hashes remain unchanged.
+
+An isolated loopback match with two browser clients verified saved gametags,
+live kill notifications, the original attacker-view killcam, automatic final
+scores (3 points/0 deaths versus 0 points/3 deaths) and the next-round briefing.
+Evidence: `out/gametag-prompt.png`, `out/kill-feed-verified.png`,
+`out/killcam-verified.png` and `out/final-summary-verified.png`. Test-only devmap
+and a score limit of three are confined to the isolated Compose override.

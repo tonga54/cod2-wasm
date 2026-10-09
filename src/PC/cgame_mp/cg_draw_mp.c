@@ -52,6 +52,7 @@ extern qboolean CG_DrawScoreboard(void);
 extern void CL_TrackStatistics(trStatistics_t *pStats);
 extern void Con_DrawMiniConsole(int xPos, int yPos, float alpha);
 extern void Con_DrawNotify(int xPos, int yPos, float alpha, msgwnd_mode_t mode);
+extern void CL_AddReliableCommand(const char *cmd);
 extern void Con_DrawSay(int y);
 extern void Con_DrawSubtitles(int xPos, int yPos, int charHeight, float alpha, msgwnd_mode_t mode);
 extern void Menu_PaintAll(displayContextDef_t *dc);
@@ -1627,6 +1628,10 @@ unsigned int CG_Draw2D(void)
     pm_type = cg->nextSnap->ps.pm_type;
     if (pm_type == 5) {
         CL_CloseAllMenus();
+        if (!cg->showScores) {
+            cg->scoresRequestTime = cg->time;
+            CL_AddReliableCommand("score");
+        }
         cg->showScores = 1;
         cg->scoreFadeTime = cg->time;
         CG_DrawScoreboard();
@@ -1862,8 +1867,6 @@ unsigned int CG_Draw2D(void)
         CG_Draw2D_DrawBottomOverlays(cg);
         return 0;
     } else {
-        float notifyY = floorf(cgs->compassY -
-                               (cg_hudCompassSize->current.value - 1.0f) * cgs->compassHeight + 12.0f + 0.5f);
         float alpha;
         if (!CG_ScoreboardDisplayed()) {
             alpha = 1.0f;
@@ -1875,7 +1878,8 @@ unsigned int CG_Draw2D(void)
             }
             alpha = fade[3];
         }
-        Con_DrawNotify(6, (int)notifyY, alpha, 2);
+        /* Keep the kill/server feed below the team scores, at the top left. */
+        Con_DrawNotify(6, 84, alpha, MWM_TOPDOWN);
         CG_Draw2D_DrawBottomOverlays(cg);
     }
 

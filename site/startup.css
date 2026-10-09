@@ -107,3 +107,36 @@
   outline: 2px solid #f0eee6;
   outline-offset: 3px;
 }
+
+#cod2-gametag {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #000;
+  color: #e5e2d8;
+  font: 16px/1.5 system-ui, sans-serif;
+}
+#cod2-gametag form { width: min(440px, 100%); }
+#cod2-gametag img { width: 100%; height: auto; }
+#cod2-gametag h1 { margin: 24px 0 8px; font: 28px Georgia, serif; }
+#cod2-gametag p { margin: 0 0 24px; color: #b9b8ae; }
+#cod2-gametag label { display: block; margin-bottom: 8px; }
+#cod2-gametag input, #cod2-gametag button {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #9d8b63;
+  border-radius: 0;
+  background: #171815;
+  color: #f0eee6;
+  font: inherit;
+}
+#cod2-gametag button { margin-top: 16px; background: #3b392b; cursor: pointer; }
+#cod2-gametag input:focus-visible, #cod2-gametag button:focus-visible {
+  outline: 2px solid #d7c59a;
+  outline-offset: 3px;
+}
+#cod2-gametag .gametag-error { margin: 12px 0 0; color: #f0a99b; }

@@ -9,7 +9,7 @@ extern float floorf(float x);
 extern int CL_GetKeyCatchers(void);
 extern Bool CL_GetDisplayHUDWithKeycatchUI(void);
 extern float CL_NormalizedTextScale(FontHandle font, float fontScale);
-extern void CalcScreenPlacement(float *x, float *y, float *scaleX, float *scaleY, int vertAlign, int horzAlign);
+extern void CalcScreenPlacement(float *x, float *y, float *scaleX, float *scaleY, int horzAlign, int vertAlign);
 extern void CL_DrawTextPhysical(const char *text, int maxChars, FontHandle font, float x, float y, float scaleX, float scaleY, vec4_t *color, int style);
 extern void CL_DrawStretchPicPhysical(float x, float y, float w, float h, float s0, float t0, float s1, float t1, vec4_t *color, void *material);
 extern void CG_DrawRotatedPicPhysical(float x, float y, float w, float h, float angle, vec4_t *color, void *material);
@@ -307,11 +307,11 @@ static void CG_DrawHudElemString(const char *text, const hudelem_t *elem, cg_hud
     float dummyX = 0.0f;
     float dummyY = 0.0f;
     int alignScreen = elem->alignScreen;
-    CalcScreenPlacement(&dummyX, &dummyY, &scaleX, &scaleY, alignScreen & 7, (alignScreen >> 3) & 7);
+    CalcScreenPlacement(&dummyX, &dummyY, &scaleX, &scaleY, (alignScreen >> 3) & 7, alignScreen & 7);
 
     float dx = 0.0f;
     float dy = cghe->fontHeight;
-    CalcScreenPlacement(&dummyX, &dummyY, &dx, &dy, alignScreen & 7, (alignScreen >> 3) & 7);
+    CalcScreenPlacement(&dummyX, &dummyY, &dx, &dy, (alignScreen >> 3) & 7, alignScreen & 7);
 
     CL_DrawTextPhysical(text, 0x7fffffff, cghe->font, cghe->x, yPos + dy, scaleX, scaleY, &cghe->color, 3);
 }
@@ -571,7 +571,7 @@ static void CG_GetHudElemInfo(const hudelem_t *elem, cg_hudelem_t *cghe, char *h
             float dummyWidth = 0.0f;
             float dummyHeight = 0.0f;
             int alignScreen = elem->alignScreen;
-            CalcScreenPlacement(&cghe->x, &cghe->y, &dummyWidth, &dummyHeight, alignScreen & 7, (alignScreen >> 3) & 7);
+            CalcScreenPlacement(&cghe->x, &cghe->y, &dummyWidth, &dummyHeight, (alignScreen >> 3) & 7, alignScreen & 7);
         } else {
 
             float width = cghe->width;
@@ -585,7 +585,7 @@ static void CG_GetHudElemInfo(const hudelem_t *elem, cg_hudelem_t *cghe, char *h
             float dummyWidth = 0.0f;
             float dummyHeight = 0.0f;
             int fromAlignScreen = elem->fromAlignScreen;
-            CalcScreenPlacement(&fromX, &fromY, &dummyWidth, &dummyHeight, fromAlignScreen & 7, (fromAlignScreen >> 3) & 7);
+            CalcScreenPlacement(&fromX, &fromY, &dummyWidth, &dummyHeight, (fromAlignScreen >> 3) & 7, fromAlignScreen & 7);
 
             float toX = elem->x;
             float toY = elem->y;
@@ -595,7 +595,7 @@ static void CG_GetHudElemInfo(const hudelem_t *elem, cg_hudelem_t *cghe, char *h
             dummyWidth = 0.0f;
             dummyHeight = 0.0f;
             int alignScreen = elem->alignScreen;
-            CalcScreenPlacement(&toX, &toY, &dummyWidth, &dummyHeight, alignScreen & 7, (alignScreen >> 3) & 7);
+            CalcScreenPlacement(&toX, &toY, &dummyWidth, &dummyHeight, (alignScreen >> 3) & 7, alignScreen & 7);
 
             cghe->x = fromX + (toX - fromX) * moveLerp;
             cghe->y = fromY + (toY - fromY) * moveLerp;
@@ -735,7 +735,7 @@ void CG_Draw2dHudElems(qboolean foreground)
                 float dummyX = 0.0f;
                 float dummyY = 0.0f;
                 int alignScreen = elem->alignScreen;
-                CalcScreenPlacement(&dummyX, &dummyY, &width, &height, alignScreen & 7, (alignScreen >> 3) & 7);
+                CalcScreenPlacement(&dummyX, &dummyY, &width, &height, (alignScreen >> 3) & 7, alignScreen & 7);
 
                 CL_DrawStretchPicPhysical(cghe.x, yPos, width, height, 0.0f, 0.0f, 1.0f, 1.0f, &cghe.color, material);
             } else if (typeMask & 0x1800) {
@@ -814,7 +814,7 @@ void CG_Draw2dHudElems(qboolean foreground)
                 float dummyY2 = 0.0f;
                 float dummyW = 0.0f;
                 int alignScreen2 = elem->alignScreen;
-                CalcScreenPlacement(&dummyY2, &dummyW, &width, &height, alignScreen2 & 7, (alignScreen2 >> 3) & 7);
+                CalcScreenPlacement(&dummyY2, &dummyW, &width, &height, (alignScreen2 >> 3) & 7, alignScreen2 & 7);
 
                 CL_DrawStretchPicPhysical(cghe.x, yPos2, width, height, 0.0f, 0.0f, 1.0f, 1.0f, &cghe.color, faceMaterial);
 

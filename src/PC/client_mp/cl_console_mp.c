@@ -917,7 +917,7 @@ void Con_DrawBoldMessages(int xPos, int yPos, float alpha, msgwnd_mode_t mode)
 
 void Con_DrawNotify(int xPos, int yPos, float alpha, msgwnd_mode_t mode)
 {
-    Con_DrawMessageWindow(&con.messageBuffer->gamemsg, xPos, yPos, 12, 1, 3, alpha, 1.0f, mode);
+    Con_DrawMessageWindow(&con.messageBuffer->gamemsg, xPos, yPos, 12, 1, 1, alpha, 1.0f, mode);
 }
 
 static void ConDrawInput_IncrMatchCounter(const char *str)
@@ -1734,6 +1734,15 @@ void CL_DeathMessagePrint(const char *attackerName, const vec_t *attackerColor, 
 
     defaultColor = ColorIndex('7');
 
+#ifdef __EMSCRIPTEN__
+    /* Keep browser obituaries readable while console icon materials lack a
+       usable web rendering path. Native clients retain the original icons. */
+    if (attackerName && attackerName[0]) {
+        CL_WriteDeathMessageText(attackerName, defaultColor);
+        CL_WriteDeathMessageText(" > ", defaultColor);
+    }
+    CL_WriteDeathMessageText(victimName, defaultColor);
+#else
     if (attackerName && attackerName[0]) {
         CL_AddConsoleInfoColor(0x0a, attackerColor);
         CL_WriteDeathMessageText(attackerName, defaultColor);
@@ -1751,8 +1760,13 @@ void CL_DeathMessagePrint(const char *attackerName, const vec_t *attackerColor, 
     }
 
     CL_WriteDeathMessageText(victimName, defaultColor);
+#endif
     Con_Linefeed(PMSG_GAME, duration);
     con.prevType = PMSG_GAME;
+    if (getenv("PTRACE"))
+        Com_Printf("[obituary] feed '%s' -> '%s' width=%d duration=%d window=%d time=%d\n",
+                   attackerName, victimName, con.linewidth, duration,
+                   con.messageBuffer->gamemsg.current_line, (*(clientActive_t **)imp_cl)->serverTime);
 }
 #else
 static short Con_FillChar(void)

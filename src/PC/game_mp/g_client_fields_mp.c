@@ -314,7 +314,7 @@ static void ClientScr_SetPSOffsetTime(gclient_t *pSelf, const client_fields_s *p
 static void ClientScr_GetPSOffsetTime(gclient_t *pSelf, const client_fields_s *pField)
 {
     gclient_s *client = (gclient_s *)pSelf;
-    { (void)(Scr_AddInt(client->sess.archiveTime)); return; }
+    { (void)(Scr_AddInt(client->sess.psOffsetTime)); return; }
 }
 
 void GScr_AddFieldsForClient(void)

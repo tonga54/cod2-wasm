@@ -226,7 +226,7 @@ static __attribute_regparm__(3)
             continue;
         }
 
-        if (type == 0x0d || type == 0x10 || type == 0x11 || type == 0x12) {
+        if (type == 0x0d || type == 0x10 || type == 0x11 || type == 0x12 || type == 0x13) {
             *foundIcon = 1;
             markedEnd = -1;
             pos = pos;
@@ -306,7 +306,7 @@ static __attribute_regparm__(3)
         unsigned short entry = (unsigned short)string[i];
         unsigned char value = (unsigned char)entry;
 
-        switch (value) {
+        switch (entry >> 8) {
         case 0x0d:
             if (color) {
                 color[0] = (float)value * 0.003921568859368563f;
@@ -346,7 +346,8 @@ static __attribute_regparm__(3)
             break;
 
         default:
-            break;
+            *maxChars -= i;
+            return string + i;
         }
     }
 

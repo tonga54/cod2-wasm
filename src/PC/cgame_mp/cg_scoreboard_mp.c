@@ -55,7 +55,7 @@ qboolean CG_DrawScoreboard(void);
 
 qboolean CG_ScoreboardDisplayed(void)
 {
-    return cg->showScores;
+    return cg->showScores || (cg->nextSnap && cg->nextSnap->ps.pm_type == 5);
 }
 
 void CG_ScrollScoreboardUp(void)
@@ -386,7 +386,7 @@ static float CG_DrawScoreboard_ListBanner(vec_t *color, float y, float listWidth
 
         if (column->type == LCT_SCORE)
             text = va((const char *)"%i", cg->teamScores[team]);
-        else if (column->type == LCT_DEATHS)
+        else if (column->type == LCT_PING)
             text = va((const char *)"%i", cg->teamPings[team]);
 
         if (text) {
@@ -704,17 +704,18 @@ qboolean CG_DrawScoreboard(void)
     float y;
     float *fadePtr;
 
-    if (cg_paused->current.integer != 0)
+    if (cg_paused->current.integer != 0 &&
+        !(cg->nextSnap && cg->nextSnap->ps.pm_type == 5))
         return 0;
 
     {
-        if (cg->showScores == 0) {
+        if (!CG_ScoreboardDisplayed()) {
 
             fadePtr = (float *)CG_FadeColor(cg->scoreFadeTime, 100, 100);
             if (fadePtr == 0) {
 
                 cg->killerName[0] = 0;
-                goto scoreboard_done;
+                return 0;
             }
 
             fade = fadePtr[0];
@@ -918,6 +919,5 @@ qboolean CG_DrawScoreboard(void)
 
     CG_DrawScoreboard_ScoresList(fade);
 
-scoreboard_done:
     return 1;
 }

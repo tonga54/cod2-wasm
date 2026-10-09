@@ -142,6 +142,9 @@ static void CG_Viewpos_f(void)
                        server->viewangles[0], server->viewangles[1], server->viewangles[2], server->stats[0]);
         }
         if (cg->nextSnap) {
+            Com_Printf("[viewpos] killcam=%d delta=%d type=%d scores=%d local=%d viewed=%d\n",
+                       cg->inKillCam, cg->nextSnap->ps.deltaTime, cg->nextSnap->ps.pm_type,
+                       cg->numScores, cg->clientNum, cg->nextSnap->ps.clientNum);
             Com_Printf("[viewpos] entities=%d clients=%d\n", cg->nextSnap->numEntities, cg->nextSnap->numClients);
             Com_Printf("[viewpos] time=%d snap=%d next=%d fraction=%.3f\n", cg->time,
                        cg->snap ? cg->snap->serverTime : -1, cg->nextSnap->serverTime,

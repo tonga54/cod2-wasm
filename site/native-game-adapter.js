@@ -4,15 +4,84 @@
   let failed = false;
   let dataSet;
   let factoryPromise;
+  let moduleAssetQuery = '';
   let clientAttributeWarningReported = false;
   let traceInput = () => {};
   let hadInputCapture = false;
   let updateNotifier;
   let fullscreenPending = false;
+  let gametag;
+  const gametagStorageKey = 'cod2-wasm-gametag';
   const startupStyle = document.createElement('link');
   startupStyle.rel = 'stylesheet';
   startupStyle.href = '/startup.css';
   document.head.appendChild(startupStyle);
+  function validGametag(value) {
+    const name = String(value || '').trim();
+    // The native client has a 32-byte name buffer and parses console commands.
+    if (!name || /^(Player|Unknown Soldier)$/i.test(name) ||
+        /[\x00-\x1f\x7f";+\\]/.test(name) || new TextEncoder().encode(name).length > 31) return '';
+    return name;
+  }
+  async function requireGametag(context) {
+    if (gametag) return gametag;
+    let saved;
+    try { saved = localStorage.getItem(gametagStorageKey); } catch {}
+    gametag = validGametag(saved) || validGametag(context.preferences?.values().playerName);
+    if (gametag) return gametag;
+    context.setLoading('Elegí tu gametag para entrar', '', 0);
+    return new Promise(resolve => {
+      const panel = document.createElement('section');
+      panel.id = 'cod2-gametag';
+      panel.setAttribute('role', 'dialog');
+      panel.setAttribute('aria-modal', 'true');
+      panel.setAttribute('aria-labelledby', 'cod2-gametag-title');
+      const form = document.createElement('form');
+      const logo = document.createElement('img');
+      logo.src = '/game-data/files/cod2-startup/original.png';
+      logo.alt = 'Call of Duty 2';
+      const title = document.createElement('h1');
+      title.id = 'cod2-gametag-title';
+      title.textContent = 'Elegí tu gametag';
+      const description = document.createElement('p');
+      description.textContent = 'Es el nombre que verán los otros jugadores. Lo guardamos en este navegador.';
+      const label = document.createElement('label');
+      label.htmlFor = 'cod2-gametag-input';
+      label.textContent = 'Gametag';
+      const input = document.createElement('input');
+      input.id = 'cod2-gametag-input';
+      input.name = 'gametag';
+      input.type = 'text';
+      input.maxLength = 31;
+      input.autocomplete = 'nickname';
+      input.required = true;
+      const error = document.createElement('p');
+      error.className = 'gametag-error';
+      error.setAttribute('role', 'alert');
+      error.hidden = true;
+      const button = document.createElement('button');
+      button.type = 'submit';
+      button.textContent = 'Entrar';
+      form.append(logo, title, description, label, input, error, button);
+      panel.appendChild(form);
+      document.body.appendChild(panel);
+      input.focus();
+      form.addEventListener('submit', event => {
+        event.preventDefault();
+        const name = validGametag(input.value);
+        if (!name) {
+          error.textContent = 'Elegí un gametag propio y corto, sin comillas, punto y coma, signo + ni barras invertidas.';
+          error.hidden = false;
+          input.focus();
+          return;
+        }
+        gametag = name;
+        try { localStorage.setItem(gametagStorageKey, name); } catch {}
+        panel.remove();
+        resolve(name);
+      });
+    });
+  }
   function showOriginalStartup(context) {
     const { loading, loadingTitle, loadingProgress, loadingStatus } = context.elements;
     loading.classList.add('cod2-startup');
@@ -196,16 +265,27 @@
     };
   }
   function loadFactory() {
-    if (globalThis.createCod2Client) return Promise.resolve(globalThis.createCod2Client);
-    if (!factoryPromise) factoryPromise = new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = '/cod2.js';
-      script.onload = () => globalThis.createCod2Client
-        ? resolve(globalThis.createCod2Client)
-        : reject(new Error('El módulo del cliente no registró su factory.'));
-      script.onerror = () => reject(new Error('No se pudo cargar el cliente WebAssembly.'));
-      document.head.appendChild(script);
-    });
+    if (!factoryPromise) factoryPromise = (async () => {
+      let buildId;
+      try {
+        const response = await fetch('/build-info.json', { cache: 'no-store', signal: AbortSignal.timeout(3000) });
+        const build = response.ok && await response.json();
+        if (/^[a-f0-9]{64}$/.test(build?.buildId)) buildId = build.buildId;
+      } catch { /* Hosts without metadata still load a fresh engine. */ }
+      // A page reload revalidates scripts, but a WASM fetch can reuse an old
+      // cached binary. Give the JS loader and binary the same build URL.
+      moduleAssetQuery = `?build=${buildId || Date.now()}`;
+      if (globalThis.createCod2Client) return globalThis.createCod2Client;
+      return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = `/cod2.js${moduleAssetQuery}`;
+        script.onload = () => globalThis.createCod2Client
+          ? resolve(globalThis.createCod2Client)
+          : reject(new Error('El módulo del cliente no registró su factory.'));
+        script.onerror = () => reject(new Error('No se pudo cargar el cliente WebAssembly.'));
+        document.head.appendChild(script);
+      });
+    })();
     return factoryPromise;
   }
   function startUpdateNotifier(context) {
@@ -299,7 +379,7 @@
       globalThis.addEventListener('error', event => {
         if (!native || failed) return;
         const stack = String(event.error?.stack || '');
-        if (!stack.includes('/cod2.wasm:') && !String(event.filename).endsWith('/cod2.js')) return;
+        if (!/\/cod2\.(wasm|js)([?:]|$)/.test(stack + '\n' + String(event.filename))) return;
         failed = true;
         closeTransport();
         context.log(`[cod2-wasm] runtime: ${stack || event.message}`, 'error');
@@ -323,6 +403,7 @@
       if (native || failed) throw new Error('Recargá la página para iniciar una instancia nueva.');
       context.setEngineState('loading');
       try {
+        await requireGametag(context);
         context.setLoading('Preparando el juego…', '', 0);
         const factory = await loadFactory();
         const meter = performanceMeter(context);
@@ -333,7 +414,7 @@
           // Emscripten's default terminal stdin opens window.prompt("Input:").
           // Browser gameplay receives keyboard events through SDL instead.
           stdin: () => null,
-          locateFile: path => `/${path}`,
+          locateFile: path => `/${path}${moduleAssetQuery}`,
           print: line => {
             const text = String(line);
             if (text === "DrawElements doesn't actually prepareClientAttributes properly.") {
@@ -367,6 +448,7 @@
         native.callMain([
           '+set', 'fs_basepath', '/game', '+set', 'fs_homepath', '/profile',
           '+set', 'dedicated', '0', '+set', 'r_rendererPreference', 'dx7',
+          '+set', 'name', `"${gametag}"`,
           '+set', 'r_gpuSync', 'off', '+set', 'com_hunkMegs', '128',
           '+set', 'r_fullscreen', '0', '+set', 'r_mode', '3',
           '+set', 'g_gametype', 'tdm', '+set', 'ui_mapname', 'mp_toujane',

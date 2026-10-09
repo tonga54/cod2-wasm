@@ -502,7 +502,9 @@ void SV_ArchiveSnapshot(void)
                 int cfSlot = signedMod512(idx);
                 byte *cf = cachedFrames + cfSlot * 28;
 
-                if (*(int *)cf <= newnum) {
+                /* Delta bases must stay within the last second. An older base
+                 * otherwise persists forever and falls out of the archive ring. */
+                if (((cachedSnapshot_t *)cf)->archivedFrame >= newnum) {
 
                     if (((cachedSnapshot_t *)cf)->usesDelta == 0) {
 
