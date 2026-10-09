@@ -11,12 +11,6 @@ extern Bool g_rendererExists;
 #define PART_ANCHOR_Y(p) (((Effect *)(p))->origin[1])
 #define PART_ANCHOR_Z(p) (((Effect *)(p))->origin[2])
 
-#define QUAT_X(p) (((const DObjAnimMat *)(p))->quat[0])
-#define QUAT_Y(p) (((const DObjAnimMat *)(p))->quat[1])
-#define QUAT_Z(p) (((const DObjAnimMat *)(p))->quat[2])
-#define QUAT_W(p) (((const DObjAnimMat *)(p))->quat[3])
-#define QUAT_SCALE(p) (((const DObjAnimMat *)(p))->transWeight)
-
 #define SCH_FX(p) (*(byte **)(p))
 #define SCH_PRIM_INDEX(p) (((ScheduledEffect *)(p))->mPrimIndex)
 #define SCH_START_TIME(p) (((ScheduledEffect *)(p))->mStartTime)
@@ -72,13 +66,14 @@ extern void __ZdaPv(void *ptr);
 extern void Rand_Init(int seed);
 extern void FxHelper_Trace(void *helper, void *trace, vec_t *start, vec_t *mins, vec_t *maxs, vec_t *end, int contents, int mask);
 extern void AxisCopy(const vec_t *src, vec_t *dst);
-extern void CG_GetDObjOrientation(int entityNum, void *axis);
+extern void CG_GetDObjOrientation(int entityNum, orientation_t *orient);
 extern void *Com_GetClientDObj(int entityNum, int localClientNum);
 extern int DObjNumBones(void *dobj);
 extern void CG_DObjCalcBoneGeneric(int entityNum, int localClientNum, int boneIndex);
 extern void *DObjGetRotTransArray(void *dobj);
-extern void MatrixMultiply(void *a, void *b, void *out);
-extern void MatrixTransformVector43(void *trans, void *axis, void *out);
+extern void MatrixMultiply(const vec3_t *a, const vec3_t *b, vec3_t *out);
+extern void MatrixTransformVector43(const vec_t *trans, const vec3_t *axis, vec_t *out);
+extern void ConvertQuatToMat(const DObjAnimMat *mat, vec3_t *axis);
 extern void *imp_fx_debugBolt;
 extern void AxisTransformVector(void *axis, float x, float y, float z, vec_t *out);
 extern void *imp_vec3_origin;
@@ -289,13 +284,13 @@ void FX_CalcOrigin2(const PrimitiveTemplate *primTemp, vec_t *org, vec_t *org2, 
     }
 }
 
-extern void CG_GetDObjOrientation(int entityNum, void *axis);
+extern void CG_GetDObjOrientation(int entityNum, orientation_t *orient);
 extern void *Com_GetClientDObj(int entityNum, int localClientNum);
 extern int DObjNumBones(void *dobj);
 extern void CG_DObjCalcBoneGeneric(int entityNum, int localClientNum, int boneIndex);
 extern void *DObjGetRotTransArray(void *dobj);
-extern void MatrixMultiply(void *a, void *b, void *out);
-extern void MatrixTransformVector43(void *trans, void *axis, void *out);
+extern void MatrixMultiply(const vec3_t *a, const vec3_t *b, vec3_t *out);
+extern void MatrixTransformVector43(const vec_t *trans, const vec3_t *axis, vec_t *out);
 extern void *imp_fx_debugBolt;
 extern void *imp_colorRed;
 extern void *imp_colorGreen;
@@ -303,19 +298,18 @@ extern void *imp_colorBlue;
 extern void CL_AddDebugLine(const vec_t *start, const vec_t *end, const vec_t *color, int depthTest, int duration, int fromServer);
 Bool FX_GetBoneOrientation(const FxBoltInfo *bolt, orientation_t *orient)
 {
-    FxBoltInfo *b = (FxBoltInfo *)bolt;
-    int entityNum = b->dobjHandle;
-    int boneIndex = b->boneIndex;
+    int entityNum = bolt->dobjHandle;
+    int boneIndex = bolt->boneIndex;
+    orientation_t parent;
+    vec3_t parentMatrix[4];
 
-    float axis[12];
-    CG_GetDObjOrientation(entityNum, axis);
+    if ((unsigned int)entityNum >= 0x480)
+        return 0;
+
+    CG_GetDObjOrientation(entityNum, &parent);
 
     if (boneIndex < 0) {
-
-        orient->origin[0] = axis[9];
-        orient->origin[1] = axis[10];
-        orient->origin[2] = axis[11];
-        AxisCopy((vec_t *)axis, (vec_t *)orient->axis);
+        *orient = parent;
         return 1;
     }
 
@@ -327,42 +321,19 @@ Bool FX_GetBoneOrientation(const FxBoltInfo *bolt, orientation_t *orient)
         return 0;
 
     CG_DObjCalcBoneGeneric(entityNum, 0, boneIndex);
-    byte *rotTransArray = (byte *)DObjGetRotTransArray(dobj);
+    const DObjAnimMat *rotTransArray = DObjGetRotTransArray(dobj);
     if (!rotTransArray)
         return 0;
 
-    byte *mtx = rotTransArray + boneIndex * 32;
+    const DObjAnimMat *mtx = &rotTransArray[boneIndex];
+    vec3_t tagAxis[3];
+    ConvertQuatToMat(mtx, tagAxis);
+    MatrixMultiply(tagAxis, parent.axis, orient->axis);
 
-    float scale = QUAT_SCALE(mtx);
-    float qx = QUAT_X(mtx) * scale;
-    float qy = QUAT_Y(mtx) * scale;
-    float qz = QUAT_Z(mtx) * scale;
-    float qw = QUAT_W(mtx);
-
-    float xx = qx * QUAT_X(mtx);
-    float xy = qx * QUAT_Y(mtx);
-    float xz = qx * QUAT_Z(mtx);
-    float xw = qx * qw;
-    float yy = qy * QUAT_Y(mtx);
-    float yz = qy * QUAT_Z(mtx);
-    float yw = qy * qw;
-    float zz = qz * QUAT_Z(mtx);
-    float zw = qz * qw;
-
-    float tagAxis[9];
-    tagAxis[0] = 1.0f - (yy + zz);
-    tagAxis[1] = zw + xy;
-    tagAxis[2] = xz - yw;
-    tagAxis[3] = xy - zw;
-    tagAxis[4] = 1.0f - (xx + zz);
-    tagAxis[5] = xw + yz;
-    tagAxis[6] = yw + xz;
-    tagAxis[7] = yz - xw;
-    tagAxis[8] = 1.0f - (xx + yy);
-
-    MatrixMultiply(tagAxis, axis, orient->axis);
-
-    MatrixTransformVector43(mtx + 0x10, axis, orient);
+    /* orientation_t stores origin before axis; a 4x3 matrix stores it last. */
+    AxisCopy((vec_t *)parent.axis, (vec_t *)parentMatrix);
+    memcpy(parentMatrix[3], parent.origin, sizeof(parent.origin));
+    MatrixTransformVector43(mtx->trans, parentMatrix, orient->origin);
 
     float debugDist = (*(dvar_t **)imp_fx_debugBolt)->current.value;
     if (debugDist != 0.0f) {

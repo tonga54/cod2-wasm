@@ -701,14 +701,10 @@ int CG_PlaySoundAliasAsMasterByName(int entitynum, const vec_t *origin, const ch
 
 void CG_GetDObjOrientation(int dobjHandle, orientation_t *orient)
 {
-    const byte *cent;
-
     if ((unsigned int)dobjHandle <= 0x3ff) {
-        cent = (const byte *)cg_entities + dobjHandle * 548;
-        orient->origin[0] = ((centity_t *)cent)->lerpOrigin[0];
-        orient->origin[1] = ((centity_t *)cent)->lerpOrigin[1];
-        orient->origin[2] = ((centity_t *)cent)->lerpOrigin[2];
-        AnglesToAxis((const vec_t *)&((centity_t *)cent)->lerpAngles[0], orient->axis);
+        const centity_t *cent = &cg_entities[dobjHandle];
+        memcpy(orient->origin, cent->lerpOrigin, sizeof(orient->origin));
+        AnglesToAxis(cent->lerpAngles, orient->axis);
         return;
     }
 
@@ -716,9 +712,7 @@ void CG_GetDObjOrientation(int dobjHandle, orientation_t *orient)
         return;
     }
 
-    orient->origin[0] = *(const float *)((const byte *)&cgArray + 180412);
-    orient->origin[1] = *(const float *)((const byte *)&cgArray + 180416);
-    orient->origin[2] = *(const float *)((const byte *)&cgArray + 180420);
+    memcpy(orient->origin, cg->viewModelOrigin, sizeof(orient->origin));
     AxisCopy((vec3_t *)&cg->viewModelAxis[0][0], orient->axis);
 }
 

@@ -1279,3 +1279,36 @@ scores (3 points/0 deaths versus 0 points/3 deaths) and the next-round briefing.
 Evidence: `out/gametag-prompt.png`, `out/kill-feed-verified.png`,
 `out/killcam-verified.png` and `out/final-summary-verified.png`. Test-only devmap
 and a score limit of three are confined to the isolated Compose override.
+
+## 2026-10-09: muzzle flash attachment transforms
+
+`FX_GetBoneOrientation` treated an `orientation_t` (origin followed by axes) as
+a 4x3 matrix (axes followed by origin). World position therefore entered the
+rotation calculation, and tag translation used the wrong rows. It now composes
+the bone rotation with the parent's typed axes and explicitly builds the 4x3
+matrix for the translated tag. The existing quaternion conversion helper
+preserves nonunit quaternion weights. Invalid DObj handles are rejected.
+
+The viewmodel orientation provider now reads `cg->viewModelOrigin`, matching
+the rendered weapon, instead of stale byte offsets into the client globals.
+World entities likewise use typed centity indexing. Original muzzle-flash
+definitions, textures, sizes, randomness and weapon stats remain unchanged.
+This corrects the shared transform used by muzzle flashes and other effects
+attached to weapon bones.
+
+`test-muzzle-fx-transform.py` passes 1,026 world/viewmodel transforms against
+independent Rodrigues rotations, including translated cameras, pitch/yaw/roll,
+nonunit quaternions, root attachments and missing bones. It checks 1,100 cached
+orientation queries across changing frames and rejects origin/axis layout
+regressions under address/undefined-behavior sanitizers. Existing FX drawing,
+impact/tracer and weapon-view/ground checks pass, along with the full browser
+package checks. Native and WebAssembly builds succeeded.
+
+In an isolated Toujane browser match, Sten bursts showed flashes at the muzzle
+from the hip and in ADS after a 45-degree turn. Bren bursts also showed their
+flash at the barrel after a further turn. No browser console errors were
+recorded. Evidence: `out/muzzle-fx-hip-0.png` through `out/muzzle-fx-hip-7.png`,
+`out/muzzle-fx-ads-0.png` through `out/muzzle-fx-ads-5.png`, and
+`out/muzzle-fx-bren-0.png` through `out/muzzle-fx-bren-5.png`. The selected
+proof is `out/muzzle-fx-verified.png`. Other weapon transforms are covered by
+the shared-path tests; they were not individually tested in the browser.
