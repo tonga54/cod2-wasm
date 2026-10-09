@@ -150,6 +150,11 @@ void Sys_Error(const char *error, ...)
     vsnprintf(text, sizeof(text), error, argptr);
     va_end(argptr);
 
+#ifdef __EMSCRIPTEN__
+    /* Desktop console/quit loops freeze the browser and conceal the failure. */
+    fprintf(stderr, "[cod2-wasm] fatal: %s\n", text);
+    abort();
+#else
     Sys_DestroySplashWindow();
     timeEndPeriod(1);
     IN_Shutdown();
@@ -164,6 +169,7 @@ void Sys_Error(const char *error, ...)
     for (;;) {
         Com_Quit_f();
     }
+#endif
 }
 
 void Sys_NormalExit(void)
@@ -254,7 +260,12 @@ static HINSTANCE g_hInstance;
 #ifdef __EMSCRIPTEN__
 static void Sys_WebFrame(void)
 {
+    static int measure = -1;
+    if (measure < 0)
+        measure = EM_ASM_INT({ return Boolean(Module.cod2Performance); });
+    if (measure) EM_ASM({ Module.cod2Performance.begin(); });
     Com_Frame();
+    if (measure) EM_ASM({ Module.cod2Performance.end(); });
 }
 #endif
 
@@ -264,6 +275,7 @@ static void cr_atexit_diag(void)
     Com_Printf("[ATEXIT] process exiting via CRT exit()/return\n");
 }
 
+#ifdef _WIN32
 /* A CRT secure-function failure (e.g. a buffer size wrong on x64) invokes the invalid-parameter
    handler, which by default __fastfails -- terminating abruptly with no SEH report. Trap it so it
    logs and CONTINUES (returns an error to the caller) instead of killing the process. */
@@ -279,6 +291,7 @@ static void __cdecl cr_inv_param(const void *e, const void *f, const void *fl, u
     if (n++ < 3)
         Com_Printf("[INVPARAM] CRT invalid-parameter trapped -- continuing\n");
 }
+#endif
 
 int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
@@ -296,7 +309,10 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
                             COD2_VERSION_DATE, lpCmdLine);
 #endif
     { extern int atexit(void (*)(void)); atexit(cr_atexit_diag); }
+
+#ifdef _WIN32
     _set_invalid_parameter_handler(cr_inv_param);
+#endif
 
     Sys_InitMainThread();
     Win_InitLocalization();

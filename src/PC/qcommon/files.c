@@ -53,7 +53,7 @@ extern int Cmd_Argc(void);
 extern char *Cmd_Argv(int arg);
 extern char **FS_ListFiles(const char *path, const char *extension, int wantSubs, int *numfiles, int flags);
 extern void FS_FreeFileList(char **list, int flags);
-extern char **FS_ListFilteredFiles(void *searchPath, const char *path, const char *extension, const char *filter, int *numfiles, int flags);
+extern const char **FS_ListFilteredFiles(searchpath_t *searchPath, const char *path, const char *extension, const char *filter, FsListBehavior behavior, int *numfiles, int allocTrackType);
 extern void FS_SortFileList(char **list, int numfiles);
 extern void FS_ConvertPath(char *s);
 extern qboolean FS_TouchFile(const char *filename);
@@ -85,7 +85,7 @@ extern void FS_FCloseFile(fileHandle_t f);
 extern FILE *FS_FileForHandle(fileHandle_t f);
 extern void Com_Memset(void *dest, int val, int count);
 extern int FS_FileRead(void *buf, int len, int count, FILE *f);
-extern FILE *FS_FileClose(FILE *f);
+extern int FS_FileClose(FILE *f);
 extern int Com_sprintf(char *dest, int destsize, const char *fmt, ...);
 
 static inline __attribute__((always_inline)) void FS_SV_BuildOSPath(const char *base, const char *filename, char *ospath, size_t ospathSize)
@@ -353,7 +353,7 @@ void FS_NewDir_f(void)
 
     {
         void *searchpaths = *(void **)imp_fs_searchpaths;
-        dirnames = FS_ListFilteredFiles(searchpaths, "", "", filter, &ndirs, 10);
+        dirnames = (char **)FS_ListFilteredFiles(searchpaths, "", "", filter, (FsListBehavior)0, &ndirs, 10);
     }
 
     FS_SortFileList(dirnames, ndirs);

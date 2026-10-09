@@ -11,7 +11,7 @@ extern void *BG_GetWeaponDef(int weapIndex);
 extern void *XAnimCreateTree(void *anims, void *Alloc);
 extern struct XAnim_s *XAnimCreateAnims(const char *debugName, int size, void *Alloc);
 extern void XAnimBlend(struct XAnim_s *anims, unsigned int animIndex, const char *name, unsigned int children, unsigned int num, unsigned int flags);
-extern void XAnimPrecache(const char *name, void *Alloc);
+extern XAnimParts *XAnimPrecache(const char *name, Alloc_t Alloc);
 extern void XAnimCreate(struct XAnim_s *anims, unsigned int animIndex, const char *name);
 extern void *Com_GetClientDObj(int entityNum, int localClientNum);
 extern void Com_ClientDObjCreate(DObjModel_s *dobjModels, int numModels, struct XAnimTree_s *tree, int handle);
@@ -22,9 +22,9 @@ extern void CG_RegisterItemVisuals(int itemNum);
 extern void Com_Error(int code, const char *fmt, ...);
 extern float AngleSubtract(float a1, float a2);
 extern float LerpAngle(float from, float to, float frac);
-extern void DObjSetControlTagAngles(void *obj, int *partBits, unsigned int tagName, float *angles);
+extern qboolean DObjSetControlTagAngles(void *obj, int *partBits, unsigned int tagName, float *angles);
 extern void *DObjGetTree(void *obj);
-extern void XAnimSetCompleteGoalWeightKnobAll(void *tree, int animIndex, float goalWeight, float goalTime, float rate, int notifyType, int notifyClient);
+extern int XAnimSetCompleteGoalWeightKnobAll(XAnimTree *tree, unsigned int animIndex, unsigned int rootIndex, float goalWeight, float goalTime, float rate, unsigned int notifyName, int bRestart);
 extern void BG_Player_DoControllers(const struct DObj_s *pDObj, const entityState_t *es, int *partBits, clientInfo_t *ci, int frametime);
 extern int DObjGetClientNotifyList(XAnimNotify **notifyList);
 extern int stricmp(const char *s1, const char *s2);
@@ -53,7 +53,8 @@ extern int BG_GetNumWeapons(void);
 extern int CG_PlaySoundAlias(int entitynum, const vec_t *origin, snd_alias_list_t *aliasList);
 extern int FX_GetBoneIndex(int entNum, unsigned int bone);
 extern void FX_PlayEntityEffect(EffectTemplate *fx, const vec_t *org, vec3_t *axis, const FxBoltInfo *bolt);
-extern void FX_PlayEffect(EffectTemplate *fx, const vec_t *org, const vec_t *fwd, ...);
+extern void FX_PlayEffect(EffectTemplate *fx, const vec_t *org, const vec_t *fwd);
+extern void FX_PlayOrientedEffect(EffectTemplate *fx, const vec_t *org, const vec_t *fwd, const vec_t *up);
 extern void FX_PlaySimpleEffect(EffectTemplate *fx, const vec_t *org);
 extern void Com_Printf(const char *fmt, ...);
 extern void ByteToDir(const int b, vec_t *dir);
@@ -133,7 +134,7 @@ static void CG_mg42_DoControllers(const centity_t *cent, int *partBits)
     struct XAnim_s *tree;
     int animIndex;
 
-    s1 = (const entityState_t *)((const byte *)cent + 0xf0);
+    s1 = &cent->nextState;
 
     ps = &cg->predictedPlayerState;
 
@@ -146,8 +147,8 @@ static void CG_mg42_DoControllers(const centity_t *cent, int *partBits)
         angles[2] = 0.0f;
     } else {
 
-        angles[0] = LerpAngle(s1->angles2[0], s1->angles2[0], cg->frameInterpolation);
-        angles[1] = LerpAngle(s1->angles2[1], s1->angles2[1], cg->frameInterpolation);
+        angles[0] = LerpAngle(cent->currentState.angles2[0], s1->angles2[0], cg->frameInterpolation);
+        angles[1] = LerpAngle(cent->currentState.angles2[1], s1->angles2[1], cg->frameInterpolation);
         angles[2] = 0.0f;
     }
 
@@ -156,7 +157,7 @@ static void CG_mg42_DoControllers(const centity_t *cent, int *partBits)
 
     DObjSetControlTagAngles(obj, partBits, scr->tag_aim_animated, angles);
 
-    angles[0] = LerpAngle(s1->angles2[2], s1->angles2[2], cg->frameInterpolation);
+    angles[0] = LerpAngle(cent->currentState.angles2[2], s1->angles2[2], cg->frameInterpolation);
     angles[1] = 0.0f;
 
     DObjSetControlTagAngles(obj, partBits, scr->tag_flash, angles);
@@ -185,7 +186,7 @@ static void CG_mg42_DoControllers(const centity_t *cent, int *partBits)
         float goalWeight = 1.0f;
         float goalTime = 0.1f;
         float rate = 1.0f;
-        XAnimSetCompleteGoalWeightKnobAll(tree, animIndex, goalWeight, goalTime, rate, 0, 0);
+        XAnimSetCompleteGoalWeightKnobAll((XAnimTree *)tree, animIndex, 0, goalWeight, goalTime, rate, 0, 0);
     }
 }
 
@@ -496,7 +497,7 @@ void CG_EntityEffects(centity_t *cent)
     int constantLight;
 
     if (loopSound) {
-        if (cent->nextState.constantLight == 0x00FFFFFF) {
+        if (cent->nextState.solid == 0x00FFFFFF) {
             vec3_t origin;
             vec_t *midpoint = cgs->inlineModelMidpoints[cent->nextState.index.brushmodel];
 
@@ -765,7 +766,7 @@ void CG_ScriptMover(centity_t *cent)
     AnglesToAxis(cent->lerpAngles, ent.axis);
     ent.renderFxFlags = 0x40;
 
-    if (s1->constantLight == 0x00FFFFFF) {
+    if (s1->solid == 0x00FFFFFF) {
         GfxModel model;
 
         ent.reType = 3;
@@ -851,7 +852,7 @@ static void CG_PlayLoopedFx(centity_t *cent)
             up[1] += scale * forward[1];
             up[2] += scale * forward[2];
             Vec3Normalize(up);
-            FX_PlayEffect(fx, cent->lerpOrigin, forward, up);
+            FX_PlayOrientedEffect(fx, cent->lerpOrigin, forward, up);
         } else {
             FX_PlayEffect(fx, cent->lerpOrigin, forward);
         }
@@ -963,11 +964,23 @@ void CG_AddPacketEntities(void)
         int entityNum = snap->entities[num].number;
         centity_t *cent;
 
-        if (entityNum == viewlocked_entNum)
-            continue;
-
         cent = &(*(centity_t **)imp_cg_entities)[entityNum];
-        if (cent->nextState.eType <= 9)
+        if (cent->nextState.eType <= 9) {
+            /* The predicted local player is advanced separately in CG_DrawActiveFrame.
+             * Packet entities also need their animation time and blend weights advanced. */
+            if (entityNum != snap->ps.clientNum || !(snap->ps.pm_flags & 0xc00000)) {
+                struct DObj_s *obj = Com_GetClientDObj(entityNum, cent->localClientNum);
+                if (obj) {
+                    CG_DObjUpdateInfo(obj);
+                    CG_ProcessClientNoteTracks(entityNum);
+                }
+            }
+            /* Event processing only updates positions when an event arrives.
+             * Rendering and collision need the interpolated pose every frame. */
+            CG_CalcEntityLerpPositions(cent);
+            if (entityNum == viewlocked_entNum)
+                continue;
             CG_ProcessEntity(cent);
+        }
     }
 }

@@ -19,6 +19,7 @@ extern Bool FxHelper_CullSphere(const FxHelper *_this, const vec_t *worldPos, fl
 extern void CL_AddPolyToScene(MaterialHandle mtlHandle, int lmapIndex, int vertCount, const GfxWorldVertex *verts);
 extern int CL_MarkFragments(const vec3_t *points, const vec_t *origin, const vec3_t *axis, float radius, int maxPoints, GfxWorldVertex *verts, int maxFragments, GfxMarkFragment *fragmentBuffer, MaterialHandle markMaterial);
 extern void Com_Error(errorParm_t code, const char *fmt, ...);
+extern void Com_Printf(const char *fmt, ...);
 
 #define CG_MARKCOUNT_PTR (*(int **)(imp_cg_marksLimit))
 #define CG_MARKS_DVAR cg_marks
@@ -97,9 +98,10 @@ void CG_AddMarks(void)
 
 void CG_ImpactMark(MaterialHandle markMaterial, const vec_t *origin, const vec_t *dir, float orientation, const vec_t *color, float radius)
 {
-    vec3_t axisRight;
-    vec3_t axisCross;
-    vec3_t axisDir;
+    vec3_t axis[3];
+    vec_t *axisDir = axis[0];
+    vec_t *axisRight = axis[1];
+    vec_t *axisCross = axis[2];
     vec3_t originalPoints[4];
     GfxMarkFragment markFragments[384];
     int fragmentCount;
@@ -112,7 +114,7 @@ void CG_ImpactMark(MaterialHandle markMaterial, const vec_t *origin, const vec_t
     MarkPoly *current;
     float a, b;
 
-    if (!CG_MARKS_DVAR->current.enabled)
+    if (!markMaterial || radius <= 0.0f || !CG_MARKS_DVAR->current.enabled)
         return;
 
     if (((cg_t *)cg)->nomarks != 0)
@@ -135,7 +137,7 @@ void CG_ImpactMark(MaterialHandle markMaterial, const vec_t *origin, const vec_t
     fragmentCount = CL_MarkFragments(
         originalPoints,
         origin,
-        (const vec3_t *)axisDir,
+        axis,
         radius,
         1024,
         (GfxWorldVertex *)&markVerts,
@@ -143,10 +145,14 @@ void CG_ImpactMark(MaterialHandle markMaterial, const vec_t *origin, const vec_t
         markFragments,
         markMaterial);
 
-    nativeColor.array[1] = ColorFloatToByte(color[0]);
-    nativeColor.array[2] = ColorFloatToByte(color[1]);
-    nativeColor.array[3] = ColorFloatToByte(color[2]);
-    nativeColor.array[0] = ColorFloatToByte(color[3]);
+    /* World vertices use RGBA; the complete basis above supplies decal UVs. */
+    for (j = 0; j < 4; j++)
+        nativeColor.array[j] = ColorFloatToByte(color[j]);
+
+    if (getenv("PTRACE"))
+        Com_Printf("[mark] material=%s fragments=%d radius=%.2f color=%.2f,%.2f,%.2f,%.2f\n",
+            markMaterial->info.name, fragmentCount, radius,
+            color[0], color[1], color[2], color[3]);
 
     if (fragmentCount <= 0)
         return;

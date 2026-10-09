@@ -109,7 +109,7 @@ extern void Sys_ShowConsole(int visLevel, qboolean quitOnClose);
 extern void Sys_NormalExit(void);
 extern void SV_AddDedicatedCommands(void);
 extern qboolean Com_HasPlayerProfile(void);
-extern void Com_BuildPlayerProfilePath(char *buf, int bufsize, const char *suffix);
+extern int Com_BuildPlayerProfilePath(char *buf, int bufsize, const char *format, ...);
 
 extern const dvar_t *Dvar_RegisterInt(const char *name, int value, int min, int max, int flags);
 extern int Sys_Milliseconds(void);
@@ -517,7 +517,7 @@ static void Com_Crash_f(void)
 void Com_WriteCDKey(void)
 {
     extern qboolean CL_CDKeyValidate(const char *key, const char *checksum);
-    extern unsigned char MacPreferences_PutString(const char *key, const char *value);
+    extern void MacPreferences_PutString(const char *key, const char *value);
     char regkey[21];
 
     if (!CL_CDKeyValidate(cl_cdkey, cl_cdkeychecksum)) {
@@ -1390,7 +1390,7 @@ int Com_EventLoop(void)
 {
     extern void CL_KeyEvent(int key, int down, int time);
     extern void CL_CharEvent(int ch);
-    extern void CL_PacketEvent(netadr_t from, msg_t * msg, int time);
+    extern Bool CL_PacketEvent(netadr_t from, msg_t * msg, int time);
     extern void SV_PacketEvent(netadr_t from, msg_t * msg);
     extern void Cbuf_AddText(const char *text);
     extern void LargeLocal_LargeLocal(LargeLocal * ll, int size);
@@ -1593,8 +1593,15 @@ BM_NOINLINE void Com_Frame_Try_Block_Function(void)
         if (com_frameTime < com_lastFrameTime)
             com_lastFrameTime = com_frameTime;
         rawMsec = com_frameTime - com_lastFrameTime;
+#ifdef __EMSCRIPTEN__
+        /* requestAnimationFrame schedules the next opportunity; never spin
+         * on the browser's main thread to enforce a desktop frame cap. */
         if (rawMsec < minMsec)
-            NET_Sleep(0);
+            return;
+#else
+        if (rawMsec < minMsec)
+            NET_Sleep(minMsec - rawMsec);
+#endif
     } while (rawMsec < minMsec);
 
     Cbuf_Execute();

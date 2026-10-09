@@ -1,0 +1,10 @@
+*
+!out/
+!out/cod2-native/
+!out/cod2-native/cod2_lnxded
+!server.cfg
+!site/
+!site/wasm-game-data.json
+!downstream/
+!downstream/server/
+!downstream/server/entrypoint.sh

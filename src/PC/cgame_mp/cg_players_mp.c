@@ -13,7 +13,7 @@ COD2_ASSERT_FIELD(WeaponDef, fAnimHorRotateInc, 0x564);
 extern void *Com_GetClientDObj(int clientNum, int localClientNum);
 extern void BG_UpdatePlayerDObj(void *obj, entityState_t *es, byte *ci, int p4);
 extern void BG_PlayerAnimation(void *obj, entityState_t *es, byte *ci);
-extern void XAnimClearTreeGoalWeights(void *pAnimTree, unsigned short animIndex, int flags);
+extern void XAnimClearTreeGoalWeights(XAnimTree *pAnimTree, unsigned int animIndex, float blendTime);
 extern void XAnimSetCompleteGoalWeight(void *pAnimTree, unsigned short animIndex, float goalWeight, float goalTime, float rate, int p6, int p7, int p8);
 extern void Com_Printf(const char *fmt, ...);
 extern void AnglesToAxis(float *angles, float *axis);
@@ -22,7 +22,7 @@ extern void CG_AddPlayerWeapon(byte *body, int unused, centity_t *cent, int flag
 extern qboolean CG_DObjGetWorldTagPos(centity_t *cent, void *obj, unsigned short tag, float *origin);
 extern void CL_DrawSprite(MaterialHandle material, byte *rgbaColor, float *origin, float radius, float minScreenRadius, int flags);
 extern void XAnimClearTreeGoalWeightsStrict(void *pAnimTree, unsigned int animIndex, float blendTime);
-extern void XAnimSetGoalWeight(void *pAnimTree, unsigned short animIndex, float goalWeight, float goalTime, float rate, int p6, int p7, int p8);
+extern int XAnimSetGoalWeight(void *pAnimTree, unsigned short animIndex, float goalWeight, float goalTime, float rate, int p6, int p7, int p8);
 extern float XAnimGetWeight(void *pAnimTree, unsigned short animIndex);
 extern int XAnimGetNumChildren(void *pXAnims, unsigned short animIndex);
 extern unsigned short XAnimGetChildAt(void *pXAnims, unsigned short parentIndex, int childNum);
@@ -667,7 +667,9 @@ void CG_Corpse(centity_t *cent)
 
     clientNum = cent->nextState.number;
 
-    ci = (char *)cgs - 0x6bec + clientNum * CI_STRIDE;
+    if ((unsigned)(clientNum - 64) >= 8)
+        return;
+    ci = (byte *)&((cgs_t *)cgs)->corpseinfo[clientNum - 64];
 
     obj = Com_GetClientDObj(clientNum, cent->localClientNum);
     BG_UpdatePlayerDObj(obj, es, ci, 0);

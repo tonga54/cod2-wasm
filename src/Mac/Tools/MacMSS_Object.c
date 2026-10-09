@@ -12,7 +12,7 @@ void free(void *ptr);
 
 #define CSOUNDOBJECT_VTABLE_PTR ((void *)0x332548)
 
-#ifdef __EMSCRIPTEN__
+#if defined(__EMSCRIPTEN__) || (defined(COD2_NATIVE_PORTABLE_DATA) && !defined(COD2_X64))
 AIL_file_open_callback __ZN12CSoundObject13sOpenCallbackE;
 AIL_file_close_callback __ZN12CSoundObject14sCloseCallbackE;
 AIL_file_seek_callback __ZN12CSoundObject13sSeekCallbackE;

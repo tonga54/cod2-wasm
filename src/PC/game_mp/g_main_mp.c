@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <float.h>
+extern void G_ParseHitLocDmgTable(void);
 
 extern void BodyEnd();
 extern void Die_trigger_damage();
@@ -115,9 +116,9 @@ extern const dvar_t *g_dumpAnims;
 extern unsigned char g_clients[];
 
 extern float ceilf(float x);
-extern int Com_ServerDObjCreate(DObjModel_s *models, int numModels, struct XAnimTree_s *tree, int handle);
+extern void Com_ServerDObjCreate(DObjModel_s *models, int numModels, struct XAnimTree_s *tree, int handle);
 extern int *Hunk_AllocLowInternal(int size);
-extern int SV_Trace(trace_t *results, const vec_t *start, const vec_t *mins, const vec_t *maxs, const vec_t *end, int passEntityNum, int contentmask, qboolean locational, unsigned char *priorityMap, qboolean staticmodels);
+extern void SV_Trace(trace_t *results, const vec_t *start, const vec_t *mins, const vec_t *maxs, const vec_t *end, int passEntityNum, int contentmask, qboolean locational, unsigned char *priorityMap, qboolean staticmodels);
 extern qboolean SV_TracePassed(const vec_t *start, const vec_t *mins, const vec_t *maxs, const vec_t *end, int passEntityNum, int passOwnerNum, int contentmask, int locational, int staticmodels);
 extern int SV_SightTrace(int *hitNum, const vec_t *start, const vec_t *mins, const vec_t *maxs, const vec_t *end, int passEntityNum, int passOwnerNum, int contentmask);
 extern void CL_AddDebugString(const vec_t *xyz, const vec_t *color, float scale, const char *pszText, int fromServer);
@@ -138,7 +139,8 @@ extern void Scr_ShutdownSystem(int inst, qboolean freeScripts);
 extern void SV_FreeClientScriptPers(void);
 extern void Z_FreeInternal(void *ptr);
 extern void Mantle_ShutdownAnims(void);
-extern unsigned int GScr_FreeScripts(void);
+extern void Mantle_CreateAnims(MantleAnimAlloc xanimAlloc);
+extern void GScr_FreeScripts(void);
 extern void Scr_FreeScripts(int inst);
 extern void XAnimFreeTree(struct XAnimTree_s *tree, int inst);
 extern void Hunk_ClearToMarkLow(int mark);
@@ -147,7 +149,7 @@ extern void G_RunItem(gentity_t *ent);
 extern void G_RunCorpse(gentity_t *ent);
 extern void G_RunMover(gentity_t *ent);
 extern void G_RunClient(gentity_t *ent);
-extern unsigned char G_GeneralLink(gentity_t *ent);
+extern void G_GeneralLink(gentity_t *ent);
 
 static vec3_t vec3_zero = { 0.0f, 0.0f, 0.0f };
 
@@ -170,7 +172,7 @@ int G_GetClientScore(int clientNum);
 int G_GetClientArchiveTime(int clientNum);
 void G_SetClientArchiveTime(int clientNum, int time);
 clientState_t *G_GetClientState(int clientNum);
-static int G_CreateDObj(DObjModel_s *dobjModels, int numModels, struct XAnimTree_s *tree, int handle, clientInfo_t *ci);
+static void G_CreateDObj(DObjModel_s *dobjModels, int numModels, struct XAnimTree_s *tree, int handle, clientInfo_t *ci);
 int *Hunk_AllocXAnimServer(int size);
 static int SortRanks(const int *a, const int *b);
 void CalculateRanks(void);
@@ -213,6 +215,7 @@ unsigned int g_lastop_dbg;
 /* write-watchpoint: make ent#439's page read-only so the corrupting write faults with an exact rip */
 void dbg_protect_439(void)
 {
+#ifdef _WIN32
     static int done;
     void *__stdcall GetModuleHandleA(const char *);
     void *__stdcall GetProcAddress(void *, const char *);
@@ -234,6 +237,7 @@ void dbg_protect_439(void)
         vp((void *)(uintptr_t)page, 0x1000, 2 /*PAGE_READONLY*/, &oldp);
         Com_Printf("[wp] protected ent#439 page %p (ent at %p)\n", (void *)(uintptr_t)page, (void *)base);
     }
+#endif
 }
 void dbg_end_probe(int step)
 {
@@ -265,11 +269,10 @@ void dbg_check439(void)
 {
     static int rep;
     if (!rep && (unsigned int)g_entities[439].s.pos.trType > 20u) {
-        void *__stdcall GetModuleHandleA(const char *);
         rep = 1;
-        Com_Printf("[corruptor] ent#439 trType=0x%x after builtinIndex=%u fn_rva=0x%llx\n",
+        Com_Printf("[corruptor] ent#439 trType=0x%x after builtinIndex=%u fn=%p\n",
                    (unsigned int)g_entities[439].s.pos.trType, g_dbg_lastBuiltin,
-                   (unsigned long long)((char *)g_dbg_lastBuiltinFn - (char *)GetModuleHandleA(0)));
+                   g_dbg_lastBuiltinFn);
     }
 }
 
@@ -308,7 +311,7 @@ clientState_t *G_GetClientState(int clientNum)
     return &level.clients[clientNum].sess.cs;
 }
 
-static int G_CreateDObj(DObjModel_s *dobjModels, int numModels, struct XAnimTree_s *tree, int handle, clientInfo_t *ci)
+static void G_CreateDObj(DObjModel_s *dobjModels, int numModels, struct XAnimTree_s *tree, int handle, clientInfo_t *ci)
 {
     numModels = (unsigned short)numModels;
     (void)ci;
@@ -467,20 +470,20 @@ extern void Scr_BeginLoadAnimScripts(void);
 extern void GScr_LoadAnimScripts(void);
 extern void Scr_EndLoadAnimScripts(void);
 extern void Scr_FreeEntityList(void);
-extern void Scr_InitSystem(int sys);
+extern void Scr_InitSystem(void);
 extern void Scr_SetLoading(int loading);
 extern void Scr_AllocGameVariable(void);
 extern void G_LoadStructs(void);
-extern unsigned int Scr_LoadLevel(void);
-extern unsigned int Scr_LoadGameType(void);
-extern unsigned int Scr_StartupGameType(void);
+extern void Scr_LoadLevel(void);
+extern void Scr_LoadGameType(void);
+extern void Scr_StartupGameType(void);
 extern void RestoreBody(void);
 extern void ClientUserinfoChanged(int clientNum);
 extern void G_InitTurrets(void);
 extern int SV_GetBrushModelCount(void);
 extern void G_SpawnTriggerHurt(int numBrushModels);
 extern void GScr_PostResetTimeout(void);
-extern short int CheckTeamStatus(void);
+extern void CheckTeamStatus(void);
 extern void DeathmatchScoreboardMessage(gentity_t *ent);
 extern const char *SL_ConvertToString(unsigned int index);
 extern void Dvar_SetBool(const dvar_t *dvar, int value);
@@ -497,12 +500,39 @@ extern void ClientEndFrame(gentity_t *ent);
 extern void HudElem_UpdateClient(gclient_t *client, int clientNum, int which);
 extern unsigned char scrVarPub[];
 extern unsigned char scrVmPub[];
-extern unsigned int Scr_AddEntity(void *ent);
+extern void Scr_AddEntity(void *ent);
 extern void Scr_Notify(void *ent, int stringValue, unsigned int paramcount);
 extern void BG_LoadAnim(void);
 extern int Com_FindSoundAlias(const char *name);
 extern int G_AnimScriptSound(int client, snd_alias_list_t *aliasList);
 extern void *XAnimCreateTree(void *anims, void *Alloc);
+
+static void G_InitPlayerAnimTrees(qboolean restart)
+{
+    scr_data_t *scrData = (scr_data_t *)imp_g_scr_data;
+    int i;
+
+    if (!restart) {
+        void *anims;
+        Mantle_CreateAnims((MantleAnimAlloc)Hunk_AllocXAnimServer);
+        BG_LoadAnim();
+        anims = level_bgs.animScriptData.animTree.anims;
+        for (i = 0; i < 64; i++)
+            level_bgs.clientinfo[i].pXAnimTree = XAnimCreateTree(anims, (void *)Hunk_AllocXAnimServer);
+        for (i = 0; i < 8; i++) {
+            corpseInfo_t *corpse = &scrData->playerCorpseInfo[i];
+            corpse->tree = XAnimCreateTree(anims, (void *)Hunk_AllocXAnimServer);
+            corpse->ci.pXAnimTree = corpse->tree;
+        }
+    }
+
+    for (i = 0; i < 8; i++) {
+        corpseInfo_t *corpse = &scrData->playerCorpseInfo[i];
+        corpse->entnum = -1;
+        corpse->time = 0;
+        corpse->falling = 0;
+    }
+}
 
 #ifndef __EMSCRIPTEN__
 void G_InitGame(int levelTime, int randomSeed, qboolean restart, qboolean savepersist)
@@ -574,14 +604,10 @@ void G_InitGame(int levelTime, int randomSeed, qboolean restart, qboolean savepe
     *(int *)((char *)&level + 20) = 0;
 
     SV_LocateGameData((gentity_t *)g_entities, 0x48, sizeof(gentity_t), (playerState_t *)g_clients, sizeof(gclient_t));
-    G_SpawnEntitiesFromString();
-    DBG_PrintFreeVars(str_dbg_spawn);
-    level.initializing = 0;
 
     G_LogPrintf("gametype: %s\n", g_gametype->current.string);
 
     G_InitTurrets();
-    G_SpawnTriggerHurt(SV_GetBrushModelCount() + 1);
     GScr_PostResetTimeout();
     G_SetupWeaponDef();
     Scr_BeginLoadScripts();
@@ -595,17 +621,10 @@ void G_InitGame(int levelTime, int randomSeed, qboolean restart, qboolean savepe
     level_bgs.animScriptData.soundAlias = (snd_alias_list_t * (*)()) Com_FindSoundAlias;
     level_bgs.animScriptData.playSoundAlias = (int (*)())G_AnimScriptSound;
 
-    if (!restart) {
-        BG_LoadAnim();
-
-        void *animTree = (void *)level_bgs.animScriptData.animTree.anims;
-        byte *clientTree = (byte *)&level_bgs + 0xb40a0;
-        int t;
-        for (t = 0; t < 64; t++, clientTree += 0x4b8)
-            *(void **)clientTree = XAnimCreateTree(animTree, (void *)Hunk_AllocXAnimServer);
-    }
+    G_InitPlayerAnimTrees(restart);
 
     GScr_LoadConsts();
+    G_ParseHitLocDmgTable();
     Scr_FreeScripts(1);
     Scr_BeginLoadAnimScripts();
     GScr_LoadAnimScripts();
@@ -614,7 +633,7 @@ void G_InitGame(int levelTime, int randomSeed, qboolean restart, qboolean savepe
 
     Com_Printf(str_dbg_vmtop_fmt, *(void **)((byte *)&scrVmPub + 16));
     Scr_FreeEntityList();
-    Scr_InitSystem(1);
+    Scr_InitSystem();
     Com_Printf(str_dbg_ff_trace, *(void **)((byte *)&scrVmPub + 12));
     Scr_SetLoading(1);
     Scr_AllocGameVariable();
@@ -623,6 +642,12 @@ void G_InitGame(int levelTime, int randomSeed, qboolean restart, qboolean savepe
     Com_Printf(str_dbg_ff_gls, *(void **)((byte *)&scrVmPub + 12));
 
     level.initializing = 1;
+    /* Map entities need the registered Radiant keys and a live script VM.
+     * Spawning them before GScr_LoadScripts discarded script_gameobjectname,
+     * leaving the DM/HQ/SD turrets stacked on their TDM counterparts. */
+    G_SpawnEntitiesFromString();
+    DBG_PrintFreeVars(str_dbg_spawn);
+    G_SpawnTriggerHurt(SV_GetBrushModelCount() + 1);
     Scr_LoadLevel();
     Com_Printf(str_dbg_ff_before, *(void **)((byte *)&scrVmPub + 12));
     Scr_LoadGameType();
@@ -679,20 +704,20 @@ extern void Scr_BeginLoadAnimScripts(void);
 extern void GScr_LoadAnimScripts(void);
 extern void Scr_EndLoadAnimScripts(void);
 extern void Scr_FreeEntityList(void);
-extern void Scr_InitSystem(int sys);
+extern void Scr_InitSystem(void);
 extern void Scr_SetLoading(int loading);
 extern void Scr_AllocGameVariable(void);
 extern void G_LoadStructs(void);
-extern unsigned int Scr_LoadLevel(void);
-extern unsigned int Scr_LoadGameType(void);
-extern unsigned int Scr_StartupGameType(void);
+extern void Scr_LoadLevel(void);
+extern void Scr_LoadGameType(void);
+extern void Scr_StartupGameType(void);
 extern void RestoreBody(void);
 extern void ClientUserinfoChanged(int clientNum);
 extern void G_InitTurrets(void);
 extern int SV_GetBrushModelCount(void);
 extern void G_SpawnTriggerHurt(int numBrushModels);
 extern void GScr_PostResetTimeout(void);
-extern short int CheckTeamStatus(void);
+extern void CheckTeamStatus(void);
 extern void DeathmatchScoreboardMessage(gentity_t *ent);
 extern const char *SL_ConvertToString(unsigned int index);
 extern void Dvar_SetBool(const dvar_t *dvar, int value);
@@ -709,7 +734,7 @@ extern void ClientEndFrame(gentity_t *ent);
 extern void HudElem_UpdateClient(gclient_t *client, int clientNum, int which);
 extern unsigned char scrVarPub[];
 extern unsigned char scrVmPub[];
-extern unsigned int Scr_AddEntity(void *ent);
+extern void Scr_AddEntity(void *ent);
 extern void Scr_Notify(void *ent, int stringValue, unsigned int paramcount);
 
 static void G_RegisterDvars_impl(void)
@@ -853,14 +878,10 @@ void G_InitGame(int levelTime, int randomSeed, qboolean restart, qboolean savepe
     *(int *)((char *)&level + 20) = 0;
 
     SV_LocateGameData((gentity_t *)g_entities, 0x48, sizeof(gentity_t), (playerState_t *)g_clients, sizeof(gclient_t));
-    G_SpawnEntitiesFromString();
-    DBG_PrintFreeVars(str_dbg_spawn);
-    level.initializing = 0;
 
     G_LogPrintf("gametype: %s\n", g_gametype->current.string);
 
     G_InitTurrets();
-    G_SpawnTriggerHurt(SV_GetBrushModelCount() + 1);
     GScr_PostResetTimeout();
     G_SetupWeaponDef();
     Scr_BeginLoadScripts();
@@ -874,17 +895,10 @@ void G_InitGame(int levelTime, int randomSeed, qboolean restart, qboolean savepe
     level_bgs.animScriptData.soundAlias = (snd_alias_list_t * (*)()) Com_FindSoundAlias;
     level_bgs.animScriptData.playSoundAlias = (int (*)())G_AnimScriptSound;
 
-    if (!restart) {
-        BG_LoadAnim();
-
-        void *animTree = (void *)level_bgs.animScriptData.animTree.anims;
-        byte *clientTree = (byte *)&level_bgs + 0xb40a0;
-        int t;
-        for (t = 0; t < 64; t++, clientTree += 0x4b8)
-            *(void **)clientTree = XAnimCreateTree(animTree, (void *)Hunk_AllocXAnimServer);
-    }
+    G_InitPlayerAnimTrees(restart);
 
     GScr_LoadConsts();
+    G_ParseHitLocDmgTable();
     Scr_FreeScripts(1);
     Scr_BeginLoadAnimScripts();
     GScr_LoadAnimScripts();
@@ -893,7 +907,7 @@ void G_InitGame(int levelTime, int randomSeed, qboolean restart, qboolean savepe
 
     Com_Printf(str_dbg_vmtop_fmt, *(void **)((byte *)&scrVmPub + 16));
     Scr_FreeEntityList();
-    Scr_InitSystem(1);
+    Scr_InitSystem();
     Com_Printf(str_dbg_ff_trace, *(void **)((byte *)&scrVmPub + 12));
     Scr_SetLoading(1);
     Scr_AllocGameVariable();
@@ -902,6 +916,12 @@ void G_InitGame(int levelTime, int randomSeed, qboolean restart, qboolean savepe
     Com_Printf(str_dbg_ff_gls, *(void **)((byte *)&scrVmPub + 12));
 
     level.initializing = 1;
+    /* Map entities need the registered Radiant keys and a live script VM.
+     * Spawning them before GScr_LoadScripts discarded script_gameobjectname,
+     * leaving the DM/HQ/SD turrets stacked on their TDM counterparts. */
+    G_SpawnEntitiesFromString();
+    DBG_PrintFreeVars(str_dbg_spawn);
+    G_SpawnTriggerHurt(SV_GetBrushModelCount() + 1);
     Scr_LoadLevel();
     Com_Printf(str_dbg_ff_before, *(void **)((byte *)&scrVmPub + 12));
     Scr_LoadGameType();
@@ -1281,9 +1301,7 @@ int G_RunFrame(int levelTime)
         }
 
         Scr_RunCurrentThreads();
-        Com_Printf("[ckpt] G_RunFrame trigger round index=%d size=%d more=%d\n", index, level.currentTriggerListSize, bMoreTriggered);
     } while (bMoreTriggered);
-    Com_Printf("[ckpt] G_RunFrame trigger loop DONE\n");
     { static int s; if (s++ < 1) dbg_scan_ents("after_triggers"); }
 
     for (i = 0; i < level.num_entities; i++) {
@@ -1303,9 +1321,7 @@ int G_RunFrame(int levelTime)
         }
     }
 
-    Com_Printf("[ckpt] G_RunFrame DObj-update loop DONE\n");
     Scr_IncTime();
-    Com_Printf("[ckpt] G_RunFrame Scr_IncTime DONE num_entities=%d\n", level.num_entities);
 
     level.currentEntityThink = 0;
     for (i = 0; i < level.num_entities; i++) {
@@ -1323,7 +1339,6 @@ int G_RunFrame(int levelTime)
         }
         level.currentEntityThink = i + 1;
     }
-    Com_Printf("[ckpt] G_RunFrame think loop DONE\n");
     level.currentEntityThink = -1;
 
     {

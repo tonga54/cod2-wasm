@@ -19,7 +19,7 @@ extern void Scr_LoadAnimTreeAtIndex(int index, Alloc_t Alloc, int user);
 extern void Scr_InitOpcodeLookup(void);
 extern void Scr_ShutdownOpcodeLookup(void);
 extern void Scr_ClearErrorMessage(void);
-extern int Scr_EvalVariable(unsigned int varId);
+extern unsigned long long Scr_EvalVariable(unsigned int varId);
 
 extern void ScriptParse(sval_t *parseData, int flag);
 extern void ScriptCompile(sval_t parseData, unsigned int compiledObj, unsigned int scriptId);

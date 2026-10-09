@@ -36,13 +36,13 @@ const FxCurve *FxCurve_AllocAndCreateWithKeys(const float *keyArray, int dimensi
         curveKeys[keyIndex * keySize] = 1.0f;
         int d;
         for (d = 0; d < dimensionCount; d++) {
-            curveKeys[keyIndex * keySize + 1 + d] = keyArray[1 + d];
+            curveKeys[keyIndex * keySize + 1 + d] = keyArray[(keyCount - 1) * keySize + 1 + d];
         }
     } else {
 
     }
 
-    newCurve->keyCount = keyCount;
+    newCurve->keyCount = totalKeys;
 
     return newCurve;
 }

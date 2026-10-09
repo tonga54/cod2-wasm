@@ -2,214 +2,214 @@
 /* Do not edit; regenerated from data.S with 4-byte pointer relocations. */
 #include "common_types.h"
 
-extern char CAETarget_CAETarget[];
-extern char GScr_AddTestClient[];
-extern char GScr_AllClientsPrint[];
-extern char GScr_AnimHasNotetrack[];
-extern char GScr_Announcement[];
-extern char GScr_BanPlayer[];
-extern char GScr_CastInt[];
-extern char GScr_ClientAnnouncement[];
-extern char GScr_ClientClaimTrigger[];
-extern char GScr_ClientPrint[];
-extern char GScr_ClientReleaseTrigger[];
-extern char GScr_CloseFile[];
-extern char GScr_DisableAimAssist[];
-extern char GScr_DisableGrenadeBounce[];
-extern char GScr_DisableGrenadeTouchDamage[];
-extern char GScr_Earthquake[];
-extern char GScr_EnableAimAssist[];
-extern char GScr_EnableGrenadeBounce[];
-extern char GScr_EnableGrenadeTouchDamage[];
-extern char GScr_EndXboxLiveLobby[];
-extern char GScr_ExitLevel[];
-extern char GScr_FGetArg[];
-extern char GScr_FPrintln[];
-extern char GScr_FReadLn[];
-extern char GScr_GetAmmoCount[];
-extern char GScr_GetAngleDelta[];
-extern char GScr_GetAnimLength[];
-extern char GScr_GetBrushModelCenter[];
-extern char GScr_GetDvar[];
-extern char GScr_GetDvarFloat[];
-extern char GScr_GetDvarInt[];
-extern char GScr_GetEntityNumber[];
-extern char GScr_GetMoveDelta[];
-extern char GScr_GetNorthYaw[];
-extern char GScr_GetNumParts[];
-extern char GScr_GetPartName[];
-extern char GScr_GetTeamPlayersAlive[];
-extern char GScr_GetTeamScore[];
-extern char GScr_GetTime[];
-extern char GScr_IsAlive[];
-extern char GScr_IsDefined[];
-extern char GScr_IsPlayer[];
-extern char GScr_IsPlayerNumber[];
-extern char GScr_IsString[];
-extern char GScr_IsValidGameType[];
-extern char GScr_KickPlayer[];
-extern char GScr_LoadMap[];
-extern char GScr_LocalToWorldCoords[];
-extern char GScr_LogPrint[];
-extern char GScr_MakeDvarServerInfo[];
-extern char GScr_MapExists[];
-extern char GScr_MapRestart[];
-extern char GScr_MatchEnd[];
-extern char GScr_NewClientHudElem[];
-extern char GScr_NewHudElem[];
-extern char GScr_NewTeamHudElem[];
-extern char GScr_Obituary[];
-extern char GScr_Objective_Team[];
-extern char GScr_OpenFile[];
-extern char GScr_PlaceSpawnPoint[];
-extern char GScr_PrecacheHeadIcon[];
-extern char GScr_PrecacheMenu[];
-extern char GScr_PrecacheStatusIcon[];
-extern char GScr_PrecacheTurret[];
-extern char GScr_RadiusDamage[];
-extern char GScr_ReleaseClaimedTrigger[];
-extern char GScr_SendXboxLiveRanks[];
-extern char GScr_SetArchive[];
-extern char GScr_SetBottomArc[];
-extern char GScr_SetClientNameMode[];
-extern char GScr_SetCursorHint[];
-extern char GScr_SetDvar[];
-extern char GScr_SetHintString[];
-extern char GScr_SetLeftArc[];
-extern char GScr_SetPlayerIgnoreRadiusDamage[];
-extern char GScr_SetPlayerTeamRank[];
-extern char GScr_SetRightArc[];
-extern char GScr_SetTeamForTrigger[];
-extern char GScr_SetTeamScore[];
-extern char GScr_SetTopArc[];
-extern char GScr_SetVoteNoCount[];
-extern char GScr_SetVoteString[];
-extern char GScr_SetVoteTime[];
-extern char GScr_SetVoteYesCount[];
-extern char GScr_SetWinningPlayer[];
-extern char GScr_SetWinningTeam[];
-extern char GScr_ShellShock[];
-extern char GScr_Spawn[];
-extern char GScr_SpawnTurret[];
-extern char GScr_StopShellShock[];
-extern char GScr_UpdateClientNames[];
-extern char GScr_UpdateScores[];
-extern char GScr_ViewKick[];
-extern char GScr_WorldEntNumber[];
-extern char GScr_acos[];
-extern char GScr_asin[];
-extern char GScr_atan[];
-extern char GScr_cos[];
-extern char GScr_getStartTime[];
-extern char GScr_line[];
-extern char GScr_positionWouldTelefrag[];
-extern char GScr_print3d[];
-extern char GScr_sin[];
-extern char GScr_tan[];
-extern char MacBuilder_SetControlFontStyle[];
-extern char MacDisplay_CreateScreenContext[];
-extern char MacDisplay_Initialize[];
-extern char R_BoundsForSurf_ModelInst[];
-extern char R_BoundsForSurf_StaticModelCached[];
-extern char R_BoundsForSurf_Triangles[];
-extern char ScrCmd_Delete[];
-extern char ScrCmd_EnableLinkTo[];
-extern char ScrCmd_GetAttachIgnoreCollision[];
-extern char ScrCmd_GetAttachModelName[];
-extern char ScrCmd_GetAttachSize[];
-extern char ScrCmd_GetAttachTagName[];
-extern char ScrCmd_GetClanDescription[];
-extern char ScrCmd_GetClanId[];
-extern char ScrCmd_GetClanMotto[];
-extern char ScrCmd_GetClanName[];
-extern char ScrCmd_GetClanURL[];
-extern char ScrCmd_GetEye[];
-extern char ScrCmd_GetNormalHealth[];
-extern char ScrCmd_GetOrigin[];
-extern char ScrCmd_Hide[];
-extern char ScrCmd_IsTouching[];
-extern char ScrCmd_LinkTo[];
-extern char ScrCmd_PlayLoopRumble[];
-extern char ScrCmd_PlayLoopSound[];
-extern char ScrCmd_PlayRumble[];
-extern char ScrCmd_PlaySound[];
-extern char ScrCmd_PlaySoundAsMaster[];
-extern char ScrCmd_SetContents[];
-extern char ScrCmd_SetModel[];
-extern char ScrCmd_SetNormalHealth[];
-extern char ScrCmd_Show[];
-extern char ScrCmd_ShowToPlayer[];
-extern char ScrCmd_SoundExists[];
-extern char ScrCmd_StopLoopSound[];
-extern char ScrCmd_StopRumble[];
-extern char ScrCmd_Unlink[];
-extern char ScrCmd_UseBy[];
-extern char ScrCmd_attach[];
-extern char ScrCmd_detach[];
-extern char ScrCmd_detachAll[];
-extern char Scr_AddStruct[];
-extern char Scr_AmbientPlay[];
-extern char Scr_AmbientStop[];
-extern char Scr_AnglesToForward[];
-extern char Scr_AnglesToRight[];
-extern char Scr_AnglesToUp[];
-extern char Scr_BulletTrace[];
-extern char Scr_BulletTracePassed[];
-extern char Scr_Closer[];
-extern char Scr_Distance[];
-extern char Scr_DistanceSquared[];
-extern char Scr_GetEnt[];
-extern char Scr_GetEntArray[];
-extern char Scr_GetEntByNum[];
-extern char Scr_GetSubStr[];
-extern char Scr_GetWeaponModel[];
-extern char Scr_GrenadeExplosionEffect[];
-extern char Scr_IsSplitscreen[];
-extern char Scr_IsSubStr[];
-extern char Scr_Length[];
-extern char Scr_LengthSquared[];
-extern char Scr_LoadFX[];
-extern char Scr_MusicPlay[];
-extern char Scr_MusicStop[];
-extern char Scr_Objective_Add[];
-extern char Scr_Objective_Current[];
-extern char Scr_Objective_Delete[];
-extern char Scr_Objective_Icon[];
-extern char Scr_Objective_OnEntity[];
-extern char Scr_Objective_Position[];
-extern char Scr_Objective_State[];
-extern char Scr_PhysicsTrace[];
-extern char Scr_PlayFX[];
-extern char Scr_PlayFXOnTag[];
-extern char Scr_PlayLoopRumbleOnPos[];
-extern char Scr_PlayLoopedFX[];
-extern char Scr_PlayRumbleOnPos[];
-extern char Scr_PrecacheItem[];
-extern char Scr_PrecacheModel[];
-extern char Scr_PrecacheRumble[];
-extern char Scr_PrecacheShader[];
-extern char Scr_PrecacheShellShock[];
-extern char Scr_PrecacheString[];
-extern char Scr_RandomFloat[];
-extern char Scr_RandomFloatRange[];
-extern char Scr_RandomInt[];
-extern char Scr_RandomIntRange[];
-extern char Scr_ResetTimeout[];
-extern char Scr_SetExponentialFog[];
-extern char Scr_SetLinearFog[];
-extern char Scr_SetStableMissile[];
-extern char Scr_SightTracePassed[];
-extern char Scr_SoundFade[];
-extern char Scr_StopAllRumbles[];
-extern char Scr_StrTok[];
-extern char Scr_ToLower[];
-extern char Scr_VectorDot[];
-extern char Scr_VectorNormalize[];
-extern char Scr_VectorToAngles[];
-extern char __mh_execute_header[];
-extern char assertCmd[];
-extern char assertexCmd[];
-extern char assertmsgCmd[];
+extern void CAETarget_CAETarget(void);
+extern void GScr_AddTestClient(void);
+extern void GScr_AllClientsPrint(void);
+extern void GScr_AnimHasNotetrack(void);
+extern void GScr_Announcement(void);
+extern void GScr_BanPlayer(void);
+extern void GScr_CastInt(void);
+extern void GScr_ClientAnnouncement(void);
+extern void GScr_ClientClaimTrigger(void);
+extern void GScr_ClientPrint(void);
+extern void GScr_ClientReleaseTrigger(void);
+extern void GScr_CloseFile(void);
+extern void GScr_DisableAimAssist(void);
+extern void GScr_DisableGrenadeBounce(void);
+extern void GScr_DisableGrenadeTouchDamage(void);
+extern void GScr_Earthquake(void);
+extern void GScr_EnableAimAssist(void);
+extern void GScr_EnableGrenadeBounce(void);
+extern void GScr_EnableGrenadeTouchDamage(void);
+extern void GScr_EndXboxLiveLobby(void);
+extern void GScr_ExitLevel(void);
+extern void GScr_FGetArg(void);
+extern void GScr_FPrintln(void);
+extern void GScr_FReadLn(void);
+extern void GScr_GetAmmoCount(void);
+extern void GScr_GetAngleDelta(void);
+extern void GScr_GetAnimLength(void);
+extern void GScr_GetBrushModelCenter(void);
+extern void GScr_GetDvar(void);
+extern void GScr_GetDvarFloat(void);
+extern void GScr_GetDvarInt(void);
+extern void GScr_GetEntityNumber(void);
+extern void GScr_GetMoveDelta(void);
+extern void GScr_GetNorthYaw(void);
+extern void GScr_GetNumParts(void);
+extern void GScr_GetPartName(void);
+extern void GScr_GetTeamPlayersAlive(void);
+extern void GScr_GetTeamScore(void);
+extern void GScr_GetTime(void);
+extern void GScr_IsAlive(void);
+extern void GScr_IsDefined(void);
+extern void GScr_IsPlayer(void);
+extern void GScr_IsPlayerNumber(void);
+extern void GScr_IsString(void);
+extern void GScr_IsValidGameType(void);
+extern void GScr_KickPlayer(void);
+extern void GScr_LoadMap(void);
+extern void GScr_LocalToWorldCoords(void);
+extern void GScr_LogPrint(void);
+extern void GScr_MakeDvarServerInfo(void);
+extern void GScr_MapExists(void);
+extern void GScr_MapRestart(void);
+extern void GScr_MatchEnd(void);
+extern void GScr_NewClientHudElem(void);
+extern void GScr_NewHudElem(void);
+extern void GScr_NewTeamHudElem(void);
+extern void GScr_Obituary(void);
+extern void GScr_Objective_Team(void);
+extern void GScr_OpenFile(void);
+extern void GScr_PlaceSpawnPoint(void);
+extern void GScr_PrecacheHeadIcon(void);
+extern void GScr_PrecacheMenu(void);
+extern void GScr_PrecacheStatusIcon(void);
+extern void GScr_PrecacheTurret(void);
+extern void GScr_RadiusDamage(void);
+extern void GScr_ReleaseClaimedTrigger(void);
+extern void GScr_SendXboxLiveRanks(void);
+extern void GScr_SetArchive(void);
+extern void GScr_SetBottomArc(void);
+extern void GScr_SetClientNameMode(void);
+extern void GScr_SetCursorHint(void);
+extern void GScr_SetDvar(void);
+extern void GScr_SetHintString(void);
+extern void GScr_SetLeftArc(void);
+extern void GScr_SetPlayerIgnoreRadiusDamage(void);
+extern void GScr_SetPlayerTeamRank(void);
+extern void GScr_SetRightArc(void);
+extern void GScr_SetTeamForTrigger(void);
+extern void GScr_SetTeamScore(void);
+extern void GScr_SetTopArc(void);
+extern void GScr_SetVoteNoCount(void);
+extern void GScr_SetVoteString(void);
+extern void GScr_SetVoteTime(void);
+extern void GScr_SetVoteYesCount(void);
+extern void GScr_SetWinningPlayer(void);
+extern void GScr_SetWinningTeam(void);
+extern void GScr_ShellShock(void);
+extern void GScr_Spawn(void);
+extern void GScr_SpawnTurret(void);
+extern void GScr_StopShellShock(void);
+extern void GScr_UpdateClientNames(void);
+extern void GScr_UpdateScores(void);
+extern void GScr_ViewKick(void);
+extern void GScr_WorldEntNumber(void);
+extern void GScr_acos(void);
+extern void GScr_asin(void);
+extern void GScr_atan(void);
+extern void GScr_cos(void);
+extern void GScr_getStartTime(void);
+extern void GScr_line(void);
+extern void GScr_positionWouldTelefrag(void);
+extern void GScr_print3d(void);
+extern void GScr_sin(void);
+extern void GScr_tan(void);
+extern void MacBuilder_SetControlFontStyle(void);
+extern void MacDisplay_CreateScreenContext(void);
+extern void MacDisplay_Initialize(void);
+extern void R_BoundsForSurf_ModelInst(void);
+extern void R_BoundsForSurf_StaticModelCached(void);
+extern void R_BoundsForSurf_Triangles(void);
+extern void ScrCmd_Delete(void);
+extern void ScrCmd_EnableLinkTo(void);
+extern void ScrCmd_GetAttachIgnoreCollision(void);
+extern void ScrCmd_GetAttachModelName(void);
+extern void ScrCmd_GetAttachSize(void);
+extern void ScrCmd_GetAttachTagName(void);
+extern void ScrCmd_GetClanDescription(void);
+extern void ScrCmd_GetClanId(void);
+extern void ScrCmd_GetClanMotto(void);
+extern void ScrCmd_GetClanName(void);
+extern void ScrCmd_GetClanURL(void);
+extern void ScrCmd_GetEye(void);
+extern void ScrCmd_GetNormalHealth(void);
+extern void ScrCmd_GetOrigin(void);
+extern void ScrCmd_Hide(void);
+extern void ScrCmd_IsTouching(void);
+extern void ScrCmd_LinkTo(void);
+extern void ScrCmd_PlayLoopRumble(void);
+extern void ScrCmd_PlayLoopSound(void);
+extern void ScrCmd_PlayRumble(void);
+extern void ScrCmd_PlaySound(void);
+extern void ScrCmd_PlaySoundAsMaster(void);
+extern void ScrCmd_SetContents(void);
+extern void ScrCmd_SetModel(void);
+extern void ScrCmd_SetNormalHealth(void);
+extern void ScrCmd_Show(void);
+extern void ScrCmd_ShowToPlayer(void);
+extern void ScrCmd_SoundExists(void);
+extern void ScrCmd_StopLoopSound(void);
+extern void ScrCmd_StopRumble(void);
+extern void ScrCmd_Unlink(void);
+extern void ScrCmd_UseBy(void);
+extern void ScrCmd_attach(void);
+extern void ScrCmd_detach(void);
+extern void ScrCmd_detachAll(void);
+extern void Scr_AddStruct(void);
+extern void Scr_AmbientPlay(void);
+extern void Scr_AmbientStop(void);
+extern void Scr_AnglesToForward(void);
+extern void Scr_AnglesToRight(void);
+extern void Scr_AnglesToUp(void);
+extern void Scr_BulletTrace(void);
+extern void Scr_BulletTracePassed(void);
+extern void Scr_Closer(void);
+extern void Scr_Distance(void);
+extern void Scr_DistanceSquared(void);
+extern void Scr_GetEnt(void);
+extern void Scr_GetEntArray(void);
+extern void Scr_GetEntByNum(void);
+extern void Scr_GetSubStr(void);
+extern void Scr_GetWeaponModel(void);
+extern void Scr_GrenadeExplosionEffect(void);
+extern void Scr_IsSplitscreen(void);
+extern void Scr_IsSubStr(void);
+extern void Scr_Length(void);
+extern void Scr_LengthSquared(void);
+extern void Scr_LoadFX(void);
+extern void Scr_MusicPlay(void);
+extern void Scr_MusicStop(void);
+extern void Scr_Objective_Add(void);
+extern void Scr_Objective_Current(void);
+extern void Scr_Objective_Delete(void);
+extern void Scr_Objective_Icon(void);
+extern void Scr_Objective_OnEntity(void);
+extern void Scr_Objective_Position(void);
+extern void Scr_Objective_State(void);
+extern void Scr_PhysicsTrace(void);
+extern void Scr_PlayFX(void);
+extern void Scr_PlayFXOnTag(void);
+extern void Scr_PlayLoopRumbleOnPos(void);
+extern void Scr_PlayLoopedFX(void);
+extern void Scr_PlayRumbleOnPos(void);
+extern void Scr_PrecacheItem(void);
+extern void Scr_PrecacheModel(void);
+extern void Scr_PrecacheRumble(void);
+extern void Scr_PrecacheShader(void);
+extern void Scr_PrecacheShellShock(void);
+extern void Scr_PrecacheString(void);
+extern void Scr_RandomFloat(void);
+extern void Scr_RandomFloatRange(void);
+extern void Scr_RandomInt(void);
+extern void Scr_RandomIntRange(void);
+extern void Scr_ResetTimeout(void);
+extern void Scr_SetExponentialFog(void);
+extern void Scr_SetLinearFog(void);
+extern void Scr_SetStableMissile(void);
+extern void Scr_SightTracePassed(void);
+extern void Scr_SoundFade(void);
+extern void Scr_StopAllRumbles(void);
+extern void Scr_StrTok(void);
+extern void Scr_ToLower(void);
+extern void Scr_VectorDot(void);
+extern void Scr_VectorNormalize(void);
+extern void Scr_VectorToAngles(void);
+
+extern void assertCmd(void);
+extern void assertexCmd(void);
+extern void assertmsgCmd(void);
 extern char cg_eachClientActiveLocalEntities[];
 extern char cg_eachClientLocalEntities[];
 extern char cin[];
@@ -217,12 +217,12 @@ extern char cmd_texts[];
 extern char effectClusterArray[];
 extern char effectListArrayBolt[];
 extern char effectListArrayNonBolt[];
-extern char iprintln[];
-extern char iprintlnbold[];
+extern void iprintln(void);
+extern void iprintlnbold(void);
 extern char legacyHacksArray[];
 extern char playerKeys[];
-extern char print[];
-extern char println[];
+extern void print(void);
+extern void println(void);
 extern char scr_const[];
 extern char str_002157b8[];
 extern char str_00216cd8[];
@@ -1417,18 +1417,10 @@ struct _d32___ZN10CVAOPacket14sCurrentPacketE __attribute__((aligned(4))) __ZN10
 struct _d32___ZN10CVAOPacket10sVAOStatusE __attribute__((aligned(4))) __ZN10CVAOPacket10sVAOStatusE = {
     { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
 };
-struct _d32___ZN12CSoundObject13sReadCallbackE __attribute__((aligned(4))) __ZN12CSoundObject13sReadCallbackE = {
-    { 0, 0, 0, 0 }
-};
-struct _d32___ZN12CSoundObject13sSeekCallbackE __attribute__((aligned(4))) __ZN12CSoundObject13sSeekCallbackE = {
-    { 0, 0, 0, 0 }
-};
-struct _d32___ZN12CSoundObject14sCloseCallbackE __attribute__((aligned(4))) __ZN12CSoundObject14sCloseCallbackE = {
-    { 0, 0, 0, 0 }
-};
-struct _d32___ZN12CSoundObject13sOpenCallbackE __attribute__((aligned(4))) __ZN12CSoundObject13sOpenCallbackE = {
-    { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
-};
+
+
+
+
 /* frenchNumberKeysMap: defined by typed C TU (cl_keys_mp.c); skipped. */
 /* keynames_localized: migrated to home .c (plan 4g); skipped. */
 /* keynames: migrated to home .c (plan 4g); skipped. */
@@ -1613,7 +1605,7 @@ struct _d32_g_decoder __attribute__((aligned(4))) g_decoder = {
 /* g_frame_size: defined by typed C TU; skipped. */
 /* g_current_bandwidth_setting: defined by typed C TU; skipped. */
 struct _d32_g_encoder_samplerate __attribute__((aligned(4))) g_encoder_samplerate = {
-    (void *)((char *)&__mh_execute_header + 4096)
+    (void *)(uintptr_t)0x2000
 };
 struct _d32_g_encoder_quality __attribute__((aligned(4))) g_encoder_quality = {
     { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
@@ -1626,15 +1618,15 @@ struct _d32_g_encoder_quality __attribute__((aligned(4))) g_encoder_quality = {
 /* inflate_mask: defined by typed C TU; skipped. */
 struct _d32_fixed_td __attribute__((aligned(4))) fixed_td = {
     { 80, 5, 0, 0, 1, 0, 0, 0, 87, 5, 0, 0, 1, 1, 0, 0, 83, 5, 0, 0, 17, 0, 0, 0, 91, 5, 0, 0 },
-    (void *)((char *)&__mh_execute_header + 1),
+    (void *)(uintptr_t)0x1001,
     { 81, 5, 0, 0, 5, 0, 0, 0, 89, 5, 0, 0, 1, 4, 0, 0, 85, 5, 0, 0, 65, 0, 0, 0, 93, 5, 0, 0 },
     (void *)((char *)&MacBuilder_SetControlFontStyle + 65),
     { 80, 5, 0, 0, 3, 0, 0, 0, 88, 5, 0, 0, 1, 2, 0, 0, 84, 5, 0, 0, 33, 0, 0, 0, 92, 5, 0, 0 },
-    (void *)((char *)&__mh_execute_header + 4097),
+    (void *)(uintptr_t)0x2001,
     { 82, 5, 0, 0, 9, 0, 0, 0, 90, 5, 0, 0, 1, 8, 0, 0, 86, 5, 0, 0, 129, 0, 0, 0, 192, 5, 0, 0 },
     (void *)((char *)&MacDisplay_CreateScreenContext + 2103),
     { 80, 5, 0, 0, 2, 0, 0, 0, 87, 5, 0, 0, 129, 1, 0, 0, 83, 5, 0, 0, 25, 0, 0, 0, 91, 5, 0, 0 },
-    (void *)((char *)&__mh_execute_header + 2049),
+    (void *)(uintptr_t)0x1801,
     { 81, 5, 0, 0, 7, 0, 0, 0, 89, 5, 0, 0, 1, 6, 0, 0, 85, 5, 0, 0, 97, 0, 0, 0, 93, 5, 0, 0 },
     (void *)((char *)&MacDisplay_CreateScreenContext + 2103),
     { 80, 5, 0, 0, 4, 0, 0, 0, 88, 5, 0, 0, 1, 3, 0, 0, 84, 5, 0, 0, 49, 0, 0, 0, 92, 5, 0, 0 },

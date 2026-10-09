@@ -7,7 +7,7 @@ extern struct scrCompilePub_t scrCompilePub;
 extern void Z_FreeInternal(void *ptr);
 extern void *Z_MallocInternal(int size);
 extern unsigned int FindVariable(unsigned int parentId, unsigned int value);
-extern int Scr_EvalVariable(unsigned int id);
+extern unsigned long long Scr_EvalVariable(unsigned int id);
 extern VariableUnion *GetVariableValueAddress(unsigned int id);
 extern void AddRefToValue(int type, VariableUnion u);
 extern void Scr_EvalBinaryOperator(int op, VariableValue *value1, VariableValue *value2);
@@ -22,7 +22,7 @@ extern unsigned int GetArray(unsigned int id);
 extern void SetVariableValue(unsigned int id, VariableValue *value);
 extern void Com_Error(int code, const char *fmt, ...);
 extern void CompileError(unsigned int sourcePos, const char *fmt, ...);
-extern void CompileError2(int codePos, const char *msg);
+extern void CompileError2(const char *codePos, const char *msg, ...);
 extern void AddOpcodePos(unsigned int sourcePos, int type);
 extern void RemoveOpcodePos(void);
 extern void AddThreadStartOpcodePos(unsigned int sourcePos);
@@ -83,11 +83,7 @@ static const char str_dbg_before_lt[] = "before-LinkThread";
 #define SCRCOMP_VAR_INCLUDE_CODEPOS 13
 #define SCRCOMP_MAX_VARIABLES 65534
 
-#ifndef __EMSCRIPTEN__
 static unsigned int LinkThread(unsigned int threadId, VariableValue *pos, int allowFarCall) __attribute_regparm__(3);
-#else
-static unsigned int LinkThread(unsigned int threadId, VariableUnion (*pos)[16]);
-#endif
 static unsigned int SpecifyThreadPosition(unsigned int threadId, unsigned int name, unsigned int sourcePos, int type) __attribute_regparm__(3);
 static void Scr_EvalVariableValue(unsigned int id, VariableValue *value);
 int CompareCaseInfo(const unsigned int *elem1, const unsigned int *elem2);
@@ -127,7 +123,6 @@ static void Scr_EmitLocalVarsRemove(scr_block_t *block, int count);
 static void Scr_MergeBranchChildBlocks(scr_block_t *block, scr_block_t **childBlocks, int childCount);
 static intptr_t *ScriptStatementListFirstExecNode(sval_t val);
 
-#ifndef __EMSCRIPTEN__
 static unsigned int __attribute_regparm__(3)
     LinkThread(unsigned int threadId, VariableValue *pos, int allowFarCall)
 {
@@ -139,7 +134,7 @@ static unsigned int __attribute_regparm__(3)
     if (!varId)
         return 0;
 
-    count = Scr_EvalVariable(varId);
+    count = (int)(unsigned int)Scr_EvalVariable(varId);
     if (count <= 0)
         return 0;
 
@@ -394,15 +389,15 @@ static Bool __attribute_regparm__(2)
         constValue->sourcePos = node[2];
         return 1;
 
-    case 72:
+    case 72: /* parser node 0x48: true */
         constValue->value.type = 6;
-        constValue->value.u.intValue = 0;
+        constValue->value.u.intValue = 1;
         constValue->sourcePos = node[1];
         return 1;
 
-    case 73:
+    case 73: /* parser node 0x49: false */
         constValue->value.type = 6;
-        constValue->value.u.intValue = 1;
+        constValue->value.u.intValue = 0;
         constValue->sourcePos = node[1];
         return 1;
 
@@ -6014,50 +6009,3 @@ unsigned int EmitDeveloperStatementList(sval_t val, scr_block_t *block, sval_t *
     );
 }
 #    endif
-
-#else
-static unsigned int LinkThread(unsigned int threadId, VariableUnion (*pos)[16])
-{
-
-    unsigned int varId;
-    int count, i;
-    int allowFarCall = 0;
-
-    varId = FindVariable(threadId, 0);
-    if (!varId)
-        return 0;
-
-    count = Scr_EvalVariable(varId);
-    if (count <= 0)
-        return 0;
-
-    for (i = 0; i < count; i++) {
-        unsigned int valueId = FindVariable(threadId, i + 2);
-        int *value = (int *)GetVariableValueAddress(valueId);
-        int type = GetVarType(valueId);
-        int posType = ((int *)pos)[1];
-
-        if (posType == 0xc) {
-            if (type == 7) {
-                CompileError2(*value, (const char *)"normal script cannot reference a function in a /# ... #/ comment");
-                continue;
-            }
-        } else {
-            if (!posType) {
-                CompileError2(*value, (const char *)"unknown function");
-                continue;
-            }
-            if (!allowFarCall) {
-                int *target = (int *)*value;
-                if (*target == 1) {
-                    CompileError2(*value, (const char *)"unknown function");
-                    continue;
-                }
-            }
-        }
-
-        *(int *)*value = *(int *)pos;
-    }
-    return 0;
-}
-#endif

@@ -176,15 +176,8 @@ void NET_Sleep(int msec)
         return;
     }
 
-    memset(&fdset, 0, 0x80);
-
-#ifdef _WIN32
-
-    fdset.fd_count = 1;
-    fdset.fd_array[0] = ip_socket;
-#else
-    fdset.fds_bits[(unsigned)ip_socket >> 5] |= 1 << (ip_socket & 31);
-#endif
+    FD_ZERO(&fdset);
+    FD_SET(ip_socket, &fdset);
 
     timeout.tv_sec = msec / 1000;
     timeout.tv_usec = (msec - timeout.tv_sec * 1000) * 1000;

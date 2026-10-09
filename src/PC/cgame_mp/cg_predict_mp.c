@@ -16,13 +16,13 @@ static centity_t *cg_triggerEntities[256];
 extern int CM_PointContents(const vec_t *point, unsigned int model);
 extern int CM_TransformedPointContents(const vec_t *point, unsigned int model, const vec_t *origin, const vec_t *angles);
 extern int CM_ContentsOfModel(unsigned int model);
-extern void CM_BoxTrace(trace_t *results, const vec_t *start, const vec_t *end, const vec_t *mins, const vec_t *maxs, unsigned int model, int brushmask);
+extern int CM_BoxTrace(trace_t *results, const vec_t *start, const vec_t *end, const vec_t *mins, const vec_t *maxs, unsigned int model, int brushmask);
 extern unsigned int CM_TempBoxModel(const vec_t *mins, const vec_t *maxs, int capsule);
-extern void CM_TransformedBoxTraceExternal(trace_t *results, const vec_t *start, const vec_t *end, const vec_t *mins, const vec_t *maxs, unsigned int model, int brushmask, const vec_t *origin, const vec_t *angles);
+extern int CM_TransformedBoxTraceExternal(trace_t *results, const vec_t *start, const vec_t *end, const vec_t *mins, const vec_t *maxs, unsigned int model, int brushmask, const vec_t *origin, const vec_t *angles);
 extern float CM_RadiusOfModel(unsigned int model);
 extern int CL_GetCurrentCmdNumber(void);
 extern qboolean CL_GetUserCmd(int cmdNumber, usercmd_t *ucmd);
-extern void PM_UpdateViewAngles(playerState_t *ps, const usercmd_t *cmd, int, int);
+extern void PM_UpdateViewAngles(playerState_t *ps, float msec, usercmd_t *cmd, int handler);
 extern float LerpAngle(float from, float to, float frac);
 extern void Pmove(pmove_t *pm);
 extern void CG_TransitionPlayerState(playerState_t *ps, playerState_t *ops);
@@ -130,7 +130,7 @@ static void CG_InterpolatePlayerState(qboolean grabAngles)
     if (grabAngles) {
         int cmdNum = CL_GetCurrentCmdNumber();
         CL_GetUserCmd(cmdNum, &cmd);
-        PM_UpdateViewAngles(out, &cmd, 0, 0);
+        PM_UpdateViewAngles(out, (float)cg->frametime, &cmd, 0);
     }
 
     if (next->serverTime <= prev->serverTime)
@@ -180,7 +180,7 @@ void CG_PredictPlayerState(void)
     snapshot_t *nextSnap;
     int cmdNum, oldest;
     usercmd_t curCmd;
-    qboolean moved;
+    qboolean moved = 0;
     WeaponDef *weapDef;
     int cg_time;
 

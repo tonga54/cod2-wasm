@@ -3,6 +3,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* This reconstructed translation unit doesn't include the GL header. Keep
+ * the actual OpenGL void-returning signature instead of an implicit int. */
+extern void glClear(unsigned int mask);
+extern void glClearColor(float red, float green, float blue, float alpha);
+
 float g_scale1 = 1.0f;
 float g_scale2 = 16777216.0f;
 
@@ -97,11 +102,11 @@ extern int MacDisplay_GetSupportsAnisotropicFiltering(void);
 extern float MacDisplay_GetMaxSupportedAnisotropy(void);
 extern int MacDisplay_GetMaxTextureImageUnits(void);
 extern int MacDisplay_GetMaxTextureUnits(void);
-extern void MacDisplay_ReleaseContext(void *ctx);
-extern void MacDisplay_SetGammaRamp(const D3DGAMMARAMP *pRamp);
+extern short unsigned int MacDisplay_ReleaseContext(void *ctx);
+extern short unsigned int MacDisplay_SetGammaRamp(const D3DGAMMARAMP *pRamp);
 extern void MacDisplay_FadeOut(int val);
 extern void MacDisplay_FadeIn(float val);
-extern void MacDisplay_GetCurrentDimensions(int *w, int *h);
+extern short unsigned int MacDisplay_GetCurrentDimensions(int *w, int *h);
 extern void *MacDisplay_CreateScreenContext(int depth, int windowed, int stencil, int multiSample, int fsaa, int *hasAux);
 extern void MacDisplay_SwapContext(void *ctx);
 extern void MacDisplay_SetMode(int w, int h, int depth, int freq);
@@ -111,7 +116,7 @@ extern const char *MacDisplay_GetGLRenderer(void);
 extern const char *MacDisplay_GetGLExtensions(void);
 extern void game_dprintf(const char *fmt, ...);
 extern void COpenGLMatrix_SetIdentity(float *m);
-extern void D3DXMatrixMultiply(float *out, const float *a, const float *b);
+extern D3DXMATRIX *D3DXMatrixMultiply(D3DXMATRIX *out, const D3DXMATRIX *a, const D3DXMATRIX *b);
 extern int MacOpenGLUtils_ConvertD3DProjectionMatrixToOpenGL(float *m, float ViewportWidth, float ViewportHeight);
 extern D3DMATRIX *RB_GetActiveWorldMatrix(void);
 
@@ -355,7 +360,14 @@ typedef struct {
     void *texStageData;
     void *texStageEnd;
     void *texStageCap;
-    unsigned char lightData[0x5A0];
+    union {
+        unsigned char bytes[0x5A0];
+        struct {
+            D3DLIGHT9 lights[8];
+            BOOL enabled[8];
+            D3DMATERIAL9 material;
+        } state;
+    } lightData;
     UINT32 bVal1;
     IDirect3DPixelShader9 *pixelShader;
     UINT32 bVal3;
@@ -378,6 +390,10 @@ unsigned int g_prebind_texID = 0;
 unsigned int g_prebind_texTarget = 0x0DE1;
 static byte *g_colorArrayScratch = NULL;
 static UINT g_colorArrayScratchCapacity = 0;
+static unsigned short *g_indexArrayScratch = NULL;
+static UINT g_indexArrayScratchCapacity = 0;
+static float *g_texCoordScratch = NULL;
+static UINT g_texCoordScratchCapacity = 0;
 
 typedef struct {
     void **vtable;
@@ -477,6 +493,11 @@ static const byte *CDirect3DDevice_ConvertColorArray(const byte *vertBase, UINT 
     if (colorOffset < 0 || vertexCount == 0)
         return NULL;
 
+    /* Already-native bytes can share the interleaved vertex upload. Avoid a
+     * color copy and the legacy GL layer's separate-array restriding pass. */
+    if (byteOrder == COLOR_BYTES_RGBA)
+        return NULL;
+
     bytesNeeded = vertexCount * 4;
     if (bytesNeeded > g_colorArrayScratchCapacity) {
         byte *newScratch = (byte *)realloc(g_colorArrayScratch, bytesNeeded);
@@ -513,6 +534,70 @@ static const byte *CDirect3DDevice_ConvertColorArray(const byte *vertBase, UINT 
     }
 
     return g_colorArrayScratch;
+}
+
+/* Original XSurface colors and world/tess vertices are RGBA. Cached static
+ * vertices pass through StdConverterARGB and therefore need a different order. */
+static int CDirect3DDevice_ColorByteOrder(UINT stride, int positionComponents)
+{
+    if (stride == 0x44 || stride == 0x20 || stride == 0x24)
+        return COLOR_BYTES_RGBA;
+    if (stride == 0x18 ||
+        (stride == 0x40 && positionComponents == 3))
+        return COLOR_BYTES_ARGB;
+    return COLOR_BYTES_BGRA;
+}
+
+/* The engine derives up to eight directional lights from its original light
+ * grid. Upload them in view space; normals use the full model-view matrix.
+ * Emscripten performs the lighting in the generated WebGL vertex shader. */
+static void CDirect3DDevice_ApplyModelLights(DeviceImpl *dev, const float *view)
+{
+    static const float zero[4] = {0, 0, 0, 0};
+    int i;
+    glLoadMatrixf(view);
+    glLightModelfv(0x0B53, zero);
+    glMaterialfv(0x0408, 0x1200, &dev->lightData.state.material.Ambient.r);
+    glMaterialfv(0x0408, 0x1201, &dev->lightData.state.material.Diffuse.r);
+    glMaterialfv(0x0408, 0x1202, zero);
+    for (i = 0; i < 8; ++i) {
+        const D3DLIGHT9 *light = &dev->lightData.state.lights[i];
+        if (dev->lightData.state.enabled[i] && light->Type == 3) {
+            float direction[4] = {-light->Direction.x, -light->Direction.y,
+                                  -light->Direction.z, 0};
+            glEnable(0x4000 + i);
+            glLightfv(0x4000 + i, 0x1200, &light->Ambient.r);
+            glLightfv(0x4000 + i, 0x1201, &light->Diffuse.r);
+            glLightfv(0x4000 + i, 0x1202, zero);
+            glLightfv(0x4000 + i, 0x1203, direction);
+        } else {
+            glDisable(0x4000 + i);
+        }
+    }
+    glEnable(0x0B50);
+}
+
+static const float *CDirect3DDevice_CameraTexCoords(const byte *vertices, UINT stride,
+                                                  int positionOffset, UINT count,
+                                                  const float *worldView)
+{
+    UINT i;
+    if (count > g_texCoordScratchCapacity) {
+        float *coords = (float *)realloc(g_texCoordScratch, (size_t)count * 3 * sizeof(float));
+        if (!coords)
+            return NULL;
+        g_texCoordScratch = coords;
+        g_texCoordScratchCapacity = count;
+    }
+    for (i = 0; i < count; ++i) {
+        const float *position = (const float *)(vertices + i * stride + positionOffset);
+        int axis;
+        for (axis = 0; axis < 3; ++axis)
+            g_texCoordScratch[i * 3 + axis] = position[0] * worldView[axis]
+                + position[1] * worldView[4 + axis] + position[2] * worldView[8 + axis]
+                + worldView[12 + axis];
+    }
+    return g_texCoordScratch;
 }
 
 static GLenum CDirect3DDevice_MapCompareFunc(DWORD func)
@@ -584,7 +669,10 @@ static GLenum CDirect3DDevice_MapBlendFunc(DWORD blend)
 
 static unsigned int CDirect3DDevice_GetTextureGLId(IDirect3DBaseTexture9 *texture)
 {
-    if (!texture || (uintptr_t)texture <= 0x08000000u)
+    if (!texture)
+        return 0;
+    if (*(void ***)texture != vtbl_CDirect3DTexture &&
+        *(void ***)texture != vtbl_CDirect3DCubeTexture)
         return 0;
     /* CDirect3DTexture.texIDStorage: 3 ptrs (2 vtbl + mpTexID) + 16 int fields(64B) +
        2 ptrs (surfaces,pixelData) => 5*sizeof(void*)+64. x86=0x54, x64=0x68. */
@@ -593,7 +681,7 @@ static unsigned int CDirect3DDevice_GetTextureGLId(IDirect3DBaseTexture9 *textur
 
 static GLenum CDirect3DDevice_GetTextureTarget(IDirect3DBaseTexture9 *texture)
 {
-    if (!texture || (unsigned int)texture <= 0x08000000u)
+    if (!texture)
         return 0x0DE1;
     if (*(void ***)texture == vtbl_CDirect3DCubeTexture)
         return GL_TEXTURE_CUBE_MAP;
@@ -895,14 +983,8 @@ static void CDirect3DDevice_ApplyTextureStageState(UINT stage)
         colorOp = D3DTOP_MODULATE;
     if (!alphaOp)
         alphaOp = D3DTOP_MODULATE;
-    if (!colorArg1)
-        colorArg1 = 2;
-    if (!colorArg2)
-        colorArg2 = 1;
-    if (!alphaArg1)
-        alphaArg1 = 2;
-    if (!alphaArg2)
-        alphaArg2 = 1;
+    /* D3DTA_DIFFUSE is zero, a valid vertex-color input. Device creation
+     * initializes the defaults; replacing zero here loses colors and alpha. */
 
     glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
     CDirect3DDevice_SetTextureFactorColor();
@@ -948,7 +1030,7 @@ static void CDirect3DDevice_UpdateTextureIfNeeded(IDirect3DBaseTexture9 *texture
 {
     extern void CDirect3DTexture_UpdateOpenGLSurfaces(const CDirect3DTexture *_this);
 
-    if (!texture || (unsigned int)texture <= 0x08000000u)
+    if (!texture)
         return;
     if (*(void ***)texture == vtbl_CDirect3DTexture)
         CDirect3DTexture_UpdateOpenGLSurfaces((const CDirect3DTexture *)texture);
@@ -1118,6 +1200,13 @@ HRESULT CDirect3DDevice_CreateVertexDeclaration(const CDirect3DDevice *_this,
 HRESULT CDirect3DDevice_CreateVertexShader(const CDirect3DDevice *_this,
                                            const DWORD *pFunction, IDirect3DVertexShader9 **ppShader)
 {
+#ifdef __EMSCRIPTEN__
+    /* The browser target selects the real DX7 fixed-function renderer.
+       ARB/D3D shader creation must report unsupported, never fake success. */
+    *ppShader = NULL;
+    return (HRESULT)0x8876086a; /* D3DERR_NOTAVAILABLE */
+#else
+
     void *shader;
     int errorPos;
     (void)_this;
@@ -1130,11 +1219,19 @@ HRESULT CDirect3DDevice_CreateVertexShader(const CDirect3DDevice *_this,
         return 0x8876086c;
     }
     return 0;
+#endif
 }
 
 HRESULT CDirect3DDevice_CreatePixelShader(const CDirect3DDevice *_this,
                                           const DWORD *pFunction, IDirect3DPixelShader9 **ppShader)
 {
+#ifdef __EMSCRIPTEN__
+    /* The browser target selects the real DX7 fixed-function renderer.
+       ARB/D3D shader creation must report unsupported, never fake success. */
+    *ppShader = NULL;
+    return (HRESULT)0x8876086a; /* D3DERR_NOTAVAILABLE */
+#else
+
     (void)_this;
 
     if (pFunction) {
@@ -1158,12 +1255,20 @@ HRESULT CDirect3DDevice_CreatePixelShader(const CDirect3DDevice *_this,
         *ppShader = (IDirect3DPixelShader9 *)ps;
     }
     return 0;
+#endif
 }
 
 HRESULT CDirect3DDevice_CreatePixelShaderOpenGL(const CDirect3DDevice *_this,
                                                 OpenGLPixelShaderType ShaderType, const long unsigned int *pSrcData,
                                                 IDirect3DPixelShader9 **ppShader)
 {
+#ifdef __EMSCRIPTEN__
+    /* The browser target selects the real DX7 fixed-function renderer.
+       ARB/D3D shader creation must report unsupported, never fake success. */
+    *ppShader = NULL;
+    return (HRESULT)0x8876086a; /* D3DERR_NOTAVAILABLE */
+#else
+
     (void)_this;
     (void)ShaderType;
 
@@ -1187,6 +1292,7 @@ HRESULT CDirect3DDevice_CreatePixelShaderOpenGL(const CDirect3DDevice *_this,
         *ppShader = (IDirect3DPixelShader9 *)ps;
     }
     return 0;
+#endif
 }
 
 HRESULT CDirect3DDevice_CreateDepthStencilSurface(const CDirect3DDevice *_this,
@@ -1564,6 +1670,35 @@ HRESULT CDirect3DDevice_DrawPrimitive(const CDirect3DDevice *_this,
 }
 
 COD2_FORCE_ALIGN_ARG_POINTER
+/* Static-model cache draws advertise 65,536 vertices even for a tiny mesh.
+ * Rebase the actual index range before converting or uploading attributes. */
+static const unsigned short *CDirect3DDevice_IndexRange(const unsigned short *indices,
+    UINT indexCount, UINT *firstVertex, UINT *vertexCount)
+{
+    UINT i, lo = 65535, hi = 0;
+    if (!indexCount)
+        return NULL;
+    for (i = 0; i < indexCount; ++i) {
+        if (indices[i] < lo) lo = indices[i];
+        if (indices[i] > hi) hi = indices[i];
+    }
+    *firstVertex = lo;
+    *vertexCount = hi - lo + 1;
+    if (!lo)
+        return indices;
+    if (indexCount > g_indexArrayScratchCapacity) {
+        unsigned short *scratch = realloc(g_indexArrayScratch,
+            (size_t)indexCount * sizeof(*scratch));
+        if (!scratch)
+            return NULL;
+        g_indexArrayScratch = scratch;
+        g_indexArrayScratchCapacity = indexCount;
+    }
+    for (i = 0; i < indexCount; ++i)
+        g_indexArrayScratch[i] = indices[i] - lo;
+    return g_indexArrayScratch;
+}
+
 HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                                              D3DPRIMITIVETYPE PrimitiveType, INT BaseVertexIndex, UINT MinVertexIndex,
                                              UINT NumVertices, UINT startIndex, UINT primCount)
@@ -1572,6 +1707,9 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
     byte *vbData, *ibData, *vertBase;
     UINT stride, offset;
     int indexCount;
+    const unsigned short *drawIndices;
+    UINT firstVertex, drawVertexCount, vbBytes, ibBytes;
+    long long firstByte;
     GLenum glMode;
     GLenum stage0Target;
     r_backEndGlobals_t *backEndState;
@@ -1584,8 +1722,18 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
     int texOffset;
     int lightmapOffset;
     int normalOffset;
+    float textureWorldView[16];
+    int textureWorldViewValid = 0;
     const D3DVERTEXELEMENT9 *element;
 
+#ifdef __EMSCRIPTEN__
+    static unsigned int webStateChecks;
+    int webCheck = webStateChecks++ < 2;
+#define WEB_STATE_CHECK(stage) do { if (webCheck) fprintf(stdout, "[web-state] %s error=0x%x\n", stage, glGetError()); } while (0)
+#else
+#define WEB_STATE_CHECK(stage) do {} while (0)
+#endif
+    WEB_STATE_CHECK("entry");
     (void)PrimitiveType;
 
     if (!dev->streams[0] || !dev->indexBuffer)
@@ -1598,7 +1746,7 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
     stride = dev->streamStrides[0];
     backEndState = (r_backEndGlobals_t *)imp_backEnd;
     is2D = backEndState && backEndState->projection2D;
-    usesLightmap = !is2D && stride == 0x44;
+    usesLightmap = !is2D && (stride == 0x44 || stride == 0x20);
     stage0Target = 0x0DE1;
 
     positionOffset = 0;
@@ -1611,8 +1759,9 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
     texOffset = stride == 0x44   ? 0x1c
                 : stride == 0x40 ? 0x20
                 : stride == 0x24 ? 0x1c
+                : (stride == 0x20 || stride == 0x18) ? 0x10
                                  : -1;
-    lightmapOffset = stride == 0x44 ? 0x24 : -1;
+    lightmapOffset = stride == 0x44 ? 0x24 : stride == 0x20 ? 0x18 : -1;
     normalOffset = stride == 0x44   ? 0x0c
                    : stride == 0x40 ? 0x10
                    : stride == 0x24 ? 0x0c
@@ -1638,18 +1787,49 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
     if (element)
         normalOffset = element->Offset;
 
-    if (stride == 0x44 || stride == 0x20 || stride == 0x18)
-        colorByteOrder = COLOR_BYTES_RGBA;
-    else if (stride == 0x40 && positionComponents == 3)
-        colorByteOrder = COLOR_BYTES_ARGB;
-    else
-        colorByteOrder = COLOR_BYTES_BGRA;
+    colorByteOrder = CDirect3DDevice_ColorByteOrder(stride, positionComponents);
 
     ibData = *(byte **)((byte *)dev->indexBuffer + sizeof(void *) + 8);   /* IB.data (x86 was +12) */
     if (!ibData)
         return 0;
 
-    vertBase = vbData + offset + BaseVertexIndex * stride;
+    vbBytes = *(UINT *)((byte *)dev->streams[0] + sizeof(void *) + 4);
+    ibBytes = *(UINT *)((byte *)dev->indexBuffer + sizeof(void *) + 4);
+    if (!stride || !primCount || primCount > 0x7fffffffu / 3 ||
+        startIndex > ibBytes / 2 || primCount * 3 > ibBytes / 2 - startIndex)
+        return 0;
+    indexCount = primCount * 3;
+    drawIndices = CDirect3DDevice_IndexRange(
+        (const unsigned short *)(ibData + startIndex * 2), indexCount,
+        &firstVertex, &drawVertexCount);
+    if (!drawIndices)
+        return 0;
+    firstByte = (long long)offset + ((long long)BaseVertexIndex + firstVertex) * stride;
+    if (firstByte < 0 || firstByte > vbBytes ||
+        (long long)drawVertexCount * stride > vbBytes - firstByte)
+        return 0;
+    vertBase = vbData + (size_t)firstByte;
+
+#ifdef __EMSCRIPTEN__
+    {
+        static unsigned int traceStrides[128];
+        if (!is2D && stride < 128 && traceStrides[stride] < 3 && getenv("GTRACE")) {
+            const unsigned short *indices = drawIndices;
+            const byte *first = vertBase + indices[0] * stride;
+            const float *uv = (const float *)(first + texOffset);
+            const byte *color = first + colorOffset;
+            const materialCommands_t *commands = (const materialCommands_t *)imp_tess;
+            ++traceStrides[stride];
+            fprintf(stdout, "[world-input] stride=%u fvf=%x material=%s verts=%u base=%d min=%u indices=%u,%u,%u uv=%g,%g color=%u,%u,%u,%u lm=%d\n",
+                stride, g_currentFVF, commands->material ? commands->material->info.name : "null",
+                NumVertices, BaseVertexIndex, MinVertexIndex, indices[0], indices[1], indices[2],
+                uv[0], uv[1], color[0], color[1], color[2], color[3], commands->lmapIndex);
+            fprintf(stdout, "[world-stages] op0=%u arg1=%u arg2=%u coord=%u tex=%u op1=%u arg1=%u arg2=%u coord=%u tex=%u\n",
+                g_textureStageState[0][1], g_textureStageState[0][2], g_textureStageState[0][3], g_textureStageState[0][11], CDirect3DDevice_GetTextureGLId(g_boundTextures[0]),
+                g_textureStageState[1][1], g_textureStageState[1][2], g_textureStageState[1][3], g_textureStageState[1][11], CDirect3DDevice_GetTextureGLId(g_boundTextures[1]));
+        }
+    }
+#endif
 
     {
         extern void glBindVertexArray(unsigned int);
@@ -1661,8 +1841,10 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
         CDirect3DDevice_DisableExtraTextureUnits();
     }
 
+    WEB_STATE_CHECK("texture units");
     {
 
+#ifndef __EMSCRIPTEN__
         {
             GLuint vsId = (!is2D && g_activeVertexShader)
                               ? *(GLuint *)((char *)g_activeVertexShader + 4)
@@ -1683,6 +1865,7 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                 glBindProgramARB(0x8620, 0);
             }
         }
+#endif
         if (!is2D && dev->zEnable) {
             glEnable(0x0B71);
             glDepthFunc(CDirect3DDevice_MapCompareFunc(dev->zFunc));
@@ -1711,6 +1894,7 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
         }
         glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 
+        WEB_STATE_CHECK("fixed state");
         if (!is2D) {
 
             const GfxViewParms *viewParms = backEndState ? backEndState->viewParms : NULL;
@@ -1742,6 +1926,11 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                     memcpy(proj, &viewParms->projectionMatrix, sizeof(proj));
                 }
 
+                /* D3D TCI_CAMERASPACEPOSITION is generated before the GL
+                 * handedness conversion, then transformed by the material's
+                 * texture matrix. Sky cube maps have no authored UV direction. */
+                D3DXMatrixMultiply(textureWorldView, world, view);
+                textureWorldViewValid = 1;
                 view[2] = -view[2];
                 view[6] = -view[6];
                 view[10] = -view[10];
@@ -1756,6 +1945,8 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                 glMatrixMode(0x1701);
                 glLoadMatrixf(proj);
                 glMatrixMode(0x1700);
+                if (dev->lighting && normalOffset >= 0)
+                    CDirect3DDevice_ApplyModelLights(dev, view);
                 glLoadMatrixf(modelView);
             } else {
                 glMatrixMode(0x1701);
@@ -1781,6 +1972,7 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
         }
     }
 
+    WEB_STATE_CHECK("matrices");
     if (1)
     {
 #ifndef __EMSCRIPTEN__
@@ -1808,7 +2000,7 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
 
             if (!is2D && stride != 0x44) {
                 extern void *imp_tess;
-                const Material *mmat = *(const Material **)((byte *)imp_tess + 0x5a7bc);
+                const Material *mmat = ((materialCommands_t *)imp_tess)->material;
                 if (mmat) {
                     GfxImage *mimg = CDirect3DDevice_SelectMaterialColorImage(mmat);
                     unsigned int mtex = CDirect3DDevice_GetImageGLId(mimg);
@@ -1821,7 +2013,7 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
             if (!glTexID && usesLightmap) {
                 extern void *imp_tess;
                 byte *tessBase = (byte *)imp_tess;
-                const Material *mat = *(const Material **)(tessBase + 0x5a7bc);
+                const Material *mat = ((materialCommands_t *)tessBase)->material;
                 materialImage = CDirect3DDevice_SelectMaterialColorImage(mat);
                 glTexID = CDirect3DDevice_GetImageGLId(materialImage);
                 stage0Target = CDirect3DDevice_GetImageTextureTarget(materialImage);
@@ -1837,10 +2029,10 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                         extern void *imp_tess;
                         extern GfxWorld s_world;
                         byte *tessBase = (byte *)imp_tess;
-                        int lmapIndex = *(int *)(tessBase + 0x5a7c4);
+                        int lmapIndex = ((materialCommands_t *)tessBase)->lmapIndex;
                         int lmapAllowed = !dev->alphaBlendEnable || dev->destBlend == 6;
                         CDirect3DDevice_DisableExtraTextureUnits();
-                        if (lmapAllowed && stage0Target != GL_TEXTURE_CUBE_MAP && lmapIndex >= 0 && lmapIndex < 31 && s_world.lightmaps) {
+                        if (lmapAllowed && stage0Target != GL_TEXTURE_CUBE_MAP && lmapIndex >= 0 && lmapIndex < s_world.lightmapCount && s_world.lightmaps) {
                             GfxImage *lmapImg = s_world.lightmaps[lmapIndex][0];
                             if (lmapImg) {
                                 unsigned int lmTexID = CDirect3DDevice_GetImageGLId(lmapImg);
@@ -1875,8 +2067,6 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                                     glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_ALPHA, 0x0302 );
                                     glTexEnvi(GL_TEXTURE_ENV, 0x0D1C , 1);
 
-                                    glTexEnvi(GL_TEXTURE_ENV, GL_RGB_SCALE,
-                                              dev->alphaBlendEnable ? 1 : CDirect3DDevice_LightmapScale());
                                     glActiveTextureARB(GL_TEXTURE0_ARB);
                                 }
                             }
@@ -1893,6 +2083,7 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
         }
     }
 
+    WEB_STATE_CHECK("texture sampling");
     if (dev->alphaBlendEnable) {
         glEnable(0x0BE2);
         glBlendFunc(CDirect3DDevice_MapBlendFunc(dev->srcBlend),
@@ -1901,14 +2092,19 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
         glDisable(0x0BE2);
     }
 
+    WEB_STATE_CHECK("blend");
     glEnableClientState(0x8074);
     glVertexPointer(positionComponents, 0x1406 , stride,
                     vertBase + positionOffset);
+    if (!is2D && dev->lighting && normalOffset >= 0) {
+        glEnableClientState(0x8075);
+        glNormalPointer(0x1406, stride, vertBase + normalOffset);
+    }
 
     {
         if (usesLightmap) {
             const byte *colors = CDirect3DDevice_ConvertColorArray(
-                vertBase, stride, colorOffset, MinVertexIndex + NumVertices,
+                vertBase, stride, colorOffset, drawVertexCount,
                 colorByteOrder);
 
             glEnableClientState(0x8076);
@@ -1927,7 +2123,7 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
             }
         } else if (colorOffset >= 0) {
             const byte *colors = CDirect3DDevice_ConvertColorArray(
-                vertBase, stride, colorOffset, MinVertexIndex + NumVertices,
+                vertBase, stride, colorOffset, drawVertexCount,
                 colorByteOrder);
 
             glEnableClientState(0x8076);
@@ -1939,7 +2135,14 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
         if (texOffset >= 0) {
             glEnableClientState(0x8078);
             if (stage0Target == GL_TEXTURE_CUBE_MAP) {
-                if (normalOffset >= 0)
+                const float *generated = NULL;
+                if (textureWorldViewValid &&
+                    (g_textureStageState[0][D3DTSS_TEXCOORDINDEX] & 0xffff0000u) == 0x20000u)
+                    generated = CDirect3DDevice_CameraTexCoords(vertBase, stride,
+                        positionOffset, drawVertexCount, textureWorldView);
+                if (generated)
+                    glTexCoordPointer(3, 0x1406, 0, generated);
+                else if (normalOffset >= 0)
                     glTexCoordPointer(3, 0x1406 , stride,
                                       vertBase + normalOffset);
                 else
@@ -1961,19 +2164,33 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
     {
         extern void glDrawElements(unsigned int, int, unsigned int, const void *);
         indexCount = primCount * 3;
-
+#ifdef __EMSCRIPTEN__
+        static unsigned int webDrawChecks;
+        if (webDrawChecks++ < 4) {
+            GLint viewport[4];
+            const float *position = (const float *)(vertBase + positionOffset);
+            glGetIntegerv(0x0BA2, viewport);
+            fprintf(stdout, "[web-draw] 2D=%d stride=%u verts=%u tris=%u xy=(%.1f,%.1f) viewport=(%d,%d,%d,%d) error=0x%x\n",
+                    is2D, stride, NumVertices, primCount, position[0], position[1],
+                    viewport[0], viewport[1], viewport[2], viewport[3], glGetError());
+        }
+#endif
+        WEB_STATE_CHECK("attributes");
         glDrawElements(0x0004 , indexCount,
                        0x1403 ,
-                       ibData + startIndex * 2);
+                       drawIndices);
     }
 
+    WEB_STATE_CHECK("draw");
     glDisableClientState(0x8074);
+    glDisableClientState(0x8075);
     glDisableClientState(0x8076);
     glDisableClientState(0x8078);
     CDirect3DDevice_DisableExtraTextureUnits();
 
     return 0;
 }
+#undef WEB_STATE_CHECK
 
 HRESULT CDirect3DDevice_DrawPrimitiveUP(const CDirect3DDevice *_this,
                                         D3DPRIMITIVETYPE PrimitiveType, UINT PrimitiveCount,
@@ -2020,6 +2237,9 @@ HRESULT COD2_FORCE_ALIGN_ARG_POINTER CDirect3DDevice_SetRenderState(const CDirec
 {
     DeviceImpl *dev = (DeviceImpl *)_this;
     switch (State) {
+    case D3DRS_LIGHTING:
+        dev->lighting = Value;
+        break;
     case D3DRS_ZENABLE:
         dev->zEnable = Value;
         break;
@@ -2106,6 +2326,9 @@ HRESULT CDirect3DDevice_GetRenderState(const CDirect3DDevice *_this, D3DRENDERST
     if (!pValue)
         return 0;
     switch (State) {
+    case D3DRS_LIGHTING:
+        *pValue = dev->lighting;
+        break;
     case D3DRS_ZENABLE:
         *pValue = dev->zEnable;
         break;
@@ -2295,8 +2518,8 @@ HRESULT CDirect3DDevice_GetViewport(const CDirect3DDevice *_this, IDirect3DIndex
 
 HRESULT CDirect3DDevice_SetMaterial(const CDirect3DDevice *_this, const D3DMATERIAL9 *pMaterial)
 {
-    (void)_this;
-    (void)pMaterial;
+    if (!pMaterial) return (HRESULT)0x8876086c;
+    ((DeviceImpl *)_this)->lightData.state.material = *pMaterial;
     return 0;
 }
 
@@ -2309,9 +2532,8 @@ HRESULT CDirect3DDevice_GetMaterial(const CDirect3DDevice *_this, char (*pMateri
 
 HRESULT CDirect3DDevice_SetLight(const CDirect3DDevice *_this, DWORD Index, const D3DLIGHT9 *pLight)
 {
-    (void)_this;
-    (void)Index;
-    (void)pLight;
+    if (Index >= 8 || !pLight) return (HRESULT)0x8876086c;
+    ((DeviceImpl *)_this)->lightData.state.lights[Index] = *pLight;
     return 0;
 }
 
@@ -2324,17 +2546,15 @@ HRESULT CDirect3DDevice_GetLight(const CDirect3DDevice *_this, DWORD Index)
 
 HRESULT CDirect3DDevice_LightEnable(const CDirect3DDevice *_this, DWORD Index, BOOL Enable)
 {
-    (void)_this;
-    (void)Index;
-    (void)Enable;
+    if (Index >= 8) return (HRESULT)0x8876086c;
+    ((DeviceImpl *)_this)->lightData.state.enabled[Index] = Enable != 0;
     return 0;
 }
 
 HRESULT CDirect3DDevice_GetLightEnable(const CDirect3DDevice *_this, DWORD Index, BOOL *pEnable)
 {
-    (void)_this;
-    (void)Index;
-    (void)pEnable;
+    if (Index >= 8 || !pEnable) return (HRESULT)0x8876086c;
+    *pEnable = ((DeviceImpl *)_this)->lightData.state.enabled[Index];
     return 0;
 }
 
@@ -2462,7 +2682,9 @@ HRESULT CDirect3DDevice_SetVertexShaderConstantF(const CDirect3DDevice *_this, U
     const float *pf = pConstantData;
     (void)_this;
     for (i = StartRegister; i < StartRegister + Vector4fCount; i++) {
+#ifndef __EMSCRIPTEN__
         glProgramEnvParameter4fvARB(0x8620, i, pf);
+#endif
         if (i < 256)
             memcpy(g_vsConst + i * 4, pf, 16);
         pf += 4;

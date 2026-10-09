@@ -282,7 +282,7 @@ extern struct XAnim_s *Scr_GetAnims(int index);
 extern XAnim *XAnimGetAnims(const struct XAnimTree_s *tree);
 extern const char *XAnimGetAnimTreeDebugName(const XAnim *anims);
 extern const char *XAnimGetAnimDebugName(const XAnim *anims, unsigned int animIndex);
-extern unsigned int Scr_CompileShutdown(void);
+extern void Scr_CompileShutdown(void);
 extern void Scr_FreeEntityList(void);
 extern void Scr_FreeGameVariable(int bComplete);
 extern void ClearObject(unsigned int parentId);
@@ -479,7 +479,7 @@ static unsigned int VM_CurrentFrameLocalCacheCount(void)
     unsigned int *frameBase;
 
     if (scrVmPub.function_count > 1) {
-        for (frameIndex = 0; frameIndex + 1 < (unsigned int)scrVmPub.function_count; frameIndex++) {
+        for (frameIndex = 1; frameIndex < (unsigned int)scrVmPub.function_count; frameIndex++) {
             previousFrameLocals += scrVmPub.function_frame_start[frameIndex].fs.localVarCount;
         }
     }
@@ -1459,7 +1459,7 @@ static VariableStackBuffer *VM_NotifyRemoveStackFromWait(unsigned int selfId, un
 
     {
         unsigned int waitSelfId = Scr_GetSelf(startLocalId);
-        unsigned int selfNameId = FindObject(FindObjectVariable(varPub->levelId, waitSelfId));
+        unsigned int selfNameId = FindObject(FindObjectVariable(varPub->pauseArrayId, waitSelfId));
         unsigned int notifyListOwnerId = GetVariableValueAddress(FindObjectVariable(selfNameId, startLocalId))->pointerValue;
         unsigned int notifyListId = FindObject(FindVariable(notifyListOwnerId, 0x1fffe));
         unsigned int notifyNameListId = FindObject(FindVariable(notifyListId, waitString));
@@ -1469,7 +1469,7 @@ static VariableStackBuffer *VM_NotifyRemoveStackFromWait(unsigned int selfId, un
         VM_CancelNotifyInternal(notifyListOwnerId, startLocalId, notifyListId, notifyNameListId, waitString);
         RemoveObjectVariable(selfNameId, startLocalId);
         if (!GetArraySize(selfNameId)) {
-            RemoveObjectVariable(varPub->levelId, waitSelfId);
+            RemoveObjectVariable(varPub->pauseArrayId, waitSelfId);
         }
     }
 
@@ -1490,12 +1490,15 @@ static void VM_NotifyTerminatePausedStack(unsigned int selfId, unsigned int star
     VariableStackBuffer *stackValue;
 
     Scr_ClearWaitTime(startLocalId);
-    id = FindObject(FindVariable(varPub->pauseArrayId, time));
+    /* Timed waits live in timeArrayId; pauseArrayId indexes notify owners.
+     * Reading a time bucket from pauseArrayId interpreted an object id as a
+     * stack pointer when an endon cancelled a waiting connection thread. */
+    id = FindObject(FindVariable(varPub->timeArrayId, time));
     stackValue = SCR_STACK_PTR(*GetVariableValueAddress(FindObjectVariable(id, startLocalId)));
     RemoveObjectVariable(id, startLocalId);
 
     if (!GetArraySize(id) && time != (unsigned int)varPub->time) {
-        RemoveVariable(varPub->pauseArrayId, time);
+        RemoveVariable(varPub->timeArrayId, time);
     }
 
     VM_TerminateStack(selfId, startLocalId, stackValue);
@@ -1640,7 +1643,7 @@ static void VM_NotifySuspendStack(unsigned int notifyListOwnerId, unsigned int s
     VM_CancelNotifyInternal(notifyListOwnerId, startLocalId, notifyListId, notifyNameListId, stringValue);
     RemoveObjectVariable(selfNameId, startLocalId);
     if (!GetArraySize(selfNameId)) {
-        RemoveObjectVariable(varPub->levelId, selfId);
+        RemoveObjectVariable(varPub->pauseArrayId, selfId);
     }
 
     Scr_SetThreadWaitTime(startLocalId, varPub->time);
@@ -1693,7 +1696,7 @@ static void __attribute_regparm__(3)
     while ((scanId = FindPrevSibling(scanId)) != 0) {
         unsigned int startLocalId = GetVariableKeyObject(scanId);
         unsigned int selfId = Scr_GetSelf(startLocalId);
-        unsigned int selfNameId = FindObject(FindObjectVariable(varPub->levelId, selfId));
+        unsigned int selfNameId = FindObject(FindObjectVariable(varPub->pauseArrayId, selfId));
         int varType = GetVarType(scanId);
 
         if (!varType) {
@@ -1704,7 +1707,7 @@ static void __attribute_regparm__(3)
             Scr_KillEndonThread(startLocalId);
             RemoveObjectVariable(selfNameId, startLocalId);
             if (!GetArraySize(selfNameId)) {
-                RemoveObjectVariable(varPub->levelId, selfId);
+                RemoveObjectVariable(varPub->pauseArrayId, selfId);
             }
 
             currentStartLocalId = GetStartLocalId(selfId);
@@ -6742,7 +6745,7 @@ static int VM_CandidateHandleWaitTill(const char **pos, unsigned int *localVarCo
     tempValue.u.pointerValue = notifyListOwnerId;
     tempValue.type = VAR_POINTER;
     selfId = Scr_GetSelf(*localId);
-    selfNameId = GetArray(GetObjectVariable(varPub->levelId, selfId));
+    selfNameId = GetArray(GetObjectVariable(varPub->pauseArrayId, selfId));
     selfVarId = GetNewObjectVariable(selfNameId, *localId);
     SetNewVariableValue(selfVarId, &tempValue);
     Scr_SetThreadNotifyName(*localId, stringValue);
@@ -6833,7 +6836,7 @@ static void VM_CandidateHandleEndOnCallback(unsigned int localId, VariableValue 
 
     tempValue.u.pointerValue = notifyListOwnerId;
     tempValue.type = VAR_POINTER;
-    selfNameId = GetArray(GetObjectVariable(varPub->levelId, localId));
+    selfNameId = GetArray(GetObjectVariable(varPub->pauseArrayId, localId));
     selfVarId = GetNewObjectVariable(selfNameId, threadId);
     SetNewVariableValue(selfVarId, &tempValue);
     Scr_SetThreadNotifyName(threadId, stringValue);
@@ -7946,18 +7949,23 @@ static void VM_Resume(unsigned int timeId)
             unsigned int frameLocalId = localId;
 
             for (frameIndex = (unsigned int)scrVmPub.function_count; frameIndex > 0; frameIndex--) {
-                function_frame_t *frame = &scrVmPub.function_frame_start[frameIndex - 1];
+                /* Frame zero is the VM sentinel. Live frames are 1..count,
+                 * matching VM_Execute and VM_CandidateEnterScriptFrame. */
+                function_frame_t *frame = &scrVmPub.function_frame_start[frameIndex];
                 frame->fs.localId = frameLocalId;
+                frame->fs.top = NULL;
+                frame->fs.startTop = NULL;
+                frame->topType = 0;
                 frameLocalId = GetParentLocalId(frameLocalId);
             }
 
-            for (i = 0; i + 1 < (unsigned int)scrVmPub.function_count; i++) {
+            for (i = 1; i < (unsigned int)scrVmPub.function_count; i++) {
                 function_frame_t *frame = &scrVmPub.function_frame_start[i];
                 frame->fs.localVarCount = VM_RestoreLocalVarsFromSibling(frame->fs.localId);
             }
 
             localVarCount = VM_RestoreArchivedLocalVars(stackValue);
-            scrVmPub.function_frame_start[scrVmPub.function_count - 1].fs.localVarCount = localVarCount;
+            scrVmPub.function_frame->fs.localVarCount = localVarCount;
         } else {
             localVarCount = VM_RestoreArchivedLocalVars(stackValue);
         }

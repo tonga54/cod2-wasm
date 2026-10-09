@@ -1,12 +1,7 @@
 #include "common_types.h"
 #include "imports.h"
 
-extern void CDirect3DDevice_CreateAndSetFixedFunctionVAO();
-extern void CDirect3DVertexDeclaration_GetShaderDeclaration();
-extern void MacBuilder_SetControlFontStyle();
-extern void XAnimSetCompleteGoalWeightKnobAll();
-extern char __mh_execute_header[];
-extern char s_debugFrameGlob[];
+
 extern infoParm_t infoParms[54];
 
 extern int stricmp(const char *, const char *);
@@ -58,24 +53,24 @@ infoParm_t infoParms[54] = {
     { (char *)&str_00220130, 0x1, 0x1400000, 0x20, 0x0 },
     { (char *)&str_00220138, 0x0, 0x1500000, 0x0, 0x0 },
     { (char *)&str_00220140, 0x0, 0x1600000, 0x0, 0x0 },
-    { (char *)&str_00220148, 0x0, (int)((char *)&s_debugFrameGlob + 1106304), 0x0, 0x0 },
+    { (char *)&str_00220148, 0x0, 0x1600000, 0x0, 0x0 },
     { (char *)&str_00220154, 0x1, 0x0, 0x80, 0x0 },
-    { (char *)&str_00220160, 0x1, 0x0, (int)&__mh_execute_header, 0x0 },
-    { (char *)&str_0022016c, 0x1, 0x0, (int)((char *)&__mh_execute_header + 4096), 0x0 },
-    { (char *)&str_00220178, 0x1, 0x0, (void *)((char *)&CDirect3DDevice_CreateAndSetFixedFunctionVAO + 1116), 0x0 },
-    { (char *)&str_00220184, 0x1, 0x0, (void *)((char *)&CDirect3DVertexDeclaration_GetShaderDeclaration + 82), 0x0 },
+    { (char *)&str_00220160, 0x1, 0x0, 0x1000, 0x0 },
+    { (char *)&str_0022016c, 0x1, 0x0, 0x2000, 0x0 },
+    { (char *)&str_00220178, 0x1, 0x0, 0x10000, 0x0 },
+    { (char *)&str_00220184, 0x1, 0x0, 0x20000, 0x0 },
     { (char *)&str_00220190, 0x1, 0x0, 0x200, 0x0 },
     { (char *)&str_0022019c, 0x1, 0x0, 0x400, 0x0 },
     { (char *)&str_002201a8, 0x1, 0x0, 0x80000000, 0x0 },
-    { (char *)&str_002201b0, 0x1, (void *)((char *)&MacBuilder_SetControlFontStyle + 64), 0x0, 0x0 },
+    { (char *)&str_002201b0, 0x1, 0x4000, 0x0, 0x0 },
     { (char *)&str_002201bc, 0x0, 0x0, 0x8000000, 0x0 },
     { (char *)&str_002201c4, 0x0, 0x0, 0x10000000, 0x0 },
     { (char *)&str_002201d0, 0x1, 0x80000000, 0x0, 0x0 },
     { (char *)&str_002201d8, 0x0, 0x0, 0x40, 0x0 },
     { (char *)&str_0021a570, 0x1, 0x0, 0x0, 0x4 },
     { (char *)&str_002201e8, 0x0, 0x4, 0x800, 0x0 },
-    { (char *)&str_002201ec, 0x0, (void *)((char *)&CDirect3DDevice_CreateAndSetFixedFunctionVAO + 1116), 0x0, 0x0 },
-    { (char *)&str_002201f8, 0x0, (void *)((char *)&XAnimSetCompleteGoalWeightKnobAll + 1744), 0x0, 0x0 },
+    { (char *)&str_002201ec, 0x0, 0x10000, 0x0, 0x0 },
+    { (char *)&str_002201f8, 0x0, 0x40000, 0x0, 0x0 },
     { (char *)&str_00220208, 0x0, 0x2, 0x0, 0x0 },
     { (char *)&str_00220210, 0x0, 0x10, 0x0, 0x0 },
     { (char *)&str_0022021c, 0x0, 0x20, 0x0, 0x0 },
@@ -83,11 +78,11 @@ infoParm_t infoParms[54] = {
     { (char *)&str_0022022c, 0x0, 0x1, 0x0, 0x0 },
     { (char *)&str_00220238, 0x0, 0x2000000, 0x1000000, 0x0 },
     { (char *)&str_00220244, 0x0, 0x4000000, 0x1000000, 0x0 },
-    { (char *)&str_00220250, 0x0, (int)((char *)&__mh_execute_header + 4096), 0x0, 0x0 },
+    { (char *)&str_00220250, 0x0, 0x2000, 0x0, 0x0 },
     { (char *)&str_00220258, 0x0, 0x80, 0x0, 0x0 },
     { (char *)&str_00220260, 0x0, 0x800, 0x0, 0x0 },
     { (char *)&str_0022026c, 0x0, 0x400, 0x0, 0x0 },
-    { (char *)&str_00220278, 0x0, (void *)((char *)&CDirect3DVertexDeclaration_GetShaderDeclaration + 82), 0x0, 0x0 },
+    { (char *)&str_00220278, 0x0, 0x20000, 0x0, 0x0 },
     { 0, 0x0, 0x0, 0x0, 0x0 },
     { 0, 0x0, 0x0, 0x0, 0x0 }
 };

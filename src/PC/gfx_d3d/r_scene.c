@@ -873,6 +873,33 @@ void R_RenderScene(const refdef_t *refdef)
     }
 }
 
+void R_DebugStaticModels(const float *view)
+{
+    GfxWorld *world = rgp.world;
+    int i;
+    if (!world)
+        return;
+    ri.Printf(0, "[smodels] count=%d view=%d\n", world->smodelCount, scene.viewCount);
+    for (i = 0; i < world->smodelCount; ++i) {
+        GfxStaticModelInstance *m = &world->smodelInsts[i];
+        const char *name = XModelGetName(m->model);
+        if (!strstr(name, "vehicle_"))
+            continue;
+        ri.Printf(0, "[smodels] %d %s origin=(%.1f %.1f %.1f) min=(%.1f %.1f %.1f) max=(%.1f %.1f %.1f) scale=%.2f cull=%.1f last=%d lodscale=%.2f bias=%.1f\n",
+                  i, name, m->origin[0], m->origin[1], m->origin[2],
+                  m->mins[0], m->mins[1], m->mins[2], m->maxs[0], m->maxs[1], m->maxs[2],
+                  m->scale, m->cullDist, ((int *)rg.smodelDyncs)[i * 2], rg.lodParms.scale, rg.lodParms.bias);
+        for (int j = 0; j < scene.def.entityCount; ++j) {
+            GfxEntity *ent = &scene.def.entities[j];
+            GfxSceneEntity *se = &scene.sceneEnts[j];
+            if (ent->reType == 2 && se->u.model == m->model && ent->origin[0] == m->origin[0])
+                ri.Printf(0, "[smodels] scene=%d cull=%d surfaces=%d type=%d skins=%p material=%s\n",
+                          j, se->cullState, se->surfCount, se->surfs ? *se->surfs : -1,
+                          m->model->xskins, se->surfCount && se->materials[0] ? se->materials[0]->info.name : "none");
+        }
+    }
+}
+
 int R_AddStaticModelToScene(int smodelIndex)
 {
     GfxBackEndData *buf;
@@ -925,7 +952,7 @@ int R_AddStaticModelToScene(int smodelIndex)
 
     if (r_rendererInUse->current.integer == 2) {
 
-        backEndRefEnt->lighting.dx7.colorForDir = (FxMemMgr_Emitter * (*)[2])((intptr_t)smodelIndex + (intptr_t)world->smodelLightingColorTable);
+        backEndRefEnt->lighting.dx7.colorForDir = (FxMemMgr_Emitter * (*)[2])(world->smodelLightingColorTable + smodelIndex);
         *(int *)&backEndRefEnt->lighting.dx7.sunVisibility = ((int *)world->smodelLightingSunVisTable)[smodelIndex];
     } else {
         backEndRefEnt->lighting.baseCoords[0] = smodelInst->baseLightingCoords[0];

@@ -74,7 +74,7 @@ extern void Con_Close(void);
 extern void CL_ClearState(void);
 extern void CL_SystemInfoChanged(void);
 extern qboolean FS_ConditionalRestart(int checksumFeed);
-extern qboolean Sys_IsLANAddress(int addr0, int addr1, int addr2);
+extern qboolean Sys_IsLANAddress(netadr_t adr);
 extern void CL_RequestAuthorization(void);
 extern void CL_InitDownloads(void);
 extern void CL_AddReliableCommand(const char *cmd);
@@ -270,7 +270,7 @@ void CL_ParseGamestate(msg_t *msg)
     FS_ConditionalRestart(clc->checksumFeed);
 
     if (net_lanauthorize->current.enabled == 0) {
-        if (Sys_IsLANAddress(*(int *)&clc->serverAddress, *(int *)((byte *)&clc->serverAddress + 4), *(int *)((byte *)&clc->serverAddress + 8))) {
+        if (Sys_IsLANAddress(clc->serverAddress)) {
 
             CL_InitDownloads();
             Dvar_SetInt(cl_paused, 0);

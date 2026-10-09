@@ -2,14 +2,14 @@
 #include "imports.h"
 #include "bytematch.h"
 
-extern void G_FreeEntity(gentity_t *ent);
+extern unsigned char G_FreeEntity(gentity_t *ent);
 extern unsigned char G_SetOrigin(gentity_t *ent, const vec_t *origin);
 extern qboolean G_SpawnString(const char *key, const char *defaultString, const char **out);
 extern qboolean G_SpawnFloat(const char *key, const char *defaultString, float *out);
 extern qboolean G_SpawnInt(const char *key, const char *defaultString, int *out);
 extern void Com_Error(int code, const char *fmt, ...);
 extern DObj_s *Com_GetServerDObj(int entNum);
-extern void DObjSetControlTagAngles(DObj_s *obj, int *partBits, unsigned short tag, vec_t *angles);
+extern qboolean DObjSetControlTagAngles(DObj_s *obj, int *partBits, unsigned short tag, vec_t *angles);
 extern void SV_UnlinkEntity(gentity_t *ent);
 extern void SV_LinkEntity(gentity_t *ent);
 extern void SetClientViewAngle(gentity_t *ent, vec_t *angles);
@@ -22,7 +22,7 @@ extern float AngleNormalize180(float angle);
 extern void YawVectors(const vec_t yaw, vec_t *forward, vec_t *right);
 extern float Vec3Normalize(vec_t *v);
 extern float Q_acos(float x);
-extern unsigned char G_GeneralLink(gentity_t *ent);
+extern void G_GeneralLink(gentity_t *ent);
 extern DObjAnimMat_s *G_DObjGetLocalTagMatrix(gentity_t *ent, unsigned int tagName);
 extern void AnglesToAxis(const vec_t *angles, vec_t *axis);
 extern void MatrixTransformVector(const vec_t *in1, const vec_t *in2, vec_t *out);
@@ -36,7 +36,7 @@ extern const char *va(const char *fmt, ...);
 extern qboolean IsItemRegistered(unsigned int item);
 extern SoundAlias G_SoundAliasIndex(const char *name);
 extern void G_DObjUpdate(gentity_t *ent);
-extern void G_SetAngle(gentity_t *ent, const vec_t *angles);
+extern unsigned char G_SetAngle(gentity_t *ent, const vec_t *angles);
 extern struct level_locals_t level;
 extern struct bgs_t level_bgs;
 
@@ -59,7 +59,7 @@ extern void ConvertQuatToMat(const DObjAnimMat *mat, float axis[3][3]);
 extern void XAnimClearTreeGoalWeightsStrict(XAnimTree_s *tree, unsigned int animIndex, float blendTime);
 extern int XAnimGetNumChildren(const XAnim_s *anims, unsigned int animIndex);
 extern unsigned int XAnimGetChildAt(const XAnim_s *anims, unsigned int animIndex, unsigned int childIndex);
-extern void XAnimSetGoalWeight(XAnimTree_s *tree, unsigned int animIndex, float goalWeight, float goalTime, float rate, unsigned int notifyName, unsigned int notifyType, int bRestart);
+extern int XAnimSetGoalWeight(XAnimTree_s *tree, unsigned int animIndex, float goalWeight, float goalTime, float rate, unsigned int notifyName, unsigned int notifyType, int bRestart);
 extern void XAnimCalcAbsDelta(XAnimTree_s *tree, unsigned int animIndex, float *rot, float *trans);
 extern float XAnimGetWeight(const XAnimTree_s *tree, unsigned int animIndex);
 extern const char *XAnimGetAnimDebugName(const XAnim_s *anims, unsigned int animIndex);

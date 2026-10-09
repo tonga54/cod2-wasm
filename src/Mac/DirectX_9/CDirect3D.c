@@ -216,7 +216,6 @@ HRESULT CDirect3D_CreateDevice(const void *_this, UINT Adapter, int DeviceType, 
 
     memset(deviceMem, 0, sizeof(deviceMem));
     *(void ***)deviceMem = vtbl_CDirect3DDevice;
-    CDirect3DDevice_Init(deviceMem);
 
     {
         extern int sdl_gl_width, sdl_gl_height;
@@ -224,6 +223,11 @@ HRESULT CDirect3D_CreateDevice(const void *_this, UINT Adapter, int DeviceType, 
         sdl_gl_height = height;
     }
     ctx = MacDisplay_CreateScreenContext(24, 1, 0, 0, 0, NULL);
+    if (!ctx) {
+        *ppReturnedDeviceInterface = NULL;
+        return (HRESULT)0x8876086a;
+    }
+    CDirect3DDevice_Init(deviceMem);
     /* DeviceImpl field offsets differ on x64 (8-byte ptrs): context@16 renderTarget@32
      * backBuffer@48 (x86: 0x08/0x14/0x1C). GetBackBuffer reads the typed backBuffer
      * field, so these must land at the right offset or it returns NULL. */

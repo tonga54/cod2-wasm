@@ -44,7 +44,7 @@ extern clipMap_t cm;
 extern void CM_CalcTraceEntents(TraceExtents *extents);
 extern int CM_BoxLeafnums(const vec_t *mins, const vec_t *maxs, int *list, int listsize, int *lastLeaf);
 extern short int CM_MeshTestInLeaf(const traceWork_t *tw, cLeaf_t *leaf, trace_t *trace);
-extern short int CM_TraceThroughAabbTree(const traceWork_t *tw, CollisionAabbTree *aabbTree, trace_t *trace);
+extern void CM_TraceThroughAabbTree(const traceWork_t *tw, CollisionAabbTree *aabbTree, trace_t *trace);
 extern void AnglesToAxis(vec3_t angles, float *axis);
 extern void MatrixTransformVector(const vec_t *in, const vec_t *matrix, vec_t *out);
 extern void MatrixTransposeTransformVector(const vec_t *in, const vec_t *matrix, vec_t *out);
@@ -459,6 +459,8 @@ clipHandle_t CM_TempBoxModel(const vec_t *mins, const vec_t *maxs, int contents)
     CM_CopyVec3(mins, brush->mins);
     CM_CopyVec3(maxs, brush->maxs);
     brush->contents = contents;
+    /* Entity linking reads the model leaf mask before tracing the brush. */
+    model->leaf.brushContents = contents;
 
     return CM_TEMP_BOX_MODEL;
 }

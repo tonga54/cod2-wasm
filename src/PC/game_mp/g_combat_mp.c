@@ -22,8 +22,8 @@ extern void G_GetPlayerViewOrigin(gentity_t *ent, vec_t *origin);
 extern float Vec3Normalize(vec_t *v);
 extern float Vec3NormalizeTo(const vec_t *v, vec_t *out);
 extern int G_LocationalTracePassed(const vec_t *start, const vec_t *end, int entityNum, int contentmask);
-extern unsigned int Scr_AddEntity(gentity_t *ent);
-extern unsigned int Scr_AddInt(int value);
+extern void Scr_AddEntity(gentity_t *ent);
+extern void Scr_AddInt(int value);
 extern void Scr_Notify(gentity_t *ent, int name, int numArgs);
 extern int LogAccuracyHit(gentity_t *target, gentity_t *attacker);
 extern int CM_AreaEntities(const vec_t *mins, const vec_t *maxs, int *entityList, int maxcount, int areatype);
@@ -31,7 +31,7 @@ extern void G_TraceCapsule(void *results, const vec_t *start, const vec_t *end, 
 extern void Scr_PlayerDamage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, int damage, int dflags, int mod, int weapon, const vec_t *dir, const vec_t *point, hitLocation_t hitLoc, int timeOffset);
 extern int Com_GetServerDObj(int clientNum);
 extern int BG_AnimScriptEvent(void *ps, int event, int isContinue, int force);
-extern void Scr_PlayerKilled(gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, int meansOfDeath, int iWeapon, const vec_t *vDir, hitLocation_t hitLoc, int psTimeOffset);
+extern void Scr_PlayerKilled(gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, int meansOfDeath, int iWeapon, const vec_t *vDir, hitLocation_t hitLoc, int psTimeOffset, int deathAnimDuration);
 extern gentity_t *fire_grenade(gentity_t *self, vec_t *start, vec_t *dir, int grenadeWPID, int clientNum);
 extern void Cmd_Score_f(gentity_t *ent);
 extern void SV_UnlinkEntity(gentity_t *ent);
@@ -84,7 +84,7 @@ extern entityHandler_t entityHandlers[20];
 extern const dvar_t *g_debugDamage;
 
 extern int g_sNextDmgTableId;
-extern byte g_time_ptr[];
+extern void *imp_bgs;
 extern int g_phys_world;
 
 static void G_HitLocStrcpy(byte *pMember, const char *pszKeyValue)
@@ -102,40 +102,31 @@ void G_ParseHitLocDmgTable(void)
     char buffer[0x2000];
     int hFile;
     int iFileLength;
-    int off;
+    int i;
+    const int headerSize = sizeof("LOCDMGTABLE") - 1;
 
-    {
-
-        __typeof__(&hitLocDmgFields[0]) pf = &hitLocDmgFields[0];
-        scr_string_t *pc = &g_HitLocConstNames[0];
-        for (off = 0; off != 76; off += 4) {
-            const char *name;
-            *(float *)((char *)g_fHitLocDamageMult + off) = 1.0f;
-            name = *(const char **)((char *)g_HitLocNames + off);
-            pf->name = name;
-            pf->offset = off;
-            pf->type = 6;
-            *pc = Scr_AllocString(name, 1);
-            pf++;
-            pc++;
-        }
+    for (i = 0; i < 19; i++) {
+        g_fHitLocDamageMult[i] = 1.0f;
+        hitLocDmgFields[i].name = g_HitLocNames[i];
+        hitLocDmgFields[i].offset = i * sizeof(float);
+        hitLocDmgFields[i].type = 6;
+        g_HitLocConstNames[i] = Scr_AllocString(g_HitLocNames[i], 1);
     }
 
-    ((int *)g_fHitLocDamageMult)[18] = 0;
+    g_fHitLocDamageMult[18] = 0.0f;
 
     iFileLength = FS_FOpenFileByMode("info/mp_lochit_dmgtable", &hFile, 0);
-    if (iFileLength <= 0) {
+    if (iFileLength <= headerSize) {
         Com_Error(1, "Could not load hitloc damage table %s\n", "info/mp_lochit_dmgtable");
     }
 
-    FS_Read(buffer, 11, hFile);
-    buffer[11] = '\0';
+    FS_Read(buffer, headerSize, hFile);
 
-    if (memcmp(buffer, "LOCDMGTABLE", 11) != 0) {
+    if (memcmp(buffer, "LOCDMGTABLE", headerSize) != 0) {
         Com_Error(1, "\"%s\" does not appear to be a hitloc damage table\n", "info/mp_lochit_dmgtable");
     }
 
-    iFileLength -= 11;
+    iFileLength -= headerSize;
     if (iFileLength > 0x1fff) {
         Com_Error(1, "\"%s\" Is too long of a hitloc damage table to parse\n", "info/mp_lochit_dmgtable");
     }
@@ -295,7 +286,7 @@ static float G_GetHitLocDamageMult(int weapon, hitLocation_t hitLoc)
     }
 
     weapDef = BG_GetWeaponDef(weapon);
-    if (weapDef == NULL || ((WeaponDef *)weapDef)->weapType == 0) {
+    if (weapDef == NULL || ((WeaponDef *)weapDef)->weapType != WEAPTYPE_BULLET) {
         return g_fHitLocDamageMult[hitLoc];
     }
 
@@ -566,6 +557,7 @@ done:
 void player_die(gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, int meansOfDeath, int iWeapon, const vec_t *vDir, const hitLocation_t hitLoc, int psTimeOffset)
 {
     gclient_t *cl;
+    bgs_t *savedBgs;
     int dobj;
     vec3_t dir;
     vec3_t launchvel;
@@ -589,9 +581,10 @@ void player_die(gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int 
         return;
     }
 
-    {
-        **(int **)g_time_ptr = level_bgs.time;
-    }
+    /* Client commands can trigger death between server frames, when the
+       shared animation context is unset. Always use the server context. */
+    savedBgs = *(bgs_t **)imp_bgs;
+    *(bgs_t **)imp_bgs = &level_bgs;
 
     if (attacker->s.eType == 9) {
         int ownerNum = attacker->r.ownerNum;
@@ -648,7 +641,7 @@ void player_die(gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int 
     animResult = BG_AnimScriptEvent(&cl->ps, 1, 0, 1);
 
     Scr_PlayerKilled(self, inflictor, attacker, damage, meansOfDeath,
-                     iWeapon, vDir, hitLoc, psTimeOffset);
+                     iWeapon, vDir, hitLoc, psTimeOffset, animResult);
 
     {
         int maxClients = level.maxclients;
@@ -703,6 +696,7 @@ after_yaw:
     SV_LinkEntity(self);
     self->health = 0;
     self->handler = 11;
+    *(bgs_t **)imp_bgs = savedBgs;
 }
 
 const char str_002b64e0[] = "MOD_UNKNOWN";

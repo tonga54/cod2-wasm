@@ -230,7 +230,6 @@ static const char *debugShaderNames[6] = {
 extern void R_RegisterSunDvars(void);
 extern refimport_t ri;
 
-extern int __mh_execute_header;
 
 void R_RegisterDvars(void);
 void R_UnregisterDvars(void);

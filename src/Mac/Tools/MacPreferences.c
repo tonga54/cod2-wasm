@@ -125,8 +125,8 @@ void MacPreferences_PutInteger(const char *inKey, int inNumber)
 
 void MacPreferences_Synchronize(void)
 {
-
-    CFPreferencesAppSynchronize(*kCFPreferencesCurrentApplication);
+    /* PutString writes and closes the portable preferences file directly. */
+    fflush(NULL);
 }
 
 unsigned char MacPreferences_PutRect(const char *inKey, const CGRect *inRect)

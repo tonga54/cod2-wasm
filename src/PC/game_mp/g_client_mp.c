@@ -12,17 +12,17 @@ extern void AngleVectors(const vec_t *angles, vec_t *forward, vec_t *right, vec_
 extern float AngleDelta(float a1, float a2);
 extern float AngleNormalize180(float angle);
 extern float AngleNormalize360(float angle);
-extern int CalculateRanks(void);
+extern void CalculateRanks(void);
 extern void Scr_Notify(gentity_t *ent, unsigned short name, int numArgs);
 extern int Scr_IsSystemActive(int flag);
-extern unsigned int Scr_AddString(const char *str);
+extern void Scr_AddString(const char *str);
 extern void Scr_PlayerConnect(gentity_t *ent);
 extern void Scr_PlayerDisconnect(gentity_t *ent);
 extern void StopFollowing(gentity_t *ent);
 extern void HudElem_ClientDisconnect(gentity_t *ent);
 extern unsigned char G_FreeEntity(gentity_t *ent);
-extern void G_InitGentity(gentity_t *ent);
-extern void G_EntUnlink(gentity_t *ent);
+extern unsigned char G_InitGentity(gentity_t *ent);
+extern unsigned char G_EntUnlink(gentity_t *ent);
 extern unsigned char G_SetOrigin(gentity_t *ent, const vec_t *origin);
 extern void G_SetClientContents(gentity_t *ent);
 extern void G_ClientStopUsingTurret(gentity_t *ent);
@@ -56,8 +56,8 @@ extern vec3_t playerMins;
 extern vec3_t playerMaxs;
 extern const dvar_t *g_password;
 
-extern byte g_entities_ptr[];
-extern byte level_ptr[];
+extern gentity_t g_entities[];
+extern level_locals_t level;
 
 extern const dvar_t *voice_global;
 extern const dvar_t *voice_deadChat;
@@ -371,7 +371,7 @@ void SetClientViewAngle(gentity_t *ent, const vec_t *angle)
 
     client = ent->client;
 
-    if ((client->ps.pm_flags & 1) == 0 || (client->ps.eFlags & 0x300) != 0) {
+    if ((client->ps.pm_flags & 1) != 0 && (client->ps.eFlags & 0x300) == 0) {
 
         delta = AngleNormalize180(AngleDelta(client->ps.proneDirection, newAngle[1]));
 

@@ -11,6 +11,6 @@ int aglSetCurrentContext();
 int aglSetDrawable();
 int aglSetFullScreen();
 int aglSetInteger();
-int aglSwapBuffers();
+void aglSwapBuffers(void *context);
 
 #endif

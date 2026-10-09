@@ -26,10 +26,10 @@ extern void CG_SetWeaponDefToDefaultWeapon(int weaponNum);
 extern void SCR_UpdateScreen(void);
 extern struct XAnim_s *XAnimCreateAnims(const char *debugName, int size, void *Alloc);
 extern void XAnimBlend(struct XAnim_s *anims, unsigned int animIndex, const char *name, unsigned int children, unsigned int num, unsigned int flags);
-extern void XAnimPrecache(const char *name, void *Alloc);
+extern XAnimParts *XAnimPrecache(const char *name, Alloc_t Alloc);
 extern void XAnimCreate(struct XAnim_s *anims, unsigned int animIndex, const char *name);
 extern void *XAnimCreateTree(void *anims, void *Alloc);
-extern void XAnimClearTreeGoalWeights(void *tree, int animIndex, int recursive);
+extern void XAnimClearTreeGoalWeights(XAnimTree *tree, unsigned int animIndex, float blendTime);
 extern int XAnimSetGoalWeight(void *tree, unsigned int animIndex, float goalWeight, float goalTime, float rate, unsigned int notifyName, unsigned int notifyType, int bRestart);
 extern void XAnimSetTime(void *tree, int animIndex, float time);
 extern int XAnimIsLooped(struct XAnim_s *anims, int animIndex);
@@ -335,7 +335,38 @@ static void CG_ResetViewWeaponOffsets(cg_t *cg)
     cg->gunZOfs = 0.0f;
 }
 
-#ifndef __EMSCRIPTEN__
+#ifdef __EMSCRIPTEN__
+void CG_Weapons_SetToDefault(int weaponNum, weaponInfo_s (*dobjModels)[4])
+{
+    byte *weapDef;
+    char modelFile[80];
+    const char *handModel;
+    const char *viewModel;
+
+    CG_SetWeaponDefToDefaultWeapon(weaponNum);
+    weapDef = (byte *)BG_GetWeaponDef(weaponNum);
+    Com_Printf("WARNING: gun and/or hand model file for weapon [%s] could not be found\n",
+               *(const char **)(weapDef + 4));
+
+    handModel = ((WeaponDef *)weapDef)->szGunXModel;
+    if (!handModel || handModel[0] == '\0') {
+        Com_Error(1, "could not find default weapon model");
+    } else {
+        viewModel = ((WeaponDef *)weapDef)->szHandXModel;
+        if (!viewModel || viewModel[0] == '\0') {
+            Com_Error(1, "could not find default weapon model");
+        }
+    }
+
+    viewModel = ((WeaponDef *)weapDef)->szHandXModel;
+    sprintf(modelFile, "%s%s", "xmodel/", viewModel);
+    *(void **)dobjModels = CL_RegisterModel(modelFile);
+
+    handModel = ((WeaponDef *)weapDef)->szGunXModel;
+    sprintf(modelFile, "%s%s", "xmodel/", handModel);
+    *(void **)((byte *)dobjModels + 0xc) = CL_RegisterModel(modelFile);
+}
+#else
 void CG_Weapons_SetToDefault(int weaponNum, DObjModel_s *dobjModels)
 {
     WeaponDef *weapDef;
@@ -357,6 +388,7 @@ void CG_Weapons_SetToDefault(int weaponNum, DObjModel_s *dobjModels)
     sprintf(modelFile, "%s%s", "xmodel/", weapDef->szGunXModel);
     dobjModels[1].model = CL_RegisterModel(modelFile);
 }
+#endif
 
 void CG_HoldBreathInit(void)
 {
@@ -435,18 +467,26 @@ static qboolean __attribute_regparm__(3) CG_CalcMuzzlePoint(int entityNum, vec_t
     int entFlags;
 
     snap = cg->nextSnap;
+    if (!snap || (unsigned int)entityNum >= 1024)
+        return 0;
 
-    if ((snap->ps.pm_flags & 0xc00000) && snap->ps.clientNum == entityNum) {
-        muzzle[0] = cg->refdef.vieworg[0];
-        muzzle[1] = cg->refdef.vieworg[1];
-        muzzle[2] = cg->refdef.vieworg[2];
+    if (!cg->renderingThirdPerson && (snap->ps.pm_flags & 0xc00000) && snap->ps.clientNum == entityNum) {
+        int weapon = BG_GetViewmodelWeaponIndex(&cg->predictedPlayerState);
+        struct DObj_s *viewModel = (*(weaponInfo_t **)imp_cg_weapons)[weapon].viewModelDObj;
+        if (viewModel && CG_DObjGetViewModelTagPos(viewModel, flashTag, muzzle))
+            return 1;
+        // Keep the tracer in front of the camera if the tag is not ready yet.
+        for (int i = 0; i < 3; ++i)
+            muzzle[i] = cg->refdef.vieworg[i] + 16.0f * cg->refdef.viewaxis[0][i]
+                       - 2.0f * cg->refdef.viewaxis[1][i] - 2.0f * cg->refdef.viewaxis[2][i];
         return 1;
     }
 
     cent = &cg_entities[entityNum];
     dobj = Com_GetClientDObj(cent->nextState.number, cent->localClientNum);
-    if (!dobj)
+    if (!dobj) {
         return 0;
+    }
 
     if (CG_DObjGetWorldTagPos(cent, (struct DObj_s *)dobj, flashTag, muzzle))
         return 1;
@@ -819,9 +859,9 @@ void CG_RegisterWeapon(int weaponNum)
 
     if (weapDef->szHudIcon[0]) {
         weapInfo->hHudIcon = (MaterialHandle)CL_RegisterMaterial(weapDef->szHudIcon, 7);
-        cgs->media.hintMaterials[weaponNum + 2] = weapInfo->hHudIcon;
+        cgs->media.hintMaterials[weaponNum + 4] = weapInfo->hHudIcon;
     } else {
-        cgs->media.hintMaterials[weaponNum + 2] = cgs->media.hintMaterials[0];
+        cgs->media.hintMaterials[weaponNum + 4] = cgs->media.hintMaterials[0];
     }
 
     if (weapDef->killIcon[0]) {
@@ -968,6 +1008,9 @@ void CG_SpawnTracer(vec_t *pstart, vec_t *pend)
     dir[2] = pend[2] - start[2];
 
     dist = Vec3Normalize(dir);
+    speed = cg_tracerSpeed->current.value;
+    if (dist <= 0.0f || speed <= 0.0f)
+        return;
     le = CG_AllocLocalEntity();
     le->leType = LE_MOVING_TRACER;
     le->tracerClipDist = dist;
@@ -1045,7 +1088,7 @@ void CG_BulletHitClientEvent(int sourceEntityNum, vec_t *position, int surfType,
 
     if (event == 0xb9)
         alias = cgs->media.bulletHitSmallSound[surfType];
-    else if (event == 0xb7)
+    else if (event == 0xba)
         alias = cgs->media.bulletHitLargeSound[surfType];
     else
         alias = cgs->media.shotgunHitSound[surfType];
@@ -1060,8 +1103,7 @@ void CG_BulletHitClientEvent(int sourceEntityNum, vec_t *position, int surfType,
     if (!CG_CalcMuzzlePoint(sourceEntityNum, muzzle, flashTag))
         return;
 
-    snap = cg->nextSnap;
-    if (!((snap->ps.pm_flags & 0xc00000) && snap->ps.clientNum == sourceEntityNum)) {
+    {
         int randInt = rand();
         float randValue;
 
@@ -1271,7 +1313,7 @@ void CG_AddViewWeapon(playerState_t *ps)
     ws.vLastMoveAng[1] = cg->playerEntity.vLastMoveAng[1];
     ws.vLastMoveAng[2] = cg->playerEntity.vLastMoveAng[2];
     ws.fLastIdleFactor = cg->playerEntity.fLastIdleFactor;
-    ws.time = cg->time - playerState->commandTime;
+    ws.time = cg->time;
     ws.damageTime = cg->damageTime;
     ws.v_dmg_pitch = cg->v_dmg_pitch;
     ws.v_dmg_roll = cg->v_dmg_roll;
@@ -1287,6 +1329,15 @@ void CG_AddViewWeapon(playerState_t *ps)
     ws.weapIdleTime = &cg->weapIdleTime;
     BG_CalculateWeaponAngles(&ws, weaponAngles);
 
+    /* The spring and movement filters advance in ws. Keep their result for
+     * the next frame instead of accumulating undamped shot impulses in cg. */
+    for (int i = 0; i < 3; ++i) {
+        cg->vGunOffset[i] = ws.vGunOffset[i];
+        cg->vGunSpeed[i] = ws.vGunSpeed[i];
+        cg->playerEntity.vLastMoveAng[i] = ws.vLastMoveAng[i];
+    }
+    cg->playerEntity.fLastIdleFactor = ws.fLastIdleFactor;
+
     AnglesToAxis(weaponAngles, weaponAxis);
     MatrixMultiply(weaponAxis, cg->refdef.viewaxis, finalAxis);
 
@@ -1298,13 +1349,17 @@ void CG_AddViewWeapon(playerState_t *ps)
     hand.origin[1] = cg->refdef.vieworg[1];
     hand.origin[2] = cg->refdef.vieworg[2];
 
-    CG_Madd(hand.origin, finalAxis[0], cg->swayOffset[0] + cg->vGunOffset[0] + CG_DvarValue(imp_cg_gun_x));
-    CG_Madd(hand.origin, finalAxis[1], cg->swayOffset[1] + cg->vGunOffset[1] + CG_DvarValue(imp_cg_gun_y));
-    CG_Madd(hand.origin, finalAxis[2], cg->swayOffset[2] + cg->vGunOffset[2] + CG_DvarValue(imp_cg_gun_z));
+    /* vGunOffset is angular recoil, already applied to weaponAngles. */
+    CG_Madd(hand.origin, finalAxis[0], cg->swayOffset[0] + CG_DvarValue(imp_cg_gun_x));
+    CG_Madd(hand.origin, finalAxis[1], cg->swayOffset[1] + CG_DvarValue(imp_cg_gun_y));
+    CG_Madd(hand.origin, finalAxis[2], cg->swayOffset[2] + CG_DvarValue(imp_cg_gun_z));
 
     if (BG_IsAimDownSightWeapon(weaponIndex) && playerState->fWeaponPosFrac > 0.0f) {
-        cg->gunPitch = weaponAngles[0];
-        cg->gunYaw = weaponAngles[1];
+        vec3_t worldAngles;
+        /* Crosshair projection compares against the world-space camera axis. */
+        AxisToAngles(finalAxis, worldAngles);
+        cg->gunPitch = worldAngles[0];
+        cg->gunYaw = worldAngles[1];
         cg->gunXOfs = (hand.origin[0] - cg->refdef.vieworg[0]) * playerState->fWeaponPosFrac;
         cg->gunYOfs = (hand.origin[1] - cg->refdef.vieworg[1]) * playerState->fWeaponPosFrac;
         cg->gunZOfs = (hand.origin[2] - cg->refdef.vieworg[2]) * playerState->fWeaponPosFrac;
@@ -1328,7 +1383,6 @@ void CG_AddViewWeapon(playerState_t *ps)
 void CG_BulletHitEvent(int sourceEntityNum, vec_t *position, vec_t *normal, vec_t *reflected, int surfType, int event)
 {
     byte *fxTable;
-    snapshot_t *snap;
     snd_alias_list_t *alias;
     void *fxNormal;
     void *fxReflect;
@@ -1336,12 +1390,12 @@ void CG_BulletHitEvent(int sourceEntityNum, vec_t *position, vec_t *normal, vec_
     vec3_t muzzle;
     float tracerChance;
 
-    if (event == 0xb6) {
+    if (event == 0xb5) {
         alias = cgs->media.bulletHitSmallSound[surfType];
         fxTable = cgs->media.fx ? (byte *)cgs->media.fx->table : NULL;
         fxNormal = fxTable ? *(void **)(fxTable + surfType * 4) : NULL;
         fxReflect = fxTable ? *(void **)(fxTable + 0x5c + surfType * 4) : NULL;
-    } else if (event == 0xb7) {
+    } else if (event == 0xb6) {
         alias = cgs->media.bulletHitLargeSound[surfType];
         fxTable = cgs->media.fx ? (byte *)cgs->media.fx->table : NULL;
         fxNormal = fxTable ? *(void **)(fxTable + 0xb8 + surfType * 4) : NULL;
@@ -1358,6 +1412,11 @@ void CG_BulletHitEvent(int sourceEntityNum, vec_t *position, vec_t *normal, vec_
         fxReflect = 0;
     }
 
+    if (getenv("PTRACE"))
+        Com_Printf("[impact] source=%d event=%x surface=%d pos=(%.1f %.1f %.1f) effect=%s primitives=%d\n",
+                   sourceEntityNum, event, surfType, position[0], position[1], position[2],
+                   fxNormal ? ((EffectTemplate *)fxNormal)->mEffectName : "none",
+                   fxNormal ? ((EffectTemplate *)fxNormal)->mPrimitiveCount : 0);
     CG_PlaySoundAlias(0x3fe, position, alias);
 
     if (fxNormal)
@@ -1374,8 +1433,11 @@ void CG_BulletHitEvent(int sourceEntityNum, vec_t *position, vec_t *normal, vec_
     if (!CG_CalcMuzzlePoint(sourceEntityNum, muzzle, flashTag))
         return;
 
-    snap = cg->nextSnap;
-    if (!((snap->ps.pm_flags & 0xc00000) && snap->ps.clientNum == sourceEntityNum)) {
+    if (getenv("PTRACE"))
+        Com_Printf("[tracer] source=%d muzzle=(%.1f %.1f %.1f) hit=(%.1f %.1f %.1f) chance=%.1f\n",
+            sourceEntityNum, muzzle[0], muzzle[1], muzzle[2], position[0], position[1], position[2], tracerChance);
+
+    {
         int randInt = rand();
         float randValue;
 
@@ -2038,36 +2100,3 @@ void CG_UpdateViewWeaponAnim(playerState_t *ps)
     weapInfo = &weapInfoBase[weaponIndex];
     CG_PlayViewWeaponNotetrackSounds(weapInfo);
 }
-
-#else
-void CG_Weapons_SetToDefault(int weaponNum, weaponInfo_s (*dobjModels)[4])
-{
-    byte *weapDef;
-    char modelFile[80];
-    const char *handModel;
-    const char *viewModel;
-
-    CG_SetWeaponDefToDefaultWeapon(weaponNum);
-    weapDef = (byte *)BG_GetWeaponDef(weaponNum);
-    Com_Printf("WARNING: gun and/or hand model file for weapon [%s] could not be found\n",
-               *(const char **)(weapDef + 4));
-
-    handModel = ((WeaponDef *)weapDef)->szGunXModel;
-    if (!handModel || handModel[0] == '\0') {
-        Com_Error(1, "could not find default weapon model");
-    } else {
-        viewModel = ((WeaponDef *)weapDef)->szHandXModel;
-        if (!viewModel || viewModel[0] == '\0') {
-            Com_Error(1, "could not find default weapon model");
-        }
-    }
-
-    viewModel = ((WeaponDef *)weapDef)->szHandXModel;
-    sprintf(modelFile, "%s%s", "xmodel/", viewModel);
-    *(void **)dobjModels = CL_RegisterModel(modelFile);
-
-    handModel = ((WeaponDef *)weapDef)->szGunXModel;
-    sprintf(modelFile, "%s%s", "xmodel/", handModel);
-    *(void **)((byte *)dobjModels + 0xc) = CL_RegisterModel(modelFile);
-}
-#endif

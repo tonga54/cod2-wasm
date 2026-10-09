@@ -152,33 +152,23 @@ EffectTemplate *FX_ParseEffect(GenericParser2 *parser, const char *name)
     while (primitiveGroup != NULL) {
         grpName = *(char **)primitiveGroup;
 
-        if (stricmp(grpName, "particle") == 0) {
-            type = 1;
-        } else if (stricmp(grpName, "line") == 0) {
-            type = 2;
-        } else if (stricmp(grpName, "tail") == 0) {
-            type = 3;
-        } else if (stricmp(grpName, "electricity") == 0) {
-            type = 4;
-        } else if (stricmp(grpName, "cylinder") == 0) {
-            type = 5;
-        } else if (stricmp(grpName, "light") == 0) {
-            type = 6;
-        } else if (stricmp(grpName, "sound") == 0) {
-            type = 7;
-        } else if (stricmp(grpName, "decal") == 0) {
-            type = 8;
-        } else if (stricmp(grpName, "runner") == 0) {
-            type = 9;
-        } else if (stricmp(grpName, "fxrunner") == 0) {
-            type = 10;
-        } else if (stricmp(grpName, "flash") == 0) {
-            type = 11;
-        } else if (stricmp(grpName, "spotLight") == 0) {
-            type = 12;
-        } else {
-            goto next_group;
+        static const struct { const char *name; PrimType type; } primitiveTypes[] = {
+            { "particle", PT_PARTICLE }, { "line", PT_LINE },
+            { "tail", PT_TAIL }, { "cylinder", PT_CYLINDER },
+            { "emitter", PT_EMITTER }, { "decal", PT_DECAL },
+            { "orientedparticle", PT_ORIENTEDPARTICLE }, { "fxrunner", PT_FXRUNNER },
+            { "light", PT_LIGHT }, { "camerashake", PT_CAMERASHAKE },
+            { "flash", PT_SCREENFLASH }, { "cloud", PT_CLOUD }
+        };
+        type = PT_NONE;
+        for (unsigned int k = 0; k < sizeof(primitiveTypes) / sizeof(primitiveTypes[0]); ++k) {
+            if (!stricmp(grpName, primitiveTypes[k].name)) {
+                type = primitiveTypes[k].type;
+                break;
+            }
         }
+        if (type == PT_NONE)
+            goto next_group;
 
         prim = Hunk_AllocAlignInternal(0x2a4, 4);
         PrimitiveTemplate_Init(prim);

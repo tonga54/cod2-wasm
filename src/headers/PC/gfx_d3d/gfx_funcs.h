@@ -116,10 +116,10 @@ int R_InitFonts(void);
 void R_ShutdownFonts(void);
 float R_NormalizedTextScale(FontHandle font, float scale);
 int R_TextHeight(FontHandle font);
-int R_DrawText(const char *text, int maxChars, FontHandle font, float x, float y, float xScale, float yScale, const vec_t *color, int style);
+void R_DrawText(const char *text, int maxChars, FontHandle font, float x, float y, float xScale, float yScale, const vec_t *color, int style);
 int R_TextWidth(const char *text, int maxChars, FontHandle font);
 int R_ConsoleTextWidth(const short int *string, int maxChars, FontHandle font);
-int R_DrawConsoleText(const short int *string, int maxChars, FontHandle font, float x, float y, float xScale, float yScale, const vec_t *color, int style);
+void R_DrawConsoleText(const short int *string, int maxChars, FontHandle font, float x, float y, float xScale, float yScale, const vec_t *color, int style);
 
 Font *R_LoadFont(const char *fontName, int imageTrack);
 

@@ -2,97 +2,9 @@
 #define IMPORTS_OPENGL_H
 
 #if defined(__EMSCRIPTEN__)
-
-#if defined(COD2_DOWNSTREAM_WASM)
+#include <GL/gl.h>
+#include <GL/glext.h>
 #include "downstream/wasm/web_gl_compat.h"
-#else
-#include "web/webgl2_compat.h"
-#endif
-
-void glBegin(unsigned int mode);
-void glBindTexture(unsigned int target, unsigned int texture);
-int glBindVertexArrayAPPLE(unsigned int array);
-int glBlendEquationEXT(unsigned int mode);
-int glBlendFuncSeparateEXT(unsigned int srcRGB, unsigned int dstRGB, unsigned int srcAlpha, unsigned int dstAlpha);
-int glClipPlane();
-int glColorMaterial();
-int glCombinerParameterfvNV();
-int glCombinerStageParameterfvNV();
-int glCompressedTexImage2DARB(unsigned int target, int level, unsigned int internalformat, int width, int height, int border, int imageSize, const void *data);
-int glCompressedTexImage3DARB(unsigned int target, int level, unsigned int internalformat, int width, int height, int depth, int border, int imageSize, const void *data);
-void glCompressedTexSubImage2D(unsigned int target, int level, int xoffset, int yoffset, int width, int height, unsigned int format, int imageSize, const void *data);
-void glCompressedTexSubImage3D(unsigned int target, int level, int xoffset, int yoffset, int zoffset, int width, int height, int depth, unsigned int format, int imageSize, const void *data);
-void glCopyTexSubImage2D(unsigned int target, int level, int xoffset, int yoffset, int x, int y, int width, int height);
-int glDeleteFencesAPPLE();
-int glDeleteProgramsARB();
-void glDeleteTextures(int n, const unsigned int *textures);
-int glDeleteVertexArraysAPPLE(int n, const unsigned int *arrays);
-int glDisableVertexAttribArrayARB(unsigned int index);
-int glDrawBuffer();
-int glDrawRangeElements();
-int glEnableVertexAttribArrayARB(unsigned int index);
-void glEnd(void);
-void glFinish(void);
-int glFinishFenceAPPLE();
-int glFlushVertexArrayRangeAPPLE();
-void glFogf(unsigned int pname, float param);
-int glFogi();
-int glFrontFace();
-int glGenFencesAPPLE();
-int glGenProgramsARB();
-void glGenTextures(int n, unsigned int *textures);
-int glGenVertexArraysAPPLE(int n, unsigned int *arrays);
-int glGetFloatv();
-int glGetProgramivARB();
-const unsigned char *glGetString();
-int glHint();
-int glLightModelfv();
-int glLightModeli();
-void glLightf(unsigned int light, unsigned int pname, float param);
-int glLightfv();
-void glMaterialf(unsigned int face, unsigned int pname, float param);
-int glMaterialfv();
-int glNormalPointer();
-void glPixelStorei(unsigned int pname, int param);
-void glPointParameterfARB(unsigned int pname, float param);
-int glPointParameterfvARB();
-void glPointSize(float size);
-int glPolygonMode();
-void glPolygonOffset(float factor, float units);
-int glPopAttrib();
-int glPopClientAttrib();
-void glPopMatrix(void);
-int glProgramStringARB();
-int glPushAttrib();
-int glPushClientAttrib();
-void glPushMatrix(void);
-void glReadBuffer(unsigned int src);
-void glReadPixels(int x, int y, int width, int height, unsigned int format, unsigned int type, void *pixels);
-void glScissor(int x, int y, int width, int height);
-int glSetFenceAPPLE();
-int glShadeModel();
-int glStencilFunc();
-int glStencilMask();
-int glStencilOp();
-int glTestFenceAPPLE();
-void glTexCoord2f(float s, float t);
-void glTexEnvf(unsigned int target, unsigned int pname, float param);
-int glTexGenfv();
-int glTexGeni();
-void glTexImage2D(unsigned int target, int level, int internalformat, int width, int height, int border, unsigned int format, unsigned int type, const void *pixels);
-void glTexImage3D(unsigned int target, int level, int internalformat, int width, int height, int depth, int border, unsigned int format, unsigned int type, const void *pixels);
-void glTexParameterf(unsigned int target, unsigned int pname, float param);
-int glTexParameterfv();
-void glTexSubImage2D(unsigned int target, int level, int xoffset, int yoffset, int width, int height, unsigned int format, unsigned int type, const void *pixels);
-void glTexSubImage3D(unsigned int target, int level, int xoffset, int yoffset, int zoffset, int width, int height, int depth, unsigned int format, unsigned int type, const void *pixels);
-void glVertex2f(float x, float y);
-void glVertex3f(float x, float y, float z);
-int glVertexArrayParameteriAPPLE();
-int glVertexArrayRangeAPPLE();
-int glVertexAttribPointerARB(unsigned int index, int size, unsigned int type, unsigned char normalized, int stride, const void *pointer);
-int gluCheckExtension();
-void gluOrtho2D(double l, double r, double b, double t);
-
 #define glDisable webgl2_glDisable
 #define glDrawArrays webgl2_glDrawArrays
 #define glDrawElements webgl2_glDrawElements
@@ -160,16 +72,16 @@ void glGetIntegerv(unsigned int pname, int *params);
 int glGetProgramivARB();
 const unsigned char *glGetString();
 int glHint();
-int glLightModelfv();
+void glLightModelfv(unsigned int pname, const float *params);
 int glLightModeli();
 void glLightf(unsigned int light, unsigned int pname, float param);
-int glLightfv();
+void glLightfv(unsigned int light, unsigned int pname, const float *params);
 void glLoadIdentity(void);
 int glLoadMatrixf();
 void glMaterialf(unsigned int face, unsigned int pname, float param);
-int glMaterialfv();
+void glMaterialfv(unsigned int face, unsigned int pname, const float *params);
 void glMatrixMode(unsigned int mode);
-int glNormalPointer();
+void glNormalPointer(unsigned int type, int stride, const void *pointer);
 int glPixelStorei();
 void glPointParameterfARB(unsigned int pname, float param);
 int glPointParameterfvARB();
@@ -206,7 +118,7 @@ int glTexImage3D();
 void glTexParameterf(unsigned int target, unsigned int pname, float param);
 int glTexParameterfv();
 void glTexParameteri(unsigned int target, unsigned int pname, int param);
-int glTexSubImage2D();
+void glTexSubImage2D(unsigned int target, int level, int xoffset, int yoffset, int width, int height, unsigned int format, unsigned int type, const void *pixels);
 int glTexSubImage3D();
 void glVertex2f(float x, float y);
 void glVertex3f(float x, float y, float z);

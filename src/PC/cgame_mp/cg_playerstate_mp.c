@@ -74,6 +74,12 @@ static inline __attribute__((always_inline)) void VectorClear3Int(void *base, in
 void CG_Respawn(void)
 {
     char *snap;
+    extern void CG_ResetDeathView(void);
+
+    CG_ResetDeathView();
+
+    memset(cg->kickAVel, 0, sizeof(cg->kickAVel));
+    memset(cg->kickAngles, 0, sizeof(cg->kickAngles));
 
     CG_INT(cg, CG_OFF_25BBC) = 0;
 

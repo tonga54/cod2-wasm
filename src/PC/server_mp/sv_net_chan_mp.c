@@ -23,8 +23,8 @@ COD2_ASSERT_FIELD(client_t, state,                   0x0);
 #define CLIENT_STRIDE ((int)sizeof(client_t))
 #define SVSCMD_SIZE 1032
 
-extern byte svs_ptr[];
-extern byte sv_ptr[];
+extern serverStatic_t svs;
+extern server_t sv;
 extern byte *net_profile_dvar;
 
 #define SVS_CLIENTS_OFF 0xc
@@ -176,17 +176,17 @@ void SV_Netchan_PrintProfileStats(qboolean bPrintToConsole)
     char szClientName[17];
     int i;
 
-    clientBase = *(byte **)(svs_ptr + SVS_CLIENTS_OFF);
+    clientBase = *(byte **)(((byte *)&svs) + SVS_CLIENTS_OFF);
     if (clientBase == NULL)
         return;
 
-    pOOBProf = *(netProfileInfo_t **)(svs_ptr + SVS_POOBPROF_OFF);
+    pOOBProf = *(netProfileInfo_t **)(((byte *)&svs) + SVS_POOBPROF_OFF);
     if (pOOBProf != NULL) {
         NetProf_UpdateStatistics(&pOOBProf->send);
         NetProf_UpdateStatistics(&pOOBProf->recieve);
     }
 
-    numClients = *(int *)((byte *)sv_ptr + 8);
+    numClients = *(int *)((byte *)((byte *)&sv) + 8);
     for (i = 0; i < numClients; i++) {
         byte *cl = clientBase + (long)i * CLIENT_STRIDE;
         if (*(int *)(cl + CLIENT_STATE_OFF) == 0)
@@ -237,7 +237,7 @@ void SV_Netchan_PrintProfileStats(qboolean bPrintToConsole)
         iYPos += 0xa;
     }
 
-    pOOBProf = *(netProfileInfo_t **)(svs_ptr + SVS_POOBPROF_OFF);
+    pOOBProf = *(netProfileInfo_t **)(((byte *)&svs) + SVS_POOBPROF_OFF);
     if (pOOBProf != NULL) {
         iTotalBPSSent = pOOBProf->send.iBytesPerSecond;
         iTotalPacketsSent = pOOBProf->send.iCountedPackets;
@@ -274,7 +274,7 @@ void SV_Netchan_PrintProfileStats(qboolean bPrintToConsole)
         iTotalMinRecieved = 9999;
     }
 
-    numClients = *(int *)((byte *)sv_ptr + 8);
+    numClients = *(int *)((byte *)((byte *)&sv) + 8);
     for (i = 0; i < numClients; i++) {
         byte *cl = clientBase + (long)i * CLIENT_STRIDE;
         if (*(int *)(cl + CLIENT_STATE_OFF) == 0)
@@ -322,7 +322,7 @@ void SV_Netchan_PrintProfileStats(qboolean bPrintToConsole)
         iYPos += 0xa;
     }
 
-    pOOBProf = *(netProfileInfo_t **)(svs_ptr + SVS_POOBPROF_OFF);
+    pOOBProf = *(netProfileInfo_t **)(((byte *)&svs) + SVS_POOBPROF_OFF);
     if (pOOBProf != NULL) {
         int oobTotalPackets;
         int oobFragPerc;
@@ -359,7 +359,7 @@ void SV_Netchan_PrintProfileStats(qboolean bPrintToConsole)
         iYPos += 0xa;
     }
 
-    numClients = *(int *)((byte *)sv_ptr + 8);
+    numClients = *(int *)((byte *)((byte *)&sv) + 8);
     for (i = 0; i < numClients; i++) {
         byte *cl = clientBase + (long)i * CLIENT_STRIDE;
 

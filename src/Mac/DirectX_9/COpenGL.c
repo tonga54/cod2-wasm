@@ -325,6 +325,12 @@ __attribute__((constructor)) void GLOBAL__I__ZN7COpenGL7sOpenGLE(void)
 
 unsigned int COpenGLVertexProgram_COpenGLVertexProgram(const COpenGLVertexProgram *_this, const char *pSrcData)
 {
+#ifdef __EMSCRIPTEN__
+    extern void Com_Error(int, const char *, ...);
+    Com_Error(1, "ARB shaders are unsupported by the WebGL fixed-function target");
+    return 0;
+#else
+
 
     GLuint *progIdPtr = (GLuint *)_this;
 
@@ -352,6 +358,7 @@ unsigned int COpenGLVertexProgram_COpenGLVertexProgram(const COpenGLVertexProgra
     }
 
     return 0;
+#endif
 }
 
 void ZN20COpenGLVertexProgramD1Ev(void *_this)

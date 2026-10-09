@@ -22,7 +22,7 @@ extern int UI_TextWidth(const char *text, int maxChars, void *font, float scale)
 extern const char *UI_SafeTranslateString(const char *ref);
 extern void UI_DrawText(const char *text, int maxChars, void *font, float x, float y, int horzAlign, int vertAlign, float scale, const float *color, int style);
 extern void UI_DrawLoadBar(float x, float y, float w, float h, int horzAlign, int vertAlign, const vec_t *color, MaterialHandle material);
-extern float UI_FillRect(float x, float y, float width, float height, int horzAlign, int vertAlign, const vec_t *color);
+extern void UI_FillRect(float x, float y, float width, float height, int horzAlign, int vertAlign, const vec_t *color);
 
 extern void *imp_legacyHacks;
 extern void *imp_colorWhite;

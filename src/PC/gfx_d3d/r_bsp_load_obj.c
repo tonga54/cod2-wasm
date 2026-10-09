@@ -18,7 +18,7 @@ COD2_ASSERT_FIELD(struct r_globals_load_t, portalVerts, 12);
 COD2_ASSERT_FIELD(struct r_globals_load_t, aabbTrees, 16);
 COD2_ASSERT_FIELD(struct r_globals_load_t, aabbTreeCount, 20);
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 typedef struct daabbnode_ondisk_s {
     float mins[3];
     float maxs[3];
@@ -786,8 +786,7 @@ finish:
     Hunk_ClearTempMemory();
 }
 
-#ifndef __EMSCRIPTEN__
-
+/* Portable 32-bit BSP loaders are also required by the browser renderer. */
 static void R_LoadNodesAndLeafs_impl(const byte *loadState)
 {
     const int *load = (const int *)loadState;
@@ -1180,8 +1179,6 @@ void __attribute_regparm__(1) R_LoadCullGroups(const int *load)
 {
     R_LoadCullGroups_impl(load);
 }
-
-#endif
 
 static int R_LoadSurfacesLump(const GfxBspLoad *load, int lumpOfs, int elemSize, const byte **outData)
 {

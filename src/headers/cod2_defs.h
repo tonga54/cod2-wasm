@@ -2943,8 +2943,8 @@ typedef unsigned char Bool;
 
 typedef unsigned char Boolean;
 
-typedef unsigned int (*BuiltinFunction)();
-typedef unsigned int (*BuiltinMethod)();
+typedef void (*BuiltinFunction)(void);
+typedef void (*BuiltinMethod)(scr_entref_t);
 typedef unsigned char Bytef;
 
 typedef void *CDisplayList;
@@ -3004,6 +3004,9 @@ typedef float Float32;
 typedef double Float64;
 typedef void (*Free_t)();
 typedef GDevice * GDPtr;
+#ifdef __EMSCRIPTEN__
+#include <GL/gl.h>
+#else
 typedef long unsigned int GLbitfield;
 
 typedef unsigned char GLboolean;
@@ -3013,6 +3016,7 @@ typedef long int GLint;
 typedef long int GLsizei;
 typedef long unsigned int GLuint;
 
+#endif
 typedef unsigned int GfxDrawSurfSort;
 
 typedef unsigned char GfxImageCategory;

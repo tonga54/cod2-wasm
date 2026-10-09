@@ -12,7 +12,7 @@ static DebugGlobals debugGlobals;
 extern refimport_t ri;
 extern GfxBackEndData *frontEndDataOut;
 #define frontEndDataOut frontEndDataOut
-extern int __mh_execute_header;
+
 
 extern float Vec3Normalize(vec_t *v);
 
@@ -33,11 +33,11 @@ void R_AddScaledDebugString(DebugGlobals *debugGlobalsEntry, const GfxViewParms 
 static inline __attribute__((always_inline)) void R_InitDebugEntry_core(DebugGlobals *debugGlobalsEntry)
 {
     memset(debugGlobalsEntry, 0, sizeof(DebugGlobals));
-    debugGlobalsEntry->vertLimit = (int)&__mh_execute_header;
+    debugGlobalsEntry->vertLimit = 0x1000;
     debugGlobalsEntry->polyLimit = 512;
-    debugGlobalsEntry->stringLimit = (int)&__mh_execute_header;
+    debugGlobalsEntry->stringLimit = 0x1000;
     debugGlobalsEntry->lineLimit = 16384;
-    debugGlobalsEntry->plumeLimit = (int)&__mh_execute_header;
+    debugGlobalsEntry->plumeLimit = 0x1000;
 }
 void R_InitDebugEntry(DebugGlobals *debugGlobalsEntry)
 {

@@ -13,7 +13,7 @@ static unsigned int g_end;
 extern void SL_RemoveRefToString(unsigned int stringValue);
 extern void SL_AddRefToString(unsigned int stringValue);
 extern const char *SL_ConvertToString(unsigned int stringValue);
-extern unsigned int Scr_AddConstString(unsigned int value);
+extern void Scr_AddConstString(unsigned int value);
 extern void Scr_NotifyNum(int entnum, int classnum, unsigned int stringValue, unsigned int paramcount);
 static XAnimNotify g_notifyList[128];
 static int g_notifyListSize;
@@ -1740,7 +1740,7 @@ static void XAnimCalcAccumulateFullQuatLocal(DObjAnimMat *mat, const XAnimPartQu
                                              const XAnimTime *animTime, float scale)
 {
     if (!quat) {
-        mat->quat[3] += scale;
+        mat->quat[3] += 32767.0f * scale;
         return;
     }
 
@@ -1766,7 +1766,7 @@ static void XAnimCalcAccumulateSimpleQuatLocal(DObjAnimMat *mat, const XAnimPart
                                                const XAnimTime *animTime, float scale)
 {
     if (!quat) {
-        mat->quat[3] += scale;
+        mat->quat[3] += 32767.0f * scale;
         return;
     }
 
@@ -1978,6 +1978,11 @@ void DObjCalcAnim(const DObj *obj, int *partBits)
 
     if (obj->tree) {
         XAnimCalc(obj, 0, 1.0f, (XAnimPart (*)())mat, 1, 0, &info, 0);
+        /* A bone can be present only in a low-weight branch (for example,
+         * the legs retain weight 0.01 while the torso animation is active).
+         * Convert accumulated translations back to a pose before composing
+         * the skeleton; otherwise those bone lengths shrink with the weight. */
+        XAnimCalcNormalizeBonesLocal(obj, mat, 1.0f, &info);
     }
 
     if (!obj->numModels) {
@@ -2025,6 +2030,12 @@ void DObjCalcAnim(const DObj *obj, int *partBits)
                     mat->trans[0] = trans ? trans[0] : 0.0f;
                     mat->trans[1] = trans ? trans[1] : 0.0f;
                     mat->trans[2] = trans ? trans[2] : 0.0f;
+                } else if (!XAnimCalcBitTestLocal(ignorePartBits, boneIndex) && trans) {
+                    /* XAnim translations are offsets from the model's local
+                     * bind translation, including zero for an omitted track. */
+                    mat->trans[0] += trans[0];
+                    mat->trans[1] += trans[1];
+                    mat->trans[2] += trans[2];
                 }
 
                 ++mat;

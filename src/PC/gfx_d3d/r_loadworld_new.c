@@ -31,13 +31,13 @@ extern void R_LoadSun(const char *name, sunflare_t *sun);
 extern void R_RegisterOutdoorImage(GfxWorld *world);
 
 extern void __attribute_regparm__(1) R_LoadSurfaces(GfxBspLoad *load);
-extern void R_LoadCullGroups(void);
-extern void R_LoadPortalVerts(void);
-extern void R_LoadOccluders(void);
-extern void R_LoadAabbTrees(void);
-extern void R_LoadCells(GfxBspLoad *load);
-extern void R_LoadPortals(void);
-extern void R_LoadNodesAndLeafs(void);
+extern void __attribute_regparm__(1) R_LoadCullGroups(const int *load);
+extern void __attribute_regparm__(1) R_LoadPortalVerts(const int *load);
+extern void __attribute_regparm__(1) R_LoadOccluders(const byte *load);
+extern void __attribute_regparm__(1) R_LoadAabbTrees(const int *load);
+extern void __attribute_regparm__(1) R_LoadCells(const int *load);
+extern void __attribute_regparm__(1) R_LoadPortals(const int *load);
+extern void __attribute_regparm__(1) R_LoadNodesAndLeafs(const byte *load);
 extern void __attribute_regparm__(1) R_LoadEntities(GfxBspLoad *load);
 
 typedef void (*loader_regparm_fn)(void *) __attribute_regparm__(1);
@@ -463,7 +463,9 @@ GfxWorld *R_LoadWorldInternal(const char *name)
                 if (0) {
 
 #else
-                if (rendererInUse != 2) {
+                /* DX7's sampler.lightmap.traditional consumes a single baked
+                 * RGB image. Directional coefficients belong to the DX9 path. */
+                if (rendererInUse == 2) {
 
 #endif
                     int grpOffset = groupIdx * (int)sizeof(GfxLightmapArray);

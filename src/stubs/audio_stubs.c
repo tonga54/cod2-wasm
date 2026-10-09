@@ -185,9 +185,8 @@ void CSoundObject_get_3D_position(void *obj, float *x, float *y, float *z)
         *z = 0.0f;
 }
 
-unsigned char DSound_Frame(void)
+void DSound_Frame(void)
 {
-    return 0;
 }
 
 void DSound_SampleFrame(void *sample)
@@ -202,7 +201,6 @@ int DSound_Init(int numChannels, const unsigned char *handle)
     return 0;
 }
 
-unsigned char DSound_Shutdown(void)
+void DSound_Shutdown(void)
 {
-    return 0;
 }

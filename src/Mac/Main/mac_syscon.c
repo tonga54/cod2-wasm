@@ -43,6 +43,11 @@ void Sys_ShowConsole(int visLevel, qboolean quitOnClose)
 
 char *Sys_ConsoleInput(void)
 {
+#ifdef __EMSCRIPTEN__
+    /* No terminal is attached to a browser client. Keyboard input arrives
+     * through SDL; polling stdin would open Emscripten's blocking prompt. */
+    return NULL;
+#else
     static int len = 0;
     fd_set fds;
     struct timeval tv;
@@ -75,6 +80,7 @@ char *Sys_ConsoleInput(void)
     }
 
     return NULL;
+#endif
 }
 
 void Conbuf_AppendText(const char *pMsg)

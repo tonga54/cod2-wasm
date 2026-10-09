@@ -11,9 +11,9 @@ extern int rand(void);
 
 #define ENTITY_STRIDE sizeof(gentity_s)
 
-extern byte level_ptr[];
-extern byte scr_const_ptr[];
-extern byte g_entities_ptr[];
+extern level_locals_t level;
+extern scr_const_t scr_const;
+extern gentity_t g_entities[];
 extern entityHandler_t entityHandlers[20];
 extern byte *vec3_origin_ptr;
 extern byte *pPriorityMap;
@@ -24,10 +24,11 @@ extern byte *pPriorityMap;
 #define HANDLER_MOD(h) (entityHandlers[(h)].methodOfDeath)
 #define HANDLER_SPLASHMOD(h) (entityHandlers[(h)].splashMethodOfDeath)
 
-#define G_ENTITY(num) ((gentity_t *)(g_entities_ptr + (num) * ENTITY_STRIDE))
+#define G_ENTITY(num) ((gentity_t *)(((byte *)g_entities) + (num) * ENTITY_STRIDE))
 
 enum {
     GMISSILE_ENTITYNUM_WORLD = 0x3fe,
+    GMISSILE_EF_GRENADE_BOUNCE = 0x1000000,
     GMISSILE_FL_GUIDED = 0x10000,
     GMISSILE_FL_TURRET = 0x20000,
 };
@@ -43,7 +44,7 @@ extern WeaponDef *BG_GetWeaponDef(int weaponIndex);
 extern void BG_EvaluateTrajectory(trajectory_t *tr, int atTime, vec_t *result);
 extern void BG_EvaluateTrajectoryDelta(trajectory_t *tr, int atTime, vec_t *result);
 extern unsigned char G_SetOrigin(gentity_t *ent, const vec_t *origin);
-extern void G_SetAngle(gentity_t *ent, vec_t *angles);
+extern unsigned char G_SetAngle(gentity_t *ent, vec_t *angles);
 extern void G_TraceCapsule(trace_t *result, vec_t *start, vec_t *mins, vec_t *maxs, vec_t *end, int skipNumber, int mask);
 extern int DirToByte(vec_t *dir);
 extern unsigned char G_AddEvent(gentity_t *ent, int event, int eventParm);
@@ -155,7 +156,7 @@ void G_ExplodeMissile(gentity_t *ent)
     weapDef = BG_GetWeaponDef((_ENT(ent)->s.weapon));
 
     if (weapDef->projExplosion == 2 && (_ENT(ent)->s.groundEntityNum) == 0x3FF) {
-        (_ENT(ent)->nextthink) = 50;
+        (_ENT(ent)->nextthink) = LEVEL_TIME + 50;
         return;
     }
 
@@ -261,7 +262,7 @@ gentity_t *fire_grenade(gentity_t *self, vec_t *start, vec_t *dir, int grenadeWP
 
     (_ENT(bolt)->damage) = weapDef->damage;
 
-    (_ENT(bolt)->s.eFlags) = 0x1000000;
+    (_ENT(bolt)->s.eFlags) = GMISSILE_EF_GRENADE_BOUNCE;
 
     (_ENT(bolt)->clipmask) = 0x2802891;
 
@@ -443,7 +444,7 @@ static qboolean G_BounceMissile(gentity_t *ent, trace_t *trace)
         (_ENT(ent)->s.groundEntityNum) = trace->entityNum;
     }
 
-    if ((_ENT(ent)->s.eFlags) & 0x10000) {
+    if ((_ENT(ent)->s.eFlags) & GMISSILE_EF_GRENADE_BOUNCE) {
 
         speed = VectorLength(velocity);
 
@@ -646,7 +647,7 @@ after_trace:
 
     VectorCopy(endpos, (_ENT(ent)->r.currentOrigin));
 
-    if ((_ENT(ent)->s.eFlags) & 0x10000) {
+    if ((_ENT(ent)->s.eFlags) & GMISSILE_EF_GRENADE_BOUNCE) {
 
         if (fraction != 1.0f || (fraction == 1.0f && tr.normal[2] > 0.7f)) {
 
@@ -754,7 +755,11 @@ after_trace:
 
         (_ENT(ent)->s.surfType) = (tr.surfaceFlags & 0x1F00000) >> 20;
 
-        if ((_ENT(other)->takedamage) || ((_ENT(ent)->s.eFlags) & 0x10000)) {
+        /* Use the same bounce flag set by fire_grenade. The FX lifetime flag
+         * (0x10000) does not identify a bouncing projectile. Without this,
+         * its trajectory keeps falling through the impact and detonates
+         * below the map instead of reflecting off the collision plane. */
+        if ((_ENT(other)->takedamage) || ((_ENT(ent)->s.eFlags) & GMISSILE_EF_GRENADE_BOUNCE)) {
 
             if (!(_ENT(other)->takedamage)) {
 
@@ -769,7 +774,7 @@ after_trace:
                 qboolean bounceResult = G_BounceMissile(ent, &tr);
                 if (bounceResult && !tr.startsolid) {
 
-                    G_AddEvent(ent, 0xBB, (tr.surfaceFlags & 0x1F00000) >> 20);
+                    G_AddEvent(ent, 0xBB, DirToByte(tr.normal));
                 }
 
                 if ((_ENT(ent)->s.eType) != 4) {

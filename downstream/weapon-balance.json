@@ -1,0 +1,42 @@
+{
+  "id": "lan-balanced-v1",
+  "reference": "Owner-supplied CoD2 multiplayer weapon definitions; later retail IWDs override earlier files.",
+  "designReference": "https://support.activision.com/call-of-duty--wwii/articles/call-of-duty-wwii-multiplayer",
+  "note": "Custom LAN tuning based on retail CoD2. These overrides are not official WWII statistics. Preserve original close body damage, cadence, recoil, magazines and reloads; reduce automatic headshot and ranged/hip-fire advantages.",
+  "weapons": {
+    "sten_mp": {
+      "locHelmet": ["3", "2"],
+      "locHead": ["3", "2"],
+      "maxDamageRange": ["1000", "700"],
+      "adsSpread": ["0", "0.2"]
+    },
+    "thompson_mp": {
+      "locHelmet": ["3", "2"],
+      "locHead": ["3", "2"],
+      "maxDamageRange": ["800", "600"]
+    },
+    "mp40_mp": {
+      "locHelmet": ["3", "2"],
+      "locHead": ["3", "2"],
+      "maxDamageRange": ["1000", "700"]
+    },
+    "bren_mp": {
+      "locHelmet": ["3", "2"],
+      "locHead": ["3", "2"],
+      "minDamage": ["40", "28"],
+      "maxDamageRange": ["1500", "1200"],
+      "adsSpread": ["0", "0.2"],
+      "hipSpreadStandMin": ["1", "1.5"],
+      "hipSpreadMax": ["5", "6"]
+    },
+    "mp44_mp": {
+      "locHelmet": ["3", "2"],
+      "locHead": ["3", "2"],
+      "minDamage": ["40", "28"],
+      "maxDamageRange": ["1500", "1200"],
+      "adsSpread": ["0", "0.2"],
+      "hipSpreadStandMin": ["1", "1.25"],
+      "hipSpreadMax": ["5", "5.5"]
+    }
+  }
+}

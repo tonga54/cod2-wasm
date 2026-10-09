@@ -147,9 +147,9 @@ static void CM_MESH_REGPARM3_ABI CM_PositionTestCapsuleInTriangle(const traceWor
                         float ex = startX - edge->origin[0];
                         float ey = startY - edge->origin[1];
                         float ez = startZ - edge->origin[2];
-                        float edgeAxisX = edge->axis[0][0];
-                        float edgeAxisY = edge->axis[0][1];
-                        float edgeAxisZ = edge->axis[0][2];
+                        float edgeAxisX = edge->axis[2][0];
+                        float edgeAxisY = edge->axis[2][1];
+                        float edgeAxisZ = edge->axis[2][2];
 
                         float proj = ex * edgeAxisX + ey * edgeAxisY + ez * edgeAxisZ;
 
@@ -536,6 +536,8 @@ edge_trace_tests: {
                 float ey = startY - edge->origin[1];
                 float ez = startZ - edge->origin[2];
 
+                /* Axis 2 maps the finite edge to [0, 1]. The other two
+                 * axes span the perpendicular plane of its cylinder. */
                 float edgeAx0 = edge->axis[0][0];
                 float edgeAx1 = edge->axis[0][1];
                 float edgeAx2 = edge->axis[0][2];
@@ -549,8 +551,8 @@ edge_trace_tests: {
                 float dirA = tw->delta[0] * edgeAx0 + tw->delta[1] * edgeAx1 + tw->delta[2] * edgeAx2;
                 float dirB = tw->delta[0] * edgeBx0 + tw->delta[1] * edgeBx1 + tw->delta[2] * edgeBx2;
 
-                float cross = projA * dirB - projB * dirA;
-                if (cross >= 0.0f)
+                float approach = projA * dirA + projB * dirB;
+                if (approach >= 0.0f)
                     continue;
 
                 {
@@ -559,7 +561,7 @@ edge_trace_tests: {
 
                     if (0.0f >= perpDiscrim) {
 
-                        float edgeProj = ex * edgeAx0 + ey * edgeAx1 + ez * edgeAx2;
+                        float edgeProj = ex * edge->axis[2][0] + ey * edge->axis[2][1] + ez * edge->axis[2][2];
                         if (fabsf(edgeProj - 0.5f) > 0.5f)
                             continue;
 
@@ -583,14 +585,14 @@ edge_trace_tests: {
 
                     {
                         float perpLenSq = dirA * dirA + dirB * dirB;
-                        float b2 = cross * cross - perpLenSq * perpDiscrim;
+                        float b2 = approach * approach - perpLenSq * perpDiscrim;
                         if (0.0f >= b2)
                             continue;
 
                         {
                             float t_hit;
                             float sqrtVal = sqrtf(b2);
-                            t_hit = (-cross - sqrtVal) / perpLenSq;
+                            t_hit = (-approach - sqrtVal) / perpLenSq;
 
                             if (t_hit >= trace->fraction)
                                 continue;
@@ -599,7 +601,7 @@ edge_trace_tests: {
                                 float hitEx = tw->delta[0] * t_hit + ex;
                                 float hitEy = tw->delta[1] * t_hit + ey;
                                 float hitEz = tw->delta[2] * t_hit + ez;
-                                float hitProj = hitEx * edgeAx0 + hitEy * edgeAx1 + hitEz * edgeAx2;
+                                float hitProj = hitEx * edge->axis[2][0] + hitEy * edge->axis[2][1] + hitEz * edge->axis[2][2];
                                 hitProj -= 0.5f;
                                 if (fabsf(hitProj) > 0.5f)
                                     continue;

@@ -10,7 +10,7 @@ extern void CM_UnlinkEntity(svEntity_t *svEntity);
 extern int CM_BoxSightTrace(int oldHitNum, const vec_t *start, const vec_t *end, const vec_t *mins, const vec_t *maxs, int brushmask, int contentmask);
 extern int CM_PointSightTraceToEntities(const sightpointtrace_t *clip);
 extern int CM_ClipSightTraceToEntities(const sightclip_t *clip);
-extern void CM_BoxTrace(trace_t *results, const vec_t *start, const vec_t *end, const vec_t *mins, const vec_t *maxs, int brushmask, int contentmask);
+extern int CM_BoxTrace(trace_t *results, const vec_t *start, const vec_t *end, const vec_t *mins, const vec_t *maxs, int brushmask, int contentmask);
 extern void CM_PointTraceStaticModels(trace_t *results, const vec_t *start, const vec_t *end, int contentmask);
 extern void CM_CalcTraceEntents(const void *extents);
 extern void CM_PointTraceToEntities(const pointtrace_t *clip, trace_t *results);
@@ -22,7 +22,7 @@ extern int CM_BoxLeafnums(const vec_t *mins, const vec_t *maxs, int *leafs, int 
 extern int CM_LeafCluster(int leafnum);
 extern void CM_LinkEntity(svEntity_t *svEntity, const vec_t *absmin, const vec_t *absmax, int clipHandle);
 extern int CM_TraceBox(const void *extents, const vec_t *absmin, const vec_t *absmax, float fraction);
-extern void CM_TransformedBoxTrace(trace_t *results, const vec_t *start, const vec_t *end, const vec_t *mins, const vec_t *maxs, int clipHandle, int contentmask, const vec_t *origin, const vec_t *angles);
+extern int CM_TransformedBoxTrace(trace_t *results, const vec_t *start, const vec_t *end, const vec_t *mins, const vec_t *maxs, int clipHandle, int contentmask, const vec_t *origin, const vec_t *angles);
 extern int CM_TransformedBoxSightTrace(int oldHitNum, const vec_t *start, const vec_t *end, const vec_t *mins, const vec_t *maxs, int clipHandle, int contentmask, const vec_t *origin, const vec_t *angles);
 extern int CM_AreaEntities(const vec_t *mins, const vec_t *maxs, int *entityList, int maxcount, int contentmask);
 extern int CM_PointContents(const vec_t *p, int brushmask);
@@ -32,7 +32,7 @@ extern gentity_t *SV_GentityNum(int num);
 extern void *Com_GetServerDObj(int entityNum);
 extern void DObjGetBounds(void *obj, vec_t *absmin, vec_t *absmax);
 extern int DObjHasContents(void *obj, int contentmask);
-extern void G_DObjCalcPose(gentity_t *ent);
+extern int G_DObjCalcPose(gentity_t *ent);
 extern void AnglesToAxis(const vec_t *angles, float (*axis)[3]);
 extern void MatrixTransposeTransformVector43(const vec_t *in, const float *mat, vec_t *out);
 extern void MatrixTransformVector(const vec_t *in, const float (*axis)[3], vec_t *out);
@@ -550,7 +550,7 @@ void SV_PointTraceToEntity(const pointtrace_t *clip, svEntity_t *check, trace_t 
             vec3_t origin;
             vec3_t absmin;
             vec3_t absmax;
-            float entAxis[3][3];
+            float entAxis[4][3];
             vec3_t localStart;
             vec3_t localEnd;
             DObjTrace objTrace;
@@ -590,6 +590,8 @@ void SV_PointTraceToEntity(const pointtrace_t *clip, svEntity_t *check, trace_t 
 
             G_DObjCalcPose(touch);
             AnglesToAxis(touch->r.currentAngles, entAxis);
+            /* The inverse affine transform also reads the origin row. */
+            memcpy(entAxis[3], origin, sizeof(origin));
             MatrixTransposeTransformVector43(clip->extents.start, (const float *)entAxis, localStart);
             MatrixTransposeTransformVector43(clip->extents.end, (const float *)entAxis, localEnd);
 
@@ -723,7 +725,7 @@ int SV_PointSightTraceToEntity(const sightpointtrace_t *clip, svEntity_t *check)
             vec3_t absmin;
             vec3_t absmax;
             TraceExtents extents;
-            float entAxis[3][3];
+            float entAxis[4][3];
             vec3_t localStart;
             vec3_t localEnd;
             DObjTrace objTrace;
@@ -752,6 +754,7 @@ int SV_PointSightTraceToEntity(const sightpointtrace_t *clip, svEntity_t *check)
 
             G_DObjCalcPose(touch);
             AnglesToAxis(touch->r.currentAngles, entAxis);
+            memcpy(entAxis[3], origin, sizeof(origin));
             MatrixTransposeTransformVector43(extents.start, (const float *)entAxis, localStart);
             MatrixTransposeTransformVector43(extents.end, (const float *)entAxis, localEnd);
 

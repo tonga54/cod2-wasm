@@ -67,7 +67,12 @@ endif()
 # Common warning-demotions used on every toolchain (reconstructed C trips these).
 set(COD2_WNO
   -Wno-error=incompatible-pointer-types -Wno-error=implicit-function-declaration
-  -Wno-error=implicit-int -Wno-error=int-conversion -Wno-error=return-mismatch)
+  -Wno-error=implicit-int -Wno-error=int-conversion)
+include(CheckCCompilerFlag)
+check_c_compiler_flag("-Wreturn-mismatch" COD2_HAS_RETURN_MISMATCH_WARNING)
+if(COD2_HAS_RETURN_MISMATCH_WARNING)
+  list(APPEND COD2_WNO -Wno-error=return-mismatch)
+endif()
 
 set(COD2_SRC_DIR ${CMAKE_SOURCE_DIR}/src)
 
@@ -378,6 +383,8 @@ set(COD2_DED_GUARDED src/Mac/Main/mac_main.c src/PC/qcommon/common.c)
 list(REMOVE_ITEM ALL_C ${COD2_DED_GUARDED})
 
 add_library(cod2_objs OBJECT ${ALL_C} ${ALL_ASM} ${GEN_C})
+set_source_files_properties(src/Mac/Tools/MacMSS_Object.c PROPERTIES
+  COMPILE_DEFINITIONS COD2_NATIVE_PORTABLE_DATA=1)
 
 add_executable(cod2_linux $<TARGET_OBJECTS:cod2_objs> ${COD2_DED_GUARDED})
 target_link_libraries(cod2_linux PRIVATE ${COD2_LIBS})

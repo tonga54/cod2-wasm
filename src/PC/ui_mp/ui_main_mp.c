@@ -202,9 +202,9 @@ extern int LAN_ServerIsDirty(int source, int index);
 extern int LAN_GetServerPing(int source, int index);
 extern void LAN_MarkServerDirty(int source, int index, int dirty);
 extern int LAN_UpdateDirtyPings(int source);
-extern int LAN_GetServerAddressString(int source, int index, char *addr, int addrSize);
-extern int LAN_RemoveServer(int source, const char *addr);
-extern int LAN_LoadCachedServers(void);
+extern void LAN_GetServerAddressString(int source, int index, char *addr, int addrSize);
+extern void LAN_RemoveServer(int source, const char *addr);
+extern void LAN_LoadCachedServers(void);
 extern int CIN_StopCinematic(int handle);
 extern int CIN_PlayCinematic(const char *name, int x, int y, int w, int h, int flags);
 extern int CIN_RunCinematic(int handle);
@@ -253,7 +253,7 @@ extern void ListBox_SetEndPos(void *listPtr, int pos);
 extern void ListBox_SetCursorPos(void *listPtr, int pos);
 extern int CL_IsPlayerTalking(int index);
 extern int CL_IsPlayerMuted(int index);
-extern int CL_MutePlayer(int index);
+extern void CL_MutePlayer(int index);
 extern int Int_Parse(const char **args, int *out);
 extern void CLUI_GetCDKey(char *buf, int bufSize, char *checksum, int checksumSize);
 extern void CLUI_SetCDKey(char *key, char *checksum);
@@ -485,7 +485,7 @@ qboolean Load_ScriptMenu(const char *pszMenu, int imageTrack)
     return 1;
 }
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 static void UI_DrawMapPreview(const rectDef_t *rect, const vec_t *color, int net)
 {
     int map;
@@ -558,7 +558,7 @@ const char *UI_GetGameTypeDisplayName(const char *pszGameType)
     return pszGameType;
 }
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 void UI_BuildPlayerList(void)
 {
     char cs[0x844];
@@ -602,7 +602,7 @@ void UI_DrawMapLevelshot(void)
     UI_FillRect(0, 0, 640.0f, 480.0f, 0, 0, (const vec_t *)imp_colorBlack);
 }
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 void UI_LoadIngameMenus(void)
 {
     MenuList *menuList;
@@ -617,7 +617,7 @@ void UI_LoadIngameMenus(void)
 }
 #endif
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 void UI_SetMap(const char *mapname, const char *gametype)
 {
     I_strncpyz(g_mapname, mapname, 0x40);
@@ -647,7 +647,7 @@ qboolean UI_OwnerDrawVisible(int flags)
     return visible;
 }
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 static int UI_ServersQsortCompare(const void *arg1, const void *arg2)
 {
     int s1 = *(const int *)arg1;
@@ -660,7 +660,7 @@ static int UI_ServersQsortCompare(const void *arg1, const void *arg2)
 }
 #endif
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 static int UI_PlayerProfilesQsortCompare(const void *arg1, const void *arg2)
 {
     int idx1 = *(const int *)arg1;
@@ -681,7 +681,7 @@ static int UI_PlayerProfilesQsortCompare(const void *arg1, const void *arg2)
 }
 #endif
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 static void UI_SelectCurrentMap(void)
 {
     byte cstate[0x844];
@@ -752,7 +752,7 @@ qboolean UI_CheckExecKey(int key)
     return 0;
 }
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 static void UI_VerifyLanguage(void)
 {
     int oldLanguage = Dvar_GetInt("loc_language");
@@ -771,7 +771,7 @@ static void UI_VerifyLanguage(void)
 
 extern void *imp_loc_warnings;
 extern void *imp_loc_warningsAsErrors;
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 const char *UI_SafeTranslateString(const char *reference)
 {
     const char *ref = reference;
@@ -801,7 +801,7 @@ const char *UI_SafeTranslateString(const char *reference)
 }
 #endif
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 static void UI_AddServerToFavoritesList(const char *name, const char *address)
 {
     const char *message;
@@ -842,7 +842,7 @@ static void UI_AddServerToFavoritesList(const char *name, const char *address)
 }
 #endif
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 Bool UI_GetOpenOrCloseMenuOnDvarArgs(const char **args, const char *cmd,
                                      char *dvarName, char *testValue, char *menuName)
 {
@@ -1039,7 +1039,7 @@ static int __attribute_regparm__(2) UI_GetServerStatusInfo(const char *serverAdd
     return 1;
 }
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 void UI_FeederSelection(float feederID, int index)
 {
     if (feederID == 4.0f) {
@@ -1111,7 +1111,7 @@ void UI_FeederSelection(float feederID, int index)
 }
 #endif
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 static void UI_GetGameTypesList(void)
 {
     char szGameTypeList[0x1000];
@@ -1210,21 +1210,21 @@ void UI_Pause(qboolean b)
     }
 }
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 void UI_OpenMenu_f(void)
 {
     Menus_OpenByName(uiInfo, Cmd_Args(1));
 }
 #endif
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 void UI_CloseMenu_f(void)
 {
     Menus_CloseByName(uiInfo, Cmd_Args(1));
 }
 #endif
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 void UI_Init(void)
 {
     byte *legacyBase;
@@ -1395,14 +1395,14 @@ static inline __attribute__((always_inline)) void UI_KeyEvent_impl(int key, qboo
     Dvar_SetIntByName("cl_paused", 0);
 }
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 void UI_KeyEvent(int key, qboolean down)
 {
     UI_KeyEvent_impl(key, down);
 }
 #endif
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 void UI_MouseEvent(int dx, int dy)
 {
     int *cursorX = &uiInfo->uiDC.cursorx;
@@ -1426,7 +1426,7 @@ void UI_MouseEvent(int dx, int dy)
 }
 #endif
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 void UI_MouseEventAbsolute(int x, int y)
 {
     int *cursorX = &uiInfo->uiDC.cursorx;
@@ -1450,14 +1450,14 @@ void UI_MouseEventAbsolute(int x, int y)
 }
 #endif
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 uiMenuCommand_t UI_GetActiveMenu(void)
 {
     return uiInfo->currentMenuType;
 }
 #endif
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 qboolean UI_SetActiveMenu(int menu)
 {
     byte *legacyBase;
@@ -1590,7 +1590,7 @@ qboolean UI_SetActiveMenu(int menu)
 }
 #endif
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 qboolean UI_IsFullscreen(void)
 {
     return Menus_AnyFullScreenVisible(uiInfo);
@@ -1644,7 +1644,7 @@ float UI_GetBlurRadius(void)
     return uiInfo->uiDC.blurRadiusOut;
 }
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 qboolean UI_AnyFullScreenMenuVisible(void)
 {
     return Menus_AnyFullScreenVisible(uiInfo);
@@ -1712,7 +1712,7 @@ const char *UI_ReplaceConversionString(const char *sourceString, const char *rep
     return UI_ReplaceConversions(sourceString, (ConversionArguments *)convArgs);
 }
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 void UI_CloseAll(void)
 {
     Menus_CloseAll(uiInfo);
@@ -1864,7 +1864,7 @@ MaterialHandle UI_FeederItemImage(const float feederID, int index)
     return *(MaterialHandle *)((byte *)&sharedUiInfo + 5104 + byteOff);
 }
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 void UI_DrawText(const char *text, int maxChars, FontHandle font, float x, float y, int horzAlign, int vertAlign, float scale, const vec_t *color, int style)
 {
     float xScale;
@@ -1900,7 +1900,7 @@ void UI_DrawTextWithCursor(const char *text, int maxChars, FontHandle font, floa
     CL_DrawTextPhysicalWithCursor(text, maxChars, font, x, y, xScale, yScale, color, style, cursorPos, (signed char)cursor);
 }
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 static void UI_StartServerRefresh(qboolean full)
 {
     qtime_t q;
@@ -1921,6 +1921,11 @@ static void UI_StartServerRefresh(qboolean full)
 
     now = uiInfo->uiDC.realTime;
 
+#ifdef __EMSCRIPTEN__
+    /* Both refresh buttons rediscover rooms over HTTP; UDP pings would reserve
+     * one of the two gameplay slots before the player chooses Join Server. */
+    full = 1;
+#endif
     if (!full) {
         LAN_ResetPings(source);
         sharedUiInfo.serverStatus.refreshActive = 1;
@@ -1954,7 +1959,7 @@ static void UI_StartServerRefresh(qboolean full)
 }
 #endif
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 static void UI_InsertServerAtPosition(int serverIndex, int position)
 {
     int numServers = sharedUiInfo.serverStatus.numDisplayServers;
@@ -1978,7 +1983,7 @@ static void UI_InsertServerAtPosition(int serverIndex, int position)
 }
 #endif
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 static void UI_RemoveDuplicateFromFavorites(int serverIndex)
 {
     int numServers = sharedUiInfo.serverStatus.numDisplayServers;
@@ -2003,51 +2008,32 @@ static void UI_RemoveDuplicateFromFavorites(int serverIndex)
 }
 #endif
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 static void UI_BinaryInsertServer(int serverIndex)
 {
     int numDisplay = sharedUiInfo.serverStatus.numDisplayServers;
     int *displayServers = sharedUiInfo.serverStatus.displayServers;
-    int lo, hi, mid, testIdx, cmp, position, lastCmp;
+    int lo, hi, mid, cmp;
     int source = (ui_netSource)->current.integer;
     int sortKey = sharedUiInfo.serverStatus.sortKey;
     int sortDir = sharedUiInfo.serverStatus.sortDir;
 
     lo = 0;
     hi = numDisplay;
-    position = 0;
-    lastCmp = 0;
-
-    while (hi > 0) {
-        mid = hi / 2;
-        testIdx = lo + mid;
-
-        cmp = LAN_CompareServers(source, sortKey, sortDir, serverIndex, displayServers[testIdx]);
-        lastCmp = cmp;
-
-        if (cmp == 0) {
-            UI_InsertServerAtPosition(serverIndex, testIdx);
-            return;
-        } else if (cmp > 0) {
-            hi -= mid;
-            position = testIdx + 1;
-            lo = position;
-            hi--;
-        } else {
-            hi -= mid;
-        }
+    /* Search the insertion interval [0, count], including an empty list. */
+    while (lo < hi) {
+        mid = lo + (hi - lo) / 2;
+        cmp = LAN_CompareServers(source, sortKey, sortDir, serverIndex, displayServers[mid]);
+        if (cmp > 0)
+            lo = mid + 1;
+        else
+            hi = mid;
     }
-
-    if (lastCmp >= 0)
-        position = lo + 1;
-    else
-        position = lo;
-
-    UI_InsertServerAtPosition(serverIndex, position);
+    UI_InsertServerAtPosition(serverIndex, lo);
 }
 #endif
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 static void __attribute_regparm__(0) UI_BuildServerDisplayList(qboolean force)
 {
     char info_buf[0x400];
@@ -2121,6 +2107,15 @@ static void __attribute_regparm__(0) UI_BuildServerDisplayList(qboolean force)
 
         clients = atoi(Info_ValueForKey(info_buf, "clients"));
         sharedUiInfo.serverStatus.numPlayersOnServers += clients;
+
+        if (getenv("MTRACE")) {
+            Com_Printf("[server-filter] info=%s empty=%d full=%d pass=%d nopass=%d pure=%d dedicated=%d mod=%d ff=%d kc=%d gametype=%d\n",
+                       info_buf, ui_browserShowEmpty->current.enabled, ui_browserShowFull->current.enabled,
+                       ui_browserShowPassword->current.enabled, ui_browserShowNoPassword->current.enabled,
+                       ui_browserShowPure->current.enabled, ui_browserShowDedicated->current.enabled,
+                       ui_browserMod->current.integer, ui_browserFriendlyfire->current.integer,
+                       ui_browserKillcam->current.integer, ui_joinGameType->current.integer);
+        }
 
         if (I_strnicmp(Info_ValueForKey(info_buf, "addr"), "000.000.000.000", 15) == 0)
             goto reject;
@@ -2909,6 +2904,10 @@ void UI_OwnerDraw(float x, float y, float w, float h, int horzAlign, int vertAli
         int clientNum;
         int pi;
 
+        if (!(*(dvar_t **)imp_sv_voice)->current.enabled ||
+            !(*(dvar_t **)imp_cl_voice)->current.enabled)
+            return;
+
         for (pi = 0; pi < 64; pi++) {
             if (!CL_IsPlayerTalking(pi))
                 continue;
@@ -2918,11 +2917,8 @@ void UI_OwnerDraw(float x, float y, float w, float h, int horzAlign, int vertAli
         }
 
         clientNum = pi;
-        if (clientNum < 0)
+        if (clientNum < 0 || clientNum >= 64)
             return;
-
-        if (clientNum >= 64)
-            clientNum = -1;
 
         {
             MaterialHandle voiceMat;
@@ -2937,7 +2933,7 @@ void UI_OwnerDraw(float x, float y, float w, float h, int horzAlign, int vertAli
                     break;
             }
             if (num >= 64)
-                num = -1;
+                return;
 
             voiceMat = CL_RegisterMaterialNoMip("voice_on", 7);
             actualScale = CL_NormalizedTextScale(font, scale);
@@ -2982,7 +2978,7 @@ static int UI_StrContains(const char *str, const char *charset)
     return 0;
 }
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 static inline __attribute__((always_inline)) void UI_UpdateServerCount(void)
 {
     int serverCount = LAN_GetServerCount((ui_netSource)->current.integer);
@@ -3213,11 +3209,10 @@ void UI_Refresh(void)
     if (Menu_Count(uiInfo) <= 0)
         return;
 
-    if (refreshTraceCount < 80 && (uiInfo->currentMenuType || uiInfo->uiDC.openMenuCount > 0)) {
+    if (getenv("MTRACE") && refreshTraceCount < 80 && (uiInfo->currentMenuType || uiInfo->uiDC.openMenuCount > 0)) {
         int i;
-        if (getenv("MTRACE"))
-            Com_Printf("[menu-trace] UI_Refresh active=%d menuCount=%d openCount=%d",
-                       uiInfo->currentMenuType, uiInfo->uiDC.menuCount, uiInfo->uiDC.openMenuCount);
+        Com_Printf("[menu-trace] UI_Refresh active=%d menuCount=%d openCount=%d",
+                   uiInfo->currentMenuType, uiInfo->uiDC.menuCount, uiInfo->uiDC.openMenuCount);
         for (i = 0; i < uiInfo->uiDC.openMenuCount && i < 16; ++i) {
             menuDef_t *menu = uiInfo->uiDC.menuStack[i];
             Com_Printf(" stack[%d]=%s", i, menu && menu->window.name ? menu->window.name : "<null>");
@@ -3309,7 +3304,11 @@ void UI_RunMenuScript(const char **args)
         return;
 
     if (I_stricmp(name, "StartServer") == 0) {
-
+#ifdef __EMSCRIPTEN__
+        extern void Web_CreateServer(const char *name);
+        Web_CreateServer(Dvar_GetString("sv_hostname"));
+        return;
+#endif
         Dvar_SetBoolByName("cg_thirdPerson", 0);
         Dvar_SetFromStringByNameFromSource("dedicated",
                                            va("%i", (ui_dedicated)->current.integer), 1);
@@ -3773,9 +3772,9 @@ void UI_RunMenuScript(const char **args)
     if (I_stricmp(name, "LoadMovies") == 0) {
         int numMovies, i;
         char *filePtr;
-        extern int __mh_execute_header;
 
-        numMovies = FS_GetFileList("video", "roq", 0, addr, (int)&__mh_execute_header);
+
+        numMovies = FS_GetFileList("video", "roq", 0, addr, 0x1000);
         sharedUiInfo.movieCount = numMovies;
         if (numMovies == 0)
             return;
@@ -4150,7 +4149,7 @@ void UI_RunMenuScript(const char **args)
     Com_Printf("unknown UI script %s\n", name);
 }
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 
 int UI_FeederCount(float feederID)
 {

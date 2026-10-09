@@ -613,8 +613,8 @@ struct refexport_t {
 };
 
 struct refimport_t {
-    void (*Printf)();
-    void (*Error)();
+    void (*Printf)(int level, const char *format, ...);
+    void (*Error)(int code, const char *format, ...);
     int (*Milliseconds)();
     void *(*Hunk_AllocInternal)();
     void *(*Hunk_AllocateTempMemoryInternal)();

@@ -1059,6 +1059,9 @@ MaterialHandle Material_Register(const char *name, int imageTrack)
 
     material = Material_Load(name, imageTrack);
     if (!material) {
+        MaterialHandle alias = Material_TryAliasWithoutExtension(name, imageTrack);
+        if (alias)
+            return alias;
         r_global_permanent_t *rgpPtr = (r_global_permanent_t *)imp_rgp;
         if (!rgpPtr->defaultMaterial)
             R_Error(0, "couldn't load material '$default'");

@@ -57,9 +57,9 @@ static struct XModel *cached_models[256];
 
 #define ENTITY_STRIDE sizeof(gentity_s)
 
-extern byte level_ptr[];
-extern byte g_entities_ptr[];
-extern byte scr_const_ptr[];
+extern level_locals_t level;
+extern gentity_t g_entities[];
+extern scr_const_t scr_const;
 extern entityHandler_t entityHandlers[20];
 extern struct scr_data_t g_scr_data;
 
@@ -1278,8 +1278,8 @@ qboolean G_DObjGetWorldTagMatrix(gentity_t *ent, unsigned int tagName, vec3_t *t
 {
     DObjAnimMat_s *mat;
     int boneIndex;
-    vec3_t ent_axis[3];
-    vec3_t origin;
+    /* A 4x3 transform includes the entity translation in its fourth row. */
+    vec3_t ent_axis[4];
     vec3_t axis[3];
 
     boneIndex = SV_DObjGetBoneIndex(ent, tagName);
@@ -1293,7 +1293,7 @@ qboolean G_DObjGetWorldTagMatrix(gentity_t *ent, unsigned int tagName, vec3_t *t
     }
 
     AnglesToAxis((_ENT(ent)->r.currentAngles), (vec_t *)ent_axis);
-    VectorCopy((_ENT(ent)->r.currentOrigin), origin);
+    VectorCopy((_ENT(ent)->r.currentOrigin), ent_axis[3]);
 
     {
         float scale = mat->transWeight;
@@ -1331,8 +1331,8 @@ int G_DObjGetWorldTagPos(gentity_t *ent, unsigned int tagName, vec_t *pos)
 {
     DObjAnimMat_s *mat;
     int boneIndex;
-    vec3_t ent_axis[3];
-    vec3_t origin;
+    /* A 4x3 transform includes the entity translation in its fourth row. */
+    vec3_t ent_axis[4];
 
     boneIndex = SV_DObjGetBoneIndex(ent, tagName);
     if (boneIndex < 0) {
@@ -1345,7 +1345,7 @@ int G_DObjGetWorldTagPos(gentity_t *ent, unsigned int tagName, vec_t *pos)
     }
 
     AnglesToAxis((_ENT(ent)->r.currentAngles), (vec_t *)ent_axis);
-    VectorCopy((_ENT(ent)->r.currentOrigin), origin);
+    VectorCopy((_ENT(ent)->r.currentOrigin), ent_axis[3]);
 
     MatrixTransformVector43((vec_t *)&mat->trans, (vec_t *)ent_axis, pos);
 

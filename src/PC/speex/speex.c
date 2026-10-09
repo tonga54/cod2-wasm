@@ -6,8 +6,8 @@
 
 float * speex_encoder_init(const SpeexMode *mode);
 float * speex_decoder_init(const SpeexMode *mode);
-float speex_encoder_destroy(float *state);
-float speex_decoder_destroy(float *state);
+void speex_encoder_destroy(float *state);
+void speex_decoder_destroy(float *state);
 int speex_encode_native(float *state, spx_word16_t *in, SpeexBits *bits);
 int speex_decode_native(float *state, SpeexBits *bits, spx_word16_t *out);
 int speex_encoder_ctl(float *state, int request, float *ptr);
@@ -31,17 +31,17 @@ float * speex_decoder_init(const SpeexMode *mode)
 }
 
 /* line 60 */
-float speex_encoder_destroy(float *state)
+void speex_encoder_destroy(float *state)
 {
     const SpeexMode *mode = *(const SpeexMode **)state;
-    return ((float (*)(float *))mode->enc_destroy)(state);
+    ((void (*)(float *))mode->enc_destroy)(state);
 }
 
 /* line 65 */
-float speex_decoder_destroy(float *state)
+void speex_decoder_destroy(float *state)
 {
     const SpeexMode *mode = *(const SpeexMode **)state;
-    return ((float (*)(float *))mode->dec_destroy)(state);
+    ((void (*)(float *))mode->dec_destroy)(state);
 }
 
 /* line 72 */

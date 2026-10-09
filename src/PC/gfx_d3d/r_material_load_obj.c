@@ -68,8 +68,22 @@ extern const MtlStateMapBitGroup s_stateMapDstFogBitGroup[];
 extern const MtlStateMapBitGroup s_stateMapDstPolygonOffsetBitGroup[];
 extern const MtlStateMapBitGroup s_stateMapDstWireframeBitGroup[];
 extern const MtlStateMapBitGroup s_stateMapDstStencilBitGroup[];
-static const MtlTextureFunctionDx7 s_textureFuncsDx7[21];
-static const PassOptionDx7 s_passOptionsDx7[5];
+/* Operations present in the original DX7 technique files. The enumerants
+ * are indices into rb_state.c's s_textureOpTable, not raw D3DTOP values. */
+static const MtlTextureFunctionDx7 s_textureFuncsDx7[] = {
+    { "select", 1, 1, MTL_TEXFUNC_VALID_BOTH },
+    { "modulate", 3, 2, MTL_TEXFUNC_VALID_BOTH },
+    { "modulate2x", 4, 2, MTL_TEXFUNC_VALID_BOTH },
+    { "blendCurrentAlpha", 15, 2, MTL_TEXFUNC_VALID_BOTH },
+    { "dotProduct3", 20, 2, MTL_TEXFUNC_VALID_COLOR },
+};
+static const PassOptionDx7 s_passOptionsDx7[] = {
+    { "gridLighting", offsetof(MaterialPassDx7, gridLighting) },
+    { "projectToInfinity", offsetof(MaterialPassDx7, projectToInfinity) },
+    { "ambientLighting", offsetof(MaterialPassDx7, ambientLighting) },
+    { "objectiveGlow", offsetof(MaterialPassDx7, objectiveGlow) },
+    { "fogToBlack", offsetof(MaterialPassDx7, fogToBlack) },
+};
 
 HRESULT IncludeClass_Close(const IncludeClass *_this, LPCVOID data);
 static Bool MATERIAL_REGPARM3_ABI Material_ValidatePassArguments_impl(const Material *material, const char *techniqueSetName, const char *techniqueName, int argCount, const MaterialShaderArgument *args);
@@ -531,34 +545,34 @@ static Bool MATERIAL_REGPARM3_ABI Material_LoadPassTextureStateDx7_impl(const ch
         return 0;
 
     token = Com_Parse(text);
-    for (fnIndex = 0; fnIndex < 21; fnIndex++) {
-        const byte *entry = (const byte *)s_textureFuncsDx7 + fnIndex * 16;
-        if (strcmp(token, *(const char **)entry) == 0)
+    for (fnIndex = 0; fnIndex < (int)(sizeof(s_textureFuncsDx7) / sizeof(s_textureFuncsDx7[0])); fnIndex++) {
+        const MtlTextureFunctionDx7 *entry = &s_textureFuncsDx7[fnIndex];
+        if (strcmp(token, entry->name) == 0)
             break;
     }
-    if (fnIndex >= 21) {
+    if (fnIndex >= (int)(sizeof(s_textureFuncsDx7) / sizeof(s_textureFuncsDx7[0]))) {
         Com_ScriptWarning("expected a texture function, found '%s' instead.\n", token);
         Com_Printf("Valid texture functions:.\n");
         {
             int i;
-            for (i = 0; i < 21; i++) {
-                const byte *e = (const byte *)s_textureFuncsDx7 + i * 16;
-                Com_Printf("  %s\n", *(const char **)e);
+            for (i = 0; i < (int)(sizeof(s_textureFuncsDx7) / sizeof(s_textureFuncsDx7[0])); i++) {
+                const MtlTextureFunctionDx7 *e = &s_textureFuncsDx7[i];
+                Com_Printf("  %s\n", e->name);
             }
         }
         return 0;
     }
 
     {
-        const byte *entry = (const byte *)s_textureFuncsDx7 + fnIndex * 16;
-        int funcValidMask = *(int *)(entry + 12);
+        const MtlTextureFunctionDx7 *entry = &s_textureFuncsDx7[fnIndex];
+        int funcValidMask = entry->valid;
         if (!(validTest & funcValidMask)) {
             const char *desc = (validTest == 1) ? "alpha" : "color";
             Com_ScriptWarning("%s is only valid for %s\n", token, desc);
             return 0;
         }
-        *texStageBits = *(int *)(entry + 4);
-        argCount = *(int *)(entry + 8);
+        *texStageBits = entry->enumerant;
+        argCount = entry->argCount;
     }
 
     if (!Com_MatchToken(text, "(", 1))
@@ -2182,8 +2196,8 @@ static Bool Material_ResolveTechniqueSet(Material *mtlx, const char *tsName, int
                                 {
                                     int oi;
                                     for (oi = 0; oi < 5; oi++) {
-                                        byte *sp = (byte *)&s_passOptionsDx7[oi];
-                                        *(byte *)(dcp + *(int *)(sp + 4)) = 0;
+                                        const PassOptionDx7 *sp = &s_passOptionsDx7[oi];
+                                        *(byte *)(dcp + sp->valueOffset) = 0;
                                     }
                                 }
                                 {
@@ -2192,8 +2206,8 @@ static Bool Material_ResolveTechniqueSet(Material *mtlx, const char *tsName, int
                                         const char *ot = Com_Parse(&dtext);
                                         int oi;
                                         for (oi = 0; oi < 5; oi++) {
-                                            byte *sp = (byte *)&s_passOptionsDx7[oi];
-                                            if (strcmp(*(const char **)sp, ot) == 0)
+                                            const PassOptionDx7 *sp = &s_passOptionsDx7[oi];
+                                            if (strcmp(sp->name, ot) == 0)
                                                 break;
                                         }
                                         if (oi >= 5) {
@@ -2205,8 +2219,8 @@ static Bool Material_ResolveTechniqueSet(Material *mtlx, const char *tsName, int
                                             break;
                                         }
                                         {
-                                            byte *sp = (byte *)&s_passOptionsDx7[oi];
-                                            *(byte *)(dcp + *(int *)(sp + 4)) = 1;
+                                            const PassOptionDx7 *sp = &s_passOptionsDx7[oi];
+                                            *(byte *)(dcp + sp->valueOffset) = 1;
                                         }
                                     }
                                     if (optErr) {
@@ -2706,8 +2720,8 @@ Material *Material_Load(const char *name, int imageTrack)
     result = Material_FinishLoadingInstance((MaterialObj *)mtlData, imageTrack);
     if (!result) {
 
-        Com_Printf("Material_Load: '%s' FinishLoadingInstance failed, using partial data\n", name);
-        return (Material *)mtlData;
+        Com_Printf("Material_Load: '%s' FinishLoadingInstance failed\n", name);
+        return NULL;
     }
     return (Material *)mtlData;
 #endif

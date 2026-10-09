@@ -333,9 +333,14 @@ int FSOpenIterator()
 {
     return 0;
 }
-int FSPathMakeRef()
+int FSPathMakeRef(const unsigned char *path, FSRef *ref, unsigned char *isDirectory)
 {
-    return 0;
+    (void)path;
+    if (ref)
+        memset(ref, 0, sizeof(*ref));
+    if (isDirectory)
+        *isDirectory = 0;
+    return -4; /* unimpErr: browser files use the engine's virtual filesystem. */
 }
 int FSpMakeFSRef()
 {
@@ -377,10 +382,6 @@ int GetControlMaximum()
     return 0;
 }
 int GetControlReference()
-{
-    return 0;
-}
-int SND_SetChannelInfo()
 {
     return 0;
 }
@@ -477,33 +478,34 @@ int FindNextComponent()
 struct {
     const char *flag;
     unsigned int masks[2];
-} fxAttributeFlags[26] __attribute__((aligned(4))) = {
-    { "org2fromTrace", { 0x000001, 0 } },
-    { "traceImpactFx", { 0x000002, 0 } },
-    { "org2isOffset", { 0x000004, 0 } },
-    { "cheapOrgCalc", { 0x000008, 0 } },
-    { "cheapOrg2Calc", { 0x000010, 0 } },
-    { "absoluteVel", { 0x000020, 0 } },
-    { "useBBox", { 0x000040, 0 } },
-    { "usePhysics", { 0x000080, 0 } },
-    { "impactKills", { 0x000100, 0 } },
-    { "useAlpha", { 0x000200, 0 } },
-    { "useRandomColors", { 0x000400, 0 } },
-    { "useRandomAlpha", { 0x000800, 0 } },
-    { "useRandomSize", { 0x001000, 0 } },
-    { "useRandomSize2", { 0x002000, 0 } },
-    { "useRandomLength", { 0x004000, 0 } },
-    { "useRandomRotationDelta", { 0x008000, 0 } },
-    { "useRandomVelocity", { 0x010000, 0 } },
-    { "useRandomVelocity2", { 0x020000, 0 } },
-    { "absoluteVel2", { 0x040000, 0 } },
-    { "affectedByWind", { 0x080000, 0 } },
-    { "emitFx", { 0x100000, 0 } },
-    { "relative", { 0x200000, 0 } },
-    { "blocksSight", { 0x400000, 0 } },
-    { "disableFarPlaneCulling", { 0x800000, 0 } },
-    { "impactFx", { 0x1000000, 0 } },
-    { "linear", { 0x2000000, 0 } },
+} fxAttributeFlags[27] __attribute__((aligned(4))) = {
+    { "org2fromTrace", { 0, 0x008 } },
+    { "traceImpactFx", { 0, 0x010 } },
+    { "org2isOffset", { 0, 0x020 } },
+    { "cheapOrgCalc", { 0, 0x040 } },
+    { "cheapOrg2Calc", { 0, 0x080 } },
+    { "absoluteVel", { 0x200000, 0 } },
+    { "useModel", { 0x000010, 0 } },
+    { "useBBox", { 0x000060, 0 } },
+    { "usePhysics", { 0x000020, 0 } },
+    { "impactKills", { 0x000400, 0 } },
+    { "useAlpha", { 0x000080, 0 } },
+    { "useRandomColors", { 0x002000, 0 } },
+    { "useRandomAlpha", { 0x004000, 0 } },
+    { "useRandomSize", { 0x008000, 0 } },
+    { "useRandomSize2", { 0x010000, 0 } },
+    { "useRandomLength", { 0x020000, 0 } },
+    { "useRandomRotationDelta", { 0x040000, 0 } },
+    { "useRandomVelocity", { 0x080000, 0 } },
+    { "useRandomVelocity2", { 0x100000, 0 } },
+    { "absoluteVel2", { 0x400000, 0 } },
+    { "affectedByWind", { 0x800000, 0 } },
+    { "emitFx", { 0x000100, 0 } },
+    { "relative", { 0x000002, 0 } },
+    { "blocksSight", { 0x001000, 0 } },
+    { "disableFarPlaneCulling", { 0x2000000, 0 } },
+    { "impactFx", { 0x000820, 0 } },
+    { "linear", { 0x4000000, 0 } },
 };
 
 char fx_sort_ptr[64] __attribute__((aligned(4))) = { 0 };
@@ -512,20 +514,21 @@ struct {
     const char *flag;
     unsigned int masks[2];
 } fxSpawnFlags[13] __attribute__((aligned(4))) = {
-    { "evenDistribution", { 0, 0x001 } },
-    { "frustumCull", { 0, 0x002 } },
-    { "orgOnSphere", { 0, 0x004 } },
-    { "absoluteAccel", { 0, 0x008 } },
-    { "depthHack", { 0, 0x010 } },
-    { "setShaderTime", { 0, 0x020 } },
-    { "useModel", { 0, 0x040 } },
-    { "orgOnCylinder", { 0, 0x080 } },
-    { "axisFromSphere", { 0, 0x100 } },
-    { "randrotaroundfwd", { 0, 0x200 } },
-    { "impactFx", { 0, 0x400 } },
-    { "deathFx", { 0, 0x800 } },
-    { "emitFx", { 0, 0x1000 } },
+    { "evenDistribution", { 0, 0x200 } },
+    { "frustumCull", { 0, 0x400 } },
+    { "orgOnSphere", { 0, 0x001 } },
+    { "absoluteAccel", { 0x400000, 0 } },
+    { "depthHack", { 0x001, 0 } },
+    { "setShaderTime", { 0x004, 0 } },
+    { "useModel", { 0x010, 0 } },
+    { "orgOnCylinder", { 0, 0x004 } },
+    { "axisFromSphere", { 0, 0x002 } },
+    { "randrotaroundfwd", { 0, 0x100 } },
+    { "impactFx", { 0x820, 0 } },
+    { "deathFx", { 0x200, 0 } },
+    { "emitFx", { 0x100, 0 } },
 };
+
 char fx_time_dst1[64] __attribute__((aligned(4))) = { 0 };
 char fx_time_dst2[64] __attribute__((aligned(4))) = { 0 };
 char fx_time_src1[64] __attribute__((aligned(4))) = { 0 };
@@ -617,7 +620,9 @@ char IOObjectRetain[64] __attribute__((aligned(4))) = { 0 };
 char IORegistryEntryCreateCFProperty[64] __attribute__((aligned(4))) = { 0 };
 char IORegistryEntryCreateIterator[64] __attribute__((aligned(4))) = { 0 };
 char IsMovieDone[64] __attribute__((aligned(4))) = { 0 };
+#if !defined(COD2_DOWNSTREAM_WASM)
 char jpeg_memory_src[64] __attribute__((aligned(4))) = { 0 };
+#endif
 char kCFAllocatorDefault[64] __attribute__((aligned(4))) = { 0 };
 
 char loadingMessage[64] __attribute__((aligned(4))) = { 0 };

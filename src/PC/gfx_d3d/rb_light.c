@@ -197,9 +197,12 @@ int RB_DeriveEntityLights(vec4_t *colorForDir, float sunVisibility, const Materi
     float sunColorR, sunColorG, sunColorB;
     (void)0;
 
+    if (maxLights <= 0)
+        return 0;
+
     techSet = material->techniqueSet;
     technique = techSet->techniques[15];
-    if (!technique)
+    if (!technique || maxLights < 2)
         goto fallback;
 
     if (*((unsigned char *)technique + 0xe) == 0)
@@ -262,7 +265,9 @@ fallback:
 
     for (;;) {
         lightCount++;
-        if (lightCount > maxLights)
+        /* The last light is the sun, filled after this loop. Reserve its
+         * slot before generating another grid light. */
+        if (lightCount >= maxLights)
             break;
 
         errorDirAvg[0] = 0.0f;

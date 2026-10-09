@@ -33,12 +33,12 @@ int R_InitFonts(void);
 void R_ShutdownFonts(void);
 float R_NormalizedTextScale(FontHandle font, float scale);
 int R_TextHeight(FontHandle font);
-int R_DrawText(const char *text, int maxChars, FontHandle font, float x, float y, float xScale, float yScale, const vec_t *color, int style);
+void R_DrawText(const char *text, int maxChars, FontHandle font, float x, float y, float xScale, float yScale, const vec_t *color, int style);
 static const short int *__attribute_regparm__(3) R_GetConsoleString(const short int *string, int *limit, char *text, vec_t *color, Bool *foundIcon);
 static const short int *__attribute_regparm__(3) R_GetConsoleIcon(const short int *string, int *maxChars, float *iconWidth, float *iconHeight, MaterialHandle *iconMaterial, vec_t *color, Bool *iconHorzFlip);
 int R_TextWidth(const char *text, int maxChars, FontHandle font);
 int R_ConsoleTextWidth(const short int *string, int maxChars, FontHandle font);
-int R_DrawConsoleText(const short int *string, int maxChars, FontHandle font, float x, float y, float xScale, float yScale, const vec_t *color, int style);
+void R_DrawConsoleText(const short int *string, int maxChars, FontHandle font, float x, float y, float xScale, float yScale, const vec_t *color, int style);
 
 static inline __attribute__((always_inline))
 const Glyph *
@@ -167,11 +167,9 @@ int R_TextHeight(FontHandle font)
     return font->pixelHeight;
 }
 
-int R_DrawText(const char *text, int maxChars, FontHandle font, float x, float y, float xScale, float yScale, const vec_t *color, int style)
+void R_DrawText(const char *text, int maxChars, FontHandle font, float x, float y, float xScale, float yScale, const vec_t *color, int style)
 {
-    int (*draw)(const char *, int, FontHandle, float, float, float, float, const vec_t *, int, int, int) =
-        (int (*)(const char *, int, FontHandle, float, float, float, float, const vec_t *, int, int, int))R_AddCmdDrawTextWithCursor;
-    return draw(text, maxChars, font, x, y, xScale, yScale, color, style, -1, 0);
+    R_AddCmdDrawTextWithCursor(text, maxChars, font, x, y, xScale, yScale, color, style, -1, 0);
 }
 
 static __attribute_regparm__(3)
@@ -431,7 +429,7 @@ int R_ConsoleTextWidth(const short int *string, int maxChars, FontHandle font)
     return (int)width;
 }
 
-int R_DrawConsoleText(const short int *string, int maxChars, FontHandle font, float x, float y, float xScale, float yScale, const vec_t *color, int style)
+void R_DrawConsoleText(const short int *string, int maxChars, FontHandle font, float x, float y, float xScale, float yScale, const vec_t *color, int style)
 {
     const short int *stringRemaining;
     float xOfs;
@@ -455,7 +453,7 @@ int R_DrawConsoleText(const short int *string, int maxChars, FontHandle font, fl
     curColor[3] = color[3];
 
     if (!string) {
-        return 0;
+        return;
     }
 
     stringRemaining = string;
@@ -494,5 +492,4 @@ int R_DrawConsoleText(const short int *string, int maxChars, FontHandle font, fl
         xOfs += scaledW;
     }
 
-    return 0;
 }

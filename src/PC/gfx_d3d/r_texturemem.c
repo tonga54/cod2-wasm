@@ -13,6 +13,7 @@ unsigned int R_AvailableTextureMemory(void)
     unsigned int texMemInMegs;
 
     MacDisplay_GetVideoMemoryInfo(&vidMem, &textureMemBytes);
+    vidMem >>= 20;
 
     char *device = *(char **)(dx + 8);
     void **vtable = *(void ***)device;

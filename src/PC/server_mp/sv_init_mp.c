@@ -15,8 +15,8 @@ const dvar_t *sv_wwwBaseURL;
 const dvar_t *sv_wwwDlDisconnected;
 #endif
 
-extern byte sv_ptr[];
-extern byte svs_ptr[];
+extern server_t sv;
+extern serverStatic_t svs;
 extern byte *sv_maxclients_dvar;
 extern byte *sv_gametype_dvar;
 extern byte *sv_dedicated_dvar;
@@ -149,7 +149,7 @@ extern void NET_Sleep(int msec);
 extern Bool NET_OutOfBandPrint(int sock, netadr_t adr, const char *data);
 extern int *G_GetSavePersist(void);
 extern const char *ClientConnect(int clientNum, unsigned short scriptId);
-extern int __mh_execute_header;
+
 
 #define SV_STATE_OFF 0x0
 #define SV_CHECKSUM_OFF 0x8
@@ -368,7 +368,7 @@ void SV_Init(void)
     *(dvar_t **)imp_sv_maxPing = Dvar_RegisterInt("sv_maxPing", 0, 0, 999, 0x1005);
     *(dvar_t **)imp_sv_floodProtect = Dvar_RegisterBool("sv_floodProtect", 1, 0x1005);
     *(dvar_t **)imp_sv_allowAnonymous = Dvar_RegisterBool("sv_allowAnonymous", 0, 0x1004);
-    *(dvar_t **)imp_sv_showCommands = Dvar_RegisterBool("sv_showCommands", 0, (int)&__mh_execute_header);
+    *(dvar_t **)imp_sv_showCommands = Dvar_RegisterBool("sv_showCommands", 0, 0x1000);
     *(dvar_t **)imp_sv_disableClientConsole = Dvar_RegisterBool("sv_disableClientConsole", 0, 0x1008);
     *(dvar_t **)imp_sv_voice = Dvar_RegisterBool("sv_voice", 0, 0x100d);
     *(dvar_t **)imp_sv_voiceQuality = Dvar_RegisterInt("sv_voiceQuality", 1, 0, 9, 0x1008);
@@ -379,35 +379,35 @@ void SV_Init(void)
     *(dvar_t **)imp_sv_iwdNames = Dvar_RegisterString("sv_iwdNames", "", 0x1048);
     *(dvar_t **)imp_sv_referencedIwds = Dvar_RegisterString("sv_referencedIwds", "", 0x1048);
     *(dvar_t **)imp_sv_referencedIwdNames = Dvar_RegisterString("sv_referencedIwdNames", "", 0x1048);
-    *(dvar_t **)imp_rcon_password = Dvar_RegisterString("rcon_password", "", (int)&__mh_execute_header);
-    *(dvar_t **)imp_sv_privatePassword = Dvar_RegisterString("sv_privatePassword", "", (int)&__mh_execute_header);
-    *(dvar_t **)imp_sv_fps = Dvar_RegisterInt("sv_fps", 20, 10, 1000, (int)&__mh_execute_header);
-    *(dvar_t **)imp_sv_timeout = Dvar_RegisterInt("sv_timeout", 240, 0, 1800, (int)&__mh_execute_header);
-    *(dvar_t **)imp_sv_zombietime = Dvar_RegisterInt("sv_zombietime", 2, 0, 1800, (int)&__mh_execute_header);
+    *(dvar_t **)imp_rcon_password = Dvar_RegisterString("rcon_password", "", 0x1000);
+    *(dvar_t **)imp_sv_privatePassword = Dvar_RegisterString("sv_privatePassword", "", 0x1000);
+    *(dvar_t **)imp_sv_fps = Dvar_RegisterInt("sv_fps", 20, 10, 1000, 0x1000);
+    *(dvar_t **)imp_sv_timeout = Dvar_RegisterInt("sv_timeout", 240, 0, 1800, 0x1000);
+    *(dvar_t **)imp_sv_zombietime = Dvar_RegisterInt("sv_zombietime", 2, 0, 1800, 0x1000);
     *(dvar_t **)imp_sv_allowDownload = Dvar_RegisterBool("sv_allowDownload", 1, 0x1001);
     *(dvar_t **)imp_sv_reconnectlimit = Dvar_RegisterInt("sv_reconnectlimit", 3, 0, 1800, 0x1001);
-    *(dvar_t **)imp_sv_padPackets = Dvar_RegisterInt("sv_padPackets", 0, 0, 0x7fffffff, (int)&__mh_execute_header);
+    *(dvar_t **)imp_sv_padPackets = Dvar_RegisterInt("sv_padPackets", 0, 0, 0x7fffffff, 0x1000);
 
     {
 
         (*(LegacyHacks **)imp_legacyHacks)->sv_killserver = 0;
     }
 
-    *(dvar_t **)imp_sv_allowedClan1 = Dvar_RegisterString("sv_allowedClan1", "", (int)&__mh_execute_header);
-    *(dvar_t **)imp_sv_allowedClan2 = Dvar_RegisterString("sv_allowedClan2", "", (int)&__mh_execute_header);
-    *(dvar_t **)imp_sv_packet_info = Dvar_RegisterBool("sv_packet_info", 0, (int)&__mh_execute_header);
-    *(dvar_t **)imp_sv_showAverageBPS = Dvar_RegisterBool("sv_showAverageBPS", 0, (int)&__mh_execute_header);
-    *(dvar_t **)imp_sv_kickBanTime = Dvar_RegisterFloat("sv_kickBanTime", 300.0f, 0.0f, 3600.0f, (int)&__mh_execute_header);
-    *(dvar_t **)imp_sv_mapRotation = Dvar_RegisterString("sv_mapRotation", "", (int)&__mh_execute_header);
-    *(dvar_t **)imp_sv_mapRotationCurrent = Dvar_RegisterString("sv_mapRotationCurrent", "", (int)&__mh_execute_header);
-    *(dvar_t **)imp_sv_debugRate = Dvar_RegisterBool("sv_debugRate", 0, (int)&__mh_execute_header);
-    *(dvar_t **)imp_sv_debugReliableCmds = Dvar_RegisterBool("sv_debugReliableCmds", 0, (int)&__mh_execute_header);
+    *(dvar_t **)imp_sv_allowedClan1 = Dvar_RegisterString("sv_allowedClan1", "", 0x1000);
+    *(dvar_t **)imp_sv_allowedClan2 = Dvar_RegisterString("sv_allowedClan2", "", 0x1000);
+    *(dvar_t **)imp_sv_packet_info = Dvar_RegisterBool("sv_packet_info", 0, 0x1000);
+    *(dvar_t **)imp_sv_showAverageBPS = Dvar_RegisterBool("sv_showAverageBPS", 0, 0x1000);
+    *(dvar_t **)imp_sv_kickBanTime = Dvar_RegisterFloat("sv_kickBanTime", 300.0f, 0.0f, 3600.0f, 0x1000);
+    *(dvar_t **)imp_sv_mapRotation = Dvar_RegisterString("sv_mapRotation", "", 0x1000);
+    *(dvar_t **)imp_sv_mapRotationCurrent = Dvar_RegisterString("sv_mapRotationCurrent", "", 0x1000);
+    *(dvar_t **)imp_sv_debugRate = Dvar_RegisterBool("sv_debugRate", 0, 0x1000);
+    *(dvar_t **)imp_sv_debugReliableCmds = Dvar_RegisterBool("sv_debugReliableCmds", 0, 0x1000);
 #if COD2_IS_PATCH_13
     sv_wwwDownload = Dvar_RegisterBool("sv_wwwDownload", 0, 0x1001);
     sv_wwwBaseURL = Dvar_RegisterString("sv_wwwBaseURL", "", 0x1001);
     sv_wwwDlDisconnected = Dvar_RegisterBool("sv_wwwDlDisconnected", 0, 0x1001);
 #endif
-    *(dvar_t **)&nextmap = Dvar_RegisterString("nextmap", "", (int)&__mh_execute_header);
+    *(dvar_t **)&nextmap = Dvar_RegisterString("nextmap", "", 0x1000);
     *(dvar_t **)imp_com_expectedHunkUsage = Dvar_RegisterInt("com_expectedHunkUsage", 0, 0, 0x7fffffff, 0x1040);
 }
 

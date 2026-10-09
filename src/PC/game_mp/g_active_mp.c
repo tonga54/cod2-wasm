@@ -2,6 +2,7 @@
 #include "imports.h"
 #include <string.h>
 extern bgs_t level_bgs;
+extern void Com_Printf(const char *fmt, ...);
 
 #ifndef qfalse
 #    define qfalse 0
@@ -9,16 +10,16 @@ extern bgs_t level_bgs;
 #endif
 
 extern int Scr_IsSystemActive(int);
-extern unsigned int Scr_AddEntity(gentity_t *ent);
+extern void Scr_AddEntity(gentity_t *ent);
 extern void Scr_Notify(gentity_t *ent, int stringValue, unsigned int paramcount);
 extern void BG_WeaponFireRecoil(playerState_t *ps, float *kickAVel, float *kickAVel_out);
 extern void BG_Player_DoControllers(void *obj, gentity_t *self, int *partBits, clientInfo_t *ci, int serverTime);
 extern void *Com_GetServerDObj(int entityNum);
 extern void SV_GetUsercmd(int clientNum, usercmd_t *ucmd);
 extern void ClientThink_real(gentity_t *ent, usercmd_t *ucmd);
-extern void G_SetFixedLink(gentity_t *ent, int mode);
+extern unsigned char G_SetFixedLink(gentity_t *ent, int mode);
 extern unsigned char G_SetOrigin(gentity_t *ent, const vec_t *origin);
-extern void G_SetAngle(gentity_t *ent, const vec_t *angles);
+extern unsigned char G_SetAngle(gentity_t *ent, const vec_t *angles);
 extern void SV_LinkEntity(gentity_t *ent);
 extern void SV_UnlinkEntity(gentity_t *ent);
 extern void SV_GameDropClient(int clientNum, const char *reason);
@@ -69,7 +70,7 @@ extern void BG_UpdatePlayerDObj(struct DObj_s *pDObj, entityState_t *es, clientI
 extern void BG_PlayerAnimation(const struct DObj_s *pDObj, entityState_t *es, clientInfo_t *ci);
 extern void G_SafeDObjFree(gentity_t *ent);
 extern qboolean SV_DObjExists(gentity_t *ent);
-extern unsigned char G_DObjCalcPose(gentity_t *ent);
+extern int G_DObjCalcPose(gentity_t *ent);
 extern void SV_XModelDebugBoxes(gentity_t *ent);
 extern void turret_think_client(gentity_t *self);
 extern void SV_SetConfigstring(int index, const char *val);
@@ -538,40 +539,39 @@ void ClientEvents(gentity_t *ent, int oldEventSequence)
             continue;
         }
 
-        switch (event - 0x9e) {
-        case 0:
-        case 1:
-        case 2:
-        case 3:
-        case 18:
+        switch (event) {
+        case 0x9e: /* EV_FIRE_WEAPON */
+        case 0x9f: /* EV_FIRE_WEAPONB */
+        case 0xa0: /* EV_FIRE_WEAPON_LASTSHOT */
+        case 0xaf: /* EV_FIRE_WEAPON_MG42 */
             if (((const dvar_t *)*(void **)imp_g_antilag)->current.enabled) {
                 FireWeaponAntiLag(ent, client->lastServerTime);
             } else {
                 FireWeaponAntiLag(ent, level.time);
             }
             break;
-        case 7:
+        case 0xa4: /* EV_FIRE_MELEE */
             FireWeaponMelee(ent);
             break;
-        case 9:
+        case 0xa6: /* EV_USE_OFFHAND; selecting it (0xa7) must not throw. */
             G_UseOffHand(ent);
             break;
-        case 11:
+        case 0xa8: /* EV_BINOCULAR_ENTER */
             Scr_Notify(ent, SCR_CONST()->binocular_enter, 0);
             break;
-        case 12:
+        case 0xa9: /* EV_BINOCULAR_EXIT */
             Scr_Notify(ent, SCR_CONST()->binocular_exit, 0);
             break;
-        case 13:
+        case 0xaa: /* EV_BINOCULAR_FIRE */
             Scr_Notify(ent, SCR_CONST()->binocular_fire, 0);
             break;
-        case 14:
+        case 0xab: /* EV_BINOCULAR_RELEASE */
             Scr_Notify(ent, SCR_CONST()->binocular_release, 0);
             break;
-        case 15:
+        case 0xac: /* EV_BINOCULAR_DROP */
             Scr_Notify(ent, SCR_CONST()->binocular_drop, 0);
             break;
-        case 39:
+        case 0xc5: /* EV_GRENADE_SUICIDE */
             if (ent->client && !((byte)ent->flags & 3)) {
                 ent->health = 0;
                 ent->client->ps.stats[0] = 0;
@@ -1203,7 +1203,7 @@ static inline __attribute__((always_inline)) qboolean G_UpdateClientInfoModel(ge
 static void G_ClientEndFrameIntermission(gentity_t *ent, gclient_t *client)
 {
     ent->r.svFlags = (ent->r.svFlags & 0xfd) | 1;
-    ent->active = 0;
+    ent->takedamage = 0;
     ent->r.contents = 0;
 
     client->ps.pm_flags &= 0xfc7fffff;
@@ -1264,11 +1264,11 @@ void ClientEndFrame(gentity_t *ent)
     }
 
     ent->r.svFlags = (ent->r.svFlags | 2) & 0xfe;
-    ent->active = 1;
+    ent->takedamage = 1;
 
     client->ps.pm_flags |= 0x00800000;
     client->ps.pm_flags &= 0xfcffffff;
-    client->ps.damageCount = client->sess.viewmodelIndex;
+    client->ps.viewmodelIndex = client->sess.viewmodelIndex;
 
     G_SetClientContents(ent);
 
@@ -1284,7 +1284,7 @@ void ClientEndFrame(gentity_t *ent)
     } else if (client->sess.sessionState == SESS_STATE_DEAD) {
         client->ps.pm_type = (ent->count == 1) ? 6 : 7;
         ent->r.svFlags = (ent->r.svFlags | 1) & 0xfd;
-        ent->active = 0;
+        ent->takedamage = 0;
     } else {
         client->ps.pm_type = ent->tagInfo != 0;
     }
@@ -1318,7 +1318,8 @@ void ClientEndFrame(gentity_t *ent)
     }
 
     client->ps.stats[0] = ent->health;
-    ent->s.eventSequence = 0;
+    /* ClientThink already exports events into this persistent ring. Clearing
+     * its sequence here discards them before the next snapshot is sent. */
 
     if (g_smoothClients->current.enabled) {
         G_PlayerStateToEntityStateExtrapolate(&client->ps, &ent->s, client->ps.commandTime, qtrue);

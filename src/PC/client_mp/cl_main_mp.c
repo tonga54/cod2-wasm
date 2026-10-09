@@ -58,7 +58,7 @@ extern void FS_FCloseFile(fileHandle_t f);
 extern void MSG_WriteReliableCommandToBuffer(const char *cmd, char *buf, int bufSize);
 extern int FS_Write(const void *buffer, int len, int f);
 extern void CL_ShutdownCGame(void);
-extern void CL_ShutdownUI(void);
+extern qboolean CL_ShutdownUI(void);
 extern void Dvar_SetInt(const dvar_t *dvar, int value);
 extern void Dvar_SetBool(const dvar_t *dvar, int value);
 extern void Dvar_SetString(const dvar_t *dvar, const char *value);
@@ -142,11 +142,11 @@ extern int FS_FileExists(const char *path);
 extern int FS_FOpenFileWrite(const char *path);
 extern int FS_FOpenFileRead(const char *path, int *file, int uniqueFILE);
 extern int FS_Read(void *buffer, int len, int f);
-extern void FS_ConditionalRestart(int checksumFeed);
+extern qboolean FS_ConditionalRestart(int checksumFeed);
 extern void FS_Restart(int checksumFeed);
 extern const char *FS_ReferencedIwdPureChecksums(void);
 extern int FS_CompareIwds(char *buf, int bufLen, int flag);
-extern void FS_ShiftStr(const char *name, int shift);
+extern char * FS_ShiftStr(const char *name, int shift);
 extern void MSG_Init(void *msg, void *data, int length);
 extern void MSG_WriteLong(void *msg, int value);
 extern void MSG_WriteShort(void *msg, int value);
@@ -165,9 +165,9 @@ extern void CL_Netchan_AddOOBProfilePacket(int size);
 extern void CL_Netchan_Decode(byte *data, int len);
 extern void CL_Netchan_SendOOBPacket(int len, const void *data, netadr_t to);
 extern int CL_CDKeyValidate(const char *cdkey, const char *checksum);
-extern int CL_ServerInfoPacket(netadr_t from, msg_t *msg, int time);
-extern int CL_ServerStatusResponse(netadr_t from, msg_t *msg);
-extern int CL_ServersResponsePacket(netadr_t from, msg_t *msg);
+extern void CL_ServerInfoPacket(netadr_t from, msg_t *msg, int time);
+extern void CL_ServerStatusResponse(netadr_t from, msg_t *msg);
+extern void CL_ServersResponsePacket(netadr_t from, msg_t *msg);
 extern const char *CL_GetConfigString(int index);
 extern void CL_ParseServerMessage(msg_t *msg);
 extern void CL_ArchiveClientState(void *memFile);
@@ -182,7 +182,7 @@ extern void *Z_MallocInternal(int size);
 extern void *Z_VirtualAllocInternal(int size);
 extern void Z_VirtualFreeInternal(void *ptr);
 extern void CG_CalculateFPS(void);
-extern void Voice_GetLocalVoiceData(void *dest);
+extern int Voice_GetLocalVoiceData(ClientVoicePacket_t *dest);
 extern void Voice_Playback(void);
 extern void SEH_UpdateLanguageInfo(void);
 extern const char *SEH_LocalizeTextMessage(const char *ref, const char *defaultText, int flags);
@@ -1848,6 +1848,12 @@ void CL_LocalServers_f(void)
 
     Com_Memset(&to, 0, sizeof(to));
 
+#ifdef __EMSCRIPTEN__
+    /* Browsers cannot send LAN broadcasts. Discover the host's live dedicated
+     * servers over HTTP without reserving a gameplay WebSocket slot. */
+    extern void Web_DiscoverServers(void);
+    Web_DiscoverServers();
+#else
     for (pass = 0; pass < 2; ++pass) {
         for (port = 0x7120; port < 0x7124; ++port) {
             to.port = (unsigned short)(((port & 0xff) << 8) | ((port >> 8) & 0xff));
@@ -1860,6 +1866,7 @@ void CL_LocalServers_f(void)
                                      to);
         }
     }
+#endif
 }
 
 void CL_PlayLogo_f(void)
@@ -2218,7 +2225,10 @@ Bool CL_ConnectionlessPacket(netadr_t from, msg_t *msg, int time)
             I_strncpyz(mapname, MSG_ReadStringLine(msg), sizeof(mapname));
             gametype = MSG_ReadStringLine(msg);
             CL_SetupForNewServerMap(mapname, gametype);
-            if (conn->state <= CA_CONNECTED)
+            /* The loading screen no longer runs CG_DrawActiveFrame/CL_Input.
+             * Leave ACTIVE so CL_SendCmd keeps sending acknowledgements and
+             * the old serverId that requests the new gamestate. */
+            if (conn->state >= CA_CONNECTED)
                 conn->state = CA_CONNECTED;
             UI_DrawConnectScreen();
         }
@@ -2402,7 +2412,7 @@ Lc6:
             goto L183;
         goto Lmain0;
     }
-    t = cls.realtime - clc_p->connectTime;
+    t = cls.realtime - clc_p->lastPacketTime;
     if ((float)t <= cl_timeout->current.value * 1000.0f)
         goto Lmain0;
     cl_p->timeoutcount += 1;
@@ -2606,6 +2616,11 @@ void CL_Disconnect(void)
     }
 
     oldState = conn->state;
+#ifdef __EMSCRIPTEN__
+    /* Returning to menus releases this room's WebSocket/UDP player slot. */
+    extern void NET_Config(qboolean enabled);
+    NET_Config(0);
+#endif
     CL_ClearState();
     CL_ClearMutedList();
 

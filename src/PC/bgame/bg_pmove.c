@@ -105,15 +105,18 @@ extern void PM_Weapon(pmove_t *pm, pml_t *pml);
 extern void PM_ResetWeaponState(playerState_t *ps);
 extern void BG_AnimUpdatePlayerStateConditions(pmove_t *pmove);
 extern int BG_AnimScriptEvent(playerState_t *ps, int event, int isContinue, int force);
+extern int BG_AnimScriptAnimation(playerState_t *ps, aistateEnum_t state, scriptAnimMoveTypes_t movetype, qboolean isContinue);
 extern Bool Jump_Check(pmove_t *pm, pml_t *pml);
 extern void Jump_ClearState(playerState_t *ps);
 extern float Jump_ReduceFriction(playerState_t *ps);
 extern void Mantle_CapView(playerState_t *ps);
+extern void Mantle_Check(pmove_t *pm, pml_t *pml);
+extern void Mantle_Move(pmove_t *pm, playerState_t *ps, pml_t *pml);
 extern void AngleVectors(const vec_t *angles, vec_t *forward, vec_t *right, vec_t *up);
 extern void Sys_SnapVector(vec_t *v);
 
-extern int Jump_ActivateSlowdown(playerState_t *ps);
-extern int PM_ExitAimDownSight(playerState_t *ps);
+extern void Jump_ActivateSlowdown(playerState_t *ps);
+extern void PM_ExitAimDownSight(playerState_t *ps);
 extern int BG_PlayAnim(playerState_t *ps, int animNum, int bodyPart, int forceDuration, qboolean setTimer, qboolean isContinue, qboolean force);
 extern float PitchForYawOnNormal(float fYaw, const vec_t *normal);
 extern const dvar_t *bg_fallDamageMinHeight;
@@ -379,6 +382,18 @@ static float PM_CmdScale(const playerState_t *ps, const usercmd_t *cmd)
 
 static void PM_DropTimers(playerState_t *ps, int msec)
 {
+    /* Timed jump/land/weapon gestures must release the movement animation. */
+    if (ps->legsTimer > 0) {
+        ps->legsTimer -= msec;
+        if (ps->legsTimer < 0)
+            ps->legsTimer = 0;
+    }
+    if (ps->torsoTimer > 0) {
+        ps->torsoTimer -= msec;
+        if (ps->torsoTimer < 0)
+            ps->torsoTimer = 0;
+    }
+
     if (ps->pm_time > 0) {
         ps->pm_time -= msec;
         if (ps->pm_time <= 0) {
@@ -387,29 +402,8 @@ static void PM_DropTimers(playerState_t *ps, int msec)
         }
     }
 
-    if (ps->weaponTime > 0) {
-        ps->weaponTime -= msec;
-        if (ps->weaponTime < 0)
-            ps->weaponTime = 0;
-    }
-
-    if (ps->weaponDelay > 0) {
-        ps->weaponDelay -= msec;
-        if (ps->weaponDelay < 0)
-            ps->weaponDelay = 0;
-    }
-
-    if (ps->grenadeTimeLeft > 0) {
-        ps->grenadeTimeLeft -= msec;
-        if (ps->grenadeTimeLeft < 0)
-            ps->grenadeTimeLeft = 0;
-    }
-
-    if (ps->weaponRestrictKickTime > 0) {
-        ps->weaponRestrictKickTime -= msec;
-        if (ps->weaponRestrictKickTime < 0)
-            ps->weaponRestrictKickTime = 0;
-    }
+    /* PM_Weapon owns weapon and cook timers. Decrementing weaponDelay here
+     * can consume its zero transition before the reload/fire action sees it. */
 
     if (ps->foliageSoundTime > 0) {
         ps->foliageSoundTime -= msec;
@@ -828,7 +822,7 @@ static void PM_REGPARM2_ABI PM_Friction(playerState_t *ps, pml_t *pml)
     vx = ps->velocity[0];
     vy = ps->velocity[1];
     vz = ps->velocity[2];
-    if (pml->walking)
+    if (pml->walking && !(ps->pm_flags & PMF_LADDER))
         vz = 0.0f;
     speed = sqrtf(vx * vx + vy * vy + vz * vz);
 
@@ -841,8 +835,8 @@ static void PM_REGPARM2_ABI PM_Friction(playerState_t *ps, pml_t *pml)
 
     drop = 0.0f;
 
-    if (pml->walking && !(pml->groundTrace.surfaceFlags & 2) &&
-        !(ps->pm_flags & 0x400) && ps->pm_type != 4) {
+    if ((ps->pm_flags & PMF_LADDER) || (pml->walking && !(pml->groundTrace.surfaceFlags & 2) &&
+        !(ps->pm_flags & 0x400) && ps->pm_type != 4)) {
         control = speed;
         if (PM_DvarFloat(stopspeed, 100.0f) > control)
             control = PM_DvarFloat(stopspeed, 100.0f);
@@ -1291,9 +1285,89 @@ static void PM_NoclipMove(pmove_t *pm, pml_t *pml)
     PM_SetMovementDir(pm, pml);
 }
 
+static void PM_CheckLadderMove(pmove_t *pm, pml_t *pml)
+{
+    playerState_t *ps = pm->ps;
+    qboolean wasLadder = (ps->pm_flags & PMF_LADDER) != 0;
+    vec3_t direction, end;
+    trace_t trace;
+
+    ps->pm_flags &= ~PMF_LADDER;
+    /* Only live, standing players climb. Jumping away must not reattach on
+       the very next prediction/server movement step. */
+    if (ps->pm_type != 0 || (ps->pm_flags & 0x3) ||
+        ((ps->pm_flags & PMF_JUMPING) && pm->cmd.serverTime - ps->jumpTime < 500) ||
+        (!wasLadder && pml->walking && pm->cmd.forwardmove <= 0))
+        return;
+
+    if (wasLadder) {
+        direction[0] = -ps->vLadderVec[0];
+        direction[1] = -ps->vLadderVec[1];
+    } else {
+        direction[0] = pml->forward[0];
+        direction[1] = pml->forward[1];
+    }
+    direction[2] = 0.0f;
+    if (Vec3Normalize(direction) == 0.0f)
+        return;
+    end[0] = ps->origin[0] + direction[0] * 2.0f;
+    end[1] = ps->origin[1] + direction[1] * 2.0f;
+    end[2] = ps->origin[2];
+    PM_playerTrace(pm, &trace, ps->origin, pm->mins, pm->maxs, end,
+                   ps->clientNum, pm->tracemask);
+    /* The visible wooden rungs can be just in front of the ladder brush.
+       Its authored player-clip volume, not the rung's wood material, marks
+       the climbable surface. Keep the same short reach for this second trace. */
+    if (!(trace.surfaceFlags & 0x8) && (pm->tracemask & 0x10000))
+        PM_playerTrace(pm, &trace, ps->origin, pm->mins, pm->maxs, end,
+                       ps->clientNum, 0x10000);
+    /* SURF_LADDER is carried by the original BSP's collision material. */
+    if (trace.fraction == 1.0f || trace.startsolid ||
+        !(trace.surfaceFlags & 0x8) || fabsf(trace.normal[2]) >= 0.3f)
+        return;
+    ps->pm_flags |= PMF_LADDER;
+    PM_VectorCopy(trace.normal, ps->vLadderVec);
+    Jump_ClearState(ps);
+    if (!wasLadder)
+        ps->velocity[2] = 0.0f;
+}
+
 static void PM_REGPARM2_ABI PM_LadderMove(pmove_t *pm, pml_t *pml)
 {
-    PM_AirMove(pm, pml);
+    playerState_t *ps = pm->ps;
+    vec3_t wishvel, wishdir;
+    float scale, wishspeed, into, climb;
+
+    if (Jump_Check(pm, pml)) {
+        PM_AirMove(pm, pml);
+        return;
+    }
+
+    if (!pm->cmd.forwardmove && !pm->cmd.rightmove)
+        PM_Friction(ps, pml);
+    scale = PM_CmdScale(ps, &pm->cmd) * 0.5f;
+    wishvel[0] = pml->forward[0] * pm->cmd.forwardmove + pml->right[0] * pm->cmd.rightmove;
+    wishvel[1] = pml->forward[1] * pm->cmd.forwardmove + pml->right[1] * pm->cmd.rightmove;
+    wishvel[2] = 0.0f;
+    into = PM_DotProduct(wishvel, ps->vLadderVec);
+    wishvel[0] -= into * ps->vLadderVec[0];
+    wishvel[1] -= into * ps->vLadderVec[1];
+    /* Forward climbs while looking level/up; looking down reverses it. */
+    climb = fmaxf(-1.0f, fminf(1.0f, (pml->forward[2] + 0.5f) * 2.0f));
+    wishvel[2] = climb * pm->cmd.forwardmove;
+    PM_VectorCopy(wishvel, wishdir);
+    wishspeed = Vec3Normalize(wishdir) * scale;
+    PM_Accelerate(ps, pml, wishdir, wishspeed, 9.0f);
+
+    /* Keep contact while climbing and move onto the roof as the capsule
+       clears the last rung. Normal collision/step traces still apply. */
+    if (pm->cmd.forwardmove) {
+        ps->velocity[0] -= ps->vLadderVec[0] * 20.0f;
+        ps->velocity[1] -= ps->vLadderVec[1] * 20.0f;
+    }
+    PM_ApplyGroundPlane(ps, pml);
+    PM_StepSlideMove(pm, pml, 0);
+    PM_SetMovementDir(pm, pml);
 }
 
 static void PM_GetViewHeightLerp(const viewLerpWaypoint_t *table, int frac,
@@ -1529,17 +1603,53 @@ void PM_UpdatePronePitch(pmove_t *pm, pml_t *pml)
 
 void PM_FootstepEvent(pmove_t *pm, pml_t *pml, int iOldBobCycle, int iNewBobCycle, qboolean bFootStep)
 {
-    (void)pm;
-    (void)pml;
-    (void)iOldBobCycle;
-    (void)iNewBobCycle;
-    (void)bFootStep;
+    int surface, event;
+    if (!bFootStep || !pml->walking || pm->ps->groundEntityNum == ENTITYNUM_NONE ||
+        !((iOldBobCycle ^ iNewBobCycle) & 0x40) ||
+        (pml->groundTrace.surfaceFlags & 0x2000))
+        return;
+
+    surface = PM_GroundSurfaceType(pml);
+    if ((unsigned)surface >= 23)
+        surface = 0;
+    /* Each movement sound family has the 23 original surface variants. */
+    event = pm->ps->viewHeightTarget == 11 ? 47 :
+            pm->ps->viewHeightTarget == 40 ? 24 : 1;
+    PM_AddEvent(pm->ps, event + surface);
 }
 
 static void PM_REGPARM2_ABI PM_Footsteps(pmove_t *pm, pml_t *pml)
 {
     int oldBob;
     int newBob;
+    playerState_t *ps = pm->ps;
+    scriptAnimMoveTypes_t moveType;
+    int stance = PM_GetEffectiveStance(ps);
+    qboolean moving = pm->xyspeed > 1.0f &&
+        (pm->cmd.forwardmove || pm->cmd.rightmove);
+    qboolean backwards = pm->cmd.forwardmove < 0;
+    qboolean walking = (ps->pm_flags & 0x40) ||
+        (PM_AbsInt(pm->cmd.forwardmove) < 127 && PM_AbsInt(pm->cmd.rightmove) < 127);
+
+    /* Movement selects the original playeranim.script entries even when no
+       ground footstep can play (notably while attached to a ladder). */
+    if (ps->pm_flags & PMF_LADDER) {
+        moveType = ps->velocity[2] < 0.0f ? ANIM_MT_CLIMBDOWN : ANIM_MT_CLIMBUP;
+        ps->movementDir = (int)AngleDelta(vectoyaw(ps->vLadderVec) + 180.0f,
+                                        ps->viewangles[1]);
+    } else if (!moving || !pml->walking) {
+        moveType = stance == 1 ? ANIM_MT_IDLEPRONE :
+                   stance == 2 ? ANIM_MT_IDLECR : ANIM_MT_IDLE;
+    } else if (stance == 1) {
+        moveType = backwards ? ANIM_MT_WALKPRONEBK : ANIM_MT_WALKPRONE;
+    } else if (stance == 2) {
+        moveType = walking ? (backwards ? ANIM_MT_WALKCRBK : ANIM_MT_WALKCR) :
+                            (backwards ? ANIM_MT_RUNCRBK : ANIM_MT_RUNCR);
+    } else {
+        moveType = walking ? (backwards ? ANIM_MT_WALKBK : ANIM_MT_WALK) :
+                            (backwards ? ANIM_MT_RUNBK : ANIM_MT_RUN);
+    }
+    BG_AnimScriptAnimation(ps, AISTATE_COMBAT, moveType, 1);
 
     if (!PM_ShouldMakeFootsteps(pm))
         return;
@@ -1846,6 +1956,7 @@ void Pmove(pmove_t *pm)
         ps->commandTime = finalTime - 1000;
 
     pm->numtouch = 0;
+    pm->mantleStarted = 0;
 
     while (ps->commandTime != finalTime) {
         pml_t pml;
@@ -1858,6 +1969,22 @@ void Pmove(pmove_t *pm)
             msec = 1;
 
         pm->cmd.serverTime = ps->commandTime + msec;
+
+        /* The animated corpse is a separate entity. A dead player's state
+         * must consume commands without running the noclip movement path. */
+        if (ps->pm_type == 6 || ps->pm_type == 7) {
+            PM_VectorCopy(ps->mins, pm->mins);
+            PM_VectorCopy(ps->maxs, pm->maxs);
+            pm->mantleStarted = 0;
+            ps->velocity[0] = ps->velocity[1] = ps->velocity[2] = 0.0f;
+            ps->eFlags &= ~0x40;
+            ps->pm_flags &= ~PMF_LADDER;
+            pm->xyspeed = 0.0f;
+            PM_ResetWeaponState(ps);
+            ps->commandTime = pm->cmd.serverTime;
+            pm->oldcmd = pm->cmd;
+            continue;
+        }
 
         BG_AnimUpdatePlayerStateConditions(pm);
 
@@ -1896,18 +2023,29 @@ void Pmove(pmove_t *pm)
         PM_UpdateAimDownSightFlag(pm, &pml);
 
         if (ps->pm_type <= 5) {
-            PM_GroundTrace(pm, &pml);
-
-            if (ps->pm_flags & PMF_LADDER) {
-                PM_LadderMove(pm, &pml);
-            } else if (pml.walking && ps->groundEntityNum != ENTITYNUM_NONE) {
-                PM_WalkMove(pm, &pml);
+            /* Mantling owns root motion until the ledge animation finishes.
+             * Walking/air sliding would cancel that motion against the wall. */
+            Mantle_Check(pm, &pml);
+            if (ps->pm_flags & PMF_MANTLE) {
+                ps->groundEntityNum = ENTITYNUM_NONE;
+                ps->pm_flags &= ~PMF_LADDER;
+                Mantle_Move(pm, ps, &pml);
             } else {
-                PM_AirMove(pm, &pml);
-            }
+                PM_GroundTrace(pm, &pml);
+                PM_CheckLadderMove(pm, &pml);
 
-            PM_GroundTrace(pm, &pml);
-            PM_Footsteps(pm, &pml);
+                if (ps->pm_flags & PMF_LADDER) {
+                    PM_LadderMove(pm, &pml);
+                } else if (pml.walking && ps->groundEntityNum != ENTITYNUM_NONE) {
+                    PM_WalkMove(pm, &pml);
+                } else {
+                    PM_AirMove(pm, &pml);
+                }
+
+                PM_GroundTrace(pm, &pml);
+                pm->xyspeed = PM_VectorLength2D(ps->velocity);
+                PM_Footsteps(pm, &pml);
+            }
             PM_Weapon(pm, &pml);
         } else {
             ps->groundEntityNum = ENTITYNUM_NONE;

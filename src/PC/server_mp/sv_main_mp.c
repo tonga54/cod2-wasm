@@ -11,7 +11,7 @@ extern Bool NET_OutOfBandPrint(netsrc_t sock, netadr_t adr, const char *data);
 
 extern void Scr_FreeValue(int value);
 extern void SV_ResetSkeletonCache(void);
-extern void G_RunFrame(int levelTime);
+extern int G_RunFrame(int levelTime);
 extern void LargeLocal_LargeLocal(LargeLocal *ll, int size);
 extern void *LargeLocal_GetBuf(LargeLocal *ll);
 extern void ZN10LargeLocalD1Ev(LargeLocal *ll);
@@ -1240,7 +1240,7 @@ void SV_Frame(int msec)
             cl->lastPacketTime = svs.time;
         }
 
-        if (*(int *)((byte *)cl + 0x765f4)) {
+        if (cl->bIsTestClient) {
             continue;
         }
 

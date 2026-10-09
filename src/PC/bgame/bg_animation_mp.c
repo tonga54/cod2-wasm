@@ -724,11 +724,11 @@ static void __attribute_regparm__(3) BG_RunLerpFrameRate(clientInfo_t *ci, lerpF
     }
 
     anim = lf->animation;
-    if (anim == NULL || anim->moveSpeed == 0.0f || lf->oldFrameSnapshotTime == 0 || lf->oldFrameSnapshotTime == bgs->latestSnapshotTime) {
+    if (anim == NULL || anim->moveSpeed == 0.0f || lf->oldFrameSnapshotTime == 0) {
         lf->animSpeedScale = 1.0f;
         lf->oldFrameSnapshotTime = bgs->latestSnapshotTime;
         BG_CopyLerpFramePosition(lf, es);
-    } else {
+    } else if (lf->oldFrameSnapshotTime != bgs->latestSnapshotTime) {
         int deltaMsec;
         float dist;
         float seconds;
@@ -1411,6 +1411,7 @@ static void __attribute_regparm__(3)
     int indentLevel;
     int i;
 
+    globalFilename = "mp/playeranim.script";
     if (!bScriptFileLoaded) {
         fileHandle_t f;
         int iLen = FS_FOpenFileByMode(globalFilename, &f, 0);
@@ -1436,6 +1437,14 @@ static void __attribute_regparm__(3)
     globalScriptData = scriptData;
     g_pLoadAnims = pLoadAnims;
     g_piNumLoadAnims = piNumAnims;
+
+    // Both passes rebuild the complete script table. Reuse its bounded pool
+    // instead of appending another copy on each pass and map rotation.
+    scriptData->numScriptItems = 0;
+    memset(scriptData->scriptAnims, 0, sizeof(scriptData->scriptAnims));
+    memset(scriptData->scriptCannedAnims, 0, sizeof(scriptData->scriptCannedAnims));
+    memset(scriptData->scriptStateChange, 0, sizeof(scriptData->scriptStateChange));
+    memset(scriptData->scriptEvents, 0, sizeof(scriptData->scriptEvents));
 
     memset(weaponStrings, 0, 0x400);
     BG_LoadWeaponStrings();
@@ -1776,6 +1785,10 @@ void BG_LoadAnim(void)
     int numTreeAnims;
     int i;
     int j;
+
+    bScriptFileLoaded = 0;
+    memset(bgs->animScriptData.animations, 0, sizeof(bgs->animScriptData.animations));
+    bgs->animScriptData.numAnimations = 0;
 
     LargeLocal_LargeLocal(&playerAnims_large_local, 0x9000);
     playerAnims = (loadAnim_t *)LargeLocal_GetBuf(&playerAnims_large_local);

@@ -1,7 +1,7 @@
 #include "common_types.h"
 #include "imports.h"
 
-extern void G_FreeEntity();
+extern unsigned char G_FreeEntity();
 extern void SP_corona();
 extern void SP_info_notnull();
 extern void SP_info_null();
@@ -33,12 +33,12 @@ extern void Com_Printf(const char *fmt, ...);
 extern int atoi(const char *str);
 extern double atof(const char *str);
 extern unsigned int Scr_FindField(const char *name, int *type);
-extern unsigned int Scr_AddInt(int value);
-extern unsigned int Scr_AddString(const char *value);
-extern unsigned int Scr_AddFloat(float value);
-extern unsigned int Scr_AddVector(const float *value);
+extern void Scr_AddInt(int value);
+extern void Scr_AddString(const char *value);
+extern void Scr_AddFloat(float value);
+extern void Scr_AddVector(const float *value);
 extern void Scr_AddObject(unsigned int id);
-extern unsigned int Scr_AddConstString(unsigned int value);
+extern void Scr_AddConstString(unsigned int value);
 extern void Scr_SetString(scr_string_t *to, unsigned int value);
 extern const char *SL_ConvertToString(unsigned int stringValue);
 extern int G_GetWeaponIndexForName(const char *name);
@@ -60,8 +60,8 @@ extern unsigned int Scr_GetConstString(unsigned int index);
 extern const char *Scr_GetString(unsigned int index);
 extern int Scr_GetOffset(int classnum, const char *name);
 extern unsigned int Scr_GetNumParam(void);
-extern unsigned int Scr_MakeArray(void);
-extern unsigned int Scr_AddArray(void);
+extern void Scr_MakeArray(void);
+extern void Scr_AddArray(void);
 extern int Scr_GetInt(unsigned int index);
 extern float Scr_GetFloat(unsigned int index);
 extern void Scr_GetVector(unsigned int index, float *vectorValue);
@@ -489,7 +489,10 @@ static void __attribute_regparm__(3) G_ParseEntityField(const char *key, const c
             }
             case F_MODEL:
                 if (*value == '*') {
-                    ent->model = (byte)(unsigned short)atoi(value + 1);
+                    /* Inline BSP models are collision/draw handles, not entries
+                       in the 8-bit XModel precache table. */
+                    ent->s.index.brushmodel = atoi(value + 1);
+                    ent->model = 0;
                 } else {
                     G_SetModel(ent, value);
                 }

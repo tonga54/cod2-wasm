@@ -23,7 +23,7 @@ extern void RB_ChangedWorldMatrix(float worldScale);
 extern void Com_Memcpy(void *dest, const void *src, int count);
 extern int XSurfaceGetNumVerts(const XSurface *surface);
 extern int XSurfaceGetNumTris(const XSurface *surface);
-extern long unsigned int XSurfaceGetTris(const XSurface *surface, r_index_t *dstIndices, int offset);
+extern void XSurfaceGetTris(const XSurface *surface, r_index_t *dstIndices, int offset);
 extern float Vec3Normalize(vec3_t v);
 extern void Vec3Cross(const vec3_t v0, const vec3_t v1, vec3_t cross);
 extern int VecNCompareCustomEpsilon(const vec_t *v0, const vec_t *v1, float epsilon, int coordCount);
@@ -590,10 +590,7 @@ static void RB_TESS_REGPARM2_ABI RB_BuildSprite_impl(const char *re, const float
         up[2] = cosA * worldRadius[1] * ((GfxViewParms *)viewParms)->axis[2][2] + sinA * worldRadius[1] * ((GfxViewParms *)viewParms)->axis[1][2];
     }
 
-    ((unsigned char *)&nativeColor)[0] = ((GfxEntity *)re)->materialRGBA[3];
-    ((unsigned char *)&nativeColor)[1] = ((GfxEntity *)re)->materialRGBA[0];
-    ((unsigned char *)&nativeColor)[2] = ((GfxEntity *)re)->materialRGBA[1];
-    ((unsigned char *)&nativeColor)[3] = ((GfxEntity *)re)->materialRGBA[2];
+    memcpy(&nativeColor, ((GfxEntity *)re)->materialRGBA, sizeof(nativeColor));
 
     material = (*(char **)&((GfxEntity *)re)->customMaterial);
     if (!material)
@@ -1402,12 +1399,7 @@ void RB_TessEntity(const GfxEntity *re)
             }
         }
 
-        rgba[0] = ((GfxEntity *)ent)->materialRGBA[3];
-        rgba[1] = ((GfxEntity *)ent)->materialRGBA[0];
-        rgba[2] = ((GfxEntity *)ent)->materialRGBA[1];
-        rgba[3] = ((GfxEntity *)ent)->materialRGBA[2];
-
-        nativeColor = *(int *)rgba;
+        memcpy(&nativeColor, ((GfxEntity *)ent)->materialRGBA, sizeof(nativeColor));
 
         {
             byte *texInfo = (*(byte **)&((GfxEntity *)ent)->customMaterial);
@@ -1444,10 +1436,7 @@ void RB_TessEntity(const GfxEntity *re)
     case 8:
     {
 
-        color = (((GfxEntity *)ent)->materialRGBA[3]) |
-                (((GfxEntity *)ent)->materialRGBA[0] << 8) |
-                (((GfxEntity *)ent)->materialRGBA[1] << 16) |
-                (((GfxEntity *)ent)->materialRGBA[2] << 24);
+        memcpy(&color, ((GfxEntity *)ent)->materialRGBA, sizeof(color));
 
         {
             byte *texInfo = (*(byte **)&((GfxEntity *)ent)->customMaterial);

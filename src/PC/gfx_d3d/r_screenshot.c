@@ -44,7 +44,7 @@ extern float Vec3Normalize(vec3_t v);
 extern float FresnelTerm(float n0, float n1, float cosAngle);
 extern int MacDisplay_GetCardType(void);
 extern int MacOpenGLUtils_GetPCPixelShaderVersion(void);
-extern void MacDisplay_GetCurrentDimensions(int *width, int *height);
+extern short unsigned int MacDisplay_GetCurrentDimensions(int *width, int *height);
 
 static void R_ClearGLErrors(void)
 {
@@ -86,6 +86,33 @@ void R_BeginCubemapShot(const int pixelWidthHeight, const int pixelBorder)
 
 static Bool R_GetFrontBufferData(int width, int height, int bytesPerPixel, byte *buffer)
 {
+#ifdef __EMSCRIPTEN__
+    int viewport[4], packAlignment;
+    if (!buffer || width <= 0 || height <= 0 ||
+        (bytesPerPixel != 3 && bytesPerPixel != 4)) return 0;
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    if (width > viewport[2] || height > viewport[3]) return 0;
+    byte *pixels = malloc((size_t)width * height * 4);
+    if (!pixels) return 0;
+    glGetIntegerv(GL_PACK_ALIGNMENT, &packAlignment);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    R_ClearGLErrors();
+    /* WebGL has one default framebuffer; GL_FRONT is not a valid read target. */
+    glReadPixels(0, viewport[3] - height, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    unsigned int error = glGetError();
+    glPixelStorei(GL_PACK_ALIGNMENT, packAlignment);
+    if (!error) {
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                memcpy(buffer + ((height - y - 1) * width + x) * bytesPerPixel,
+                       pixels + (y * width + x) * 4, bytesPerPixel);
+            }
+        }
+    }
+    free(pixels);
+    return error == GL_NO_ERROR;
+#else
+
     int rowBytes;
     byte *tempBuffer;
     int NumTexUnits;
@@ -252,6 +279,7 @@ static Bool R_GetFrontBufferData(int width, int height, int bytesPerPixel, byte 
 
     free(tempBuffer);
     return 0;
+#endif
 }
 
 void R_EndCubemapShot(const CubemapShot shotIndex)

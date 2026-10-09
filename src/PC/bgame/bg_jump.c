@@ -8,7 +8,7 @@ extern const dvar_t *Dvar_RegisterBool(const char *name, int value, int flags);
 extern int PM_GetEffectiveStance(playerState_t *ps);
 extern void PM_AddEvent(playerState_t *ps, int event);
 extern int PM_GroundSurfaceType(pml_t *pml);
-extern void BG_AnimScriptEvent(playerState_t *ps, int event, int isContinue, int force);
+extern int BG_AnimScriptEvent(playerState_t *ps, int event, int isContinue, int force);
 extern float Vec3Normalize(vec_t *v);
 
 #define qtrue 1

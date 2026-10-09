@@ -7,8 +7,8 @@ extern void G_GetPlayerViewDirection(gentity_t *ent, vec3_t forward, vec3_t righ
 extern void G_TraceCapsule(trace_t *trace, vec3_t start, vec3_t mins, vec3_t maxs, vec3_t end, int passEntityNum, int contentMask);
 extern int G_IsPlaying(gentity_t *ent);
 
-extern byte g_entities_ptr[];
-extern byte level_ptr[];
+extern gentity_t g_entities[];
+extern level_locals_t level;
 extern byte *sv_maxclients;
 extern vec3_t *trace_mins;
 

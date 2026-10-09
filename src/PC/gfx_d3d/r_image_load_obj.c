@@ -17,7 +17,7 @@ extern void *Hunk_AllocateTempMemoryInternal(int size);
 extern void Hunk_FreeTempMemory(void *buf);
 extern void R_LoadJpg(const char *filepath, void **file, byte **pic, int *width, int *height, int *imageFormat);
 extern void R_GenerateOutdoorImage(GfxImage *image);
-extern void Image_BuildSpecularityMap(int unused, byte *pic);
+extern void Image_BuildSpecularityMap(float shift, byte *pic);
 
 extern GfxImage *Image_Alloc(const char *name, int category, int semantic, int imageTrack);
 static vec3_t lightGridLookupMatrix[3];
@@ -126,10 +126,12 @@ static void __attribute_regparm__(3) Image_LoadBitmap(GfxImage *image, const Gfx
                     byte *dst = expandedData;
                     const byte *src = srcPtr;
                     for (p = 0; p < mipPixels; p++) {
-                        dst[0] = 0xFF;
-                        dst[1] = src[2];
-                        dst[2] = src[1];
-                        dst[3] = src[0];
+                        /* IWI RGB bitmaps contain BGR bytes. The D3D surface
+                         * consumes BGRX, including on the WebGL upload path. */
+                        dst[0] = src[0];
+                        dst[1] = src[1];
+                        dst[2] = src[2];
+                        dst[3] = 0xFF;
                         dst += 4;
                         src += 3;
                     }

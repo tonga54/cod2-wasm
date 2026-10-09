@@ -263,6 +263,11 @@ void CDirect3DCubeTexture_CDirect3DCubeTexture(const CDirect3DCubeTexture *_this
     glGenTextures(1, &tex->texIDStorage);
     glGetIntegerv(GL_TEXTURE_BINDING_CUBE_MAP, &prevTex);
     glBindTexture(GL_TEXTURE_CUBE_MAP, tex->texIDStorage);
+#ifdef __EMSCRIPTEN__
+    /* D3D can allocate a single cube mip while a material still requests
+     * trilinear filtering. Limit the WebGL chain to the allocated levels. */
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, 0x813D, tex->levelCount - 1);
+#endif
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_REPEAT);

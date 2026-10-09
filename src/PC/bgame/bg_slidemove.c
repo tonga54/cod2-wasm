@@ -43,6 +43,10 @@ static qboolean PM_SLIDEMOVE_ABI PM_SlideMove(pmove_t *pm, pml_t *pml, qboolean 
     float into;
     int permutation[MAX_CLIP_PLANES];
     float dots[MAX_CLIP_PLANES];
+    static int traceEnabled = -1;
+
+    if (traceEnabled < 0)
+        traceEnabled = getenv("PTRACE") != NULL;
 
     ps = pm->ps;
 
@@ -79,7 +83,7 @@ static qboolean PM_SLIDEMOVE_ABI PM_SlideMove(pmove_t *pm, pml_t *pml, qboolean 
 
         PM_playerTrace(pm, &trace, ps->origin, pm->mins, pm->maxs, end, ps->clientNum, pm->tracemask);
 
-#ifdef PM_STUCKTRACE
+        if (traceEnabled) {
         if (trace.fraction < 1.0f) {
             static int cn;
             if (cn++ < 80)
@@ -91,13 +95,13 @@ static qboolean PM_SLIDEMOVE_ABI PM_SlideMove(pmove_t *pm, pml_t *pml, qboolean 
                         trace.material ? trace.material : "(null)", numplanes);
             fflush(stderr);
         }
-#endif
+        }
 
         if (trace.allsolid) {
-#ifdef PM_STUCKTRACE
+            if (traceEnabled) {
             {
                 static int n;
-                if (n++ < 40 || (n % 60) == 0)
+                if (n++ < 40)
                     fprintf(stderr, "[stuck] allsolid org=(%.1f,%.1f,%.1f) vel=(%.1f,%.1f,%.1f) "
                                     "frac=%.3f startsolid=%d contents=0x%x surf=0x%x ent=%d mat='%s'\n",
                             ps->origin[0], ps->origin[1], ps->origin[2],
@@ -106,7 +110,7 @@ static qboolean PM_SLIDEMOVE_ABI PM_SlideMove(pmove_t *pm, pml_t *pml, qboolean 
                             trace.entityNum, trace.material ? trace.material : "(null)");
                 fflush(stderr);
             }
-#endif
+            }
             ps->velocity[2] = 0;
             return 1;
         }
@@ -125,7 +129,8 @@ static qboolean PM_SLIDEMOVE_ABI PM_SlideMove(pmove_t *pm, pml_t *pml, qboolean 
 
         time_left -= time_left * trace.fraction;
 
-        if (numplanes > 7) {
+        /* Stop before adding a plane beyond all three fixed-size arrays. */
+        if (numplanes >= MAX_CLIP_PLANES) {
             ps->velocity[0] = 0;
             ps->velocity[1] = 0;
             ps->velocity[2] = 0;
@@ -525,7 +530,8 @@ do_step:
 
     PM_playerTrace(pm, &trace, ps->origin, pm->mins, pm->maxs, down, ps->clientNum, pm->tracemask);
 
-    if (trace.entityNum > 0x3f) {
+    /* Reject stepping onto a player; world geometry is ENTITYNUM_WORLD. */
+    if (trace.entityNum < 64) {
 
         ps->origin[0] = down_o[0];
         ps->origin[1] = down_o[1];

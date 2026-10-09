@@ -1,16 +1,17 @@
 {
   "id": "cod2-family",
   "engine": "IW 2.0 reconstruction",
-  "kicker": "Call of Duty 2 WASM",
-  "description": "Still in development — Call of Duty 2 does not launch in this build.",
+  "kicker": "",
+  "description": "",
+  "autoStart": true,
   "defaultVariant": "cod2-mp",
   "preferencesNamespace": "cod2-wasm",
-  "adapter": "/game-adapter.js",
+  "adapter": "/native-game-adapter.js",
   "displayMode": "16:9",
   "canvasWidth": 1280,
   "canvasHeight": 720,
   "pixelated": false,
-  "pointerLock": false,
+  "pointerLock": true,
   "fullscreen": false,
   "identity": false,
   "graphics": false,
@@ -28,26 +29,26 @@
   "variants": {
     "cod2-mp": {
       "title": "Call of Duty 2 Multiplayer",
-      "shortTitle": "CoD2 MP",
-      "description": "Still in development — Call of Duty 2 does not launch in this build.",
-      "loadingTitle": "Opening Call of Duty 2 status…",
-      "provisioningText": "Install the required Call of Duty 2 main/*.iwd files into this container to continue.",
-      "icon": "/cod2-diagnostic.svg",
+      "shortTitle": "Call of Duty 2 Multiplayer",
+      "description": "",
+      "loadingTitle": "Call of Duty 2",
+      "provisioningText": "El host prepara los archivos originales del juego.",
+      "icon": "/game-data/files/cod2-icon/original.ico",
       "iconPixelated": false,
       "pwa": {
         "id": "/?game=cod2-mp",
-        "name": "Call of Duty 2 WASM",
-        "shortName": "CoD2 WASM",
-        "description": "Still in development — Call of Duty 2 does not launch in this build.",
+        "name": "Call of Duty 2 Multiplayer",
+        "shortName": "Call of Duty 2",
+        "description": "En desarrollo: cliente WebAssembly real; la partida de dos jugadores todav\u00eda no est\u00e1 verificada.",
         "startUrl": "/?game=cod2-mp",
         "themeColor": "#9d8b63",
         "backgroundColor": "#11120f",
         "orientation": "landscape",
         "icons": [
           {
-            "src": "/cod2-diagnostic.svg",
+            "src": "/game-data/files/cod2-icon/original.ico",
             "sizes": "any",
-            "type": "image/svg+xml",
+            "type": "image/x-icon",
             "purpose": "any"
           }
         ]

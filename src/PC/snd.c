@@ -56,7 +56,7 @@ void Com_Printf(const char *fmt, ...);
 void Com_DPrintf(const char *fmt, ...);
 void Z_FreeInternal(void *ptr);
 void AxisCopy(vec3_t *in, vec3_t *out);
-unsigned int Voice_Shutdown(void);
+void Voice_Shutdown(void);
 void Com_UnloadSoundAliases(snd_alias_system_t system);
 void SND_ShutdownDriver(void);
 void Cmd_RemoveCommand(const char *cmdName);
@@ -70,7 +70,7 @@ const dvar_t *Dvar_RegisterFloat(const char *name, float defaultValue, float min
 Bool SND_InitDriver(void);
 int Sys_Milliseconds(void);
 void Cmd_AddCommand(const char *cmdName, void (*function)(void));
-void Voice_Init(void);
+Bool Voice_Init(void);
 void CG_GetEntityOrientation(int entnum, vec_t *origin, vec3_t *axis);
 
 Bool SND_Is2DChannelFree(int index);
@@ -692,6 +692,42 @@ void SND_SetListener(int entnum, const vec_t *origin, vec3_t *axis)
     g_snd.listeners[0].active = 1;
 }
 
+void SND_SetChannelInfo(int index, int entnum, const snd_alias_t *pAlias0,
+    const snd_alias_t *pAlias1, float lerp, const vec_t *origin, float volume,
+    float pitch, int srcChannelCount, int baserate, int total_msec, int start_msec,
+    int startDelay, int master, snd_alias_system_t system)
+{
+    if ((unsigned)index >= sizeof(g_snd.chaninfo) / sizeof(g_snd.chaninfo[0]) || !pAlias0)
+        return;
+    snd_channel_info_t *channel = &g_snd.chaninfo[index];
+    memset(channel, 0, sizeof(*channel));
+    channel->entnum = entnum;
+    channel->entchannel = (pAlias0->flags & 0x780) >> 7;
+    channel->startDelay = startDelay;
+    channel->looptime = g_snd.looptime;
+    channel->endtime = g_snd.time + total_msec - start_msec;
+    channel->basevolume = volume;
+    channel->baserate = baserate;
+    channel->pitch = pitch;
+    channel->srcChannelCount = srcChannelCount;
+    channel->pAlias0 = pAlias0;
+    channel->pAlias1 = pAlias1;
+    channel->lerp = lerp;
+    channel->master = master;
+    channel->system = system;
+    channel->paused = g_snd.paused && g_snd.pauseSettings[channel->entchannel];
+    if (origin) {
+        vec3_t entityOrigin, axis[3], delta;
+        CG_GetEntityOrientation(entnum, entityOrigin, axis);
+        for (int i = 0; i < 3; ++i) {
+            channel->org[i] = origin[i];
+            delta[i] = origin[i] - entityOrigin[i];
+        }
+        for (int i = 0; i < 3; ++i)
+            channel->offset[i] = delta[0]*axis[i][0] + delta[1]*axis[i][1] + delta[2]*axis[i][2];
+    }
+}
+
 void SND_GetCurrent3DPosition(int entnum, const vec_t *offset, vec_t *pos_out)
 {
     vec3_t org;
@@ -1031,7 +1067,11 @@ void SND_Init(void)
 
     Com_Printf("------- Sound Initialized -------\n");
 
+#ifndef __EMSCRIPTEN__
+    /* The browser backend provides game playback only. The legacy microphone
+     * driver has no browser implementation and requires native capture state. */
     Voice_Init();
+#endif
 }
 
 static __attribute_regparm__(3) int SND_PlaySoundAlias_Internal(const snd_alias_t *pAlias0, const snd_alias_t *pAlias1, float lerp, int entnum, const vec_t *org, int *pChannel, int timeshift, int treatAsMaster, snd_alias_system_t system)

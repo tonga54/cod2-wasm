@@ -35,9 +35,9 @@ extern void Com_Printf(const char *fmt, ...);
 extern int I_stricmp(const char *s0, const char *s1);
 extern int I_strnicmp(const char *s0, const char *s1, size_t n);
 extern int Com_AddToString(const char *add, char *msg, int len, int maxlen, qboolean mayAddQuotes);
-extern void CL_Netchan_SendOOBPacket(int len, const char *data, int type, int addr0, int addr1);
+extern void CL_Netchan_SendOOBPacket(int len, const void *data, netadr_t to);
 extern int NET_StringToAdr(const char *s, netadr_t *a);
-extern int NET_OutOfBandPrint(int type, int addr0, int addr1, int addr2, const char *data);
+extern Bool NET_OutOfBandPrint(netsrc_t sock, netadr_t adr, const char *data);
 extern int Com_sprintf(char *dest, int size, const char *fmt, ...);
 extern int Sys_Milliseconds(void);
 extern int sscanf(const char *str, const char *format, ...);
@@ -48,7 +48,11 @@ extern void SND_StopSounds(int a);
 extern void SV_Frame(int a);
 extern void CL_Disconnect(void);
 extern void Con_Close(void);
-extern qboolean NET_IsLocalAddress(int addr0, int addr1, int addr2);
+extern qboolean NET_IsLocalAddress(netadr_t adr);
+#ifdef COD2_DOWNSTREAM_WASM
+extern qboolean Sys_IsLANAddress(netadr_t adr);
+extern const dvar_t *net_lanauthorize;
+#endif
 extern void UI_CloseAll(void);
 extern void SCR_UpdateScreen(void);
 extern void Com_Error(int level, const char *fmt, ...);
@@ -247,7 +251,7 @@ void CL_ServerInfoPacket(netadr_t from, msg_t *msg, int time)
             cls->numlocalservers = i + 1;
 
             server->adr = from;
-            server->dirty = 0;
+            server->dirty = 1;
             server->hostName[0] = '\0';
             server->mapName[0] = '\0';
             server->game[0] = '\0';
@@ -259,17 +263,10 @@ void CL_ServerInfoPacket(netadr_t from, msg_t *msg, int time)
             server->netType = (byte)from.type;
             server->clients = 0;
 
-            I_strncpyz(info, MSG_ReadString(msg), 0x400);
-            if (!info[0])
-                return;
-
-            len = strlen(info);
-            if (info[len - 2] != '\n') {
-                info[len] = '\n';
-                info[len + 1] = '\0';
-            }
-
-            Com_Printf((const char *)"%s: %s", NET_AdrToString(from), info);
+            /* infoResponse has one info string, already consumed above.
+             * Populate this newly discovered entry and let the ping queue
+             * measure it before the native server browser displays it. */
+            CL_SetServerInfo(server, infoString, -1);
             return;
         }
     }
@@ -419,7 +416,7 @@ void CL_Rcon_f(void)
 
     {
         int msgLen = strlen(message);
-        CL_Netchan_SendOOBPacket(msgLen, message, sendAdr.type, *(int *)sendAdr.ip, *(int *)&sendAdr.port);
+        CL_Netchan_SendOOBPacket(msgLen, message, sendAdr);
     }
 }
 
@@ -611,7 +608,7 @@ void CL_GlobalServers_f(void)
         *(short *)(buffptr + 4) = 0x6f;
     }
 
-    NET_OutOfBandPrint(1, to.type, *(int *)to.ip, *(int *)&to.port, command);
+    NET_OutOfBandPrint(NS_SERVER, to, command);
 }
 
 void CL_ServersResponsePacket(netadr_t from, msg_t *msg)
@@ -874,7 +871,7 @@ fill_slot:
         CL_SetServerInfoByAddress(entry->adr, NULL, 0);
     }
 
-    NET_OutOfBandPrint(0, to.type, *(int *)to.ip, *(int *)&to.port, (const char *)"getinfo xxx");
+    NET_OutOfBandPrint(NS_CLIENT1, to, "getinfo xxx");
 
 }
 
@@ -916,7 +913,9 @@ void CL_Connect_f(void)
         legacyHacks->cl_serverloadgametype[0] = '\0';
     }
 
+#ifndef __EMSCRIPTEN__
     SV_Frame(0);
+#endif
     CL_Disconnect();
     Con_Close();
 
@@ -950,7 +949,14 @@ void CL_Connect_f(void)
         }
     }
 
-    if (!NET_IsLocalAddress(*(int *)&clc->serverAddress, *(int *)clc->serverAddress.ip, *(int *)&clc->serverAddress.port)) {
+    if (!NET_IsLocalAddress(clc->serverAddress)
+#ifdef COD2_DOWNSTREAM_WASM
+        /* The browser port targets the fixed LAN gateway. Match the engine's
+         * existing LAN authorization policy rather than requiring Mac OS
+         * registration preferences. The normal server challenge still runs. */
+        && (net_lanauthorize->current.enabled || !Sys_IsLANAddress(clc->serverAddress))
+#endif
+    ) {
 
         unsigned int crc = 0;
         byte *cdkey = (byte *)imp_cl_cdkey;
@@ -985,7 +991,7 @@ void CL_Connect_f(void)
         clc = *(clientConnection_t **)imp_clc;
         clcConn = (clientConnection_t *)clc;
 
-        if (NET_IsLocalAddress(*(int *)&clcConn->serverAddress, *(int *)clcConn->serverAddress.ip, *(int *)&clcConn->serverAddress.port)) {
+        if (NET_IsLocalAddress(clcConn->serverAddress)) {
             clcConn->state = 4;
         } else {
             clcConn = *(clientConnection_t **)imp_clc;
@@ -1099,7 +1105,7 @@ found_entry:
             serverStatus->time = 0;
             serverStatus->startTime = Sys_Milliseconds();
 
-            NET_OutOfBandPrint(0, to.type, *(int *)to.ip, *(int *)&to.port, (const char *)"getstatus");
+            NET_OutOfBandPrint(NS_CLIENT1, to, "getstatus");
             return 0;
         }
     }
@@ -1114,7 +1120,7 @@ found_entry:
     serverStatus->startTime = Sys_Milliseconds();
     serverStatus->time = 0;
 
-    NET_OutOfBandPrint(0, to.type, *(int *)to.ip, *(int *)&to.port, (const char *)"getstatus");
+    NET_OutOfBandPrint(NS_CLIENT1, to, "getstatus");
     return 0;
 }
 
@@ -1144,7 +1150,7 @@ void CL_ServerStatus_f(void)
     if (!NET_StringToAdr(serverAddr, &to))
         return;
 
-    NET_OutOfBandPrint(0, to.type, *(int *)to.ip, *(int *)&to.port, (const char *)"getstatus");
+    NET_OutOfBandPrint(NS_CLIENT1, to, "getstatus");
 
     {
         for (i = 0; i < 16; i++) {

@@ -16,7 +16,7 @@ extern int CG_ScoreboardDisplayed(void);
 extern int Cmd_Argc(void);
 extern void CG_SetShellShockParmsFromDvars(byte *parms);
 extern int CG_LoadShellShockDvars(const char *name);
-extern void CG_SaveShellShockDvars(const char *name);
+extern qboolean CG_SaveShellShockDvars(const char *name);
 extern float floorf(float x);
 extern void Cmd_ArgsBuffer(char *buf, int bufSize);
 extern int Com_sprintf(char *dest, int size, const char *fmt, ...);
@@ -24,8 +24,11 @@ extern void CL_AddReliableCommand(const char *cmd);
 extern const char *CG_Argv(int arg);
 extern int I_stricmp(const char *s1, const char *s2);
 extern void CL_AddCgameCommand(const char *cmdName);
-extern void CL_Popup(const char *name);
+extern qboolean CL_Popup(const char *name);
 extern const char *UI_SafeTranslateString(const char *key);
+extern void *Com_GetClientDObj(int clientNum, int localClientNum);
+extern void CG_TraceCapsule(trace_t *result, const vec_t *start, const vec_t *mins,
+                            const vec_t *maxs, const vec_t *end, int skipNumber, int mask);
 
 void CG_TargetCommand_f(void);
 static void CG_SizeUp_f(void);
@@ -110,6 +113,93 @@ static void CG_Viewpos_f(void)
                (int)cg->refdef.vieworg[1],
                (int)cg->refdef.vieworg[2],
                (int)cg->refdefViewAngles[1]);
+    if (getenv("PTRACE")) {
+        extern void R_DebugStaticModels(const float *view);
+        const playerState_t *predicted = &cg->predictedPlayerState;
+        R_DebugStaticModels(predicted->origin);
+        Com_Printf("[viewpos] predicted client=%d origin=(%.1f %.1f %.1f) angles=(%.1f %.1f %.1f) health=%d\n",
+                   predicted->clientNum, predicted->origin[0], predicted->origin[1], predicted->origin[2],
+                   predicted->viewangles[0], predicted->viewangles[1], predicted->viewangles[2], predicted->stats[0]);
+        Com_Printf("[viewpos] type=%d flags=%x ground=%d height=%.1f thirdperson=%d viewlocked=%d\n",
+                   predicted->pm_type, predicted->pm_flags, predicted->groundEntityNum,
+                   predicted->viewHeightCurrent, cg->renderingThirdPerson, predicted->viewlocked_entNum);
+        Com_Printf("[viewpos] velocity=(%.1f %.1f %.1f)\n", predicted->velocity[0],
+                   predicted->velocity[1], predicted->velocity[2]);
+        for (int axis = 0; axis < 4; ++axis) {
+            vec3_t end = {predicted->origin[0], predicted->origin[1], predicted->origin[2]};
+            trace_t trace;
+            end[axis / 2] += (axis & 1) ? -64.0f : 64.0f;
+            CG_TraceCapsule(&trace, predicted->origin, predicted->mins, predicted->maxs,
+                            end, predicted->clientNum, 0x2810011);
+            Com_Printf("[viewpos] trace=%d frac=%.3f allsolid=%d startsolid=%d ent=%d normal=(%.2f %.2f %.2f) surface=%x contents=%x\n",
+                       axis, trace.fraction, trace.allsolid, trace.startsolid, trace.entityNum,
+                       trace.normal[0], trace.normal[1], trace.normal[2], trace.surfaceFlags, trace.contents);
+        }
+        if (cg->snap) {
+            const playerState_t *server = &cg->snap->ps;
+            Com_Printf("[viewpos] server client=%d origin=(%.1f %.1f %.1f) angles=(%.1f %.1f %.1f) health=%d\n",
+                       server->clientNum, server->origin[0], server->origin[1], server->origin[2],
+                       server->viewangles[0], server->viewangles[1], server->viewangles[2], server->stats[0]);
+        }
+        if (cg->nextSnap) {
+            Com_Printf("[viewpos] entities=%d clients=%d\n", cg->nextSnap->numEntities, cg->nextSnap->numClients);
+            Com_Printf("[viewpos] time=%d snap=%d next=%d fraction=%.3f\n", cg->time,
+                       cg->snap ? cg->snap->serverTime : -1, cg->nextSnap->serverTime,
+                       cg->frameInterpolation);
+            for (int i = 0; i < cg->nextSnap->numEntities; ++i) {
+                const entityState_t *entity = &cg->nextSnap->entities[i];
+                if (entity->eType != 1 || entity->clientNum < 0 || entity->clientNum >= 64) continue;
+                const centity_t *cent = &cg_entities[entity->number];
+                const clientInfo_t *info = &cg->bgs.clientinfo[entity->clientNum];
+                Com_Printf("[viewpos] player entity=%d client=%d flags=%x origin=(%.1f %.1f %.1f) lerp=(%.1f %.1f %.1f) valid=%d model='%s' dobj=%p\n",
+                           entity->number, entity->clientNum, entity->eFlags,
+                           entity->pos.trBase[0], entity->pos.trBase[1], entity->pos.trBase[2],
+                           cent->lerpOrigin[0], cent->lerpOrigin[1], cent->lerpOrigin[2],
+                           info->infoValid, info->model, Com_GetClientDObj(entity->number, 0));
+                Com_Printf("[viewpos] trajectory player=%d current=(%d %d %d %.1f %.1f %.1f) next=(%d %d %d %.1f %.1f %.1f)\n",
+                           entity->number,
+                           cent->currentState.pos.trType, cent->currentState.pos.trTime, cent->currentState.pos.trDuration,
+                           cent->currentState.pos.trBase[0], cent->currentState.pos.trBase[1], cent->currentState.pos.trBase[2],
+                           cent->nextState.pos.trType, cent->nextState.pos.trTime, cent->nextState.pos.trDuration,
+                           cent->nextState.pos.trBase[0], cent->nextState.pos.trBase[1], cent->nextState.pos.trBase[2]);
+                Com_Printf("[viewpos] delta player=%d current=(%.1f %.1f %.1f) next=(%.1f %.1f %.1f)\n",
+                           entity->number, cent->currentState.pos.trDelta[0], cent->currentState.pos.trDelta[1],
+                           cent->currentState.pos.trDelta[2], cent->nextState.pos.trDelta[0],
+                           cent->nextState.pos.trDelta[1], cent->nextState.pos.trDelta[2]);
+                {
+                    DObj *obj = Com_GetClientDObj(entity->number, 0);
+                    extern void DObjDisplayAnim(DObj *obj);
+                    extern const char *SL_ConvertToString(unsigned int stringValue);
+                    if (obj) {
+                        Com_Printf("[viewpos] anim player=%d legs=%d torso=%d\n", entity->number,
+                                   cent->nextState.legsAnim, cent->nextState.torsoAnim);
+                        DObjDisplayAnim(obj);
+                        if (obj->skel && obj->numModels && obj->models[0]->parts) {
+                            const XModelParts *parts = obj->models[0]->parts;
+                            for (int b = 0; b < parts->numBones && b < 12; ++b) {
+                                const DObjAnimMat *mat = &obj->skel->mat[b];
+                                Com_Printf("[viewpos] bone=%d %s pos=(%.2f %.2f %.2f) quat=(%.2f %.2f %.2f %.2f) weight=%.3f\n",
+                                           b, parts->hierarchy ? SL_ConvertToString(parts->hierarchy->names[b]) : "?",
+                                           mat->trans[0], mat->trans[1], mat->trans[2], mat->quat[0], mat->quat[1],
+                                           mat->quat[2], mat->quat[3], mat->transWeight);
+                            }
+                        }
+                    }
+                }
+#ifdef __EMSCRIPTEN__
+                extern GfxScene scene;
+                for (int s = 0; s < scene.def.entityCount; ++s) {
+                    const GfxSceneEntity *rendered = &scene.sceneEnts[s];
+                    if (rendered->cent != cent) continue;
+                    Com_Printf("[viewpos] scene player=%d cull=%d surfaces=%d min=(%.1f %.1f %.1f) max=(%.1f %.1f %.1f)\n",
+                               entity->number, rendered->cullState, rendered->surfCount,
+                               rendered->curMins[0], rendered->curMins[1], rendered->curMins[2],
+                               rendered->curMaxs[0], rendered->curMaxs[1], rendered->curMaxs[2]);
+                }
+#endif
+            }
+        }
+    }
 }
 
 void CG_ScoresUp_f(void)

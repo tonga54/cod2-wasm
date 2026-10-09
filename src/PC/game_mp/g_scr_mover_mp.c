@@ -23,7 +23,6 @@ extern float AngleNormalize180(float angle);
 extern float AngleNormalize360(float angle);
 extern float AngleSubtract(float a, float b);
 
-extern int __mh_execute_header;
 
 #define g_entities ((gentity_t *)imp_g_entities)
 extern level_locals_t level;

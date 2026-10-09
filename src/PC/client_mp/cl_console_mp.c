@@ -134,7 +134,7 @@ void Con_Bottom(void);
 static void Con_Dump_f(void);
 void Con_Shutdown(void);
 static void __attribute_regparm__(3) Con_UpdateMessageWindowLine(MessageWindow *msgwnd, qboolean linefeed, int duration);
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 static inline __attribute__((always_inline)) short Con_FillChar(void)
 {
     return (short)((ColorIndex(0x37) << 8) | 0x20);
@@ -397,7 +397,7 @@ static void Con_UpdateMessageWindowLine_impl(MessageWindow *msgwnd, qboolean lin
     }
 }
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 static void __attribute_regparm__(3) Con_UpdateMessageWindowLine(MessageWindow *msgwnd, qboolean linefeed, int duration)
 {
     Con_UpdateMessageWindowLine_impl(msgwnd, linefeed, duration);

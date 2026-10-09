@@ -7,13 +7,13 @@ int g_current_bandwidth_setting = 0x0;
 int g_frame_size = 0x0;
 int g_speex_initialized = 0x0;
 
-extern void speex_encoder_ctl(void *state, int request, void *ptr);
+extern int speex_encoder_ctl(void *state, int request, void *ptr);
 extern void *speex_encoder_init(const void *mode);
 extern void speex_encoder_destroy(void *state);
 extern void speex_bits_init(SpeexBits *bits);
 extern void speex_bits_destroy(SpeexBits *bits);
 extern void speex_bits_reset(SpeexBits *bits);
-extern void speex_encode_int(void *state, short *in, SpeexBits *bits);
+extern int speex_encode_int(void *state, short *in, SpeexBits *bits);
 extern int speex_bits_write(SpeexBits *bits, char *bytes, int max_len);
 extern void Com_Printf(const char *fmt, ...);
 

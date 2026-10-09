@@ -1749,7 +1749,7 @@ static inline int R_CullBoundsAgainstFrustumAndOccluders(const float *bounds, co
 }
 
 extern void R_AddBModelSurfaces(void *sceneEnt, int entIndex);
-extern int __mh_execute_header;
+
 
 static void R_AddWorldSurfacesDpvs_impl(const GfxViewParms *viewParms, int cameraCellIndex)
 {
@@ -1759,7 +1759,7 @@ static void R_AddWorldSurfacesDpvs_impl(const GfxViewParms *viewParms, int camer
     int frustumPlaneCount;
     int i;
 
-    LargeLocal_LargeLocal(&activeOccluderBuffer_large_local, (int)&__mh_execute_header);
+    LargeLocal_LargeLocal(&activeOccluderBuffer_large_local, 0x1000);
     byte *activeOccluderBuf = (byte *)LargeLocal_GetBuf(&activeOccluderBuffer_large_local);
     LargeLocal_LargeLocal(&occluderPlaneBuffer_large_local, 0x1e000);
     byte *occluderPlaneBuf = (byte *)LargeLocal_GetBuf(&occluderPlaneBuffer_large_local);

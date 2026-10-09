@@ -116,6 +116,7 @@ void Particle_IntegrateVelocity(const Particle *_this, float normDuration, vec_t
 void Particle_IntegrateVelocity2(const Particle *_this, float normDuration, vec_t *outVector);
 void Particle_IntegrateTotalVelocity(const Particle *_this, int duration, vec_t *outVector);
 void Particle_Particle(const Particle *_this);
+void FX_SetPrimitiveVTable(void *effect, PrimType type);
 void ZN8ParticleD1Ev(void *_this);
 void ZN8ParticleD0Ev(void *_this);
 void Light_Light(const Light *_this);
@@ -154,7 +155,7 @@ void Cylinder_Cylinder(const Cylinder *_this);
 void OrientedParticle_OrientedParticle(const OrientedParticle *_this);
 void ZN16OrientedParticleD1Ev(void *_this);
 void ZN16OrientedParticleD0Ev(void *_this);
-void Cloud_Cloud(const Cloud *_this, const Cloud *_this_1);
+void Cloud_Cloud(Cloud *_this);
 void ZN5CloudD1Ev(void *_this);
 void ZN5CloudD0Ev(void *_this);
 void Line_Line(const Line *_this);
@@ -940,14 +941,14 @@ const FxBoltFramePtr FxBoltFrame_Acquire(const FxBoltInfo *bolt)
 }
 
 extern float flrand(float min, float max);
-extern void FxScheduler_PlayEffect(void *scheduler, void *fx, float *origin, float *dir);
+extern void FxScheduler_PlayEffect(void *scheduler, void *fx, float *origin, float *dir, void *bolt);
+extern void FX_PlayEffect(EffectTemplate *fx, const vec_t *origin, const vec_t *normal);
 void Particle_Die(const Particle *_this)
 {
     byte *p = (byte *)_this;
     int flags;
     float x, y, z, lenSq, len, scale;
     float norm[3];
-    void *scheduler;
 
     flags = ((Particle *)p)->base.mFlags;
     if (!(flags & 0x200))
@@ -980,8 +981,7 @@ void Particle_Die(const Particle *_this)
         norm[2] = 1.0f;
     }
 
-    scheduler = *(void **)imp_theFxScheduler;
-    FxScheduler_PlayEffect(scheduler, (*(void **)&((Particle *)p)->base.emitEffect), (float *)(p + 4), norm);
+    FX_PlayEffect((EffectTemplate *)((Particle *)p)->base.emitEffect, (float *)(p + 4), norm);
 }
 
 void Tail_CalcNewEndpoint(const Tail *_this, const orientation_t *or_)
@@ -1099,7 +1099,6 @@ static inline __attribute__((always_inline)) void EvalCurve3(byte *channelInst, 
 
 void Light_UpdateRGB(const Light *_this, const Light *_this_1)
 {
-    (void)_this_1;
     byte *self = (byte *)_this;
     float normTime = ((Effect *)self)->normTime;
     float *rgb = (float *)&((Light *)self)->base.mRefEnt.dlightColor[0];
@@ -1399,7 +1398,7 @@ void Particle_Particle(const Particle *_this)
     int *p;
     int zero = 0;
     ((struct Effect *)_this)->mBolt.value = 0;
-    *(int *)_this = 0x32ffc8;
+    FX_SetPrimitiveVTable((void *)_this, PT_PARTICLE);
     p = (int *)((byte *)_this + 0xc4);
     p[0] = zero;
     p[1] = zero;
@@ -1433,7 +1432,7 @@ void ZN8ParticleD0Ev(void *_this)
 void Light_Light(const Light *_this)
 {
     ((struct Effect *)_this)->mBolt.value = 0;
-    *(int *)_this = 0x330188;
+    FX_SetPrimitiveVTable((void *)_this, PT_LIGHT);
 }
 
 static inline __attribute__((always_inline)) void ZN5LightD1Ev_impl(void *_this)
@@ -1645,104 +1644,49 @@ void Particle_GetTotalVelocity(const Particle *_this, float normTime, vec_t *out
 
 void Emitter_UpdateEmitFx(const Emitter *_this, vec_t *bindVelocity, const orientation_t *or_)
 {
-    byte *self = (byte *)_this;
-
-    if (!((*(byte *)&((Emitter *)self)->_base[169]) & 1))
-        return;
-
+    Emitter *emitter = (Emitter *)_this;
+    Effect *effect = (Effect *)_this;
     FxHelper *helper = *(FxHelper **)imp_theFxHelper;
-    int frameTimeMs = helper->mFrameTime;
-    if (frameTimeMs == 0)
+    vec3_t start, delta;
+    float distance, step, emittedDistance;
+    int i;
+
+    (void)bindVelocity;
+    (void)or_;
+    if (!(effect->mFlags & 0x100) || !emitter->emitFx ||
+        helper->mFrameTime <= 0 || helper->mTime <= emitter->emitLastTime)
+        return;
+    emitter->emitLastTime = helper->mTime;
+
+    /* Particle_UpdateOrigin already advanced the emitter for this frame.
+       Sample that world-space path, retaining the un-emitted distance between
+       frames. Reintegrating from the birth time here repeatedly added elapsed
+       time to emitPos and sent impact dust trails far beyond the particle. */
+    step = fabsf(emitter->emitStep);
+    if (!isfinite(step) || step <= 0.0f)
+        return;
+    for (i = 0; i < 3; ++i) {
+        start[i] = emitter->emitPos[i];
+        delta[i] = effect->mRefEnt.origin[i] - start[i];
+    }
+    distance = sqrtf(delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2]);
+    if (!isfinite(distance) || distance < step)
         return;
 
-    float step = (((Emitter *)(self))->emitStep);
-    float step2 = step * step;
-    int t = (((Emitter *)(self))->emitLastTime);
-    int startTime = (((Effect *)(self))->mTimeStart);
-    float age = (float)(FXH_TIME(helper) - startTime) * 0.001f;
-    float lifeTime = (float)((((Effect *)(self))->mTimeEnd) - startTime) * 0.001f;
-
-    int dif = 0;
-    float ftimeTotal = 0.0f;
-
-    while (t < FXH_TIME(helper)) {
-        dif += 12;
-        float ftime = (float)dif * 0.001f;
-
-        vec3_t oldorg;
-        oldorg[0] = (((Emitter *)(self))->emitPos[0]) + (((Emitter *)(self))->velocityDelta[0]);
-        oldorg[1] = (((Emitter *)(self))->emitPos[1]) + (((Emitter *)(self))->velocityDelta[1]);
-        oldorg[2] = (((Emitter *)(self))->emitPos[2]) + (((Emitter *)(self))->velocityDelta[2]);
-
-        float normTime = (ftimeTotal + age) / lifeTime;
-        if (normTime > 1.0f)
-            normTime = 1.0f;
-
-        vec3_t velocity;
-        Particle_GetTotalVelocity((const Particle *)_this, normTime, velocity, or_);
-
-        vec3_t org;
-        org[0] = (((Emitter *)(self))->emitPos[0]) + velocity[0] * ftime;
-        org[1] = (((Emitter *)(self))->emitPos[1]) + velocity[1] * ftime;
-        org[2] = (((Emitter *)(self))->emitPos[2]) + velocity[2] * ftime;
-
-        if (or_ && bindVelocity) {
-            org[0] += bindVelocity[0] * ftime;
-            org[1] += bindVelocity[1] * ftime;
-            org[2] += bindVelocity[2] * ftime;
-        }
-
-        float distSq = Vec3DistanceSq(org, oldorg);
-        if (distSq < step2) {
-            t += 12;
-            continue;
-        }
-
+    for (emittedDistance = step; emittedDistance <= distance;) {
         vec3_t spawnPos;
-        if (or_) {
-            OrientationPosToWorldPos((void *)or_, org, spawnPos);
-        } else {
-            spawnPos[0] = org[0];
-            spawnPos[1] = org[1];
-            spawnPos[2] = org[2];
-        }
+        float fraction = emittedDistance / distance;
+        float nextDistance;
+        for (i = 0; i < 3; ++i)
+            spawnPos[i] = start[i] + delta[i] * fraction;
+        FxScheduler_PlayEffect(*(void **)imp_theFxScheduler, emitter->emitFx, spawnPos, NULL, NULL);
+        for (i = 0; i < 3; ++i)
+            emitter->emitPos[i] = spawnPos[i];
 
-        void *boltInfo = NULL;
-        if ((*(byte **)&((Effect *)(self))->mBolt.value))
-            boltInfo = (byte *)((*(byte **)&((Effect *)(self))->mBolt.value)) + 0x3c;
-
-        void *emitEffect = (((Emitter *)(self))->emitFx);
-        FxScheduler_PlayEffect(*(void **)imp_theFxScheduler, emitEffect, spawnPos, NULL);
-
-        float velLenSq = velocity[0] * velocity[0] + velocity[1] * velocity[1] + velocity[2] * velocity[2];
-        float dF = (velLenSq + velLenSq) * ftime;
-        float nextFtime;
-        if (dF != 0.0f) {
-
-            float sq = __builtin_sqrtf(step2 / dF);
-            nextFtime = sq * ftime;
-        } else {
-            nextFtime = ftime;
-        }
-        float nextTime = nextFtime + (ftimeTotal + age);
-        float nextNormTime = nextTime / lifeTime;
-        if (nextNormTime > 1.0f)
-            nextNormTime = 1.0f;
-
-        vec3_t nextVel;
-        Particle_GetTotalVelocity((const Particle *)_this, nextNormTime, nextVel, or_);
-
-        (((Emitter *)(self))->emitPos[0]) = org[0];
-        (((Emitter *)(self))->emitPos[1]) = org[1];
-        (((Emitter *)(self))->emitPos[2]) = org[2];
-        (((Emitter *)(self))->velocityDelta[0]) = nextVel[0] * nextFtime - velocity[0] * ftime;
-        (((Emitter *)(self))->velocityDelta[1]) = nextVel[1] * nextFtime - velocity[1] * ftime;
-        (((Emitter *)(self))->velocityDelta[2]) = nextVel[2] * nextFtime - velocity[2] * ftime;
-
-        ftimeTotal += nextFtime;
-        dif = (int)(ftimeTotal * 1000.0f);
-        t = startTime + dif;
-        (((Emitter *)(self))->emitLastTime) = t;
+        nextDistance = emittedDistance + step;
+        if (nextDistance <= emittedDistance)
+            break;
+        emittedDistance = nextDistance;
     }
 }
 
@@ -1905,7 +1849,7 @@ Bool Particle_UpdateOrigin(const Particle *_this, const orientation_t *or_)
                 endpos[0] = start_pt[0] + (end_pt[0] - start_pt[0]) * fraction;
                 endpos[1] = start_pt[1] + (end_pt[1] - start_pt[1]) * fraction;
                 endpos[2] = start_pt[2] + (end_pt[2] - start_pt[2]) * fraction;
-                FxScheduler_PlayEffect(*(void **)imp_theFxScheduler, (*(void **)&((Effect *)self)->deathEffect), endpos, (vec_t *)(trace + 0x04));
+                FX_PlayEffect((EffectTemplate *)((Effect *)self)->deathEffect, endpos, (vec_t *)(trace + 0x04));
             }
 
             if (flags & 0x400) {
@@ -2480,7 +2424,6 @@ Bool OrientedParticle_Update(const OrientedParticle *_this)
 extern void OrientationPosToWorldPos(void *orient, vec_t *localPos, vec_t *worldPos);
 Bool Particle_Update(const Particle *_this, const Particle *_this_1, const Cloud *_this_2)
 {
-    (void)_this_1;
     (void)_this_2;
     byte *self = (byte *)_this;
     int startTime = (((Effect *)(self))->mTimeStart);
@@ -2550,19 +2493,16 @@ Bool Particle_Update(const Particle *_this, const Particle *_this_1, const Cloud
         return 1;
     }
 
-    if ((((Particle *)(self))->nonUniformScale)) {
-        if (*(byte *)(self + 0xaa) & 1) {
-
+    float secondRadius = radius;
+    if (((Particle *)self)->nonUniformScale) {
+        float v = EvalCurve1((char *)self + offsetof(Particle, size2ChannelInstance.curveIterator.master), normTime);
+        if (((Effect *)self)->mFlags & 0x10000) {
+            float alternate = EvalCurve1((char *)self + offsetof(Particle, size2RandChannelInstance.curveIterator.master), normTime);
+            v += (alternate - v) * ((Particle *)self)->blendWeight[3];
         }
+        secondRadius = v * ((Particle *)self)->size2ChannelInstance.scale;
     }
-
-    float rotation;
-    if (*(byte *)(self + 0xaa) & 1) {
-        rotation = EvalCurve1(((char *)self + offsetof(Particle, size2ChannelInstance.curveIterator.master)), normTime) * *(float *)(((char *)self + offsetof(Particle, size2ChannelInstance.curveIterator.master)) + 8);
-    } else {
-        rotation = 0.0f;
-    }
-    ((Effect *)self)->mRefEnt.radius[1] = rotation;
+    ((Effect *)self)->mRefEnt.radius[1] = secondRadius;
 
     Particle_UpdateRGB(_this);
     Particle_UpdateAlpha(_this);
@@ -2867,14 +2807,14 @@ void Cylinder_Cylinder(const Cylinder *_this)
 {
     extern void *__ZTV8Cylinder;
     Particle_Particle((const Particle *)_this);
-    *(int *)_this = (int)&__ZTV8Cylinder + 8;
+    FX_SetPrimitiveVTable((void *)_this, PT_CYLINDER);
 }
 
 void OrientedParticle_OrientedParticle(const OrientedParticle *_this)
 {
     extern void *__ZTV16OrientedParticle;
     Particle_Particle((const Particle *)_this);
-    *(int *)_this = (int)&__ZTV16OrientedParticle + 8;
+    FX_SetPrimitiveVTable((void *)_this, PT_ORIENTEDPARTICLE);
 }
 
 static inline __attribute__((always_inline)) void ZN16OrientedParticleD1Ev_impl(void *_this)
@@ -2902,16 +2842,15 @@ void ZN16OrientedParticleD0Ev(void *_this)
 }
 
 extern float Vec3Normalize(float *v);
-void Cloud_Cloud(const Cloud *_this, const Cloud *_this_1)
+void Cloud_Cloud(Cloud *_this)
 {
     extern void *__ZTV5Cloud;
     extern float flrand(float min, float max);
     byte *p = (byte *)_this;
     float *dir = (float *)&((Cloud *)p)->randomDirection[0];
     int attempts = 4;
-    (void)_this_1;
     Particle_Particle((const Particle *)_this);
-    *(int *)p = (int)&__ZTV5Cloud + 8;
+    FX_SetPrimitiveVTable((void *)p, PT_CLOUD);
 
     do {
         byte *q = p;
@@ -2960,7 +2899,7 @@ void Line_Line(const Line *_this)
 {
     extern void *__ZTV4Line;
     Particle_Particle((const Particle *)_this);
-    *(int *)_this = (int)&__ZTV4Line + 8;
+    FX_SetPrimitiveVTable((void *)_this, PT_LINE);
 }
 
 static inline __attribute__((always_inline)) void ZN4LineD1Ev_impl(void *_this)
@@ -2991,7 +2930,7 @@ void Tail_Tail(const Tail *_this)
 {
     extern void *__ZTV4Tail;
     Particle_Particle((const Particle *)_this);
-    *(int *)_this = (int)&__ZTV4Tail + 8;
+    FX_SetPrimitiveVTable((void *)_this, PT_TAIL);
 }
 
 static inline __attribute__((always_inline)) void ZN4TailD1Ev_impl(void *_this)
@@ -3022,7 +2961,7 @@ void Emitter_Emitter(const Emitter *_this)
 {
     extern void *__ZTV7Emitter;
     Particle_Particle((const Particle *)_this);
-    *(int *)_this = (int)&__ZTV7Emitter + 8;
+    FX_SetPrimitiveVTable((void *)_this, PT_EMITTER);
 }
 
 static inline __attribute__((always_inline)) void ZN7EmitterD1Ev_impl(void *_this)
@@ -3085,4 +3024,30 @@ static inline __attribute__((always_inline)) void ZN5FlashD1Ev_impl(void *_this)
 void ZN5FlashD1Ev(void *_this)
 {
     ZN5FlashD1Ev_impl(_this);
+}
+
+// Reconstructed virtual dispatch must use linked functions, never retail
+// executable addresses or the placeholder vtable blobs.
+static Bool FX_ParticleUpdateVirtual(const Particle *particle)
+{
+    return Particle_Update(particle, particle, NULL);
+}
+
+void FX_SetPrimitiveVTable(void *effect, PrimType type)
+{
+#define FXVT(destruct, die, update, cull, draw, visibility, addvis, channels, id, archive, fixup) \
+    { (void *)destruct, (void *)destruct, (void *)die, (void *)update, (void *)cull, (void *)draw, \
+      (void *)visibility, (void *)addvis, (void *)channels, (void *)id, (void *)archive, (void *)fixup }
+    static void *const particle[] = FXVT(ZN8ParticleD0Ev, Particle_Die, FX_ParticleUpdateVirtual, Particle_Cull, Particle_Draw, Particle_GetVisibility, Particle_AddVisibility, Particle_CreateChannelInstances, Particle_TypeID, Particle_Archive, Particle_FixupArchiveLoad);
+    static void *const line[] = FXVT(ZN4LineD0Ev, Line_Die, Line_Update, Line_Cull, Line_Draw, Particle_GetVisibility, Particle_AddVisibility, Particle_CreateChannelInstances, Line_TypeID, Line_Archive, Particle_FixupArchiveLoad);
+    static void *const tail[] = FXVT(ZN4TailD0Ev, Particle_Die, Tail_Update, Tail_Cull, Tail_Draw, Particle_GetVisibility, Particle_AddVisibility, Tail_CreateChannelInstances, Tail_TypeID, Tail_Archive, Tail_FixupArchiveLoad);
+    static void *const cylinder[] = FXVT(ZN8CylinderD0Ev, Particle_Die, Cylinder_Update, Cylinder_Cull, Cylinder_Draw, Particle_GetVisibility, Particle_AddVisibility, Tail_CreateChannelInstances, Cylinder_TypeID, Cylinder_Archive, Particle_FixupArchiveLoad);
+    static void *const emitter[] = FXVT(ZN7EmitterD0Ev, Particle_Die, Emitter_Update, Emitter_Cull, Emitter_Draw, Particle_GetVisibility, Particle_AddVisibility, Particle_CreateChannelInstances, Emitter_TypeID, Emitter_Archive, Particle_FixupArchiveLoad);
+    static void *const oriented[] = FXVT(ZN16OrientedParticleD0Ev, Particle_Die, OrientedParticle_Update, OrientedParticle_Cull, OrientedParticle_Draw, Particle_GetVisibility, Particle_AddVisibility, Particle_CreateChannelInstances, OrientedParticle_TypeID, OrientedParticle_Archive, Particle_FixupArchiveLoad);
+    static void *const light[] = FXVT(ZN5LightD0Ev, Effect_Die, Light_Update, Light_Cull, Light_Draw, Effect_GetVisibility, Effect_AddVisibility, Light_CreateChannelInstances, Light_TypeID, Light_Archive, Light_FixupArchiveLoad);
+    static void *const flash[] = FXVT(ZN5FlashD0Ev, Effect_Die, Flash_Update, Flash_Cull, Flash_Draw, Effect_GetVisibility, Effect_AddVisibility, Light_CreateChannelInstances, Flash_TypeID, Flash_Archive, Light_FixupArchiveLoad);
+    static void *const cloud[] = FXVT(ZN5CloudD0Ev, Particle_Die, Cloud_Update, Cloud_Cull, Cloud_Draw, Particle_GetVisibility, Particle_AddVisibility, Cloud_CreateChannelInstances, Cloud_TypeID, Cloud_Archive, Cloud_FixupArchiveLoad);
+    static void *const *const tables[13] = { NULL, particle, line, tail, cylinder, emitter, NULL, oriented, NULL, light, NULL, flash, cloud };
+    *(void *const **)effect = tables[type];
+#undef FXVT
 }

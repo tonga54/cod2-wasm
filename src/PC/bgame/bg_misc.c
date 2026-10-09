@@ -1116,17 +1116,7 @@ void BG_EvaluateTrajectory(const trajectory_t *tr, int atTime, vec_t *result)
         return;
 
     default: {
-        void *_ReturnAddress(void);
-        void *__stdcall GetModuleHandleA(const char *);
-        void *ra = _ReturnAddress();
-        const int *es = (const int *)((const char *)tr - 12); /* &entityState (pos at +12) */
-        char dump[64]; int k; const unsigned char *bp = (const unsigned char *)tr;
-        for (k = 0; k < 48; k++) { unsigned char c = bp[k]; dump[k] = (c >= 32 && c < 127) ? (char)c : '.'; }
-        dump[48] = 0;
-        { static int once; if (once++ < 3)
-            Com_Printf("[trajerr] number=%d eType=%d caller_rva=0x%llx bytes@pos='%s' (DEGRADING to stationary)\n",
-                       es[0], es[1], (unsigned long long)((char *)ra - (char *)GetModuleHandleA(0)), dump); }
-        BG_Vec3Copy(tr->trBase, result); /* DIAGNOSTIC: don't ERR_DROP, treat unknown as stationary */
+        Com_Error(1, "BG_EvaluateTrajectory: unknown trajectory type %d", tr->trType);
         return;
     }
     }

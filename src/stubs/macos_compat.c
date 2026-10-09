@@ -5,6 +5,8 @@
 #include <sys/time.h>
 #include <math.h>
 #include <stdio.h>
+#include <time.h>
+#include <errno.h>
 
 #if !defined(_WIN32) || defined(W32_CLIENT)
 #    include <SDL2/SDL.h>
@@ -47,22 +49,34 @@ int pthread_main_np(void)
 }
 #endif
 
-typedef struct {
-    unsigned int hi;
-    unsigned int lo;
-} AbsoluteTime;
-AbsoluteTime UpTime(void)
+long long UpTime(void)
 {
-    AbsoluteTime t = { 0, 0 };
-    return t;
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (long long)t.tv_sec * 1000000000LL + t.tv_nsec;
 }
-AbsoluteTime AddDurationToAbsolute(int duration, AbsoluteTime absTime)
+long long AddDurationToAbsolute(int duration, long long absTime)
 {
-    return absTime;
+    /* Carbon Duration uses milliseconds when positive, microseconds when
+     * negative. AbsoluteTime is represented as monotonic nanoseconds here. */
+    return absTime + (duration >= 0 ? (long long)duration * 1000000LL
+                                   : -(long long)duration * 1000LL);
 }
-int MPDelayUntil(AbsoluteTime *expiration)
+int MPDelayUntil(const long long *expiration)
 {
+    if (!expiration) return -50;
+    long long remaining = *expiration - UpTime();
+    if (remaining <= 0) return 0;
+#ifdef __EMSCRIPTEN__
+    /* A synchronous OS sleep cannot yield this browser main thread. */
+    return -4;
+#else
+    struct timespec delay = { remaining / 1000000000LL, remaining % 1000000000LL };
+    while (nanosleep(&delay, &delay) != 0) {
+        if (errno != EINTR) return -1;
+    }
     return 0;
+#endif
 }
 void Microseconds(long long *us)
 {
@@ -622,7 +636,7 @@ ContextRef MacDisplay_CreateScreenContext(int inDepthSize, int inUseStencil,
 #    endif
         if (!sdl_gl_window) {
 
-            sdl_gl_window = SDL_CreateWindow("CoD2",
+            sdl_gl_window = SDL_CreateWindow("Call of Duty 2 Multiplayer",
                                              SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                              sdl_gl_width, sdl_gl_height,
                                              SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);

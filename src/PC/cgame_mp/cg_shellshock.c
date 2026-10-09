@@ -60,9 +60,9 @@ extern void SND_SetEnvironmentEffects(int type, const char *name, float drylevel
 extern void SND_DeactivateChannelVolumes(int type, int flags);
 extern void SND_DeactivateEnvironmentEffects(int type, int flags);
 extern void *CL_PickSoundAlias(const char *name);
-extern void SND_PlayBlendedSoundAliases(void *alias0, void *alias1, float fade, int channel, int entity, int flags, int loop);
-extern void SND_PlaySoundAlias(void *alias, int channel, int entity, int duration, int loop);
-extern void CL_CapTurnRate(int min_rate, int max_rate);
+extern int SND_PlayBlendedSoundAliases(void *alias0, void *alias1, float fade, int channel, int entity, int flags, int loop);
+extern int SND_PlaySoundAlias(void *alias, int channel, int entity, int duration, int loop);
+extern void CL_CapTurnRate(float pitchRate, float yawRate);
 extern void CL_SetUserCmdInShellshock(int inShellshock);
 
 static inline float dvar_get_float(byte *dvar_pp)
@@ -543,7 +543,7 @@ check_mouse: {
             cgp = cg;
             cgp->shellshock.sensitivity = parms->mouse.sensitivity;
 
-            CL_CapTurnRate(*(int *)&parms->mouse.maxPitchSpeed, *(int *)&parms->mouse.maxYawSpeed);
+            CL_CapTurnRate(parms->mouse.maxPitchSpeed, parms->mouse.maxYawSpeed);
         } else if (timeSinceStart2 <= 0) {
 
             cgp = cg;
@@ -556,7 +556,7 @@ check_mouse: {
 
                 cgp = cg;
                 cgp->shellshock.sensitivity = parms->mouse.sensitivity;
-                CL_CapTurnRate(*(int *)&parms->mouse.maxPitchSpeed, *(int *)&parms->mouse.maxYawSpeed);
+                CL_CapTurnRate(parms->mouse.maxPitchSpeed, parms->mouse.maxYawSpeed);
             } else {
 
                 cgp = cg;
@@ -565,7 +565,7 @@ check_mouse: {
 
                 float minRate = parms->mouse.maxPitchSpeed / t;
                 float maxRate = parms->mouse.maxYawSpeed / t;
-                CL_CapTurnRate(*(int *)&minRate, *(int *)&maxRate);
+                CL_CapTurnRate(minRate, maxRate);
             }
         }
     }

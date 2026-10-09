@@ -30,10 +30,10 @@ static int warnCount_00c85b10;
 static int warnCount_00c85b10;
 static int warnCount_00c85b10;
 extern void *Hunk_AllocInternal(int size);
-extern void DB_EnumXAssets(int type, void (*func)(XAssetHeader, void *), void *data, qboolean overrides);
-extern int XModelBad(union XAssetHeader header);
-extern void XModelUnoptimize(union XAssetHeader header);
-extern void XModelOptimize(union XAssetHeader header);
+extern void DB_EnumXAssets(int type, void (*func)(XModel *, void *), void *data, qboolean overrides);
+extern int XModelBad(const XModel *model);
+extern void XModelUnoptimize(XModel *model);
+extern void XModelOptimize(XModel *model);
 extern float Vec3Distance(const void *a, const void *b);
 extern int DObjGetLodForDist(const void *obj, int modelIndex, float dist);
 extern void DObjSetModel(struct DObj_s *obj, void *model);
@@ -130,11 +130,11 @@ qboolean R_GetIgnorePrecacheErrors(void);
 void R_UnlockSkinnedCache(void);
 struct DObj_s *R_GetGfxEntityDObj(GfxSceneEntity *sceneEnt, GfxEntity *ent);
 void R_DObjReplaceMaterial(struct DObj_s *obj, int lod, int surfaceIndex, MaterialHandle material);
-static void R_ReleaseModel(union XAssetHeader header, void *data);
+static void R_ReleaseModel(XModel *model, void *data);
 void R_OptimizeAllModels(void);
 void R_ReleaseAllModels(void);
 void *Model_Alloc(int size);
-static void R_OptimizeModel(XAssetHeader header, void *data);
+static void R_OptimizeModel(XModel *model, void *data);
 void R_GetRigidTransform(const DObjSkelMat *bone, const vec_t *origin, vec3_t *axis, float scale, vec3_t *boneAxis);
 void R_ModelBounds(GfxBrushModel *bmodel, vec_t *mins, vec_t *maxs);
 void R_LockSkinnedCache(GfxLockType lockType);
@@ -249,11 +249,11 @@ void R_DObjReplaceMaterial(struct DObj_s *obj, int lod, int surfaceIndex, Materi
     ((MaterialHandle **)skins)[lodVal][subMatIndex] = material;
 }
 
-static void R_ReleaseModel(union XAssetHeader header, void *data)
+static void R_ReleaseModel(XModel *model, void *data)
 {
-    if (XModelBad(header))
+    if (XModelBad(model))
         return;
-    XModelUnoptimize(header);
+    XModelUnoptimize(model);
 }
 
 void R_OptimizeAllModels(void)
@@ -274,11 +274,11 @@ void *Model_Alloc(int size)
     return Hunk_AllocInternal(size);
 }
 
-static void R_OptimizeModel(XAssetHeader header, void *data)
+static void R_OptimizeModel(XModel *model, void *data)
 {
-    if (XModelBad(header))
+    if (XModelBad(model))
         return;
-    XModelOptimize(header);
+    XModelOptimize(model);
 }
 
 void R_GetRigidTransform(const DObjSkelMat *bone, const vec_t *origin, vec3_t *axis, float scale, vec3_t *boneAxis)
@@ -563,10 +563,10 @@ void R_UpdateXModelBounds(GfxSceneEntity *sceneEnt, GfxEntity *ent)
     void *obj;
     int boneCount, i;
     int partBits[4];
-    short surfaces[67];
+    DSurface surfaces[64];
     char lods[8];
     float bounds[6];
-    int boneInfo[128];
+    XBoneInfo *boneInfo[128];
 
     if (((GfxSceneEntity *)se)->cullState > 3)
         return;
@@ -613,14 +613,14 @@ void R_UpdateXModelBounds(GfxSceneEntity *sceneEnt, GfxEntity *ent)
         boneCount = DObjNumBones(obj);
 
         for (i = 0; i < boneCount; i++) {
-            if (!(partBits[i >> 5] & (1 << (i & 0x1f))))
+            if (!(partBits[i >> 5] & (1u << (i & 0x1f))))
                 continue;
 
             {
                 const float *q = boneMatrix[i].quat;
                 float w2 = boneMatrix[i].transWeight;
                 const float *trans = boneMatrix[i].trans;
-                const int *bi = &boneInfo[i * 4];
+                const XBoneInfo *bi = boneInfo[i];
 
                 float xx2 = w2 * q[0], yy2 = w2 * q[1], zz2 = w2 * q[2];
                 float xx = xx2 * q[0], xy = xx2 * q[1], xz = xx2 * q[2], xw = xx2 * q[3];
@@ -632,13 +632,11 @@ void R_UpdateXModelBounds(GfxSceneEntity *sceneEnt, GfxEntity *ent)
                 float m20 = xz + yw, m21 = yz - xw, m22 = 1.0f - (xx + yy);
 
                 float bmin, bmax;
-                const float *bif = (const float *)bi;
-
 #define AXIS_CONTRIB(rot, biOfs)                                         \
     do {                                                                 \
-        int sel = (*(int *)&(rot)) >> 31 & 3;  \
-        bmin += (rot) * bif[sel];                                        \
-        bmax += (rot) * bif[3 - sel];                                    \
+        int sel = (rot) < 0.0f;                                         \
+        bmin += (rot) * bi->bounds[sel][biOfs];                          \
+        bmax += (rot) * bi->bounds[1 - sel][biOfs];                      \
     } while (0)
 
                 bmin = trans[0];
@@ -832,9 +830,9 @@ void R_SkinSceneDObj(GfxSceneEntity *sceneEnt, GfxEntity *ent)
 
     {
         int startIndex = InterlockedExchangeAdd((volatile int *)&scene.sceneEntMaterialCount, surfaceCount);
-        extern int __mh_execute_header;
-        if (startIndex + surfaceCount > (int)(unsigned int)&__mh_execute_header) {
-            scene.sceneEntMaterialCount = (int)(unsigned int)&__mh_execute_header;
+
+        if (startIndex + surfaceCount > 0x1000) {
+            scene.sceneEntMaterialCount = 0x1000;
             {
                 GfxBackEndData *fed = frontEndDataOut;
                 if (*(int *)fed != warnCount) {
@@ -1085,7 +1083,7 @@ no_smc:
 }
 
 extern int XModelNumBones(const void *model);
-extern int XModelGetSurfaces(const void *model, void **surfaces, int lod, int *partBits);
+extern int XModelGetSurfaces(const void *model, void **surfaces, int lod, int **partBits);
 extern int XModelGetLodForDist(const void *model, float dist);
 extern const DObjAnimMat *XModelGetBasePose(const void *model);
 void R_SkinXModel(GfxSceneEntity *sceneEnt, GfxEntity *ent, int smodelIndex)
@@ -1099,7 +1097,7 @@ void R_SkinXModel(GfxSceneEntity *sceneEnt, GfxEntity *ent, int smodelIndex)
 #endif
     int boneCount, surfaceCount, lod;
     void *surfacesPtr;
-    int partBits[4];
+    int *partBits;
     qboolean needSkinningSurf = 0;
     byte surfBuf[3520];
 
@@ -1109,7 +1107,7 @@ void R_SkinXModel(GfxSceneEntity *sceneEnt, GfxEntity *ent, int smodelIndex)
     if (InterlockedCompareExchange(&((GfxSceneEntity *)se)->cullState, 2, 3) != 2) {
     }
 
-    if (XModelBad(*(union XAssetHeader *)&model)) {
+    if (XModelBad(model)) {
         if (developer->current.integer) {
             void *defaultObj = rgg->modelDObj;
             DObjSetModel((struct DObj_s *)defaultObj, model);
@@ -1136,13 +1134,17 @@ void R_SkinXModel(GfxSceneEntity *sceneEnt, GfxEntity *ent, int smodelIndex)
         return;
     }
 
-    surfaceCount = XModelGetSurfaces(model, &surfacesPtr, lod, partBits);
+    surfaceCount = XModelGetSurfaces(model, &surfacesPtr, lod, &partBits);
+    if (surfaceCount <= 0 || !surfacesPtr || !partBits) {
+        sceneEnt->cullState = 4;
+        return;
+    }
 
     {
         int startIdx = InterlockedExchangeAdd((volatile int *)&scene.sceneEntMaterialCount, surfaceCount);
-        extern int __mh_execute_header;
-        if (startIdx + surfaceCount > (int)(unsigned int)&__mh_execute_header) {
-            scene.sceneEntMaterialCount = (int)(unsigned int)&__mh_execute_header;
+
+        if (startIdx + surfaceCount > 0x1000) {
+            scene.sceneEntMaterialCount = 0x1000;
             GfxBackEndData *fed = frontEndDataOut;
             if (*(int *)fed != warnCount) {
                 warnCount = *(int *)fed;

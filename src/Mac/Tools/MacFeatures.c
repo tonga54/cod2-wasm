@@ -19,7 +19,7 @@ Boolean MacFeatures_HasGestaltAttribute(OSType inSelector, UInt32 inAttribute)
     return 0;
 }
 
-Boolean MacFeatures_IsAltiVecAvailable(UInt8 *outMajor, UInt8 *outMinor, UInt8 *outBug)
+Boolean MacFeatures_IsAltiVecAvailable(void)
 {
 
     return 0;

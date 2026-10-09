@@ -1,3 +1,7 @@
+/* glibc exposes the ucontext register indexes under GNU feature definitions. */
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#    define _GNU_SOURCE 1
+#endif
 #include "crash_handler.h"
 
 #ifndef COD2_GIT_HASH

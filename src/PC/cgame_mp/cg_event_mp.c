@@ -17,10 +17,10 @@ extern void Com_DPrintf(const char *msg, ...);
 extern void Com_Error(int level, const char *msg, ...);
 extern void *BG_GetWeaponDef(int weapon);
 extern int BG_WeaponIsClipOnly(int weapon);
-extern void CG_PlayEntitySoundAlias(int entNum, int alias);
-extern void CG_PlaySoundAlias(int entNum, void *origin, int alias);
-extern void CG_PlaySoundAliasByName(int entNum, void *origin, const char *name);
-extern void CG_PlaySoundAliasAsMasterByName(int entNum, void *origin, const char *name);
+extern int CG_PlayEntitySoundAlias(int entNum, int alias);
+extern int CG_PlaySoundAlias(int entitynum, const vec_t *origin, snd_alias_list_t *aliasList);
+extern int CG_PlaySoundAliasByName(int entNum, const vec_t *origin, const char *name);
+extern int CG_PlaySoundAliasAsMasterByName(int entNum, void *origin, const char *name);
 extern void CG_FireWeapon(centity_t *cent, int weaponId, int hand);
 extern void CG_EjectWeaponBrass(entityState_t *es, int weaponId);
 extern void CG_PrepOffHand(entityState_t *es, int weaponId, int eventParm);
@@ -35,9 +35,9 @@ extern void CG_StartShakeCamera(float scale, int duration, const vec_t *src, flo
 extern void CG_BulletHitEvent(int otherEntNum, void *position, void *dir, void *reflect, int surfType, int event);
 extern void CG_BulletHitClientEvent(int otherEntNum, void *position, int surfType, int event);
 extern void CG_CompassAddWeaponPingInfo(void *ent, void *position, int duration);
-extern unsigned int CG_PriorityCenterPrint(const char *msg, float scale, int priority);
+extern void CG_PriorityCenterPrint(const char *msg, float scale, int priority);
 extern void CL_DeathMessagePrint(const char *attackerName, float *attackerColor, const char *targetName, float *victimColor, const char *iconShader, float iconWidth, float iconHeight, float *iconColor, int iconHorzFlip);
-extern float CG_DrawScoreboard_GetTeamColor(int team, float *color);
+extern void CG_DrawScoreboard_GetTeamColor(int team, float *color);
 extern void CL_SetADS(int val);
 extern void CG_CalcEntityLerpPositions(centity_t *cent);
 extern void CG_CheckOpenWaitingScriptMenu(void);
@@ -1020,7 +1020,7 @@ void CG_EntityEvent(centity_t *cent, int event)
 
             ByteToDir(es->eventParm, dir);
 
-            ByteToDir(es->dmgFlags, reflect);
+            ByteToDir(es->eventParm2, reflect);
 
             CG_BulletHitEvent(es->otherEntityNum, position,
                               dir, reflect, es->surfType, event);
@@ -1534,74 +1534,32 @@ void CG_EntityEvent(centity_t *cent, int event)
 
 void CG_CheckEvents(centity_t *cent)
 {
-    char *c = (char *)cent;
-    int eventSequence;
-    int prevEventSeq;
-    int i;
-    int oldEventParm;
-    int diff;
+    int sequence, count, oldEventParm;
 
-    if (((centity_t *)c)->nextState.eType > 10) {
-
-        i = ((centity_t *)c)->previousEventSequence;
-        if (i == 0) {
-
-            ((centity_t *)c)->previousEventSequence = 1;
-
+    if (cent->nextState.eType > 10) {
+        if (!cent->previousEventSequence) {
+            cent->previousEventSequence = 1;
             CG_CalcEntityLerpPositions(cent);
-
-            CG_EntityEvent(cent, ((centity_t *)c)->nextState.eType - 10);
+            CG_EntityEvent(cent, cent->nextState.eType - 10);
         }
         return;
     }
 
-    eventSequence = ((centity_t *)c)->nextState.eventSequence;
-    if (eventSequence == 0) {
-
-        ((centity_t *)c)->previousEventSequence = 0;
+    /* Snapshot event sequences are transmitted as eight bits. Zero is also
+     * a valid sequence after wrapping, so it must not suppress that event. */
+    sequence = cent->nextState.eventSequence & 255;
+    count = (sequence - cent->previousEventSequence) & 255;
+    if (count > 4)
+        count = 4;
+    if (!count)
         return;
-    }
-
-    prevEventSeq = ((centity_t *)c)->previousEventSequence;
-
-    if (eventSequence < prevEventSeq) {
-
-        prevEventSeq -= 256;
-        ((centity_t *)c)->previousEventSequence = prevEventSeq;
-    }
-
-    diff = eventSequence - prevEventSeq;
-    if (diff > 4) {
-
-        prevEventSeq = eventSequence - 4;
-        ((centity_t *)c)->previousEventSequence = prevEventSeq;
-    }
-
-    if (((centity_t *)c)->previousEventSequence >= eventSequence) {
-
-        ((centity_t *)c)->previousEventSequence = eventSequence;
-        return;
-    }
 
     CG_CalcEntityLerpPositions(cent);
-
-    oldEventParm = (unsigned char)((centity_t *)c)->nextState.eventParm;
-    i = ((centity_t *)c)->previousEventSequence;
-
-    while (i != ((centity_t *)c)->nextState.eventSequence) {
-
-        int ev = ((centity_t *)c)->nextState.events[i & 3];
-
-        ((centity_t *)c)->nextState.eventParm =
-            ((centity_t *)c)->nextState.eventParms[i & 3];
-
-        CG_EntityEvent(cent, ev);
-
-        i++;
+    oldEventParm = cent->nextState.eventParm;
+    for (int i = sequence - count; i < sequence; ++i) {
+        cent->nextState.eventParm = cent->nextState.eventParms[i & 3];
+        CG_EntityEvent(cent, cent->nextState.events[i & 3]);
     }
-
-    ((centity_t *)c)->nextState.eventParm = (unsigned char)oldEventParm;
-
-    ((centity_t *)c)->previousEventSequence =
-        ((centity_t *)c)->nextState.eventSequence;
+    cent->nextState.eventParm = oldEventParm;
+    cent->previousEventSequence = sequence;
 }

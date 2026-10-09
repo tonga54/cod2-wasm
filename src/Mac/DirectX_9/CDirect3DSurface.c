@@ -2,6 +2,9 @@
 #include "imports.h"
 #include <stdlib.h>
 #include <string.h>
+#ifdef __EMSCRIPTEN__
+#include "downstream/wasm/web_pixels.h"
+#endif
 
 extern bool g_NoTextureID;
 extern bool g_WarmOff;
@@ -163,6 +166,32 @@ HRESULT CDirect3DSurface_UnlockRect(const CDirect3DSurface *_this)
     return 0;
 }
 
+static void CDirect3DSurface_UploadPixels(CDirect3DSurfaceImpl *surface, GLenum target,
+                                        UINT32 w, UINT32 h, int recreate)
+{
+    const void *pixels = surface->surfaceMemory;
+    GLenum format = surface->openGLFormat;
+#ifdef __EMSCRIPTEN__
+    byte *rgba = NULL;
+    if (format == 0x80E1 && surface->openGLElementType == 0x1401) {
+        rgba = (byte *)malloc((size_t)w * h * 4);
+        if (!rgba) abort();
+        web_bgra_to_rgba(rgba, surface->surfaceMemory, (size_t)w * h);
+        pixels = rgba;
+        format = 0x1908;
+    }
+#endif
+    if (recreate)
+        glTexImage2D(target, surface->level, surface->openGLInternalFormat,
+                     w, h, 0, format, surface->openGLElementType, pixels);
+    else
+        glTexSubImage2D(target, surface->level, 0, 0, w, h,
+                       format, surface->openGLElementType, pixels);
+#ifdef __EMSCRIPTEN__
+    free(rgba);
+#endif
+}
+
 void CDirect3DSurface_CreateOpenGLSurfaceObject(const CDirect3DSurface *_this)
 {
     CDirect3DSurfaceImpl *surface = (CDirect3DSurfaceImpl *)_this;
@@ -185,9 +214,7 @@ void CDirect3DSurface_CreateOpenGLSurfaceObject(const CDirect3DSurface *_this)
         glCompressedTexImage2DARB(target, surface->level,
                                   surface->openGLInternalFormat, w, h, 0, dataSize, surface->surfaceMemory);
     } else {
-        glTexImage2D(target, surface->level,
-                     surface->openGLInternalFormat, w, h, 0,
-                     surface->openGLFormat, surface->openGLElementType, surface->surfaceMemory);
+        CDirect3DSurface_UploadPixels(surface, target, w, h, 1);
     }
 }
 
@@ -215,8 +242,7 @@ void CDirect3DSurface_UpdateOpenGLSurfaceObject(const CDirect3DSurface *_this, i
         glCompressedTexSubImage2D(target, surface->level, 0, 0,
                                   w, h, surface->openGLInternalFormat, dataSize, surface->surfaceMemory);
     } else {
-        glTexSubImage2D(target, surface->level, 0, 0,
-                        w, h, surface->openGLFormat, surface->openGLElementType, surface->surfaceMemory);
+        CDirect3DSurface_UploadPixels(surface, target, w, h, 0);
     }
 
     surface->isDirty = 0;

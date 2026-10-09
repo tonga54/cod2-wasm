@@ -1,0 +1,20 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    DISPLAY=:1 \
+    WINEPREFIX=/data/wineprefix \
+    LIBGL_ALWAYS_SOFTWARE=1
+
+RUN dpkg --add-architecture i386 && apt-get update -qq && apt-get install -y --no-install-recommends \
+    wine wine32:i386 wine64 xvfb x11vnc novnc websockify x11-utils dbus-x11 \
+    libgl1-mesa-dri libglx-mesa0 ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update -qq && apt-get install -y --no-install-recommends \
+    libgl1:i386 libglx-mesa0:i386 libgl1-mesa-dri:i386 && rm -rf /var/lib/apt/lists/*
+
+COPY entrypoint-game.sh /usr/local/bin/entrypoint-game
+COPY server.cfg /usr/local/share/cod2/server.cfg
+COPY game-index.html /usr/share/novnc/index.html
+RUN chmod +x /usr/local/bin/entrypoint-game
+
+EXPOSE 6080
+ENTRYPOINT ["/usr/local/bin/entrypoint-game"]

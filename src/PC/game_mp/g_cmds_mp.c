@@ -25,7 +25,7 @@ extern const dvar_t *g_gametype;
 extern int Com_sprintf(char *dest, int size, const char *fmt, ...);
 extern char *va(const char *fmt, ...);
 extern void Com_Printf(const char *fmt, ...);
-extern int G_LogPrintf(const char *fmt, ...);
+extern void G_LogPrintf(const char *fmt, ...);
 extern int SV_GetClientPing(int clientNum);
 extern int SV_GetGuid(int clientNum);
 extern void SV_GameSendServerCommand(int clientNum, int type, const char *text);
@@ -43,9 +43,9 @@ extern const dvar_t *Dvar_RegisterString_mac(const char *dvarName, const char *v
 extern void Cbuf_ExecuteText(int exec_when, const char *text);
 extern void SV_GetConfigstring(int index, char *buffer, int bufferLength);
 extern qboolean SV_MapExists(const char *name);
-extern unsigned int Scr_AddString(const char *value);
+extern void Scr_AddString(const char *value);
 extern void Scr_Notify(gentity_t *ent, unsigned short stringValue, int paramcount);
-extern unsigned int Scr_VoteCalled(gentity_t *self, char *command, char *param1, char *param2);
+extern void Scr_VoteCalled(gentity_t *self, char *command, char *param1, char *param2);
 extern qboolean Scr_IsValidGameType(const char *pszGameType);
 extern const char *Scr_GetGameTypeNameForScript(const char *pszGameTypeScript);
 extern void G_GetPlayerViewOrigin(const gentity_t *ent, vec_t *origin);
@@ -76,7 +76,7 @@ extern char *vtos(const vec_t *v);
 extern unsigned char G_PrintEntities(void);
 extern double atof(const char *nptr);
 extern int atoi(const char *nptr);
-extern unsigned int Scr_PlayerVote(gentity_t *self, char *option);
+extern void Scr_PlayerVote(gentity_t *self, char *option);
 
 enum {
     GCMDS_MAX_CLIENTS = 64
@@ -508,11 +508,13 @@ void Cmd_CallVote_f(gentity_t *ent)
 
     SV_GameSendServerCommand(-1, SV_CMD_CAN_IGNORE,
                              va("%c \"GAME_CALLEDAVOTE\x15%s\"", 101, ent->client->sess.cs.name));
+    Com_Printf("[vote] called by client %i: %s; eligible=%i\n",
+               (int)(ent - g_entities), lvl->voteString, lvl->numVotingClients);
     lvl->voteTime = lvl->time + 30000;
     lvl->voteYes = 1;
     lvl->voteNo = 0;
 
-    for (i = 0; i < lvl->numConnectedClients; ++i)
+    for (i = 0; i < lvl->maxclients; ++i)
         lvl->clients[i].ps.eFlags &= ~0x100000;
 
     ent->client->ps.eFlags |= 0x100000;
@@ -552,7 +554,7 @@ void Cmd_Vote_f(gentity_t *ent)
     }
 
     SV_Cmd_ArgvBuffer(1, msg, sizeof(msg));
-    if (msg[0] == 'y' || msg[1] == 'Y' || msg[1] == '1') {
+    if (msg[0] == 'y' || msg[0] == 'Y' || msg[0] == '1') {
         if ((*(const dvar_t **)imp_g_oldVoting)->current.enabled) {
             ++lvl->voteYes;
             SV_SetConfigstring(0x11, va("%i", lvl->voteYes));
@@ -623,6 +625,8 @@ void Cmd_MenuResponse_f(gentity_t *pEnt)
         strcpy(szResponse, "bad");
     }
 
+    if (getenv("MTRACE"))
+        Com_Printf("[menu-trace] server response menu='%s' value='%s'\n", szMenuName, szResponse);
     Scr_AddString(szResponse);
     Scr_AddString(szMenuName);
     Scr_Notify(pEnt, ((const scr_const_t *)imp_scr_const)->menuresponse, 2);

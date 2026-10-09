@@ -1,107 +1,57 @@
-# Call of Duty 2 WASM
+# Call of Duty 2 in the browser
 
-Call of Duty 2 WASM is an Emscripten integration for a reconstructed IW 2.0
-multiplayer client. Status: **Still in development**. The current
-checkpoint compiles the complete selected client source graph to WebAssembly
-objects and runs a small native checksum diagnostic, but the game does not
-link or launch yet.
+Work in progress: the reconstructed engine targets WebAssembly and WebGL 2.
+Each browser executes its own client. The previous Wine/noVNC runtime is stopped.
 
-The browser package uses wasm-game-framework 0.9.2 at immutable commit
-`53bc7e6eeef1ae35dcf3b25dea4e3ec0ab46726f`. The framework supplies the HTML,
-CSS, responsive canvas, setup gate, PWA metadata, service worker, and container
-data service. This repository supplies only declarative manifests, an adapter,
-the source-built diagnostic, and an original diagnostic icon.
+The final scope is Toujane, Tunisia (`mp_toujane`), TDM, and up to 64 human clients per server on a LAN.
+Two real browser clients have connected, chosen opposing teams, moved, aimed,
+fired, caused damage, killed each other and respawned with synchronized scores.
+The complete combat check also passed in the normal room after walking from
+the original spawns, with both sides scoring and respawning at 100 health. Bullet
+tracers are visible from the firing client and other clients, with their original
+texture colors restored. Wall impacts now draw particles and lasting bullet marks.
+Static vehicles, barrels and crates render again; all six Toujane ladder volumes
+have been climbed in Chrome. Grenades use the weapon's original release delay.
+Browser audio now plays the original menu music, ambience, weapon fire, reloads
+and footsteps. Shots from the other player were verified in both directions
+between Chrome and the internal browser. The October 8 update fixes clock drift,
+smoke alpha, purple model colors, command aim recoil and voted map reloads.
+Two browsers completed the vote/reload/resume flow; archive ring recovery and
+movement clock regressions pass. Longer matches, other hardware and remaining
+visual fidelity still need broader coverage. See RUNBOOK.md for exact evidence.
 
-## Current milestone
+The real engine has linked with zero undefined symbols. Function signature warnings
+are still being repaired. A build does not establish that a match is playable.
+The page loads directly into the original main menu without a launcher form or
+automatic server connection. The tab title is **Call of Duty 2 Multiplayer**;
+its favicon is extracted from the owner's original MP executable.
 
-- 395 reconstructed multiplayer client translation units compile as WebAssembly objects.
-- The native MD4/checksum diagnostic builds and executes in Node and the browser adapter.
-- The framework package exposes one honest `cod2-mp` variant.
-- A clean-room native test-client command ABI compiles with the full source graph.
-- Single-player is not offered because this source tree has no SP client,
-  server, game, cgame, or UI source families.
-- The game executable does not link; no menu, level, renderer, input, network,
-  or audio behavior is claimed.
-- Controller input and save/config persistence are explicitly disabled until
-  the multiplayer engine links and exposes native runtime seams.
+Join Game discovers the host's live dedicated servers. Start New Server creates
+another Toujane/TDM dedicated instance, with 64 player slots. Up to three
+instances are allowed; additional instances empty for five minutes are stopped.
+The native menu creation/discovery/join flow has been checked with two browser
+clients. Sustained gameplay stability and the remaining graphics work
+still require verification.
 
-The exact link blocker is the reconstruction's generated native data model.
-It represents some names as both code pointers and linear-memory data. Native
-ELF link options reconcile those aliases, while WebAssembly has separate
-function-table and data symbol kinds and rejects the collision. Repair requires
-a wasm-aware data/import generator, not undefined-symbol suppression.
+Start with `./scripts/build-docker.sh` and `docker compose up -d`. The local URL
+is `http://localhost:8088`; other LAN devices use the Mac's current IP and port
+8088. On 2026-10-07 that address changed to `http://192.168.1.10:8088`.
 
-## Multiplayer bot foundation
+Original owner assets stay untouched in ignored `data/main/`. The script
+`scripts/prepare-browser-bootstrap.py` prepares a private Toujane asset subset
+(165.6 MB, including 470 original sound files). Archives stay outside the
+public site and image. The canonical launcher pins wasm-game-framework 0.9.2
+at `53bc7e6eeef1ae35dcf3b25dea4e3ec0ab46726f`.
 
-The reconstructed multiplayer server now keeps bot command intent in a
-layout-safe sidecar and exposes GSC methods for test-client identity, stop,
-movement, view angles, weapon selection, and native input actions. The server
-submits those commands through the normal player movement path with the current
-server time; it no longer generates random test-client input.
-
-This foundation does not supply bot AI, navigation graphs, or population
-scripts, and it does not change the current link-blocked status. The post-link
-target is an 8-player population with `sv_maxclients 12`: independently
-authored server logic will add bots up to eight total participants and remove
-one as each human connects, while the extra four slots provide admission
-headroom.
-
-## Build and test
-
-Requirements: Emscripten, CMake, Node.js, and Docker. The default Emscripten
-checkout is `/home/ted/emsdk`; override it with `COD2_WASM_EMSDK`.
-
-```bash
-./scripts/test-web.sh
-./scripts/build-docker.sh
-./scripts/test-http.sh
-```
-
-The Docker build produces a suite image and a multiplayer-locked image:
-
-```text
-local/cod2-wasm:dev
-local/cod2-wasm:cod2-mp-dev
-```
-
-## Required data setup
-
-Start with a persistent data directory:
-
-```bash
-docker run --rm -p 8088:8088 \
-  -v "$PWD/data:/data" \
-  local/cod2-wasm:cod2-mp-dev
-```
-
-Open `http://localhost:8088` and select the required Call of Duty 2 `main`
-directory when prompted. The container validates the exact 28-file Steam
-inventory and stores it beneath `/data/main`. Direct `/data` and `/local-data`
-HTTP routes remain unavailable.
-
-At this diagnostic milestone the browser caches only the selected 706-byte
-representative archive. Loading the complete 3.685 GB archive set into MEMFS
-would exhaust the wasm32 address space; the future engine runtime needs a lazy,
-archive-aware filesystem.
-
-## Source boundary
-
-Call of Duty 2 is identified here by its conventional IW 2.0 engine-family
-label. IW 3.0 refers to the later Call of Duty 4 generation and must not appear
-in this launcher's metadata.
-
-The current browser checkpoint uses the technically more complete OpenCoD2
-reconstruction because it compiles 395 selected translation units to
-WebAssembly objects. That repository has no repository-level license file, so
-the images remain local. The GPL-2.0 `xtnded/cod2` reconstruction is pinned and
-evaluated in [SOURCE_BASE_AUDIT.md](SOURCE_BASE_AUDIT.md); its current native
-and Emscripten CMake targets fail in the first translation unit and do not yet
-build the reconstructed source graph.
-
-The browser target uses reconstructed native source only. It does not restore
-the removed inherited web target or import a third-party WebAssembly build.
-It also does not include or fetch third-party bot scripts or waypoint data.
-Generated JavaScript/WebAssembly and IWD archives remain outside Git and no
-downstream HTML, CSS, service worker, or web manifest is authored here.
-
-No changes from this repository are submitted upstream.
+The private subset applies `downstream/weapon-balance.json` (`lan-balanced-v1`)
+to both browser clients and dedicated rooms. It retains retail close body damage,
+cadence, recoil, magazines and reloads, reduces automatic headshots from ×3 to
+×2, shortens SMG full-damage range, and adds ranged damage loss and hip-fire
+dispersion to Bren/MP44. Rifles, scopes, pistols, shotgun, grenades and mounted
+MG42 keep their original definitions. These are custom LAN adjustments based
+on the owner's CoD2 files, using Activision's WWII class descriptions as design
+context rather than importing unverified numeric stats from another game.
+Regenerate with `python3 scripts/prepare-browser-bootstrap.py` and verify with
+`python3 scripts/test-weapon-balance.py`; the audit is written to
+`out/weapon-balance-audit.json`. Rebuild/recreate the web and server images so
+the asset manifest and cached server archives stay synchronized.

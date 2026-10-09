@@ -225,7 +225,7 @@ extern void *RB_GetActiveWorldMatrix(void);
 extern void MatrixIdentity44(void *matrix);
 extern void MatrixMultiply44(const void *a, const void *b, void *out);
 extern Bool RB_GetViewport(void *viewport);
-extern void MacOpenGLUtils_ConvertD3DProjectionMatrixToOpenGL(void *proj, float width, float height);
+extern int MacOpenGLUtils_ConvertD3DProjectionMatrixToOpenGL(void *proj, float width, float height);
 extern void RB_SetViewMatrix(const void *matrix);
 extern void RB_SetProjectionMatrix(const void *matrix);
 extern void MatrixForViewer(void *out, const void *origin, const void *axis);
@@ -3208,6 +3208,17 @@ post_render:
 
     dx = (char *)imp_dx;
     deviceState = ((DxGlobals *)dx)->gpuSync;
+#ifdef __EMSCRIPTEN__
+    /* WebGL schedules GPU work asynchronously. With synchronization disabled,
+     * creating a new query every frame leaks the previous query handle. */
+    if (deviceState == 0) {
+        if (((DxGlobals *)dx)->flushGpuQueryIssued) {
+            glDeleteFencesAPPLE(1, &g_FenceID);
+            ((DxGlobals *)dx)->flushGpuQueryIssued = 0;
+        }
+        goto done;
+    }
+#endif
     if (deviceState == 3) {
         glGenFencesAPPLE(1, &g_FenceID);
         glSetFenceAPPLE(g_FenceID);

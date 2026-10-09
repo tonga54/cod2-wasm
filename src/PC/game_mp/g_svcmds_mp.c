@@ -18,8 +18,8 @@ extern void SV_GameSendServerCommand(int clientNum, int type, const char *text);
 extern void Cbuf_ExecuteText(int exec_when, const char *text);
 
 extern level_locals_t level;
-extern byte g_entities_ptr[];
-extern byte level_ptr[];
+extern gentity_t g_entities[];
+extern level_locals_t level;
 extern const dvar_t *g_banIPs;
 extern const dvar_t *g_cheats;
 

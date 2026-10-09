@@ -20,19 +20,19 @@ extern void *imp_g_scr_data;
 extern int G_GetPlayerCorpseIndex(gentity_t *ent);
 extern struct DObj_s *Com_GetServerDObj(int entNum);
 extern int G_RunThink(gentity_t *ent);
-extern int __mh_execute_header;
+
 extern char *va(const char *format, ...);
 extern void Scr_Error(const char *error);
 extern int G_ModelIndex(const char *name);
-extern void G_SetModel(gentity_t *ent, const char *modelName);
+extern unsigned char G_SetModel(gentity_t *ent, const char *modelName);
 extern void G_DObjUpdate(gentity_t *ent);
-extern void G_SetAngle(gentity_t *ent, const vec_t *angle);
-extern void G_SetOrigin(gentity_t *ent, const vec_t *origin);
-extern int SV_LinkEntity(gentity_t *gEnt);
+extern unsigned char G_SetAngle(gentity_t *ent, const vec_t *angle);
+extern unsigned char G_SetOrigin(gentity_t *ent, const vec_t *origin);
+extern void SV_LinkEntity(gentity_t *gEnt);
 extern int G_GetHintStringIndex(int *piIndex, const char *pszString);
 extern void Com_Error(int code, const char *fmt, ...);
 extern qboolean G_XModelBad(int index);
-extern void G_OverrideModel(int modelIndex, const char *defaultModelName);
+extern unsigned char G_OverrideModel(int modelIndex, const char *defaultModelName);
 extern void BG_UpdatePlayerDObj(struct DObj_s *pDObj, entityState_t *es, clientInfo_t *ci, int attachIgnoreCollision);
 extern void BG_PlayerAnimation(const struct DObj_s *pDObj, entityState_t *es, clientInfo_t *ci);
 extern int BG_AmmoForWeapon(int weapon);
@@ -53,7 +53,7 @@ extern unsigned char G_FreeEntity(gentity_t *ed);
 extern gentity_t *G_Spawn(void);
 extern void AngleVectors(const vec_t *angles, vec_t *forward, vec_t *right, vec_t *up);
 extern void Vec3Cross(const vec_t *v0, const vec_t *v1, vec_t *cross);
-extern void AxisToAngles(const vec_t *axis, vec_t *angles);
+extern void AxisToAngles(vec3_t *axis, vec_t *angles);
 extern void XAnimCalcDelta(XAnimTree *tree, unsigned int animIndex, vec_t *rot, vec_t *trans, int bUseGoalWeight);
 extern const vec_t Vec3Normalize(vec_t *v);
 extern qboolean G_TraceCapsuleComplete(const vec_t *start, const vec_t *mins, const vec_t *maxs, const vec_t *end, int passEntityNum, int contentmask);
@@ -72,14 +72,14 @@ extern void SV_GameSendServerCommand(int clientNum, int type, const char *text);
 extern void I_strncpyz(char *dest, const char *src, int destsize);
 extern char *I_CleanStr(char *str);
 extern int SV_GetGuid(int clientNum);
-extern int G_LogPrintf(const char *fmt, ...);
+extern void G_LogPrintf(const char *fmt, ...);
 extern Bool BG_DoesWeaponNeedSlot(int weapIndex);
 extern int BG_IsPlayerWeaponInSlot(const playerState_t *pPS, int iWeaponIndex, qboolean bAnyMode);
 extern int BG_GetEmptySlotForWeapon(const playerState_t *pPS, int iWeaponIndex);
 extern int BG_GetStackSlotForWeapon(const playerState_t *pPS, int iWeaponIndex, weapSlot_t preferredSlot);
 extern void G_SelectWeaponIndex(int clientNum, int iWeaponIndex);
-extern unsigned int Scr_AddEntity(gentity_t *ent);
-extern unsigned int Scr_AddUndefined(void);
+extern void Scr_AddEntity(gentity_t *ent);
+extern void Scr_AddUndefined(void);
 extern void Scr_Notify(gentity_t *ent, int stringValue, unsigned int paramcount);
 extern void G_AddPredictableEvent(gentity_t *ent, int event, int eventParm);
 extern unsigned char G_AddEvent(gentity_t *ent, int event, int eventParm);
@@ -103,6 +103,30 @@ static inline __attribute__((always_inline)) void G_SetVec3(vec3_t v, float x, f
     v[0] = x;
     v[1] = y;
     v[2] = z;
+}
+
+static void G_ItemGroundAngles(const vec_t *currentAngles, const vec_t *normal,
+                              qboolean weapon, vec_t *angles)
+{
+    vec3_t axis[3];
+    vec3_t heading = { 0.0f, currentAngles[1], 0.0f };
+
+    /* AxisToAngles needs a complete orthonormal basis, including the up row.
+     * Preserve yaw while laying the item along the collision plane. */
+    G_SetVec3(axis[2], normal[0], normal[1], normal[2]);
+    Vec3Normalize(axis[2]);
+    AngleVectors(heading, axis[0], NULL, NULL);
+    Vec3Cross(axis[2], axis[0], axis[1]);
+    if (Vec3Normalize(axis[1]) < 0.001f) {
+        heading[1] += 90.0f;
+        AngleVectors(heading, axis[0], NULL, NULL);
+        Vec3Cross(axis[2], axis[0], axis[1]);
+        Vec3Normalize(axis[1]);
+    }
+    Vec3Cross(axis[1], axis[2], axis[0]);
+    AxisToAngles(axis, angles);
+    if (weapon)
+        angles[2] += 90.0f;
 }
 
 void DroppedItemClearOwner(gentity_t *pSelf);
@@ -296,8 +320,6 @@ void FinishSpawningItem(gentity_t *ent)
     vec3_t start;
     vec3_t dest;
     vec3_t endpos;
-    vec3_t normal;
-    vec3_t axis[3];
     vec3_t angles;
     int clipMask;
     const gitem_t *item;
@@ -363,18 +385,7 @@ void FinishSpawningItem(gentity_t *ent)
     G_SetOrigin(ent, endpos);
 
     if (tr.fraction < 1.0f) {
-        normal[0] = tr.normal[0];
-        normal[1] = tr.normal[1];
-        normal[2] = tr.normal[2];
-
-        AngleVectors(ent->r.currentAngles, axis[0], NULL, NULL);
-        Vec3Cross(normal, axis[0], axis[1]);
-        Vec3Cross(axis[1], normal, axis[0]);
-        AxisToAngles((const vec_t *)axis, angles);
-
-        if (((const gitem_t *)imp_bg_itemlist + ent->s.index.item)->giType == 1) {
-            angles[2] += 90.0f;
-        }
+        G_ItemGroundAngles(ent->r.currentAngles, tr.normal, item->giType == IT_WEAPON, angles);
         G_SetAngle(ent, angles);
     }
 
@@ -595,8 +606,6 @@ void G_RunItem(gentity_t *ent)
     trace_t tr;
     vec3_t origin;
     vec3_t endpos;
-    vec3_t normal;
-    vec3_t axis[3];
     vec3_t angles;
     int mask;
 
@@ -614,6 +623,7 @@ void G_RunItem(gentity_t *ent)
     }
 
     if (ent->s.pos.trType != 0 && ent->s.pos.trType != 6 && ent->tagInfo == 0) {
+        BG_EvaluateTrajectory(&ent->s.apos, level.time + 50, ent->r.currentAngles);
         BG_EvaluateTrajectory(&ent->s.pos, level.time + 50, origin);
 
         mask = ent->clipmask;
@@ -668,23 +678,16 @@ void G_RunItem(gentity_t *ent)
         SV_LinkEntity(ent);
         G_RunThink(ent);
 
-        if (ent->active && tr.fraction < 0.01f) {
+        /* active gates pickup/use; it does not indicate a live entity. */
+        if (ent->r.inuse && tr.fraction < 0.01f) {
             if (tr.normal[2] <= 0.0f || SV_PointContents(ent->r.currentOrigin, -1, 0x80000000)) {
                 G_FreeEntity(ent);
                 return;
             }
 
-            normal[0] = tr.normal[0];
-            normal[1] = tr.normal[1];
-            normal[2] = tr.normal[2];
-
-            AngleVectors(ent->r.currentAngles, axis[0], NULL, NULL);
-            Vec3Cross(normal, axis[0], axis[1]);
-            Vec3Cross(axis[1], normal, axis[0]);
-            AxisToAngles((const vec_t *)axis, angles);
-
-            if (((const gitem_t *)imp_bg_itemlist + ent->s.index.item)->giType == 1)
-                angles[2] += 90.0f;
+            G_ItemGroundAngles(ent->r.currentAngles, tr.normal,
+                               ((const gitem_t *)imp_bg_itemlist + ent->s.index.item)->giType == IT_WEAPON,
+                               angles);
 
             G_SetAngle(ent, angles);
             G_SetOrigin(ent, endpos);
@@ -803,6 +806,8 @@ found_drop_slot:
 
     dropped->handler = 0x0f;
     G_SetOrigin(dropped, vPos);
+    G_SetAngle(dropped, angles);
+    dropped->s.groundEntityNum = 0x3ff;
 
     dropped->s.pos.trType = TR_GRAVITY;
     dropped->s.pos.trTime = level.time;
@@ -936,7 +941,7 @@ gentity_t *Drop_Weapon(gentity_t *pEnt, int iWeaponIndex, unsigned int tag)
             pDrop->r.currentOrigin[2] = endpos[2];
             pDrop->s.pos.trTime = level.time;
 
-            AxisToAngles((const vec_t *)tagMat, vAngles);
+            AxisToAngles(tagMat, vAngles);
         } else {
             vAngles[0] = pEnt->r.currentAngles[0];
             vAngles[1] = pEnt->r.currentAngles[1];
@@ -1304,7 +1309,7 @@ void G_SpawnItem(gentity_t *ent, const gitem_t *item)
     G_DObjUpdate(ent);
 
     ent->s.clientNum = 0x3fe;
-    ent->flags |= (int)&__mh_execute_header;
+    ent->flags |= 0x1000;
 
     if (level.initializing) {
         G_SetAngle(ent, ent->r.currentAngles);

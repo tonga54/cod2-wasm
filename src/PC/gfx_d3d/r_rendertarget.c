@@ -279,8 +279,7 @@ void R_InitRenderTargets(void)
     }
 
     {
-        void (*riPrintf)() = *(void (**)())&ri;
-        riPrintf(0, "Requested frame buffer to be %s\n", "24-bit color with 8-bit alpha");
+        ri.Printf(0, "Requested frame buffer to be %s\n", "24-bit color with 8-bit alpha");
 
         dxPtr = DX();
         {
@@ -292,8 +291,7 @@ void R_InitRenderTargets(void)
         surfaceFormat = desc.Format;
         ((DxGlobals *)dxPtr)->backBufferFormat = surfaceFormat;
 
-        riPrintf = *(void (**)())&ri;
-        riPrintf(0, "DirectX returned a frame buffer that is %s\n", R_DescribeFormat(surfaceFormat));
+        ri.Printf(0, "DirectX returned a frame buffer that is %s\n", R_DescribeFormat(surfaceFormat));
     }
 
     dxPtr = DX();

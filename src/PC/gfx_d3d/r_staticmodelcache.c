@@ -863,7 +863,7 @@ void R_SkinStaticModelCachedCmd(SkinStaticModelCachedCmd *skinCmd, SkinBuffers *
 
             do {
                 vtable = *(void ***)vb;
-                ((void(D3DVTCC *)(void *))vtable[0x30 / 4])(vb);
+                ((HRESULT(D3DVTCC *)(void *))vtable[0x30 / 4])(vb);
             } while (*(volatile int *)&alwaysfails != 0);
         }
     } else {
@@ -917,22 +917,22 @@ void R_SkinStaticModelCachedCmd(SkinStaticModelCachedCmd *skinCmd, SkinBuffers *
                     int li;
 
                     for (li = 0; li < lightCount; li++) {
-                        float *lightData = (float *)&lights[li];
+                        const D3DLIGHT9 *light = &lights[li];
                         float dot;
 
-                        r += lightData[0];
-                        g += lightData[1];
-                        b += lightData[2];
+                        r += light->Ambient.r;
+                        g += light->Ambient.g;
+                        b += light->Ambient.b;
 
-                        dot = normal[0] * lightData[0x1c / 4] +
-                              normal[1] * lightData[0x20 / 4] +
-                              normal[2] * lightData[0x24 / 4];
+                        dot = normal[0] * light->Direction.x +
+                              normal[1] * light->Direction.y +
+                              normal[2] * light->Direction.z;
 
                         dot = -dot;
                         if (dot > 0.0f) {
-                            r += dot * lightData[-0x20 / 4];
-                            g += dot * lightData[-0x1c / 4];
-                            b += dot * lightData[-0x18 / 4];
+                            r += dot * light->Diffuse.r;
+                            g += dot * light->Diffuse.g;
+                            b += dot * light->Diffuse.b;
                         }
                     }
 
@@ -942,21 +942,23 @@ void R_SkinStaticModelCachedCmd(SkinStaticModelCachedCmd *skinCmd, SkinBuffers *
                         float oneOver255 = 0.003921568859368563f;
                         int ch;
 
-                        ch = (intptr_t)floorf(r * (float)srcColor[2] * oneOver255 * 255.0f + 0.5f);
+                        /* Original model colors are RGBA. The legacy converter
+                         * below reverses BGRA into ARGB for the vertex buffer. */
+                        ch = (intptr_t)floorf(b * (float)srcColor[2] * oneOver255 * 255.0f + 0.5f);
                         if (ch > 255)
                             ch = 255;
                         if (ch < 0)
                             ch = 0;
                         dstColor[0] = (byte)ch;
 
-                        ch = (intptr_t)floorf(b * (float)srcColor[1] * oneOver255 * 255.0f + 0.5f);
+                        ch = (intptr_t)floorf(g * (float)srcColor[1] * oneOver255 * 255.0f + 0.5f);
                         if (ch > 255)
                             ch = 255;
                         if (ch < 0)
                             ch = 0;
                         dstColor[1] = (byte)ch;
 
-                        ch = (intptr_t)floorf(g * (float)srcColor[0] * oneOver255 * 255.0f + 0.5f);
+                        ch = (intptr_t)floorf(r * (float)srcColor[0] * oneOver255 * 255.0f + 0.5f);
                         if (ch > 255)
                             ch = 255;
                         if (ch < 0)
@@ -1010,7 +1012,7 @@ void R_SkinStaticModelCachedCmd(SkinStaticModelCachedCmd *skinCmd, SkinBuffers *
 
             do {
                 vtable = *(void ***)vb;
-                ((void(D3DVTCC *)(void *))vtable[0x30 / 4])(vb);
+                ((HRESULT(D3DVTCC *)(void *))vtable[0x30 / 4])(vb);
             } while (*(volatile int *)&alwaysfails != 0);
         }
     }

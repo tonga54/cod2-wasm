@@ -53,7 +53,7 @@ extern int Sys_MillisecondsRaw(void);
 extern void Com_DvarDump(int channel);
 extern void *G_GetSavePersist(void);
 extern int SV_ClipHandleForEntity(const gentity_t *gEnt);
-extern void CM_TransformedBoxTraceExternal(void *trace, const void *p1, const void *p2, const vec_t *mins, const vec_t *maxs, unsigned int model, int brushmask, const vec_t *origin, const vec_t *angles);
+extern int CM_TransformedBoxTraceExternal(void *trace, const void *p1, const void *p2, const vec_t *mins, const vec_t *maxs, unsigned int model, int brushmask, const vec_t *origin, const vec_t *angles);
 extern float Vec2DistanceSq(const float *p1, const float *p2);
 extern int CM_PointLeafnum(const vec_t *p);
 extern int CM_LeafCluster(int leafnum);

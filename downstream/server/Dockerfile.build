@@ -1,0 +1,10 @@
+FROM ubuntu:22.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN dpkg --add-architecture i386 \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates cmake make gcc-multilib g++-multilib pkg-config git \
+      libsdl2-dev:i386 libgl1-mesa-dev:i386 libx11-dev:i386 zlib1g-dev:i386 \
+ && rm -rf /var/lib/apt/lists/*
+ENV PKG_CONFIG_LIBDIR=/usr/lib/i386-linux-gnu/pkgconfig:/usr/share/pkgconfig
+WORKDIR /workspace/cod2-wasm

@@ -1613,6 +1613,11 @@ static qboolean PM_UpdateOffhandCook(pmove_t *pm, pml_t *pml)
     if (!(ps->pm_flags & PM_WEAPON_FLAG_OFFHAND) || !ps->offHandIndex)
         return 0;
 
+    /* Once the release event has fired, the missile owns the remaining fuse.
+     * The predicting client must not continue cooking it in the player's hand. */
+    if (ps->weaponstate == WEAPON_OFFHAND_FIRE && !ps->weaponDelay)
+        return 0;
+
     weapDef = bg_weaponDefs[ps->offHandIndex];
     if (weapDef->weapType != WEAPTYPE_GRENADE || ps->grenadeTimeLeft <= 0 || !weapDef->bCookOffHold)
         return 0;
@@ -2240,7 +2245,18 @@ static void PM_RunReloadState(playerState_t *ps, qboolean delayedAction)
     PM_WeaponSetIdle(ps);
 }
 
-static void PM_RunOffhandState(pmove_t *pm)
+static void PM_ReleaseOffhand(playerState_t *ps, WeaponDef *weapDef)
+{
+    if (ps->ammoclip[weapDef->iClipIndex] <= 0)
+        return;
+    BG_AddPredictableEventToPlayerstate(0xa6, ps->offHandIndex, ps);
+    if (!(ps->eFlags & 0x300))
+        ps->ammoclip[weapDef->iClipIndex]--;
+    if (!ps->ammoclip[weapDef->iClipIndex])
+        PM_AddEvent(ps, 0x94);
+}
+
+static void PM_RunOffhandState(pmove_t *pm, qboolean delayedAction)
 {
     playerState_t *ps = pm->ps;
     WeaponDef *weapDef;
@@ -2271,21 +2287,26 @@ static void PM_RunOffhandState(pmove_t *pm)
 
         ps->weaponstate = WEAPON_OFFHAND_FIRE;
         ps->weaponTime = weapDef->iFireTime;
-        ps->weaponDelay = 0;
+        ps->weaponDelay = weapDef->iFireDelay;
+        if (ps->weaponTime < ps->weaponDelay)
+            ps->weaponTime = ps->weaponDelay;
         ps->pm_flags |= PM_WEAPON_FLAG_OFFHAND;
-        BG_AddPredictableEventToPlayerstate(0xa6, ps->offHandIndex, ps);
-        if (!(ps->eFlags & 0x300))
-            ps->ammoclip[weapDef->iClipIndex]--;
+        PM_WeaponSetAnim(ps, 2); /* Original fireAnim, started before release. */
         BG_AnimScriptEvent(ps, 2, 0, 1);
-        if (!ps->ammoclip[weapDef->iClipIndex])
-            PM_AddEvent(ps, 0x94);
+        if (!ps->weaponDelay)
+            PM_ReleaseOffhand(ps, weapDef);
         break;
     case WEAPON_OFFHAND_FIRE:
+        if (delayedAction)
+            PM_ReleaseOffhand(ps, weapDef);
         if (!ps->weaponTime) {
-            if (!ps->weapon)
-                ps->weaponDelay = 1;
             ps->weaponstate = WEAPON_OFFHAND_END;
             ps->pm_flags &= ~0x810;
+            ps->weaponDelay = 0;
+            if (ps->weapon) {
+                ps->weaponTime = bg_weaponDefs[ps->weapon]->quickRaiseTime;
+                PM_WeaponSetAnim(ps, 0x12);
+            }
         }
         break;
     case WEAPON_OFFHAND_END:
@@ -2423,7 +2444,7 @@ void PM_Weapon(pmove_t *pm, pml_t *pml)
     case WEAPON_OFFHAND_HOLD:
     case WEAPON_OFFHAND_FIRE:
     case WEAPON_OFFHAND_END:
-        PM_RunOffhandState(pm);
+        PM_RunOffhandState(pm, delayedAction);
         break;
     case WEAPON_BINOCULARS_INIT:
     case WEAPON_BINOCULARS_RAISE:

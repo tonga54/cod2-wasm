@@ -23,6 +23,7 @@ extern void CG_AddViewWeapon(playerState_t *ps);
 extern void CL_SetLodOrigin(const refdef_t *fd);
 extern void CL_IssueDelayedDrawing(int marker);
 extern void CL_Input(void);
+extern void CL_SetUserCmdAimValues(vec_t *angles);
 extern void CL_EndDelayedDrawing(int marker);
 extern void CG_UpdateShellShock(const shellshock_parms_t *parms, int start, int duration);
 extern void CG_ProcessSnapshots(void);
@@ -61,6 +62,7 @@ extern void CG_DObjUpdateInfo(struct DObj_s *obj);
 extern void CG_ProcessClientNoteTracks(int clientNum);
 extern void CG_CalcEntityLerpPositions(centity_t *cent);
 extern void CG_ProcessEntity(centity_t *cent);
+extern qboolean CG_DObjGetWorldTagPos(const centity_t *cent, struct DObj_s *obj, unsigned int tagName, vec_t *pos);
 extern void DObjDisplayAnim(void *obj);
 extern void R_UpdateEffectsBolt(void);
 extern void CL_FX_AdjustCamera(void *refdef);
@@ -77,7 +79,7 @@ extern float BG_GetVerticalBobFactor(const void *ps, float bobCycle, float xyspe
 extern float BG_GetHorizontalBobFactor(const void *ps, float bobCycle, float xyspeed, float bobMax);
 extern void BG_CalculateViewAngles(viewState_t *vs, vec_t *angles);
 extern void AddLeanToPosition(vec_t *origin, float viewAngle, float leanFrac, float maxStand, float maxCrouch);
-extern void CG_ShakeCamera(void);
+extern unsigned int CG_ShakeCamera(void);
 extern void CG_PerturbCamera(void);
 extern void AnglesToAxis(const vec_t *angles, void *axis);
 
@@ -90,6 +92,59 @@ static void CG_OffsetThirdPersonView(void);
 static void CG_CalcViewValues(void);
 void CG_InitView(void);
 qboolean CG_DrawActiveFrame(int serverTime, DemoType demoType, CubemapShot cubemapShot, int cubemapSize, qboolean renderScreen);
+
+static struct {
+    qboolean valid;
+    vec3_t origin;
+    vec3_t angles;
+    float fovX;
+    float fovY;
+    int respawnDeadline;
+} deathView;
+
+void CG_ResetDeathView(void)
+{
+    memset(&deathView, 0, sizeof(deathView));
+}
+
+void CG_SetRespawnDeadline(int deadline)
+{
+    deathView.respawnDeadline = deadline;
+}
+
+int CG_GetRespawnRemaining(void)
+{
+    const playerState_t *ps = &cg->nextSnap->ps;
+    if ((ps->pm_type != 6 && ps->pm_type != 7) ||
+        (ps->pm_flags & 0x400000) || deathView.respawnDeadline <= 0)
+        return -1;
+    int remaining = deathView.respawnDeadline - cg->time;
+    return remaining > 0 ? remaining : 0;
+}
+
+static void CG_ApplyDeathView(void)
+{
+    const playerState_t *ps = &cg->predictedPlayerState;
+    if ((ps->pm_type == 6 || ps->pm_type == 7) && !(ps->pm_flags & 0x400000)) {
+        if (deathView.valid) {
+            memcpy(cg->refdef.vieworg, deathView.origin, sizeof(vec3_t));
+            memcpy(cg->refdefViewAngles, deathView.angles, sizeof(vec3_t));
+            AnglesToAxis(cg->refdefViewAngles, &cg->refdef.viewaxis);
+            cg->refdef.fov_x = deathView.fovX;
+            cg->refdef.fov_y = deathView.fovY;
+        }
+        return;
+    }
+    if (ps->pm_type > 1 || (ps->pm_flags & 0x400000)) {
+        deathView.valid = 0;
+        return;
+    }
+    memcpy(deathView.origin, cg->refdef.vieworg, sizeof(vec3_t));
+    memcpy(deathView.angles, cg->refdefViewAngles, sizeof(vec3_t));
+    deathView.fovX = cg->refdef.fov_x;
+    deathView.fovY = cg->refdef.fov_y;
+    deathView.valid = 1;
+}
 
 void CG_FxRestart(void)
 {
@@ -519,8 +574,22 @@ static void CG_CalcViewValues(void)
     if (cg->renderingThirdPerson)
         goto do_third_person;
 
-    if (ps->eFlags & 0x300)
+    if (ps->eFlags & 0x300) {
+        /* The turret's tag_player is the eye point. ps->origin remains the
+         * player's feet, so skipping normal view height without this placed
+         * the mounted camera inside the wall underneath the gun. */
+        int turretNum = ps->viewlocked_entNum;
+        cg->refdef.vieworg[2] += ps->viewHeightCurrent;
+        if (turretNum >= 0 && turretNum < 1022) {
+            centity_t *turret = &cg_entities[turretNum];
+            struct DObj_s *obj = Com_GetClientDObj(turretNum, turret->localClientNum);
+            if (obj && turret->nextValid && turret->nextState.eType == 9) {
+                const scr_const_t *scr = (const scr_const_t *)imp_scr_const;
+                CG_DObjGetWorldTagPos(turret, obj, scr->tag_player, cg->refdef.vieworg);
+            }
+        }
         goto post_lean;
+    }
 
     {
         viewState_t viewState;
@@ -654,8 +723,45 @@ void CG_InitView(void)
 
     CG_UpdateViewWeaponAnim(&cg->predictedPlayerState);
     CG_CalcViewValues();
+    CG_ApplyDeathView();
     CL_FX_AdjustCamera((void *)&cg->refdef);
     FX_AdjustTime(cg->time);
+}
+
+/* Integrate the weapon's camera impulse as a critically damped spring.
+ * Analytic integration keeps the kick/return independent of browser FPS. */
+static void CG_IntegrateViewKick(float *angles, float *velocity, float centerSpeed, float dt)
+{
+    float omega = sqrtf(fmaxf(centerSpeed, 1.0f));
+    float decay = expf(-omega * fmaxf(dt, 0.0f));
+    int i;
+    for (i = 0; i < 3; ++i) {
+        float x = angles[i];
+        float c = velocity[i] + omega * x;
+        angles[i] = (x + c * dt) * decay;
+        velocity[i] = (velocity[i] - omega * c * dt) * decay;
+    }
+}
+
+static void CG_UpdateViewKick(void)
+{
+    const playerState_t *ps = &cg->predictedPlayerState;
+    const WeaponDef *weapon = BG_GetWeaponDef(BG_GetViewmodelWeaponIndex((void *)ps));
+    vec3_t aim;
+    int i;
+    if (ps->pm_type >= 5 || !weapon) {
+        memset(cg->kickAVel, 0, sizeof(cg->kickAVel));
+        memset(cg->kickAngles, 0, sizeof(cg->kickAngles));
+    } else {
+        float centerSpeed = ps->fWeaponPosFrac == 1.0f
+            ? weapon->fAdsViewKickCenterSpeed : weapon->fHipViewKickCenterSpeed;
+        CG_IntegrateViewKick(cg->kickAngles, cg->kickAVel, centerSpeed,
+                             (float)cg->frametime * 0.001f);
+    }
+    for (i = 0; i < 3; ++i)
+        aim[i] = cg->kickAngles[i] + cg->offsetAngles[i];
+    /* The command carries the same kick used by prediction and server aim. */
+    CL_SetUserCmdAimValues(aim);
 }
 
 qboolean CG_DrawActiveFrame(int serverTime, DemoType demoType,
@@ -748,22 +854,17 @@ qboolean CG_DrawActiveFrame(int serverTime, DemoType demoType,
         cg->renderingThirdPerson = 0;
     }
 
-    cg->kickAVel[0] = 0;
-    cg->kickAVel[1] = 0;
-    cg->kickAVel[2] = 0;
-    cg->kickAngles[0] = 0;
-    cg->kickAngles[1] = 0;
-    cg->kickAngles[2] = 0;
-
     CL_ResetSkeletonCache(0);
     CG_AddPacketEntities();
     R_UpdateEffectsNonBolt();
     CG_AddLocalEntities();
+    CG_UpdateViewKick();
     CL_Input();
     CG_PredictPlayerState();
 
     CG_UpdateViewWeaponAnim(&cg->predictedPlayerState);
     CG_CalcViewValues();
+    CG_ApplyDeathView();
 
     SND_SetListener(cg->nextSnap->ps.clientNum, cg->refdef.vieworg, cg->refdef.viewaxis);
 

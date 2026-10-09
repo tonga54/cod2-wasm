@@ -367,8 +367,14 @@ void CG_Init(int serverMessageNum, int serverCommandSequence, int clientNum);
 
 void CG_GetEntityOrientation(int entnum, vec_t *origin_out, vec3_t *axis_out)
 {
-    char *ent = (char *)cg_entities + entnum * 548;
-    vec_t *origin = (vec_t *)((centity_t *)ent)->lerpOrigin;
+    if (entnum < 0 || entnum >= 1022) {
+        memset(origin_out, 0, sizeof(vec3_t));
+        memset(axis_out, 0, sizeof(vec3_t) * 3);
+        axis_out[0][0] = axis_out[1][1] = axis_out[2][2] = 1.0f;
+        return;
+    }
+    centity_t *ent = &cg_entities[entnum];
+    vec_t *origin = ent->lerpOrigin;
     origin_out[0] = origin[0];
     origin_out[1] = origin[1];
     origin_out[2] = origin[2];
@@ -680,18 +686,12 @@ static inline __attribute__((always_inline)) int CG_PlayPickedAlias(const snd_al
 
 static inline __attribute__((always_inline)) int CG_LocalSoundEntityNum(void)
 {
-    const byte *localSoundState;
-
-    localSoundState = (const byte *)&cgArray + 36;
-    return *(const int *)(localSoundState + 0xd8);
+    return cg->predictedPlayerState.clientNum;
 }
 
 static inline __attribute__((always_inline)) const vec_t *CG_LocalSoundOrigin(void)
 {
-    const byte *localSoundState;
-
-    localSoundState = (const byte *)&cgArray + 36;
-    return (const vec_t *)(localSoundState + 0x20);
+    return cg->predictedPlayerState.origin;
 }
 
 int CG_PlaySoundAliasAsMasterByName(int entitynum, const vec_t *origin, const char *aliasname)
@@ -722,7 +722,6 @@ void CG_GetDObjOrientation(int dobjHandle, orientation_t *orient)
     AxisCopy((vec3_t *)&cg->viewModelAxis[0][0], orient->axis);
 }
 
-#ifndef __EMSCRIPTEN__
 static inline __attribute__((always_inline)) byte *CG_FindSmokeGrenadeEntityState(int minTime, int gametime)
 {
     byte *snap = (byte *)cg->nextSnap;
@@ -835,63 +834,58 @@ int CG_PlayClientSoundAlias(snd_alias_list_t *aliasList)
 
 int CG_PlayEntitySoundAlias(int entitynum, snd_alias_list_t *aliasList)
 {
-    const vec_t *origin;
-
-    origin = (const vec_t *)((const byte *)cg_entities + entitynum * 548 + 0x108);
-    return CG_PlayPickedAlias(Com_PickSoundAliasFromList(aliasList), entitynum, origin, 0);
+    if ((unsigned)entitynum >= 1024)
+        return 0;
+    return CG_PlayPickedAlias(Com_PickSoundAliasFromList(aliasList), entitynum,
+                             cg_entities[entitynum].lerpOrigin, 0);
 }
 
-static inline __attribute__((always_inline)) void CG_RegisterSurfaceSoundAliases(byte *cgsBase, int offset, const char *aliasBase)
+static inline __attribute__((always_inline)) void CG_RegisterSurfaceSoundAliases(snd_alias_list_t **aliases, const char *aliasBase)
 {
     char aliasName[0x118];
     int surfaceType;
 
     for (surfaceType = 0; surfaceType < 0x17; surfaceType++) {
         sprintf(aliasName, "%s_%s", aliasBase, Com_SurfaceTypeToName(surfaceType));
-        *(snd_alias_list_t **)(cgsBase + offset + surfaceType * 4) = Com_FindSoundAlias(aliasName);
+        aliases[surfaceType] = Com_FindSoundAlias(aliasName);
     }
-}
-
-static inline __attribute__((always_inline)) void CG_RegisterSoundAlias(byte *cgsBase, int offset, const char *aliasName)
-{
-    *(snd_alias_list_t **)(cgsBase + offset) = Com_FindSoundAlias(aliasName);
 }
 
 static void CG_RegisterSounds(void)
 {
-    CG_RegisterSoundAlias((byte *)cgs, 0xbc84, "player_out_of_ammo");
-    CG_RegisterSoundAlias((byte *)cgs, 0xbc88, "land_damage");
+    cgs->media.noAmmoSound = Com_FindSoundAlias("player_out_of_ammo");
+    cgs->media.landDmgSound = Com_FindSoundAlias("land_damage");
 
-    CG_RegisterSurfaceSoundAliases((byte *)cgs, 0xbc90, "grenade_bounce");
-    CG_RegisterSurfaceSoundAliases((byte *)cgs, 0xbcec, "grenade_explode");
-    CG_RegisterSurfaceSoundAliases((byte *)cgs, 0xbd48, "rocket_explode");
-    CG_RegisterSurfaceSoundAliases((byte *)cgs, 0xbda4, "bullet_small");
-    CG_RegisterSurfaceSoundAliases((byte *)cgs, 0xbe00, "bulletspray_small");
-    CG_RegisterSurfaceSoundAliases((byte *)cgs, 0xbe5c, "bullet_large");
-    CG_RegisterSurfaceSoundAliases((byte *)cgs, 0xbeb8, "step_run");
-    CG_RegisterSurfaceSoundAliases((byte *)cgs, 0xbf14, "step_run_plr");
-    CG_RegisterSurfaceSoundAliases((byte *)cgs, 0xbf70, "step_walk");
-    CG_RegisterSurfaceSoundAliases((byte *)cgs, 0xbfcc, "step_walk_plr");
-    CG_RegisterSurfaceSoundAliases((byte *)cgs, 0xc028, "step_prone");
-    CG_RegisterSurfaceSoundAliases((byte *)cgs, 0xc084, "step_prone_plr");
-    CG_RegisterSurfaceSoundAliases((byte *)cgs, 0xc0e0, "land");
-    CG_RegisterSurfaceSoundAliases((byte *)cgs, 0xc13c, "land_plr");
+    CG_RegisterSurfaceSoundAliases(cgs->media.grenadeBounceSound, "grenade_bounce");
+    CG_RegisterSurfaceSoundAliases(cgs->media.grenadeExplodeSound, "grenade_explode");
+    CG_RegisterSurfaceSoundAliases(cgs->media.rocketExplodeSound, "rocket_explode");
+    CG_RegisterSurfaceSoundAliases(cgs->media.bulletHitSmallSound, "bullet_small");
+    CG_RegisterSurfaceSoundAliases(cgs->media.shotgunHitSound, "bulletspray_small");
+    CG_RegisterSurfaceSoundAliases(cgs->media.bulletHitLargeSound, "bullet_large");
+    CG_RegisterSurfaceSoundAliases(cgs->media.stepRunSound, "step_run");
+    CG_RegisterSurfaceSoundAliases(cgs->media.stepRunSoundPlayer, "step_run_plr");
+    CG_RegisterSurfaceSoundAliases(cgs->media.stepWalkSound, "step_walk");
+    CG_RegisterSurfaceSoundAliases(cgs->media.stepWalkSoundPlayer, "step_walk_plr");
+    CG_RegisterSurfaceSoundAliases(cgs->media.stepProneSound, "step_prone");
+    CG_RegisterSurfaceSoundAliases(cgs->media.stepProneSoundPlayer, "step_prone_plr");
+    CG_RegisterSurfaceSoundAliases(cgs->media.landSound, "land");
+    CG_RegisterSurfaceSoundAliases(cgs->media.landSoundPlayer, "land_plr");
 
-    CG_RegisterSoundAlias((byte *)cgs, 0xc198, "gear_rattle_run");
-    CG_RegisterSoundAlias((byte *)cgs, 0xc19c, "gear_rattle_plr_run");
-    CG_RegisterSoundAlias((byte *)cgs, 0xc1a0, "gear_rattle_walk");
-    CG_RegisterSoundAlias((byte *)cgs, 0xc1a4, "gear_rattle_plr_walk");
-    CG_RegisterSoundAlias((byte *)cgs, 0xc1a8, "movement_foliage");
-    CG_RegisterSoundAlias((byte *)cgs, 0xc1ac, "whizby");
-    CG_RegisterSoundAlias((byte *)cgs, 0xc1b0, "melee_swing_large");
-    CG_RegisterSoundAlias((byte *)cgs, 0xc1b4, "melee_swing_small");
-    CG_RegisterSoundAlias((byte *)cgs, 0xc1b8, "melee_hit");
-    CG_RegisterSoundAlias((byte *)cgs, 0xc1bc, "melee_hit_other");
-    CG_RegisterSoundAlias((byte *)cgs, 0xc1c0, "weap_sniper_heartbeat");
-    CG_RegisterSoundAlias((byte *)cgs, 0xc1c4, "weap_sniper_breathin");
-    CG_RegisterSoundAlias((byte *)cgs, 0xc1c8, "weap_sniper_breathout");
-    CG_RegisterSoundAlias((byte *)cgs, 0xc1cc, "weap_sniper_breathgasp");
-    CG_RegisterSoundAlias((byte *)cgs, 0xc1d0, "weap_offhand_select");
+    cgs->media.runningEquipmentSound = Com_FindSoundAlias("gear_rattle_run");
+    cgs->media.runningEquipmentSoundPlayer = Com_FindSoundAlias("gear_rattle_plr_run");
+    cgs->media.walkingEquipmentSound = Com_FindSoundAlias("gear_rattle_walk");
+    cgs->media.walkingEquipmentSoundPlayer = Com_FindSoundAlias("gear_rattle_plr_walk");
+    cgs->media.foliageMovement = Com_FindSoundAlias("movement_foliage");
+    cgs->media.bulletWhizby = Com_FindSoundAlias("whizby");
+    cgs->media.meleeSwingLarge = Com_FindSoundAlias("melee_swing_large");
+    cgs->media.meleeSwingSmall = Com_FindSoundAlias("melee_swing_small");
+    cgs->media.meleeHit = Com_FindSoundAlias("melee_hit");
+    cgs->media.meleeHitOther = Com_FindSoundAlias("melee_hit_other");
+    cgs->media.playerHeartBeatSound = Com_FindSoundAlias("weap_sniper_heartbeat");
+    cgs->media.playerBreathInSound = Com_FindSoundAlias("weap_sniper_breathin");
+    cgs->media.playerBreathOutSound = Com_FindSoundAlias("weap_sniper_breathout");
+    cgs->media.playerBreathGaspSound = Com_FindSoundAlias("weap_sniper_breathgasp");
+    cgs->media.playerSwapOffhand = Com_FindSoundAlias("weap_offhand_select");
 }
 
 static inline __attribute__((always_inline)) LegacyHacks *CG_LegacyHacks(void)
@@ -1239,5 +1233,3 @@ void CG_Init(int serverMessageNum, int serverCommandSequence, int clientNum)
 #    undef cgBase
 #    undef cgsBase
 }
-
-#endif

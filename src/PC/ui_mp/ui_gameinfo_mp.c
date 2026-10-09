@@ -151,6 +151,10 @@ void UI_LoadArenas(void)
         arenaIdx = sharedUiInfo.mapCount;
 
         mapName = Info_ValueForKey(ui_arenaInfos[n], "map");
+#ifdef __EMSCRIPTEN__
+        if (I_stricmp(mapName, "mp_toujane") != 0)
+            continue;
+#endif
         mapName = String_Alloc(mapName);
         {
             int off = arenaIdx * 41;

@@ -69,7 +69,7 @@ extern const dvar_t *Dvar_RegisterFloat(const char *name, float value, float min
 extern void *Hunk_AllocAlignInternal(int size, int align);
 extern void *XAnimCreateAnims(const char *name, int count, void *allocFunc);
 extern void XAnimBlend(void *anims, unsigned int animIndex, const char *name, unsigned int children, unsigned int num, unsigned int flags);
-extern void XAnimPrecache(const char *name, void *allocFunc);
+extern XAnimParts *XAnimPrecache(const char *name, void *(*allocFunc)(int));
 extern void XAnimCreate(void *anims, int index, const char *name);
 extern void XAnimGetAbsDelta(void *anims, int animIndex, float *rot, float *delta, float frac);
 extern int XAnimGetLengthMsec(void *anims, int animIndex);
@@ -79,8 +79,8 @@ extern float AngleDelta(float a, float b);
 extern float AngleNormalize360Accurate(float a);
 extern void VectorAngleMultiply(float *trans, float yaw);
 extern void BG_AddPredictableEventToPlayerstate(int event, int param, playerState_t *ps);
-extern void BG_AnimScriptAnimation(playerState_t *ps, int anim, int moveType, int force);
-extern void BG_AnimScriptEvent(playerState_t *ps, int anim, int p3, int p4);
+extern int BG_AnimScriptAnimation(playerState_t *ps, int anim, int moveType, int force);
+extern int BG_AnimScriptEvent(playerState_t *ps, int anim, int p3, int p4);
 extern void PM_trace(pmove_t *pm, void *trace, float *start, float *mins, float *maxs, float *end, int entityNum, int contentMask);
 extern const char *va(const char *fmt, ...);
 extern float Vec3Normalize(float *v);
@@ -96,7 +96,7 @@ Bool Mantle_IsWeaponInactive(playerState_t *ps);
 void Mantle_CreateAnims(MantleAnimAlloc xanimAlloc);
 static void __attribute_regparm__(3) Mantle_GetAnimDelta(MantleState *mstate, int time, float *delta);
 void Mantle_Move(pmove_t *pm, playerState_t *ps, pml_t *pml);
-static Bool __attribute_regparm__(3) Mantle_CheckLedge(pmove_t *pm, pml_t *pml, byte *mresults, float height);
+static Bool __attribute_regparm__(3) Mantle_CheckLedge(pmove_t *pm, pml_t *pml, MantleResults *mr, float height);
 void Mantle_Check(pmove_t *pm, pml_t *pml);
 
 void Mantle_RegisterDvars(void)
@@ -348,9 +348,8 @@ void Mantle_Move(pmove_t *pm, playerState_t *ps, pml_t *pml)
     }
 }
 
-static Bool __attribute_regparm__(3) Mantle_CheckLedge(pmove_t *pm, pml_t *pml, byte *mresults_raw, float height)
+static Bool __attribute_regparm__(3) Mantle_CheckLedge(pmove_t *pm, pml_t *pml, MantleResults *mr, float height)
 {
-    MantleResults *mr = (MantleResults *)mresults_raw;
     trace_t tr;
     trace_t wallTr;
     playerState_t *ps = pm->ps;
@@ -554,9 +553,9 @@ void Mantle_Check(pmove_t *pm, pml_t *pml)
     float start[3], end[3];
     float traceDir[3];
     float mantleDir[3];
-    byte trace[0x38];
+    trace_t trace;
     float len;
-    byte mresults[0x38];
+    MantleResults mresults;
     trace_t *tr;
     MantleResults *results;
 
@@ -631,14 +630,14 @@ void Mantle_Check(pmove_t *pm, pml_t *pml)
         end[2] = ps->origin[2] + traceDir[2] * checkRange;
     }
 
-    tr = (trace_t *)trace;
-    results = (MantleResults *)mresults;
+    tr = &trace;
+    results = &mresults;
 
-    PM_trace(pm, trace, start, mins, maxs, end, ps->clientNum, 0x1000000);
+    PM_trace(pm, tr, start, mins, maxs, end, ps->clientNum, 0x1000000);
 
-    if (tr->allsolid == 0 && tr->startsolid == 0) {
+    if (tr->allsolid || tr->startsolid) {
         if (mantle_debug->current.enabled)
-            Com_Printf("%s\n", "Mantle Failed: No wall found");
+            Com_Printf("%s\n", "Mantle Failed: Wall trace started in solid");
         return;
     }
 
@@ -675,7 +674,7 @@ void Mantle_Check(pmove_t *pm, pml_t *pml)
         }
     }
 
-    memset(mresults, 0, sizeof(MantleResults));
+    memset(results, 0, sizeof(*results));
 
     results->dir[0] = mantleDir[0];
     results->dir[1] = mantleDir[1];
@@ -689,9 +688,9 @@ void Mantle_Check(pmove_t *pm, pml_t *pml)
         results->flags |= 1;
     }
 
-    if (Mantle_CheckLedge(pm, pml, mresults, 60.0f))
+    if (Mantle_CheckLedge(pm, pml, results, 60.0f))
         return;
-    if (Mantle_CheckLedge(pm, pml, mresults, 40.0f))
+    if (Mantle_CheckLedge(pm, pml, results, 40.0f))
         return;
-    Mantle_CheckLedge(pm, pml, mresults, 20.0f);
+    Mantle_CheckLedge(pm, pml, results, 20.0f);
 }

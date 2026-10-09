@@ -7,8 +7,8 @@ extern refexport_t re;
 extern float sinf(float x);
 extern float cosf(float x);
 extern double tan(double x);
-extern void CM_BoxTrace(trace_t *results, const vec_t *start, const vec_t *end, const vec_t *mins, const vec_t *maxs, unsigned int model, int brushmask);
-extern GfxEntity *R_AddRefEntityToScene(GfxEntity *ent, const struct XModel *model, int unk);
+extern int CM_BoxTrace(trace_t *results, const vec_t *start, const vec_t *end, const vec_t *mins, const vec_t *maxs, unsigned int model, int brushmask);
+extern GfxEntity *R_AddRefEntityToScene(const GfxEntity *ent, GfxModel model, const struct centity_s *cent);
 extern void FX_AddScheduledEffects(void);
 extern void FX_UpdateAllNonBolt(void);
 extern void FX_UpdateAllBolt(void);
@@ -141,7 +141,9 @@ void FxHelper_Trace(const FxHelper *_this, trace_t *tr, vec_t *start, const vec_
 
 void FxHelper_AddFxToScene(const FxHelper *_this, GfxEntity *ent, const struct XModel *model)
 {
-    R_AddRefEntityToScene(ent, model, 0);
+    GfxModel sceneModel;
+    sceneModel.model = (struct XModel *)model;
+    R_AddRefEntityToScene(ent, sceneModel, NULL);
 }
 
 void FxHelper_SetIgnorePrecacheErrors(const FxHelper *_this, int ignore)

@@ -13,11 +13,11 @@ extern const gitem_t *G_FindItem(const char *pickupName);
 
 extern struct scr_data_t g_scr_data;
 extern unsigned int Scr_AllocString(const char *s, int user);
-extern unsigned int Scr_AddString(const char *s);
-extern unsigned int Scr_AddInt(int value);
-extern unsigned int Scr_AddArray(void);
-extern unsigned int Scr_MakeArray(void);
-extern unsigned int Scr_AddArrayStringIndexed(unsigned int stringValue);
+extern void Scr_AddString(const char *s);
+extern void Scr_AddInt(int value);
+extern void Scr_AddArray(void);
+extern void Scr_MakeArray(void);
+extern void Scr_AddArrayStringIndexed(unsigned int stringValue);
 extern int Scr_GetInt(int argIndex);
 extern void Scr_AddEntity(gentity_t *ent);
 extern void Scr_AddUndefined(void);
@@ -26,7 +26,7 @@ extern int SV_AddTestClient(void);
 extern qboolean SV_MapExists(const char *name);
 extern float Vec3Normalize(vec3_t v);
 extern void SV_EnableArchivedSnapshot(int enable);
-extern unsigned int Scr_Error(const char *msg);
+extern void Scr_Error(const char *msg);
 extern const char *va(const char *fmt, ...);
 extern const char *Scr_GetString(unsigned int index);
 extern int Scr_GetType(unsigned int index);
@@ -38,16 +38,21 @@ extern void Dvar_AddFlags(const dvar_t *dvar, int flags);
 extern const dvar_t *Dvar_RegisterString_mac(const char *dvarName, const char *value, int flags);
 extern int Dvar_IsValidName(const char *dvarName);
 extern void Dvar_SetFromStringByName(const char *dvarName, const char *string);
-extern unsigned int Scr_AddFloat(float value);
-extern unsigned int Scr_AddBool(int value);
+extern void Scr_AddFloat(float value);
+extern void Scr_AddBool(int value);
 extern const char *Scr_GetDebugString(unsigned int index);
-extern unsigned int Scr_GetAnim(unsigned int index, int treeIndex);
+extern scr_anim_t Scr_GetAnim(unsigned int index, XAnimTree *tree);
+
+static unsigned int GScr_GetPackedAnim(unsigned int index) {
+    scr_anim_t anim = Scr_GetAnim(index, NULL);
+    return ((unsigned int)anim.tree << 16) | anim.index;
+}
 extern void *Scr_GetAnims(unsigned int treeIndex);
 extern void XAnimGetRelDelta(const void *anims, unsigned int animIndex, vec_t *rot, vec_t *trans, float time1, float time2);
 extern Bool XAnimIsPrimitive(void *anims, unsigned int animIndex);
 extern float XAnimGetLength(void *anims, unsigned int animIndex);
 extern float RotationToYaw(const vec_t *rot);
-extern unsigned int Scr_ParamError(unsigned int index, const char *msg);
+extern void Scr_ParamError(unsigned int index, const char *msg);
 extern unsigned int Scr_GetConstString(unsigned int index);
 extern unsigned int Scr_GetConstLowercaseString(unsigned int index);
 extern int XAnimNotetrackExists(void *anims, unsigned int animIndex, unsigned int notetrack);
@@ -122,8 +127,8 @@ extern void SV_LinkEntity(gentity_t *ent);
 extern float Vec3Distance(float *a, float *b);
 extern float Vec3DistanceSq(float *a, float *b);
 extern void vectoangles(float *vec, float *angles);
-extern unsigned int Scr_AddVector(float *vec);
-extern unsigned int Scr_AddConstString(unsigned int value);
+extern void Scr_AddVector(float *vec);
+extern void Scr_AddConstString(unsigned int value);
 extern void AngleVectors(float *angles, float *forward, float *right, float *up);
 extern void AnglesToAxis(const vec_t *angles, vec3_t *axis);
 extern void MatrixTransformVector(const vec_t *in1, const vec3_t *in2, vec_t *out);
@@ -143,7 +148,7 @@ extern int G_EffectIndex(const char *name);
 extern int G_FindConfigstringIndex(const char *name, int start, int max, qboolean create, const char *errormsg);
 extern const char *SL_ConvertToString(unsigned int stringValue);
 extern unsigned int G_EntDetachAll(gentity_t *ent);
-extern unsigned int G_EntUnlink(gentity_t *ent);
+extern unsigned char G_EntUnlink(gentity_t *ent);
 extern qboolean G_EntDetach(gentity_t *ent, const char *modelName, unsigned int tagName);
 extern qboolean G_EntAttach(gentity_t *ent, const char *modelName, unsigned int tagName, qboolean ignoreCollision);
 extern qboolean G_EntLinkTo(gentity_t *ent, gentity_t *parent, unsigned int tagName);
@@ -384,41 +389,41 @@ static inline __attribute__((always_inline)) void GScr_UpdateWinnerConfig(int wi
 unsigned int GScr_AllocString(const char *s);
 void Scr_LoadLevel(void);
 void GScr_FreeScripts(void);
-unsigned int ScrCmd_GetClanId(struct scr_entref_t entref);
-unsigned int ScrCmd_GetClanName(scr_entref_t entref);
-unsigned int ScrCmd_GetClanMotto(scr_entref_t entref);
-unsigned int ScrCmd_GetClanDescription(scr_entref_t entref);
-unsigned int ScrCmd_GetClanURL(scr_entref_t entref);
+void ScrCmd_GetClanId(struct scr_entref_t entref);
+void ScrCmd_GetClanName(scr_entref_t entref);
+void ScrCmd_GetClanMotto(scr_entref_t entref);
+void ScrCmd_GetClanDescription(scr_entref_t entref);
+void ScrCmd_GetClanURL(scr_entref_t entref);
 void print(void);
 void assertCmd(void);
 void assertexCmd(void);
 void assertmsgCmd(void);
 void GScr_IsDefined(void);
-unsigned int GScr_IsString(void);
+void GScr_IsString(void);
 void GScr_IsAlive(void);
 void GScr_GetDvar(void);
-unsigned int GScr_GetDvarInt(void);
-unsigned int GScr_GetDvarFloat(void);
-unsigned int GScr_GetTime(void);
+void GScr_GetDvarInt(void);
+void GScr_GetDvarFloat(void);
+void GScr_GetTime(void);
 void Scr_GetEntByNum(void);
 void Scr_GetWeaponModel(void);
 void GScr_GetAnimLength(void);
 void GScr_AnimHasNotetrack(void);
 void GScr_PrecacheTurret(void);
-unsigned int ScrCmd_SoundExists(void);
+void ScrCmd_SoundExists(void);
 void ScrCmd_PlayRumble(scr_entref_t entref);
 void ScrCmd_PlayLoopRumble(scr_entref_t entref);
 void ScrCmd_StopRumble(scr_entref_t entref);
 qboolean G_GetHintStringIndex(int *piIndex, const char *pszString);
 unsigned int __attribute_regparm__(2) SetObjectiveIcon(objective_t *obj, int paramNum);
-unsigned int Scr_Objective_Icon(void);
+void Scr_Objective_Icon(void);
 void Scr_Objective_OnEntity(void);
-unsigned int Scr_Objective_Current(void);
+void Scr_Objective_Current(void);
 void GScr_Objective_Team(void);
 void GScr_LogPrint(void);
-unsigned int GScr_WorldEntNumber(void);
+void GScr_WorldEntNumber(void);
 void GScr_Obituary(void);
-unsigned int GScr_getStartTime(void);
+void GScr_getStartTime(void);
 void GScr_PrecacheMenu(void);
 int GScr_GetScriptMenuIndex(const char *pszMenu);
 void GScr_PrecacheStatusIcon(void);
@@ -449,15 +454,15 @@ void Scr_AnglesToUp(void);
 void Scr_AnglesToRight(void);
 void Scr_AnglesToForward(void);
 void Scr_IsSubStr(void);
-unsigned int Scr_GetSubStr(void);
+void Scr_GetSubStr(void);
 void Scr_ToLower(void);
-unsigned int Scr_StrTok(void);
+void Scr_StrTok(void);
 void Scr_MusicPlay(void);
 void Scr_SoundFade(void);
 void Scr_PrecacheModel(void);
 void Scr_PrecacheShellShock(void);
 void Scr_PrecacheItem(void);
-unsigned int Scr_PrecacheShader(void);
+void Scr_PrecacheShader(void);
 void Scr_PrecacheString(void);
 void Scr_PrecacheRumble(void);
 void GScr_RadiusDamage(void);
@@ -472,19 +477,19 @@ void Scr_SetLinearFog(void);
 void Scr_SetExponentialFog(void);
 void GScr_IsPlayer(void);
 void GScr_IsPlayerNumber(void);
-unsigned int GScr_SetWinningPlayer(void);
-unsigned int GScr_SetWinningTeam(void);
+void GScr_SetWinningPlayer(void);
+void GScr_SetWinningTeam(void);
 void GScr_GetTeamScore(void);
-unsigned int GScr_SetTeamScore(void);
-unsigned int GScr_SetClientNameMode(void);
+void GScr_SetTeamScore(void);
+void GScr_SetClientNameMode(void);
 void GScr_UpdateClientNames(void);
 void GScr_GetTeamPlayersAlive(void);
-unsigned int GScr_GetNumParts(void);
+void GScr_GetNumParts(void);
 void GScr_GetPartName(void);
-unsigned int GScr_Earthquake(void);
+void GScr_Earthquake(void);
 void GScr_MapRestart(void);
 void GScr_LoadMap(void);
-unsigned int GScr_ExitLevel(void);
+void GScr_ExitLevel(void);
 void GScr_AddTestClient(void);
 void GScr_AllClientsPrint(void);
 void GScr_MapExists(void);
@@ -504,7 +509,7 @@ void GScr_SetArchive(void);
 void Scr_PlayRumbleOnPos(void);
 void Scr_PlayLoopRumbleOnPos(void);
 void Scr_StopAllRumbles(void);
-unsigned int Scr_IsSplitscreen(void);
+void Scr_IsSplitscreen(void);
 void GScr_MatchEnd(void);
 void GScr_SetPlayerTeamRank(void);
 void GScr_SendXboxLiveRanks(void);
@@ -556,7 +561,7 @@ void Scr_PlayerDamage(gentity_t *self, gentity_t *inflictor, gentity_t *attacker
 void Scr_PlayerKilled(gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, int meansOfDeath, int iWeapon, const vec_t *vDir, const hitLocation_t hitLoc, int psTimeOffset, int deathAnimDuration);
 void ScrCmd_Show(scr_entref_t entref);
 void ScrCmd_Hide(scr_entref_t entref);
-unsigned int ScrCmd_ShowToPlayer(scr_entref_t entref);
+void ScrCmd_ShowToPlayer(scr_entref_t entref);
 void GScr_EnableGrenadeTouchDamage(scr_entref_t entref);
 void GScr_DisableGrenadeTouchDamage(scr_entref_t entref);
 void GScr_EnableGrenadeBounce(scr_entref_t entref);
@@ -565,26 +570,26 @@ void GScr_EnableAimAssist(scr_entref_t entref);
 void GScr_DisableAimAssist(scr_entref_t entref);
 void ScrCmd_attach(scr_entref_t entref);
 void ScrCmd_detach(scr_entref_t entref);
-unsigned int ScrCmd_detachAll(scr_entref_t entref);
-unsigned int ScrCmd_GetAttachSize(scr_entref_t entref);
-unsigned int ScrCmd_GetAttachModelName(scr_entref_t entref);
-unsigned int ScrCmd_GetAttachTagName(scr_entref_t entref);
-unsigned int ScrCmd_GetAttachIgnoreCollision(scr_entref_t entref);
+void ScrCmd_detachAll(scr_entref_t entref);
+void ScrCmd_GetAttachSize(scr_entref_t entref);
+void ScrCmd_GetAttachModelName(scr_entref_t entref);
+void ScrCmd_GetAttachTagName(scr_entref_t entref);
+void ScrCmd_GetAttachIgnoreCollision(scr_entref_t entref);
 void ScrCmd_LinkTo(scr_entref_t entref);
-unsigned int ScrCmd_Unlink(scr_entref_t entref);
+void ScrCmd_Unlink(scr_entref_t entref);
 void ScrCmd_EnableLinkTo(scr_entref_t entref);
 void ScrCmd_GetOrigin(scr_entref_t entref);
 void ScrCmd_GetEye(scr_entref_t entref);
 void ScrCmd_UseBy(scr_entref_t entref);
 void Scr_SetStableMissile(scr_entref_t entref);
 void ScrCmd_IsTouching(scr_entref_t entref);
-unsigned int ScrCmd_PlaySound(scr_entref_t entref);
-unsigned int ScrCmd_PlaySoundAsMaster(scr_entref_t entref);
+void ScrCmd_PlaySound(scr_entref_t entref);
+void ScrCmd_PlaySoundAsMaster(scr_entref_t entref);
 void ScrCmd_PlayLoopSound(scr_entref_t entref);
 void ScrCmd_StopLoopSound(scr_entref_t entref);
-unsigned int ScrCmd_Delete(scr_entref_t entref);
+void ScrCmd_Delete(scr_entref_t entref);
 void ScrCmd_SetModel(scr_entref_t entref);
-unsigned int ScrCmd_GetNormalHealth(scr_entref_t entref);
+void ScrCmd_GetNormalHealth(scr_entref_t entref);
 void ScrCmd_SetNormalHealth(scr_entref_t entref);
 void ScrCmd_SetContents(scr_entref_t entref);
 void GScr_SetCursorHint(scr_entref_t entref);
@@ -593,13 +598,13 @@ static __attribute_regparm__(2) gentity_t *GetPlayerEntity(scr_entref_t entref);
 void GScr_ViewKick(scr_entref_t entref);
 void GScr_StopShellShock(scr_entref_t entref);
 void GScr_ShellShock(scr_entref_t entref);
-unsigned int GScr_GetAmmoCount(scr_entref_t entref);
+void GScr_GetAmmoCount(scr_entref_t entref);
 void GScr_LocalToWorldCoords(scr_entref_t entref);
-unsigned int GScr_SetRightArc(scr_entref_t entref);
-unsigned int GScr_SetLeftArc(scr_entref_t entref);
-unsigned int GScr_SetTopArc(scr_entref_t entref);
-unsigned int GScr_SetBottomArc(scr_entref_t entref);
-unsigned int GScr_GetEntityNumber(scr_entref_t entref);
+void GScr_SetRightArc(scr_entref_t entref);
+void GScr_SetLeftArc(scr_entref_t entref);
+void GScr_SetTopArc(scr_entref_t entref);
+void GScr_SetBottomArc(scr_entref_t entref);
+void GScr_GetEntityNumber(scr_entref_t entref);
 void GScr_PlaceSpawnPoint(scr_entref_t entref);
 void GScr_UpdateScores(scr_entref_t entref);
 void GScr_SetTeamForTrigger(scr_entref_t entref);
@@ -635,29 +640,29 @@ void GScr_FreeScripts(void)
     return;
 }
 
-unsigned int ScrCmd_GetClanId(struct scr_entref_t entref)
+void ScrCmd_GetClanId(struct scr_entref_t entref)
 {
-    return Scr_AddString("0");
+    { (void)(Scr_AddString("0")); return; }
 }
 
-unsigned int ScrCmd_GetClanName(scr_entref_t entref)
+void ScrCmd_GetClanName(scr_entref_t entref)
 {
-    return Scr_AddString("");
+    { (void)(Scr_AddString("")); return; }
 }
 
-unsigned int ScrCmd_GetClanMotto(scr_entref_t entref)
+void ScrCmd_GetClanMotto(scr_entref_t entref)
 {
-    return Scr_AddString("");
+    { (void)(Scr_AddString("")); return; }
 }
 
-unsigned int ScrCmd_GetClanDescription(scr_entref_t entref)
+void ScrCmd_GetClanDescription(scr_entref_t entref)
 {
-    return Scr_AddString("");
+    { (void)(Scr_AddString("")); return; }
 }
 
-unsigned int ScrCmd_GetClanURL(scr_entref_t entref)
+void ScrCmd_GetClanURL(scr_entref_t entref)
 {
-    return Scr_AddString("");
+    { (void)(Scr_AddString("")); return; }
 }
 
 void print(void)
@@ -715,9 +720,9 @@ void GScr_IsDefined(void)
     return;
 }
 
-unsigned int GScr_IsString(void)
+void GScr_IsString(void)
 {
-    return Scr_AddInt(Scr_GetType(0) == 2);
+    { (void)(Scr_AddInt(Scr_GetType(0) == 2)); return; }
 }
 
 void GScr_IsAlive(void)
@@ -741,19 +746,19 @@ void GScr_GetDvar(void)
     Scr_AddString(val);
 }
 
-unsigned int GScr_GetDvarInt(void)
+void GScr_GetDvarInt(void)
 {
-    return Scr_AddInt(atoi(Dvar_GetVariantString(Scr_GetString(0))));
+    { (void)(Scr_AddInt(atoi(Dvar_GetVariantString(Scr_GetString(0))))); return; }
 }
 
-unsigned int GScr_GetDvarFloat(void)
+void GScr_GetDvarFloat(void)
 {
-    return Scr_AddFloat((float)atof(Dvar_GetVariantString(Scr_GetString(0))));
+    { (void)(Scr_AddFloat((float)atof(Dvar_GetVariantString(Scr_GetString(0))))); return; }
 }
 
-unsigned int GScr_GetTime(void)
+void GScr_GetTime(void)
 {
-    return Scr_AddInt(level.time);
+    { (void)(Scr_AddInt(level.time)); return; }
 }
 
 void Scr_GetEntByNum(void)
@@ -786,7 +791,7 @@ void Scr_GetWeaponModel(void)
 
 void GScr_GetAnimLength(void)
 {
-    unsigned int anim = Scr_GetAnim(0, 0);
+    unsigned int anim = GScr_GetPackedAnim(0);
     void *anims = Scr_GetAnims(anim >> 16);
     unsigned short animIndex = anim;
 
@@ -797,7 +802,7 @@ void GScr_GetAnimLength(void)
 
 void GScr_AnimHasNotetrack(void)
 {
-    unsigned int anim = Scr_GetAnim(0, 0);
+    unsigned int anim = GScr_GetPackedAnim(0);
     unsigned int treeIndex = anim >> 16;
     unsigned int animIndex = anim & 0xffff;
     unsigned int notetrack = Scr_GetConstString(1);
@@ -814,9 +819,9 @@ void GScr_PrecacheTurret(void)
     G_GetWeaponIndexForName(Scr_GetString(0));
 }
 
-unsigned int ScrCmd_SoundExists(void)
+void ScrCmd_SoundExists(void)
 {
-    return Scr_AddBool(Com_FindSoundAlias(Scr_GetString(0)) != 0);
+    { (void)(Scr_AddBool(Com_FindSoundAlias(Scr_GetString(0)) != 0)); return; }
 }
 
 void ScrCmd_PlayRumble(scr_entref_t entref) {}
@@ -879,7 +884,7 @@ unsigned int __attribute_regparm__(2) SetObjectiveIcon(objective_t *obj, int par
     return SetObjectiveIcon_impl(obj, paramNum);
 }
 
-unsigned int Scr_Objective_Icon(void)
+void Scr_Objective_Icon(void)
 {
     int objIndex;
 
@@ -887,7 +892,7 @@ unsigned int Scr_Objective_Icon(void)
     if ((unsigned int)objIndex > 0xf)
         Scr_ParamError(0, va("index %i is an illegal objective index. Valid indexes are 0 to %i\n", objIndex, 0xf));
 
-    return SetObjectiveIcon(&level.objectives[objIndex], 1);
+    { (void)(SetObjectiveIcon(&level.objectives[objIndex], 1)); return; }
 }
 
 void Scr_Objective_OnEntity(void)
@@ -924,7 +929,7 @@ void Scr_Objective_OnEntity(void)
     return;
 }
 
-unsigned int Scr_Objective_Current(void)
+void Scr_Objective_Current(void)
 {
     int makeCurrent[16] = { 0 };
     int numParam;
@@ -945,7 +950,7 @@ unsigned int Scr_Objective_Current(void)
             level.objectives[i].state = OBJST_ACTIVE;
     }
 
-    return 0;
+    return;
 }
 
 void GScr_Objective_Team(void)
@@ -998,9 +1003,9 @@ void GScr_LogPrint(void)
     return;
 }
 
-unsigned int GScr_WorldEntNumber(void)
+void GScr_WorldEntNumber(void)
 {
-    return Scr_AddInt(0x3fe);
+    { (void)(Scr_AddInt(0x3fe)); return; }
 }
 
 void GScr_Obituary(void)
@@ -1031,9 +1036,9 @@ void GScr_Obituary(void)
     return;
 }
 
-unsigned int GScr_getStartTime(void)
+void GScr_getStartTime(void)
 {
-    return Scr_AddInt(level.startTime);
+    { (void)(Scr_AddInt(level.startTime)); return; }
 }
 
 void GScr_PrecacheMenu(void)
@@ -1437,7 +1442,7 @@ void Scr_IsSubStr(void)
     Scr_AddBool(strstr(s, sub) != 0);
 }
 
-unsigned int Scr_GetSubStr(void)
+void Scr_GetSubStr(void)
 {
     const char *s = Scr_GetString(0);
     int start = Scr_GetInt(1);
@@ -1459,7 +1464,7 @@ unsigned int Scr_GetSubStr(void)
     }
 
     tempString[dest] = '\0';
-    return Scr_AddString(tempString);
+    { (void)(Scr_AddString(tempString)); return; }
 }
 
 void Scr_ToLower(void)
@@ -1496,7 +1501,7 @@ static int Scr_IsTokenDelimiter(char ch, const char *delim, int delimLen)
     return 0;
 }
 
-unsigned int Scr_StrTok(void)
+void Scr_StrTok(void)
 {
     const char *s;
     const char *delim;
@@ -1534,7 +1539,7 @@ unsigned int Scr_StrTok(void)
         Scr_AddArray();
     }
 
-    return 0;
+    return;
 }
 
 void Scr_MusicPlay(void)
@@ -1587,7 +1592,7 @@ void Scr_PrecacheItem(void)
     return;
 }
 
-unsigned int Scr_PrecacheShader(void)
+void Scr_PrecacheShader(void)
 {
     const char *shaderName;
     if (!level.initializing)
@@ -1685,7 +1690,7 @@ void GScr_GetMoveDelta(void)
 
     GScr_GetAnimDeltaTimes(&startTime, &endTime);
 
-    anim = Scr_GetAnim(0, 0);
+    anim = GScr_GetPackedAnim(0);
     XAnimGetRelDelta(Scr_GetAnims(anim >> 16), (unsigned short)anim, rot, trans, startTime, endTime);
     Scr_AddVector(trans);
     return;
@@ -1701,7 +1706,7 @@ void GScr_GetAngleDelta(void)
 
     GScr_GetAnimDeltaTimes(&startTime, &endTime);
 
-    anim = Scr_GetAnim(0, 0);
+    anim = GScr_GetPackedAnim(0);
     XAnimGetRelDelta(Scr_GetAnims(anim >> 16), (unsigned short)anim, rot, trans, startTime, endTime);
     Scr_AddFloat(RotationToYaw(rot));
     return;
@@ -1848,14 +1853,14 @@ void GScr_IsPlayerNumber(void)
         Scr_AddInt(1);
 }
 
-unsigned int GScr_SetWinningPlayer(void)
+void GScr_SetWinningPlayer(void)
 {
     gentity_t *ent = Scr_GetEntity(0);
 
     GScr_UpdateWinnerConfig(ent->s.number + 1);
 }
 
-unsigned int GScr_SetWinningTeam(void)
+void GScr_SetWinningTeam(void)
 {
     scr_string_t team = Scr_GetConstString(0);
     int winner;
@@ -1867,7 +1872,7 @@ unsigned int GScr_SetWinningTeam(void)
     else if (team == scr_const.none)
         winner = 0;
     else
-        return Scr_ParamError(0, va("Illegal team string '%s'. Must be allies, axis, or none.", SL_ConvertToString(team)));
+        { (void)(Scr_ParamError(0, va("Illegal team string '%s'. Must be allies, axis, or none.", SL_ConvertToString(team)))); return; }
 
     GScr_UpdateWinnerConfig(winner);
 }
@@ -1886,7 +1891,7 @@ void GScr_GetTeamScore(void)
         Scr_AddInt(level.teamScores[TEAM_AXIS]);
 }
 
-unsigned int GScr_SetTeamScore(void)
+void GScr_SetTeamScore(void)
 {
     scr_string_t team = Scr_GetConstString(0);
     int score;
@@ -1906,7 +1911,7 @@ unsigned int GScr_SetTeamScore(void)
     level.bUpdateScoresForIntermission = 1;
 }
 
-unsigned int GScr_SetClientNameMode(void)
+void GScr_SetClientNameMode(void)
 {
     scr_string_t mode = Scr_GetConstString(0);
 
@@ -1967,9 +1972,9 @@ void GScr_GetTeamPlayersAlive(void)
     return;
 }
 
-unsigned int GScr_GetNumParts(void)
+void GScr_GetNumParts(void)
 {
-    return Scr_AddInt(XModelNumBones(SV_XModelGet(Scr_GetString(0))));
+    { (void)(Scr_AddInt(XModelNumBones(SV_XModelGet(Scr_GetString(0))))); return; }
 }
 
 void GScr_GetPartName(void)
@@ -1989,7 +1994,7 @@ void GScr_GetPartName(void)
     Scr_AddConstString(name);
 }
 
-unsigned int GScr_Earthquake(void)
+void GScr_Earthquake(void)
 {
     float scale;
     int duration;
@@ -2055,7 +2060,7 @@ void GScr_LoadMap(void)
     return;
 }
 
-unsigned int GScr_ExitLevel(void)
+void GScr_ExitLevel(void)
 {
     level_locals_t *lvl = &level;
 
@@ -2410,9 +2415,9 @@ void Scr_PlayLoopRumbleOnPos(void) {}
 
 void Scr_StopAllRumbles(void) {}
 
-unsigned int Scr_IsSplitscreen(void)
+void Scr_IsSplitscreen(void)
 {
-    return Scr_AddInt(0);
+    { (void)(Scr_AddInt(0)); return; }
 }
 
 void GScr_MatchEnd(void) {}
@@ -2439,9 +2444,9 @@ void GScr_ReleaseClaimedTrigger(scr_entref_t entref)
    level.xenon branches (e.g. endparty() at maps/mp/gametypes/_menus.gsc:92). The retail PC
    engine registers these as no-ops so the scripts compile; without it the GSC compiler aborts
    with "unknown function" and the map never loads. */
-static unsigned int Scr_XenonStub(void)
+static void Scr_XenonStub(void)
 {
-    return 0;
+    return;
 }
 
 BuiltinFunction Scr_GetFunction(const char **pName, int *type)
@@ -3488,13 +3493,13 @@ void ScrCmd_Hide(scr_entref_t entref)
     ent->r.clientMask[1] = -1;
 }
 
-unsigned int ScrCmd_ShowToPlayer(scr_entref_t entref)
+void ScrCmd_ShowToPlayer(scr_entref_t entref)
 {
     gentity_t *ent = GScr_EntityFromEntRef(entref);
     gentity_t *clientEnt = Scr_GetEntity(0);
 
     if (clientEnt->s.number > 63)
-        return Scr_Error("showToClient error: param must be a client entity\n");
+        { (void)(Scr_Error("showToClient error: param must be a client entity\n")); return; }
 
     ent->flags &= ~0x800;
     ent->r.clientMask[clientEnt->s.number >> 5] &= ~(1u << (clientEnt->s.number & 31));
@@ -3609,12 +3614,12 @@ void ScrCmd_detach(scr_entref_t entref)
     return;
 }
 
-unsigned int ScrCmd_detachAll(scr_entref_t entref)
+void ScrCmd_detachAll(scr_entref_t entref)
 {
-    return G_EntDetachAll(GScr_EntityFromEntRef(entref));
+    { (void)(G_EntDetachAll(GScr_EntityFromEntRef(entref))); return; }
 }
 
-unsigned int ScrCmd_GetAttachSize(scr_entref_t entref)
+void ScrCmd_GetAttachSize(scr_entref_t entref)
 {
     gentity_t *ent = GScr_EntityFromEntRef(entref);
     int i;
@@ -3624,10 +3629,10 @@ unsigned int ScrCmd_GetAttachSize(scr_entref_t entref)
             break;
     }
 
-    return Scr_AddInt(i);
+    { (void)(Scr_AddInt(i)); return; }
 }
 
-unsigned int ScrCmd_GetAttachModelName(scr_entref_t entref)
+void ScrCmd_GetAttachModelName(scr_entref_t entref)
 {
     gentity_t *ent = GScr_EntityFromEntRef(entref);
     int i = Scr_GetInt(0);
@@ -3635,10 +3640,10 @@ unsigned int ScrCmd_GetAttachModelName(scr_entref_t entref)
     if ((unsigned int)i > 6 || !ent->attachModelNames[i])
         Scr_ParamError(0, "bad index");
 
-    return Scr_AddString(G_ModelName(ent->attachModelNames[i]));
+    { (void)(Scr_AddString(G_ModelName(ent->attachModelNames[i]))); return; }
 }
 
-unsigned int ScrCmd_GetAttachTagName(scr_entref_t entref)
+void ScrCmd_GetAttachTagName(scr_entref_t entref)
 {
     gentity_t *ent = GScr_EntityFromEntRef(entref);
     int i = Scr_GetInt(0);
@@ -3646,10 +3651,10 @@ unsigned int ScrCmd_GetAttachTagName(scr_entref_t entref)
     if ((unsigned int)i > 6 || !ent->attachModelNames[i])
         Scr_ParamError(0, "bad index");
 
-    return Scr_AddConstString(ent->attachTagNames[i]);
+    { (void)(Scr_AddConstString(ent->attachTagNames[i])); return; }
 }
 
-unsigned int ScrCmd_GetAttachIgnoreCollision(scr_entref_t entref)
+void ScrCmd_GetAttachIgnoreCollision(scr_entref_t entref)
 {
     gentity_t *ent = GScr_EntityFromEntRef(entref);
     int i = Scr_GetInt(0);
@@ -3657,7 +3662,7 @@ unsigned int ScrCmd_GetAttachIgnoreCollision(scr_entref_t entref)
     if ((unsigned int)i > 6 || !ent->attachModelNames[i])
         Scr_ParamError(0, "bad index");
 
-    return Scr_AddBool((ent->attachIgnoreCollision >> i) & 1);
+    { (void)(Scr_AddBool((ent->attachIgnoreCollision >> i) & 1)); return; }
 }
 
 void ScrCmd_LinkTo(scr_entref_t entref)
@@ -3715,9 +3720,9 @@ void ScrCmd_LinkTo(scr_entref_t entref)
     return;
 }
 
-unsigned int ScrCmd_Unlink(scr_entref_t entref)
+void ScrCmd_Unlink(scr_entref_t entref)
 {
-    return G_EntUnlink(GScr_EntityFromEntRef(entref));
+    { (void)(G_EntUnlink(GScr_EntityFromEntRef(entref))); return; }
 }
 
 void ScrCmd_EnableLinkTo(scr_entref_t entref)
@@ -3829,12 +3834,12 @@ void ScrCmd_IsTouching(scr_entref_t entref)
     return;
 }
 
-unsigned int ScrCmd_PlaySound(scr_entref_t entref)
+void ScrCmd_PlaySound(scr_entref_t entref)
 {
     ScrCmd_PlaySoundEvent(GScr_EntityFromEntRef(entref), 0xb3);
 }
 
-unsigned int ScrCmd_PlaySoundAsMaster(scr_entref_t entref)
+void ScrCmd_PlaySoundAsMaster(scr_entref_t entref)
 {
     ScrCmd_PlaySoundEvent(GScr_EntityFromEntRef(entref), 0xb4);
 }
@@ -3856,7 +3861,7 @@ void ScrCmd_StopLoopSound(scr_entref_t entref)
     ent->s.loopSound = 0;
 }
 
-unsigned int ScrCmd_Delete(scr_entref_t entref)
+void ScrCmd_Delete(scr_entref_t entref)
 {
     gentity_t *ent = GScr_EntityFromEntRef(entref);
 
@@ -3867,7 +3872,7 @@ unsigned int ScrCmd_Delete(scr_entref_t entref)
         Scr_Error("Cannot delete entity during its think");
 
     Scr_Notify(ent, scr_const.death, 0);
-    return G_FreeEntity(ent);
+    { (void)(G_FreeEntity(ent)); return; }
 }
 
 void ScrCmd_SetModel(scr_entref_t entref)
@@ -3880,7 +3885,7 @@ void ScrCmd_SetModel(scr_entref_t entref)
     return;
 }
 
-unsigned int ScrCmd_GetNormalHealth(scr_entref_t entref)
+void ScrCmd_GetNormalHealth(scr_entref_t entref)
 {
     gentity_t *ent = GScr_EntityFromEntRef(entref);
     float normalHealth;
@@ -3894,7 +3899,7 @@ unsigned int ScrCmd_GetNormalHealth(scr_entref_t entref)
         normalHealth = (float)ent->health;
     }
 
-    return Scr_AddFloat(normalHealth);
+    { (void)(Scr_AddFloat(normalHealth)); return; }
 }
 
 void ScrCmd_SetNormalHealth(scr_entref_t entref)
@@ -4109,15 +4114,15 @@ void GScr_ShellShock(scr_entref_t entref)
     return;
 }
 
-unsigned int GScr_GetAmmoCount(scr_entref_t entref)
+void GScr_GetAmmoCount(scr_entref_t entref)
 {
     gentity_t *ent = GetPlayerEntity(entref);
     int weaponIndex;
 
     weaponIndex = G_GetWeaponIndexForName(Scr_GetString(0));
     if (!weaponIndex)
-        return Scr_AddInt(0);
-    return Scr_AddInt(BG_WeaponAmmo(&ent->client->ps, weaponIndex));
+        { (void)(Scr_AddInt(0)); return; }
+    { (void)(Scr_AddInt(BG_WeaponAmmo(&ent->client->ps, weaponIndex))); return; }
 }
 
 void GScr_LocalToWorldCoords(scr_entref_t entref)
@@ -4141,7 +4146,7 @@ void GScr_LocalToWorldCoords(scr_entref_t entref)
     return;
 }
 
-unsigned int GScr_SetRightArc(scr_entref_t entref)
+void GScr_SetRightArc(scr_entref_t entref)
 {
     turretInfo_t *pTurretInfo = GScr_GetTurretInfo(GScr_EntityFromEntRef(entref));
 
@@ -4150,7 +4155,7 @@ unsigned int GScr_SetRightArc(scr_entref_t entref)
         pTurretInfo->arcmin[1] = 0.0f;
 }
 
-unsigned int GScr_SetLeftArc(scr_entref_t entref)
+void GScr_SetLeftArc(scr_entref_t entref)
 {
     turretInfo_t *pTurretInfo = GScr_GetTurretInfo(GScr_EntityFromEntRef(entref));
 
@@ -4159,7 +4164,7 @@ unsigned int GScr_SetLeftArc(scr_entref_t entref)
         pTurretInfo->arcmax[1] = 0.0f;
 }
 
-unsigned int GScr_SetTopArc(scr_entref_t entref)
+void GScr_SetTopArc(scr_entref_t entref)
 {
     turretInfo_t *pTurretInfo = GScr_GetTurretInfo(GScr_EntityFromEntRef(entref));
 
@@ -4168,7 +4173,7 @@ unsigned int GScr_SetTopArc(scr_entref_t entref)
         pTurretInfo->arcmin[0] = 0.0f;
 }
 
-unsigned int GScr_SetBottomArc(scr_entref_t entref)
+void GScr_SetBottomArc(scr_entref_t entref)
 {
     turretInfo_t *pTurretInfo = GScr_GetTurretInfo(GScr_EntityFromEntRef(entref));
 
@@ -4177,9 +4182,9 @@ unsigned int GScr_SetBottomArc(scr_entref_t entref)
         pTurretInfo->arcmax[0] = 0.0f;
 }
 
-unsigned int GScr_GetEntityNumber(scr_entref_t entref)
+void GScr_GetEntityNumber(scr_entref_t entref)
 {
-    return Scr_AddInt(GScr_EntityFromEntRef(entref)->s.number);
+    { (void)(Scr_AddInt(GScr_EntityFromEntRef(entref)->s.number)); return; }
 }
 
 void GScr_PlaceSpawnPoint(scr_entref_t entref)
@@ -4363,12 +4368,12 @@ void Scr_PlayFX(void)
 
 void iprintln(void)
 {
-    Scr_MakeGameMessage_core(-1, va("%c", 0x66));
+    Scr_MakeGameMessage_core(-1, "f");
 }
 
 void iprintlnbold(void)
 {
-    Scr_MakeGameMessage_core(-1, va("%c", 0x67));
+    Scr_MakeGameMessage_core(-1, "g");
 }
 
 static inline __attribute__((always_inline)) scr_func_t GScr_LoadScriptFunction(const char *script, const char *label)
@@ -4421,14 +4426,11 @@ void GScr_LoadScripts(int inst)
     int i;
     char s[64];
 
-    Scr_LoadScript("codescripts/delete");
-    g_scr_data.delete_ = Scr_GetFunctionHandle("codescripts/delete", "main");
-
-    Scr_LoadScript("codescripts/struct");
-    g_scr_data.initstructs = Scr_GetFunctionHandle("codescripts/struct", "initstructs");
-
-    Scr_LoadScript("codescripts/struct");
-    g_scr_data.createstruct = Scr_GetFunctionHandle("codescripts/struct", "createstruct");
+    // These engine entry points are required even when no GSC imports them.
+    // Executing a missing handle (zero) enters the bytecode buffer sentinel.
+    g_scr_data.delete_ = GScr_LoadScriptFunction("codescripts/delete", "main");
+    g_scr_data.initstructs = GScr_LoadScriptFunction("codescripts/struct", "initstructs");
+    g_scr_data.createstruct = GScr_LoadScriptFunction("codescripts/struct", "createstruct");
 
     GScr_LoadGameTypeScript();
 

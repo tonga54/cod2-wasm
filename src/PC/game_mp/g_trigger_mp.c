@@ -2,9 +2,9 @@
 #include "imports.h"
 
 extern int Scr_IsSystemActive(int flag);
-extern unsigned int Scr_AddEntity(gentity_t *ent);
+extern void Scr_AddEntity(gentity_t *ent);
 extern void Scr_Notify(gentity_t *ent, unsigned int stringId, int numArgs);
-extern unsigned int Scr_AddInt(int value);
+extern void Scr_AddInt(int value);
 extern unsigned int Scr_GetNumParam(void);
 extern float Scr_GetFloat(int param);
 extern void Scr_Error(const char *msg);
@@ -26,9 +26,9 @@ extern void Com_Error(int code, const char *fmt, ...);
 extern void AddPointToBounds(vec_t *point, vec_t *mins, vec_t *maxs);
 extern int CM_AreaEntities(vec_t *mins, vec_t *maxs, int *list, int maxCount, int mask);
 
-extern byte level_ptr[];
+extern level_locals_t level;
 
-extern byte g_entities_ptr[];
+extern gentity_t g_entities[];
 extern byte *g_trace_zero_ptr;
 
 #define ENTITY_STRIDE sizeof(gentity_s) /* was hardcoded 560 = x86 sizeof; wrong on x64 */

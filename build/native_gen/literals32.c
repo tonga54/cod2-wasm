@@ -2,36 +2,36 @@
 /* Do not edit; regenerated from data.S with 4-byte pointer relocations. */
 #include "common_types.h"
 
-extern char CColorArray_Disable[];
-extern char CColorArray_Enable[];
-extern char CNormalArray_Disable[];
-extern char CNormalArray_Enable[];
-extern char CSecondaryColorArray_Disable[];
-extern char CSecondaryColorArray_Enable[];
-extern char CTexCoordArray_Disable[];
-extern char CTexCoordArray_Enable[];
-extern char CVAOPacketFixedFunction_IsFixedFunction[];
-extern char CVAOPacketProgrammable_IsFixedFunction[];
-extern char CVertexArray_Disable[];
-extern char CVertexArray_Enable[];
-extern char ZN11CColorArrayD0Ev[];
-extern char ZN11CColorArrayD1Ev[];
-extern char ZN12CNormalArrayD0Ev[];
-extern char ZN12CNormalArrayD1Ev[];
-extern char ZN12CVertexArrayD0Ev[];
-extern char ZN12CVertexArrayD1Ev[];
-extern char ZN14CTexCoordArrayD0Ev[];
-extern char ZN14CTexCoordArrayD1Ev[];
-extern char ZN15CCacheInfoBlockD0Ev[];
-extern char ZN15CCacheInfoBlockD1Ev[];
-extern char ZN20CSecondaryColorArrayD0Ev[];
-extern char ZN20CSecondaryColorArrayD1Ev[];
-extern char ZN22CVAOPacketProgrammableD0Ev[];
-extern char ZN22CVAOPacketProgrammableD1Ev[];
-extern char ZN23CVAOPacketFixedFunctionD0Ev[];
-extern char ZN23CVAOPacketFixedFunctionD1Ev[];
-extern char ZN7CBaseVAD0Ev[];
-extern char ZN7CBaseVAD1Ev[];
+extern void CColorArray_Disable(void);
+extern void CColorArray_Enable(void);
+extern void CNormalArray_Disable(void);
+extern void CNormalArray_Enable(void);
+extern void CSecondaryColorArray_Disable(void);
+extern void CSecondaryColorArray_Enable(void);
+extern void CTexCoordArray_Disable(void);
+extern void CTexCoordArray_Enable(void);
+extern void CVAOPacketFixedFunction_IsFixedFunction(void);
+extern void CVAOPacketProgrammable_IsFixedFunction(void);
+extern void CVertexArray_Disable(void);
+extern void CVertexArray_Enable(void);
+extern void ZN11CColorArrayD0Ev(void);
+extern void ZN11CColorArrayD1Ev(void);
+extern void ZN12CNormalArrayD0Ev(void);
+extern void ZN12CNormalArrayD1Ev(void);
+extern void ZN12CVertexArrayD0Ev(void);
+extern void ZN12CVertexArrayD1Ev(void);
+extern void ZN14CTexCoordArrayD0Ev(void);
+extern void ZN14CTexCoordArrayD1Ev(void);
+extern void ZN15CCacheInfoBlockD0Ev(void);
+extern void ZN15CCacheInfoBlockD1Ev(void);
+extern void ZN20CSecondaryColorArrayD0Ev(void);
+extern void ZN20CSecondaryColorArrayD1Ev(void);
+extern void ZN22CVAOPacketProgrammableD0Ev(void);
+extern void ZN22CVAOPacketProgrammableD1Ev(void);
+extern void ZN23CVAOPacketFixedFunctionD0Ev(void);
+extern void ZN23CVAOPacketFixedFunctionD1Ev(void);
+extern void ZN7CBaseVAD0Ev(void);
+extern void ZN7CBaseVAD1Ev(void);
 
 struct __attribute__((packed)) _d32___ZTV11CColorArray {
     unsigned char f0[8]; 

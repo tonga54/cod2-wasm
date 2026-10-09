@@ -5,7 +5,7 @@
 extern level_locals_t level;
 
 extern qboolean Scr_IsSystemActive(int localClientNum);
-extern unsigned int Scr_AddEntity(gentity_t *ent);
+extern void Scr_AddEntity(gentity_t *ent);
 extern void Scr_Notify(gentity_t *ent, int stringValue, unsigned int paramcount);
 extern void G_GetPlayerViewOrigin(gentity_t *ent, vec3_t origin);
 extern void G_GetPlayerViewDirection(gentity_t *ent, vec3_t forward, vec3_t right, vec3_t up);
@@ -15,15 +15,15 @@ extern qboolean SV_EntityContact(vec3_t mins, vec3_t maxs, gentity_t *ent);
 extern qboolean G_IsTurretUsable(gentity_t *turret, gentity_t *player);
 extern qboolean BG_CanItemBeGrabbed(const entityState_t *ent, const playerState_t *ps, qboolean bTouched);
 extern int G_TraceCapsuleComplete(vec3_t start, vec3_t mins, vec3_t maxs, vec3_t end, int passEntityNum, int contentMask);
-extern void G_DObjGetWorldTagPos(gentity_t *ent, unsigned int tagName, vec_t *pos);
+extern int G_DObjGetWorldTagPos(gentity_t *ent, unsigned int tagName, vec_t *pos);
 extern void G_LocationalTrace(trace_t *trace, vec3_t start, vec3_t end, int passEntityNum, int contentMask, unsigned char *priorityMap);
 extern float SV_FX_GetVisibility(vec3_t start, vec3_t end);
 extern void G_Trigger(gentity_t *self, gentity_t *other);
 extern void *BG_GetWeaponDef(int weapon);
 
-extern byte g_entities_ptr[];
-extern byte level_ptr[];
-extern byte scr_const_ptr[];
+extern gentity_t g_entities[];
+extern level_locals_t level;
+extern scr_const_t scr_const;
 extern entityHandler_t entityHandlers[20];
 extern byte *vec3_origin_ptr;
 extern byte *bg_itemlist_ptr;
@@ -42,7 +42,7 @@ void Player_UpdateLookAtEntity(gentity_t *ent);
 
 #define GENTITY_SIZE sizeof(gentity_s) /* was 0x230 = x86 sizeof(gentity_s); wrong on x64 */
 
-#define SCR_CONST() ((const scr_const_t *)scr_const_ptr)
+#define SCR_CONST() ((const scr_const_t *)((byte *)&scr_const))
 
 void Player_UpdateActivate(gentity_t *ent)
 {
@@ -257,7 +257,10 @@ static int BM_REGPARM(0) Player_GetUseList(gentity_t *ent, useList_t *useList)
         if (hitEnt == ent)
             continue;
 
-        if ((((gentity_t *)(hitEnt))->s.eType) != 3) {
+        /* Items and mounted weapons are usable entities in their own right;
+         * only script triggers need the use-trigger svFlag. Turrets have
+         * svFlags == 0, so filtering them here hid both their hint and use. */
+        if (hitEnt->s.eType != 3 && hitEnt->s.eType != 9) {
             if (!((((gentity_t *)(hitEnt))->r.svFlags) & 0x20))
                 continue;
         }

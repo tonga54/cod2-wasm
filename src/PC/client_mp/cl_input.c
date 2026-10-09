@@ -56,7 +56,7 @@ extern void CL_SendCmdInternal(void);
 extern Bool PM_IsBinocularsADS(const playerState_t *ps);
 extern const signed char ClampChar(const int i);
 extern float sqrtf(float x);
-extern qboolean Sys_IsLANAddress(int addr0, int addr1, int addr2);
+extern qboolean Sys_IsLANAddress(netadr_t adr);
 extern struct clientStatic_t cls;
 extern int com_frameTime;
 extern unsigned int frame_msec;
@@ -1515,7 +1515,7 @@ void CL_SendCmdInternal(void)
     }
 
     serverAddrWords = (const int *)&clc->serverAddress;
-    if (clc->serverAddress.type == NA_LOOPBACK || Sys_IsLANAddress(serverAddrWords[0], serverAddrWords[1], serverAddrWords[2])) {
+    if (clc->serverAddress.type == NA_LOOPBACK || Sys_IsLANAddress(clc->serverAddress)) {
         CL_WritePacket();
         return;
     }

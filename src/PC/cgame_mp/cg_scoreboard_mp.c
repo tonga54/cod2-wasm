@@ -10,7 +10,7 @@ extern const dvar_t *cg_paused;
 extern struct Material *CL_RegisterMaterialNoMip(const char *name, int imageTrack);
 extern const char *Dvar_GetString(const char *dvarName);
 extern void Dvar_GetUnpackedColorByName(const char *dvarName, vec_t *color);
-extern float UI_DrawHandlePic(float x, float y, float w, float h, int horzAlign, int vertAlign, const vec_t *color, MaterialHandle material);
+extern void UI_DrawHandlePic(float x, float y, float w, float h, int horzAlign, int vertAlign, const vec_t *color, MaterialHandle material);
 extern void UI_DrawText(const char *text, int maxChars, void *font, float x, float y, int horzAlign, int vertAlign, float scale, float *color, int style);
 extern int UI_TextWidth(const char *text, int maxChars, void *font, float scale);
 extern int UI_TextHeight(void *font, float scale);
@@ -323,9 +323,9 @@ static float CG_DrawScoreboard_ListBanner(vec_t *color, float y, float listWidth
     float nextY;
     float bannerLineHeight;
     int playerCount;
-    const char *playersString;
-    const char *bannerMaterialName;
-    const char *displayString;
+    char playersString[128];
+    char bannerMaterialName[64];
+    char displayString[256];
     vec_t bannerColor[4];
     vec_t teamColor[4];
     MaterialHandle material;
@@ -338,29 +338,32 @@ static float CG_DrawScoreboard_ListBanner(vec_t *color, float y, float listWidth
         return y;
 
     playerCount = cg->teamPlayers[team];
-    playersString = SEH_LocalizeTextMessage(
+    I_strncpyz(playersString, SEH_LocalizeTextMessage(
         va(playerCount == 1 ? (const char *)"CGAME_SB_PLAYER\x15%i" : (const char *)"CGAME_SB_PLAYERS\x15%i", playerCount == 1 ? 1 : playerCount),
         (const char *)"scoreboard banner text",
-        0);
+        0), sizeof(playersString));
+
+    /* Dvar_GetString and va share temporary buffers. Keep the asset name and
+     * labels alive across localization and material registration calls. */
 
     if (team == 1) {
         const char *teamName;
-        bannerMaterialName = Dvar_GetString((const char *)"g_ScoresBanner_Axis");
+        I_strncpyz(bannerMaterialName, Dvar_GetString("g_ScoresBanner_Axis"), sizeof(bannerMaterialName));
         teamName = SEH_LocalizeTextMessage(Dvar_GetString((const char *)"g_TeamName_Axis"), (const char *)"scoreboard team name", 0);
-        displayString = va((const char *)"%s (%s)", teamName, playersString);
+        I_strncpyz(displayString, va("%s (%s)", teamName, playersString), sizeof(displayString));
     } else if (team == 2) {
         const char *teamName;
-        bannerMaterialName = Dvar_GetString((const char *)"g_ScoresBanner_Allies");
+        I_strncpyz(bannerMaterialName, Dvar_GetString("g_ScoresBanner_Allies"), sizeof(bannerMaterialName));
         teamName = SEH_LocalizeTextMessage(Dvar_GetString((const char *)"g_TeamName_Allies"), (const char *)"scoreboard team name", 0);
-        displayString = va((const char *)"%s (%s)", teamName, playersString);
+        I_strncpyz(displayString, va("%s (%s)", teamName, playersString), sizeof(displayString));
     } else if (team == 0) {
-        bannerMaterialName = Dvar_GetString((const char *)"g_ScoresBanner_None");
-        displayString = playersString;
+        I_strncpyz(bannerMaterialName, Dvar_GetString("g_ScoresBanner_None"), sizeof(bannerMaterialName));
+        I_strncpyz(displayString, playersString, sizeof(displayString));
     } else {
         const char *teamName;
-        bannerMaterialName = Dvar_GetString((const char *)"g_ScoresBanner_Spectators");
+        I_strncpyz(bannerMaterialName, Dvar_GetString("g_ScoresBanner_Spectators"), sizeof(bannerMaterialName));
         teamName = SEH_LocalizeTextMessage((const char *)"CGAME_SPECTATORS", (const char *)"scoreboard team name", 0);
-        displayString = va((const char *)"%s (%s)", teamName, playersString);
+        I_strncpyz(displayString, va("%s (%s)", teamName, playersString), sizeof(displayString));
     }
 
     CG_Scoreboard_SetColor(bannerColor, 1.0f, 1.0f, 1.0f, color[3]);
@@ -593,9 +596,9 @@ float CG_DrawScoreboard_ScoresList(float alpha)
 
     CG_Scoreboard_SetColor(color, 1.0f, 1.0f, 1.0f, alpha);
 
-    if (cg->objectiveText[0])
-        CG_Scoreboard_DrawObjective(cg, color);
     y = 52.0f;
+    if (cg->objectiveText[0])
+        y = CG_Scoreboard_DrawObjective(cg, color);
 
     bannerHeight = CG_ScoreboardBannerHeight();
     if (cg->teamPlayers[1] || cg->teamPlayers[2]) {
@@ -688,7 +691,7 @@ qboolean CG_DrawScoreboard(void)
     float fontScale;
     float footerFontScale;
     struct Material *material;
-    sbpicinfo_t borderLines[4];
+    sbpicinfo_t borderLines[6];
     char mapBuffer[64];
     const char *map;
     const char *gameType;
@@ -762,10 +765,9 @@ qboolean CG_DrawScoreboard(void)
         numLines = CalcBorderLines(borderLines);
         if (numLines > 0) {
             int lineIdx;
-            float *linePtr = (float *)borderLines + 4;
             for (lineIdx = 0; lineIdx < numLines; lineIdx++) {
-                UI_DrawHandlePic(linePtr[-3], linePtr[-2], linePtr[-1], linePtr[0], 0, 0, color, material);
-                linePtr += 4;
+                const sbpicinfo_t *line = &borderLines[lineIdx];
+                UI_DrawHandlePic(line->x, line->y, line->w, line->h, 0, 0, color, material);
             }
         }
     }

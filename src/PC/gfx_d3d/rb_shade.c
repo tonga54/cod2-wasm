@@ -4,6 +4,7 @@ extern const dvar_t *r_objectiveColorDx7Min;
 extern const dvar_t *r_objectiveColorDx7Max;
 extern materialCommands_t tess;
 extern r_global_permanent_t rgp;
+extern r_backEndGlobals_t backEnd;
 extern struct DxState dxState;
 #include <math.h>
 #include "imports.h"
@@ -15,6 +16,7 @@ extern void RB_ChangeAlphaStageState(int stageIndex, int texStageBits);
 extern void RB_ChangeColorStageState(int stageIndex, int texStageBits);
 extern void RB_ChangeState_0(int stateBits0);
 extern void RB_ChangeState_1(int stateBits1);
+extern void RB_ChangeGenTexCoords(int samplerIndex, int genTexCoords);
 extern void RB_SetSampler(int samplerIndex, int samplerState, GfxImage *image);
 extern void RB_SetSamplerConstantDx7(unsigned int color);
 extern void RB_SetViewMatrixForWDx7(float w);
@@ -39,9 +41,9 @@ extern void MatrixTranspose44(const void *src, void *dst);
 extern void MatrixMultiply44(const void *a, const void *b, void *out);
 extern void MatrixTransformVector44(const void *vec, const void *mat, void *out);
 extern Bool RB_GetViewport(void *viewport);
-extern void MacOpenGLUtils_ConvertD3DProjectionMatrixToOpenGL(void *proj, float width, float height);
+extern int MacOpenGLUtils_ConvertD3DProjectionMatrixToOpenGL(void *proj, float width, float height);
 extern void RB_UpdateViewport(void);
-extern int RB_SetIteratorFog(void);
+extern void RB_SetIteratorFog(void);
 extern int RB_DeriveEntityLights(vec4_t *colorForDir, float sunVisibility, const Material *material, D3DLIGHT9 *lights, int maxLights);
 extern void RB_SetupEntityLighting(const GfxEntity *ent, GfxEntityLighting *lighting);
 extern void RB_SetCodeConstant(int constant, vec_t x, vec_t y, vec_t z, vec_t w);
@@ -632,6 +634,26 @@ static void RB_CopyVerticesWithColorConvert(const byte *src, byte *dst,
                                                              int vertCount, int stride,
                                                              int colorOfs, void *converter)
 {
+#ifdef __EMSCRIPTEN__
+    /* World and effect vertices carry RGBA, while 2D render commands retain
+     * the Mac ARGB layout (including font shadows and color escapes).
+     * Convert only that UI input; byte swapping RGBA destroys smoke alpha. */
+    if (stride == 0x20 || stride == 0x24 || stride == 0x44) {
+        memcpy(dst, src, (size_t)vertCount * stride);
+        if (backEnd.projection2D) {
+            int i;
+            for (i = 0; i < vertCount; ++i) {
+                const byte *in = src + i * stride + colorOfs;
+                byte *out = dst + i * stride + colorOfs;
+                out[0] = in[1];
+                out[1] = in[2];
+                out[2] = in[3];
+                out[3] = in[0];
+            }
+        }
+        return;
+    }
+#endif
     typedef void (*ConvertFunc)(void *conv, int *outColor, const byte *srcColor);
     ConvertFunc convert = *(ConvertFunc *)*(void ***)converter;
     int i;
@@ -1068,7 +1090,7 @@ static BM_NOINLINE void __attribute_regparm__(3) RB_DrawSingleTechnique(Material
                 const Material *tessMat = ((materialCommands_t *)tess)->material;
                 refStateBits = (byte *)tessMat->stateBits;
             }
-            stateMap = *(byte **)(pass + 8);
+            stateMap = (byte *)((MaterialPassDx7 *)pass)->stateMap;
 
             stateBits[0] = *(int *)(refStateBits + 0);
             stateBits[1] = *(int *)(refStateBits + 4);
@@ -1130,19 +1152,19 @@ static BM_NOINLINE void __attribute_regparm__(3) RB_DrawSingleTechnique(Material
             }
 
             {
-                int fogSrc = (*(byte *)(pass + 8) == 1) ? 0 : 2;
+                int fogSrc = (((MaterialPassDx7 *)pass)->fogToBlack == 1) ? 0 : 2;
                 RB_UpdateFogColor(fogSrc);
             }
 
             {
-                byte passNormalize = *(byte *)(pass + 4);
+                byte passNormalize = ((MaterialPassDx7 *)pass)->gridLighting;
                 if (passNormalize != dxState.gridLighting) {
                     byte *dx = (byte *)imp_dx;
                     volatile int *af = (volatile int *)&alwaysfails;
                     do {
                         byte *dev = *(byte **)(dx + 8);
                         void **vt = *(void ***)dev;
-                        ((void(D3DVTCC *)(void *, int, int))vt[0xe4 / 4])(dev, 0x89,
+                        ((HRESULT(D3DVTCC *)(void *, int, int))vt[0xe4 / 4])(dev, 0x89,
                                                                           passNormalize ? 1 : 0);
                     } while (*af);
                     dxState.gridLighting = passNormalize;
@@ -1157,7 +1179,7 @@ static BM_NOINLINE void __attribute_regparm__(3) RB_DrawSingleTechnique(Material
                     do {
                         byte *dev = *(byte **)(dx + 8);
                         void **vt = *(void ***)dev;
-                        ((void(D3DVTCC *)(void *, DWORD))vt[0x164 / 4])(dev, fvf);
+                        ((HRESULT(D3DVTCC *)(void *, DWORD))vt[0x164 / 4])(dev, fvf);
                     } while (*af);
                     dxState.fvf = fvf;
                     dxState.vertexDecl = NULL;
@@ -1167,14 +1189,14 @@ static BM_NOINLINE void __attribute_regparm__(3) RB_DrawSingleTechnique(Material
                     do {
                         byte *dev = *(byte **)(dx + 8);
                         void **vt = *(void ***)dev;
-                        ((void(D3DVTCC *)(void *, DWORD))vt[0x164 / 4])(dev, fvf);
+                        ((HRESULT(D3DVTCC *)(void *, DWORD))vt[0x164 / 4])(dev, fvf);
                     } while (*af);
                     dxState.fvf = fvf;
                     dxState.vertexDecl = NULL;
                 }
             }
 
-            if (*(byte *)(pass + 7)) {
+            if (((MaterialPassDx7 *)pass)->objectiveGlow) {
 
                 r_backEndGlobals_t *backEnd2 = backEnd;
                 float phase = backEnd2->sceneDef.floatTime;
@@ -1215,10 +1237,30 @@ static BM_NOINLINE void __attribute_regparm__(3) RB_DrawSingleTechnique(Material
             }
 
             {
-                int samplerIndex;
-                for (samplerIndex = 0; samplerIndex < 2; samplerIndex++) {
-                    byte *samplerDef = ((char *)pass + offsetof(MaterialPassDx9, pixelShader)) + samplerIndex * 8;
-
+                const MaterialPassDx7 *dx7Pass = (const MaterialPassDx7 *)pass;
+                for (int samplerIndex = 0; samplerIndex < 2; ++samplerIndex) {
+                    const MaterialShaderArgument *samplerDef = &dx7Pass->samplers[samplerIndex];
+                    void *image = NULL;
+                    byte samplerState = 0;
+                    if (samplerDef->type == 3) {
+                        RB_GetTextureFromCode_impl(samplerDef->u.codeSampler, &image, &samplerState);
+                    } else if (samplerDef->type == 4) {
+                        for (int textureIndex = 0; textureIndex < material->textureCount; ++textureIndex) {
+                            const MaterialTextureDef *texture = &material->textures[textureIndex];
+                            if (strcmp(texture->name, samplerDef->u.name) != 0)
+                                continue;
+                            image = texture->semantic == 5 ? texture->u.water->map->image : texture->u.image;
+                            samplerState = texture->samplerState;
+                            break;
+                        }
+                        if (!image)
+                            R_Error(0, "Missing sampler '%s' in material '%s'", samplerDef->u.name, material->info.name);
+                    } else if (samplerDef->type != 0) {
+                        R_Error(0, "Unsupported DX7 sampler type %u", samplerDef->type);
+                    }
+                    RB_SetSampler(samplerIndex, samplerState, image);
+                    if (dxState.genTexCoords[samplerIndex] != dx7Pass->genTexCoords[samplerIndex])
+                        RB_ChangeGenTexCoords(samplerIndex, dx7Pass->genTexCoords[samplerIndex]);
                 }
             }
 
@@ -1288,7 +1330,8 @@ static BM_NOINLINE void __attribute_regparm__(3) RB_DrawSingleTechnique(Material
                 const Material *tessMat = ((materialCommands_t *)tess)->material;
                 refStateBits = (byte *)tessMat->stateBits;
             }
-            stateMap = (byte *)((MaterialPassDx9 *)pass)->stateMap;
+            stateMap = (byte *)((MaterialPassDx9 *)pass)->stateMap;
+
             stateBits[0] = *(int *)(refStateBits + 0);
             stateBits[1] = *(int *)(refStateBits + 4);
 
@@ -1388,7 +1431,7 @@ static BM_NOINLINE void __attribute_regparm__(3) RB_DrawSingleTechnique(Material
                                 do {
                                     byte *dev = *(byte **)(dx + 8);
                                     void **vt = *(void ***)dev;
-                                    ((void(D3DVTCC *)(void *, int, void *, int))vt[0x178 / 4])(
+                                    ((HRESULT(D3DVTCC *)(void *, int, void *, int))vt[0x178 / 4])(
                                         dev, destIndex, data, 1);
                                 } while (*af);
                             }
@@ -1429,7 +1472,7 @@ static BM_NOINLINE void __attribute_regparm__(3) RB_DrawSingleTechnique(Material
                                 do {
                                     byte *dev = *(byte **)(dx + 8);
                                     void **vt = *(void ***)dev;
-                                    ((void(D3DVTCC *)(void *, int, void *, int))vt[0x178 / 4])(
+                                    ((HRESULT(D3DVTCC *)(void *, int, void *, int))vt[0x178 / 4])(
                                         dev, destIndex, (void *)matrixData, rowCount);
                                 } while (*af);
                             }
@@ -1466,7 +1509,7 @@ static BM_NOINLINE void __attribute_regparm__(3) RB_DrawSingleTechnique(Material
                                 do {
                                     byte *dev = *(byte **)(dx + 8);
                                     void **vt = *(void ***)dev;
-                                    ((void(D3DVTCC *)(void *, int, void *, int))vt[0x178 / 4])(
+                                    ((HRESULT(D3DVTCC *)(void *, int, void *, int))vt[0x178 / 4])(
                                         dev, destIndex, constData, rowCount2);
                                 } while (*af);
                             }
@@ -1501,7 +1544,7 @@ static BM_NOINLINE void __attribute_regparm__(3) RB_DrawSingleTechnique(Material
                             do {
                                 byte *dev = *(byte **)(dx + 8);
                                 void **vt = *(void ***)dev;
-                                ((void(D3DVTCC *)(void *, int, void *, int))vt[0x1b4 / 4])(
+                                ((HRESULT(D3DVTCC *)(void *, int, void *, int))vt[0x1b4 / 4])(
                                     dev, destIdx, data, 1);
                             } while (*af);
                         }
@@ -1531,7 +1574,7 @@ static BM_NOINLINE void __attribute_regparm__(3) RB_DrawSingleTechnique(Material
                                 do {
                                     byte *dev = *(byte **)(dx + 8);
                                     void **vt = *(void ***)dev;
-                                    ((void(D3DVTCC *)(void *, int, void *, int))vt[0x1b4 / 4])(
+                                    ((HRESULT(D3DVTCC *)(void *, int, void *, int))vt[0x1b4 / 4])(
                                         dev, destIdx, (void *)matrixData, rowCount);
                                 } while (*af);
                             }
@@ -1569,7 +1612,7 @@ static BM_NOINLINE void __attribute_regparm__(3) RB_DrawSingleTechnique(Material
                                 do {
                                     byte *dev = *(byte **)(dx + 8);
                                     void **vt = *(void ***)dev;
-                                    ((void(D3DVTCC *)(void *, int, void *, int))vt[0x1b4 / 4])(
+                                    ((HRESULT(D3DVTCC *)(void *, int, void *, int))vt[0x1b4 / 4])(
                                         dev, destIdx, constData, rowCount2);
                                 } while (*af);
                             }
@@ -1757,7 +1800,7 @@ void RB_EndSurface(void)
 
     {
         uintptr_t ts = (uintptr_t)material->techniqueSet;   /* was unsigned int -> truncated ptr on x64 */
-        if (!ts || ts < 0x08000000u) {
+        if (!ts) {
             g_rb_endsurface_notechnique++;
             goto cleanup;
         }
@@ -1914,7 +1957,7 @@ void RB_EndSurface(void)
 
                         void *device = ((DxGlobals *)imp_dx)->device;
                         void **vtable = *(void ***)device;
-                        ((void(D3DVTCC *)(void *, int, void *))vtable[0x104 / 4])(device, 0, d3dTexture);
+                        ((HRESULT(D3DVTCC *)(void *, int, void *))vtable[0x104 / 4])(device, 0, d3dTexture);
 
                         {
                             unsigned int texID = *(unsigned int *)((byte *)d3dTexture + 0x54);

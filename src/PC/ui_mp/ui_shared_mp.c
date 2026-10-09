@@ -53,16 +53,16 @@ extern int UI_PlayLocalSoundAliasByName(const char *name);
 extern void UI_RunMenuScript(const char **args);
 extern qboolean UI_ClientIsInGame(void);
 extern void UI_Pause(qboolean pause);
-extern float UI_DrawHandlePic(float x, float y, float w, float h, int horzAlign, int vertAlign, const vec_t *color, MaterialHandle material);
+extern void UI_DrawHandlePic(float x, float y, float w, float h, int horzAlign, int vertAlign, const vec_t *color, MaterialHandle material);
 extern void UI_DrawRect(float x, float y, float w, float h, int horzAlign, int vertAlign, float size, const vec_t *color);
-extern float UI_FillRect(float x, float y, float w, float h, int horzAlign, int vertAlign, const vec_t *color);
+extern void UI_FillRect(float x, float y, float w, float h, int horzAlign, int vertAlign, const vec_t *color);
 extern void UI_DrawSides(float x, float y, float w, float h, int horzAlign, int vertAlign, float size, const vec_t *color);
 extern void UI_DrawTopBottom(float x, float y, float w, float h, int horzAlign, int vertAlign, float size, const vec_t *color);
 extern void UI_DrawLoadBar(float x, float y, float w, float h, int horzAlign, int vertAlign, const vec_t *color, MaterialHandle material);
 extern int UI_TextWidth(const char *text, int maxChars, FontHandle font, float scale);
 extern int UI_TextHeight(FontHandle font, float scale);
 extern const char *UI_SafeTranslateString(const char *key);
-extern int UI_OwnerDrawWidth(int ownerDraw, float scale);
+extern int UI_OwnerDrawWidth(int ownerDraw, FontHandle font, float scale);
 extern qboolean UI_OwnerDrawVisible(int flags);
 extern void UI_OwnerDraw(float x, float y, float w, float h, int horzAlign, int vertAlign, float text_x, float text_y, int ownerDraw, int ownerDrawFlags, int align, float special, FontHandle font, float scale, vec_t *color, MaterialHandle shader, int textStyle);
 extern qboolean UI_OwnerDrawHandleKey(int ownerDraw, int flags, int *special, int key);
@@ -652,6 +652,9 @@ void Script_ScriptMenuResponse(displayContextDef_t *dc, itemDef_t *item, const c
         }
     }
 
+    if (getenv("MTRACE"))
+        Com_Printf("[menu-trace] response menu='%s' index=%d value='%s' server=%d\n",
+                   item->parent->window.name, iIndex, val, Dvar_GetInt("sv_serverId"));
     Cbuf_ExecuteText(2, va("cmd mr %i %i %s\n", Dvar_GetInt("sv_serverId"), iIndex, val));
 }
 
@@ -865,6 +868,44 @@ int Menu_Count(displayContextDef_t *dc)
     return dc->menuCount;
 }
 
+#ifdef __EMSCRIPTEN__
+/* Keep the retail menu widgets and layout, exposing only settings implemented
+ * by the browser's fixed Toujane/TDM room service. Original files stay intact. */
+static void UI_ConfigureBrowserMenu(menuDef_t *menu)
+{
+    const char *name = menu->window.name;
+    int count = 0;
+    if (!name) return;
+    for (int i = 0; i < menu->itemCount; ++i) {
+        itemDef_t *item = menu->items[i];
+        const char *text = item->text ? item->text : "";
+        const char *dvar = item->dvar ? item->dvar : "";
+        if (!I_stricmp(name, "main_text") && !I_stricmp(text, "@MENU_SINGLE_PLAYER"))
+            continue;
+        if (!I_stricmp(name, "createserver_buttons") &&
+            I_stricmp(text, "@MENU_BACK") && I_stricmp(text, "@MENU_START"))
+            continue;
+        if (!I_stricmp(name, "createserver_serversettings")) {
+            if (!I_stricmp(dvar, "sv_maxclients")) {
+                item->type = 0;
+                item->dvar = NULL;
+                item->text = "64";
+                item->action = NULL;
+            } else if (I_stricmp(dvar, "sv_hostname") && !item->window.ownerDraw &&
+                       I_stricmp(text, "@MENU_SERVER_SETTINGS") &&
+                       I_stricmp(text, "@MENU_GAME_TYPE") &&
+                       I_stricmp(text, "@MENU_SERVER_NAME") &&
+                       I_stricmp(text, "@MENU_MAXIMUM_PLAYERS") &&
+                       !(item->type == 0 && !I_stricmp(text, "64"))) {
+                continue;
+            }
+        }
+        menu->items[count++] = item;
+    }
+    menu->itemCount = count;
+}
+#endif
+
 void UI_AddMenuList(displayContextDef_t *dc, MenuList *menuList)
 {
     int i;
@@ -876,6 +917,9 @@ void UI_AddMenuList(displayContextDef_t *dc, MenuList *menuList)
         return;
 
     for (i = 0; i < menuList->menuCount; i++) {
+#ifdef __EMSCRIPTEN__
+        UI_ConfigureBrowserMenu(menuList->menus[i]);
+#endif
         if (dc->menuCount > 0x7f)
             Com_Error(1, "UI_AddMenu: Maximum number of menus %d exceeded.", 0x80);
         dc->Menus[dc->menuCount] = menuList->menus[i];
@@ -1175,6 +1219,10 @@ void Menus_CloseAll(displayContextDef_t *dc)
         int top = (((displayContextDef_s*)(d))->openMenuCount) - 1;
         Menus_Close(dc, *(menuDef_t **)((char *)&((displayContextDef_s *)d)->menuStack[top]));
     }
+    /* A menu may be initially visible in its asset without having been pushed
+     * onto the open stack (the retail profile selector is one example). */
+    for (int i = 0; i < dc->menuCount; ++i)
+        Window_RemoveDynamicFlags(dc->Menus[i], 6);
 }
 
 void Item_SetTextExtents(itemDef_t *item, int *width, int *height, const char *text)
@@ -1215,7 +1263,7 @@ compute:;
     if (itemType == 8) {
         int alignment = (((itemDef_s*)(it))->textalignment);
         if (alignment == 1 || alignment == 2)
-            originalWidth += UI_OwnerDrawWidth(((itemDef_t *)it)->window.ownerDraw, scale);
+            originalWidth += UI_OwnerDrawWidth(((itemDef_t *)it)->window.ownerDraw, font, scale);
     } else if (itemType <= 0x12 && ((1 << itemType) & 0x70210)) {
         if ((((itemDef_s*)(it))->textalignment) == 1 && (*(void **)&((itemDef_t *)it)->dvar)) {
             originalWidth += UI_TextWidth(Dvar_GetVariantString(item->dvar), 0, font, scale);

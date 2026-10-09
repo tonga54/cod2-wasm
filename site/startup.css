@@ -1,0 +1,68 @@
+/* Original game artwork on the black startup screen. */
+.wasm-game-framework #loading.cod2-startup {
+  background: #000 !important;
+  color: #d4d4d0;
+}
+
+.wasm-game-framework #loading.cod2-startup [data-shell-card] {
+  width: min(640px, 92vw) !important;
+  padding: 24px 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  text-align: center;
+}
+
+.wasm-game-framework #loading.cod2-startup #loading-title {
+  margin: 0 0 18px !important;
+  padding: 0 !important;
+  line-height: 0;
+}
+
+.wasm-game-framework #loading.cod2-startup #loading-title img {
+  display: block;
+  width: min(512px, 82vw);
+  height: auto;
+  margin: 0 auto;
+  user-select: none;
+}
+
+.wasm-game-framework #loading.cod2-startup #loading-status {
+  margin: 0 0 16px !important;
+  color: #d4d4d0 !important;
+  font: 15px/1.4 Georgia, 'Times New Roman', serif;
+  letter-spacing: 0.04em;
+}
+
+.wasm-game-framework #loading.cod2-startup #loading-progress {
+  display: block;
+  appearance: none;
+  width: min(180px, 48vw);
+  height: 2px;
+  margin: 0 auto;
+  border: 0;
+  border-radius: 0;
+  background: #25251f;
+  color: #a49b79;
+  accent-color: #a49b79;
+}
+
+.wasm-game-framework #loading.cod2-startup #loading-progress::-webkit-progress-bar {
+  background: #25251f;
+}
+
+.wasm-game-framework #loading.cod2-startup #loading-progress::-webkit-progress-value {
+  background: #a49b79;
+}
+
+.wasm-game-framework #loading.cod2-startup #loading-progress::-moz-progress-bar {
+  background: #a49b79;
+}
+
+.wasm-game-framework #loading.cod2-startup #loading-detail:empty {
+  display: none;
+}
+
+.wasm-game-framework #loading.cod2-startup #loading-console {
+  text-align: left;
+}

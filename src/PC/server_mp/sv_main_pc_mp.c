@@ -15,10 +15,10 @@ extern void Com_BeginRedirect(char *buffer, int buffersize, void (*flush)(char *
 extern void Com_EndRedirect(void);
 extern int Com_AddToString(const char *add, char *msg, int len, int maxlen, qboolean mayAddQuotes);
 extern const char *va(const char *fmt, ...);
-extern long int SVC_Status(netadr_t from);
-extern long int SVC_GameCompleteStatus(netadr_t from);
+extern void SVC_Status(netadr_t from);
+extern void SVC_GameCompleteStatus(netadr_t from);
 
-extern byte svs_ptr[];
+extern serverStatic_t svs;
 extern const dvar_t *sv_dedicated_dvar;
 extern const dvar_t *rcon_password_dvar;
 

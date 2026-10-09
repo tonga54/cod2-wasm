@@ -13,10 +13,10 @@ extern int SV_PointSightTraceToEntity(const sightpointtrace_t *clip, svEntity_t 
 extern int XModelGetContents(const XModel *model);
 extern qboolean CM_TraceBox(const TraceExtents *extents, const vec_t *mins, const vec_t *maxs, float fraction);
 extern qboolean CM_TraceStaticModelComplete(cStaticModel_t *sm, const vec_t *start, const vec_t *end, int contentmask);
-extern float CM_TraceStaticModel(cStaticModel_t *sm, trace_t *results, const vec_t *start, const vec_t *end, int contentmask);
+extern void CM_TraceStaticModel(cStaticModel_t *sm, trace_t *results, const vec_t *start, const vec_t *end, int contentmask);
 extern int SV_ClipSightToEntity(const sightclip_t *clip, svEntity_t *check);
-extern int SV_PointTraceToEntity(const pointtrace_t *clip, svEntity_t *check, trace_t *trace);
-extern int SV_ClipMoveToEntity(const moveclip_t *clip, svEntity_t *check, trace_t *trace);
+extern void SV_PointTraceToEntity(const pointtrace_t *clip, svEntity_t *check, trace_t *trace);
+extern void SV_ClipMoveToEntity(const moveclip_t *clip, svEntity_t *check, trace_t *trace);
 extern void CM_ModelBounds(clipHandle_t model, vec_t *mins, vec_t *maxs);
 extern cmodel_t *CM_ClipHandleToModel(clipHandle_t handle);
 extern void Com_DPrintf(const char *fmt, ...);
@@ -725,12 +725,13 @@ void CM_ClipMoveToEntities(moveclip_t *clip, trace_t *trace)
 static unsigned short CM_WorldEntityIndex(const svEntity_t *ent)
 {
     server_t *sv = (server_t *)imp_sv;
-    return (unsigned short)(ent - sv->svEntities);
+    /* Zero terminates every world-sector entity list. */
+    return (unsigned short)(ent - sv->svEntities + 1);
 }
 
 static svEntity_t *CM_WorldEntityForIndex(unsigned short entIndex)
 {
-    return &sv.svEntities[(unsigned int)entIndex];
+    return &sv.svEntities[(unsigned int)entIndex - 1];
 }
 
 static unsigned short CM_AllocWorldSector(const vec_t *mins, const vec_t *maxs)

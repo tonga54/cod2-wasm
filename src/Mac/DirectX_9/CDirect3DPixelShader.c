@@ -287,7 +287,9 @@ void COpenGLARBFragmentProgram_SetConstants(const COpenGLARBFragmentProgram *_th
     (void)_this;
     (void)CommandNumber;
     for (i = 0; i < Vector4fCount; i++) {
+#ifndef __EMSCRIPTEN__
         glProgramEnvParameter4fvARB(0x8804, Register + i, pf);
+#endif
         pf += 4;
     }
     return 0;
@@ -295,6 +297,12 @@ void COpenGLARBFragmentProgram_SetConstants(const COpenGLARBFragmentProgram *_th
 
 void COpenGLARBFragmentProgram_COpenGLARBFragmentProgram(const COpenGLARBFragmentProgram *_this, const string *Name, const string *Code)
 {
+#ifdef __EMSCRIPTEN__
+    extern void Com_Error(int, const char *, ...);
+    Com_Error(1, "ARB shaders are unsupported by the WebGL fixed-function target");
+    return ;
+#else
+
     COpenGLARBFragmentProgramImpl *program;
     const char *codeStr;
     int codeLen;
@@ -345,6 +353,7 @@ void COpenGLARBFragmentProgram_COpenGLARBFragmentProgram(const COpenGLARBFragmen
     glBindProgramARB(0x8804, 0);
 
     return 0;
+#endif
 }
 
 static void COpenGLARBFragmentProgram_DestroyImpl(const COpenGLARBFragmentProgram *_this)
@@ -353,7 +362,9 @@ static void COpenGLARBFragmentProgram_DestroyImpl(const COpenGLARBFragmentProgra
     program = (COpenGLARBFragmentProgramImpl *)_this;
     program->vtable = vtbl_CDirect3DPixelShader_ARB;
     if (program->programId) {
+#ifndef __EMSCRIPTEN__
         glDeleteProgramsARB(1, &program->programId);
+#endif
         program->programId = 0;
     }
     ZN20CDirect3DPixelShaderD2Ev((const CDirect3DPixelShader *)_this);

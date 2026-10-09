@@ -1,0 +1,58 @@
+services:
+  cod2-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: local/cod2-wasm:dev
+    cpus: 1.0
+    mem_limit: 512m
+    expose:
+      - "8088"
+    volumes:
+      - "${COD2_WEB_DATA_DIR:-./data/browser}:/data:ro"
+    restart: unless-stopped
+  cod2-server:
+    build:
+      context: .
+      dockerfile: downstream/server/Dockerfile
+    image: local/cod2-native-server:dev
+    platform: linux/amd64
+    cpus: 2.0
+    mem_limit: 1g
+    read_only: true
+    tmpfs:
+      - /profile:uid=1000,gid=1000,size=32m
+      - /tmp:size=16m
+    volumes:
+      - "${COD2_WEB_DATA_DIR:-./data/browser}/main:/game/main:ro"
+    networks:
+      - game
+    logging:
+      options:
+        max-size: "5m"
+        max-file: "2"
+  cod2-gateway:
+    build:
+      context: downstream/gateway
+    image: local/cod2-gateway:dev
+    cpus: 0.5
+    mem_limit: 96m
+    read_only: true
+    volumes:
+      - "${COD2_WEB_DATA_DIR:-./data/browser}/web:/game-ui:ro"
+    ports:
+      - "${COD2_WEB_PORT:-8088}:8088"
+    depends_on:
+      - cod2-web
+      - cod2-server
+    networks:
+      - default
+      - game
+    restart: unless-stopped
+    logging:
+      options:
+        max-size: "5m"
+        max-file: "2"
+networks:
+  game:
+    internal: true

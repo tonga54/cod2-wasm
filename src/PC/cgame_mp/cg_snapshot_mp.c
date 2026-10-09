@@ -128,6 +128,41 @@ static char *CG_ClientInfoPtr(char *cg, int clientNum)
     return (char *)&((cg_t *)cg)->bgs.clientinfo[clientNum];
 }
 
+static void CG_ResetCorpseEntity(centity_t *cent)
+{
+    int corpseIndex = cent->nextState.number - 64;
+    int clientNum = cent->nextState.clientNum;
+    clientInfo_t *source;
+    clientInfo_t *corpse;
+    void *tree;
+    int clone = cent->nextState.eFlags & 8;
+    int i;
+
+    if ((unsigned)corpseIndex >= 8 || (unsigned)clientNum >= 64)
+        return;
+    source = &((cg_t *)cg)->bgs.clientinfo[clientNum];
+    corpse = &((cgs_t *)cgs)->corpseinfo[corpseIndex];
+    tree = corpse->pXAnimTree;
+
+    if (clone || !corpse->model[0] || corpse->clientNum != source->clientNum) {
+        *corpse = *source;
+        for (i = 0; i < 6; i++) {
+            if (!I_stricmp(corpse->attachTagNames[i], "J_Spine4")) {
+                corpse->attachModelNames[i][0] = 0;
+                corpse->attachTagNames[i][0] = 0;
+            }
+        }
+        corpse->pXAnimTree = tree;
+    }
+    if (clone) {
+        XAnimCloneAnimTree(source->pXAnimTree, tree);
+        cent->previousEventSequence = 0;
+    } else {
+        cent->previousEventSequence = cent->nextState.eventSequence;
+    }
+    corpse->dobjDirty = 1;
+}
+
 static void CG_ResetEntity(char *cent)
 {
     int eType;
@@ -179,91 +214,8 @@ static void CG_ResetEntity(char *cent)
     }
 
     case 2:
-    {
-        char *ci;
-        char *corpseInfo;
-        char *corpseBase;
-        void *pXAnimTree;
-        int entNum;
-        int clientNum;
-
-        clientNum = ((centity_t *)cent)->nextState.clientNum;
-        ci = (char *)&((cg_t *)cg)->bgs.clientinfo[clientNum];
-
-        entNum = ((centity_t *)cent)->nextState.number;
-
-        {
-            char *cgs_ptr = (char *)cgs;
-
-            corpseBase = cgs_ptr + entNum * CI_STRIDE - 0x6bf0;
-            corpseInfo = corpseBase + 4;
-        }
-
-        pXAnimTree = ((clientInfo_t *)corpseInfo)->pXAnimTree;
-
-        if (((centity_t *)cent)->nextState.eFlags & 8) {
-            int attachIndex;
-
-            memcpy(corpseInfo, ci, CI_STRIDE);
-
-            {
-                char *tagSrc = corpseBase + 0x204;
-                char *modelDst = corpseInfo;
-                for (attachIndex = 0; attachIndex < 6; attachIndex++) {
-                    if (I_stricmp(tagSrc, (const char *)"J_Spine4") == 0) {
-                        *(char *)(modelDst + 0x80)  = 0;
-                        *(char *)(modelDst + 0x200)  = 0;
-                    }
-                    tagSrc += 0x40;
-                    modelDst += 0x40;
-                }
-            }
-
-            ((clientInfo_t *)corpseInfo)->pXAnimTree = pXAnimTree;
-
-            XAnimCloneAnimTree(((clientInfo_t *)ci)->pXAnimTree, pXAnimTree);
-
-            ((centity_t *)cent)->previousEventSequence = 0;
-        } else {
-
-            if (((clientInfo_t *)corpseInfo)->model[0] != 0) {
-
-                if (((clientInfo_t *)corpseInfo)->clientNum != ((clientInfo_t *)ci)->clientNum) {
-
-                    goto do_corpse_copy_from_ci;
-                }
-
-            } else {
-
-            do_corpse_copy_from_ci: {
-                int attachIndex;
-                char *src = ci;
-
-                memcpy(corpseInfo, src, CI_STRIDE);
-
-                {
-                    char *tagSrc = corpseBase + 0x204;
-                    char *modelDst = corpseInfo;
-                    for (attachIndex = 0; attachIndex < 6; attachIndex++) {
-                        if (I_stricmp(tagSrc, (const char *)"J_Spine4") == 0) {
-                            *(char *)(modelDst + 0x80)  = 0;
-                            *(char *)(modelDst + 0x200)  = 0;
-                        }
-                        tagSrc += 0x40;
-                        modelDst += 0x40;
-                    }
-                }
-
-                ((clientInfo_t *)corpseInfo)->pXAnimTree = pXAnimTree;
-            }
-            }
-
-            ((centity_t *)cent)->previousEventSequence = ((centity_t *)cent)->nextState.eventSequence;
-        }
-
-        ((clientInfo_t *)corpseInfo)->dobjDirty = 1;
+        CG_ResetCorpseEntity((centity_t *)cent);
         break;
-    }
 
     default:
 
@@ -631,14 +583,13 @@ void CG_SetNextSnap(snapshot_t *snap_param)
                             continue;
 
                         {
-                            char *cgs_ptr = (char *)cgs;
-                            int csNum = ((centity_t *)cent)->nextState.number;
-                            char *corpseBase = cgs_ptr + csNum * CI_STRIDE - 0x6bf0;
-                            char *corpseCI = corpseBase + 4;
-
-                            void *savedTree = *(void **)(corpseCI + CI_PXANIMTREE);
-
-                            int animState = *(int *)(corpseCI + 0x390)  & ~0x200;
+                            int corpseIndex = ((centity_t *)cent)->nextState.number - 64;
+                            clientInfo_t *corpseCI;
+                            if ((unsigned)corpseIndex >= 8)
+                                continue;
+                            corpseCI = &((cgs_t *)cgs)->corpseinfo[corpseIndex];
+                            void *savedTree = corpseCI->pXAnimTree;
+                            int animState = corpseCI->legs.animationNumber & ~0x200;
 
                             void *anims = XAnimGetAnims(savedTree);
 

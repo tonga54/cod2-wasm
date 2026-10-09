@@ -27,8 +27,8 @@ extern void *R_AllocStaticIndexBuffer(IDirect3DIndexBuffer9 **ib, int sizeInByte
 extern void R_FinishStaticIndexBuffer(IDirect3DIndexBuffer9 *ib);
 extern void R_FreeStaticIndexBuffer(IDirect3DIndexBuffer9 *ib);
 extern int XSurfaceGetBoneOffset(const XSurface *surf);
-extern unsigned long XSurfaceTransfer(const XVertexBuffer *surfVerts, void *verts, int vertCount);
-extern unsigned long XSurfaceTransferDx7(const XVertexBuffer *surfVerts, void *verts, int vertCount);
+extern void XSurfaceTransfer(const XVertexBuffer *surfVerts, void *verts, int vertCount);
+extern void XSurfaceTransferDx7(const XVertexBuffer *surfVerts, void *verts, int vertCount);
 extern void Com_Memcpy(void *dest, const void *src, int count);
 
 void XSurfaceOptimizeRigid(XModel *model, XSurface *surface, XVertexBuffer *surfVerts);
@@ -77,7 +77,7 @@ void XSurfaceOptimizeRigid(XModel *model, XSurface *surface, XVertexBuffer *surf
     if (hr < 0) {
 
         vbVtable = *(void ***)surface->surfRigid.vb;
-        ((void(__attribute__((cdecl)) *)(void *))vbVtable[8 / 4])(surface->surfRigid.vb);
+        ((ULONG(D3DVTCC *)(void *))vbVtable[8 / 4])(surface->surfRigid.vb);
         surface->surfRigid.vb = NULL;
         return;
     }
@@ -101,7 +101,7 @@ void XModelOptimize(XModel *model)
     int surfCount;
     int surfIndex;
     XSurface **surfaces;
-    XPartBits partBits;
+    int *partBits;
     XSurface *surf;
     int indexDataSize;
     int indexBytes;
@@ -109,13 +109,13 @@ void XModelOptimize(XModel *model)
 
     vtable = XMODEL_VTABLE;
 
-    lodCount = FLAT_CALL(vtable, 0x174, model);
+    lodCount = ((int (*)(const XModel *))ri.XModelGetNumLods)(model);
     if (lodCount <= 0)
         return;
 
     for (lodIndex = 0; lodIndex < lodCount; lodIndex++) {
 
-        surfCount = FLAT_CALL(vtable, 0x168, model, &surfaces, lodIndex, &partBits);
+        surfCount = ((int (*)(const XModel *, XSurface ***, int, int **))ri.XModelGetSurfaces)(model, &surfaces, lodIndex, &partBits);
         if (surfCount <= 0)
             continue;
 
@@ -158,19 +158,19 @@ void XModelUnoptimize(XModel *model)
     int surfCount;
     int surfIndex;
     XSurface **surfaces;
-    XPartBits partBits;
+    int *partBits;
     XSurface *surf;
     void **vbVtable;
 
     vtable = XMODEL_VTABLE;
 
-    lodCount = FLAT_CALL(vtable, 0x174, model);
+    lodCount = ((int (*)(const XModel *))ri.XModelGetNumLods)(model);
     if (lodCount <= 0)
         return;
 
     for (lodIndex = 0; lodIndex < lodCount; lodIndex++) {
 
-        surfCount = FLAT_CALL(vtable, 0x168, model, &surfaces, lodIndex, &partBits);
+        surfCount = ((int (*)(const XModel *, XSurface ***, int, int **))ri.XModelGetSurfaces)(model, &surfaces, lodIndex, &partBits);
         if (surfCount <= 0)
             continue;
 
@@ -186,7 +186,7 @@ void XModelUnoptimize(XModel *model)
                 do {
 
                     vbVtable = *(void ***)surf->surfRigid.vb;
-                    ((void(__attribute__((cdecl)) *)(void *))vbVtable[8 / 4])(surf->surfRigid.vb);
+                    ((ULONG(D3DVTCC *)(void *))vbVtable[8 / 4])(surf->surfRigid.vb);
                     surf->surfRigid.vb = NULL;
                 } while (GPU_FENCE_FLAG != 0);
             }

@@ -390,7 +390,7 @@ static void Bullet_Fire_Extended(const gentity_t *source, gentity_s (*attacker)[
     if (!(tr.surfaceFlags & 4) && !traceEnt->client && tr.fraction < 1.0f) {
         gentity_t *tent;
 
-        tent = (gentity_t *)G_TempEntity(endpos, weapDef->bRifleBullet ? 0xb7 : 0xb6);
+        tent = (gentity_t *)G_TempEntity(endpos, weapDef->bRifleBullet ? 0xb6 : 0xb5);
         tent->s.eventParm = (unsigned char)DirToByte(tr.normal);
         tent->s.eventParm2 = (unsigned char)DirToByte(reflect);
         tent->s.surfType = traceEnt->s.eType == 2 ? 7 : ((tr.surfaceFlags & 0x1f00000) >> 20);

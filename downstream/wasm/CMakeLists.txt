@@ -21,15 +21,27 @@ set(COD2_CLIENT_SOURCES ${COD2_PC_C} ${COD2_MAC_C} ${COD2_STUB_C} ${COD2_ROOT_C}
 # downstream browser entrypoint. No native x86/Mach-O assembly enters the build.
 list(FILTER COD2_CLIENT_SOURCES EXCLUDE REGEX "/PC/zlib/(inflate|infblock|infcodes|inffast|inftrees|infutil|adler32|zutil)\\.c$")
 list(FILTER COD2_CLIENT_SOURCES EXCLUDE REGEX "/(data|import_pointers|literals)\\.c$")
-list(FILTER COD2_CLIENT_SOURCES EXCLUDE REGEX "/stubs/cpp_trampoline\\.c$")
+list(FILTER COD2_CLIENT_SOURCES EXCLUDE REGEX "/stubs/(cpp_trampoline|zlib_alloc)\\.c$")
+list(FILTER COD2_CLIENT_SOURCES EXCLUDE REGEX "/Mac/Tools/(MacAppleEvents|MacBuilder)\\.c$")
+list(FILTER COD2_CLIENT_SOURCES EXCLUDE REGEX "/PC/win32/win_net\\.c$")
+list(FILTER COD2_CLIENT_SOURCES EXCLUDE REGEX "/Mac/Tools/MacMSS\\.c$")
+# The reconstruction shares startup and prediction callbacks with game_mp and
+# server_mp. Keep their real definitions while repairing the portable graph;
+# the browser startup selects a remote client, never a local dedicated server.
 
 list(APPEND COD2_CLIENT_SOURCES
   "${COD2_SRC}/blobs/bss.c"
+  "${COD2_SRC}/unix/linux_input.c"
+  "${COD2_SRC}/unix/linux_net.c"
+  "${CMAKE_CURRENT_LIST_DIR}/web_platform.c"
+  "${CMAKE_CURRENT_LIST_DIR}/web_net.c"
+  "${CMAKE_CURRENT_LIST_DIR}/web_audio.c"
   "${COD2_ROOT}/build/native_gen/data32.c"
   "${COD2_ROOT}/build/native_gen/literals32.c"
   "${COD2_ROOT}/build/native_gen/import_pointers_native.c"
   "${CMAKE_CURRENT_LIST_DIR}/web_main.c"
-  "${CMAKE_CURRENT_LIST_DIR}/web_gl_compat.c")
+  "${CMAKE_CURRENT_LIST_DIR}/web_gl_compat.c"
+  "${CMAKE_CURRENT_LIST_DIR}/web_jpeg_compat.c")
 
 add_library(cod2_client_objects OBJECT ${COD2_CLIENT_SOURCES})
 target_compile_definitions(cod2_client_objects PRIVATE
@@ -39,11 +51,13 @@ target_compile_definitions(cod2_client_objects PRIVATE
   COD2_FEATURE_SCRIPT_DEBUGGER=0
   COD2_FEATURE_GAMEPAD=0
   COD2_FEATURE_SPLITSCREEN=0
+  GL_GLEXT_PROTOTYPES=1
   SDL_DISABLE_IMMINTRIN_H=1)
 target_include_directories(cod2_client_objects PRIVATE
   "${COD2_ROOT}"
   "${COD2_SRC}"
   "${COD2_SRC}/headers"
+  "${COD2_SRC}/PC/jpeg-6"
   "${COD2_SRC}/PC/speex"
   "${CMAKE_CURRENT_LIST_DIR}")
 target_compile_options(cod2_client_objects PRIVATE
@@ -53,31 +67,50 @@ target_compile_options(cod2_client_objects PRIVATE
   -Wno-int-conversion -Wno-return-type -Wno-deprecated-non-prototype
   -Wno-duplicate-decl-specifier -Wno-ignored-attributes)
 
-# Keep the real link available as an explicit diagnostic target. It is not part
-# of ALL because the reconstruction's native generated data model currently
-# relies on function/data aliases which wasm-ld cannot represent. Compiling the
-# object graph remains useful evidence and prevents a checksum probe from being
-# mistaken for an engine build.
+# Keep the unfinished engine link explicit until the browser runtime works.
+# Undefined symbols and ABI warnings must be repaired, never hidden by the
+# checksum diagnostic or by permissive linker flags.
 add_executable(cod2_client EXCLUDE_FROM_ALL $<TARGET_OBJECTS:cod2_client_objects>)
 target_link_options(cod2_client PRIVATE
+  -g2
   "SHELL:-s USE_SDL=2"
   "SHELL:-s USE_ZLIB=1"
+  "SHELL:--pre-js ${CMAKE_CURRENT_LIST_DIR}/web_audio.js"
+  # SDL2 in Emscripten 3.1.64 addresses Module.canvas with the #canvas alias.
+  # The framework owns that element and uses its own DOM id.
+  "SHELL:-s DISABLE_DEPRECATED_FIND_EVENT_TARGET_BEHAVIOR=0"
   "SHELL:-s USE_WEBGL2=1"
   "SHELL:-s MIN_WEBGL_VERSION=2"
   "SHELL:-s MAX_WEBGL_VERSION=2"
   "SHELL:-s LEGACY_GL_EMULATION=1"
+  "SHELL:-s GL_UNSAFE_OPTS=0"
   "SHELL:-s ALLOW_MEMORY_GROWTH=1"
   "SHELL:-s INITIAL_MEMORY=536870912"
   "SHELL:-s MAXIMUM_MEMORY=4294967296"
+  "SHELL:-s MODULARIZE=1"
+  "SHELL:-s EXPORT_NAME=createCod2Client"
+  "SHELL:-s INVOKE_RUN=0"
+  "SHELL:-s EXPORTED_RUNTIME_METHODS=FS,callMain"
+  "SHELL:-s EXPORTED_FUNCTIONS=_main,_free,_web_client_state,_web_capture_lost"
   "SHELL:-s EXIT_RUNTIME=0"
   "SHELL:-s ASSERTIONS=1"
   "SHELL:-s ENVIRONMENT=web"
-  "SHELL:-s STACK_SIZE=8388608")
+  "SHELL:-s STACK_SIZE=8388608"
+  "SHELL:-Wl,--error-limit=0")
 set_target_properties(cod2_client PROPERTIES
   OUTPUT_NAME "cod2"
   SUFFIX ".js"
   LINKER_LANGUAGE CXX
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/site")
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(COD2_GL_PATCH "${COD2_ROOT}/scripts/patch-emscripten-gl.py")
+set_property(TARGET cod2_client APPEND PROPERTY LINK_DEPENDS "${COD2_GL_PATCH}")
+set_property(TARGET cod2_client APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/web_audio.js")
+add_custom_command(TARGET cod2_client POST_BUILD
+  COMMAND "${Python3_EXECUTABLE}" "${COD2_GL_PATCH}" "$<TARGET_FILE:cod2_client>"
+  COMMENT "Repairing pinned Emscripten legacy-GL texture-call generation"
+  VERBATIM)
 
 add_executable(cod2_core_probe
   "${CMAKE_CURRENT_LIST_DIR}/core_probe.c"

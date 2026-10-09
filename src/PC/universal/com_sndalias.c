@@ -3,7 +3,7 @@
 
 extern int stricmp(const char *s1, const char *s2);
 
-extern void *Hunk_AllocateTempMemoryInternal(int size, const char *name);
+extern void *Hunk_AllocateTempMemoryInternal(int size);
 extern void *Hunk_AllocInternal(int size);
 extern float GraphGetValueFromFraction(int knotCount, float *knots, float fraction);
 
@@ -326,7 +326,8 @@ SndCurve *Com_GetDefaultSoundAliasVolumeFalloffCurve(void)
 
 void *Com_AllocateTempSoundMemory(int size, const char *name)
 {
-    return (void *)Hunk_AllocateTempMemoryInternal(size, name);
+    (void)name;
+    return Hunk_AllocateTempMemoryInternal(size);
 }
 
 void *Com_AllocSoundMemory(int size, const char *name, int type)
@@ -336,6 +337,10 @@ void *Com_AllocSoundMemory(int size, const char *name, int type)
 
 void Com_UnloadSoundAliasSounds(snd_alias_system_t system)
 {
+#ifdef __EMSCRIPTEN__
+    extern void WebAudio_ClearCache(void);
+    WebAudio_ClearCache();
+#endif
     snd_alias_t *head;
     int count;
     int index;

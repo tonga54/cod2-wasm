@@ -32,7 +32,7 @@ extern void Com_Memset(void *dest, int val, int count);
 void Huff_Init(huffman_t *huff);
 void Huff_offsetReceive(node_t *node, int *ch, byte *fin, int *offset);
 static void increment(huff_t *huff, node_t *node);
-void Huff_addRef(huff_t *huff, int ch, msg_t *mbuf, int offset);
+void Huff_addRef(huff_t *huff, int ch);
 void huffman_send(node_t *node, node_t *child, byte *fout);
 void Huff_offsetTransmit(huff_t *huff, int ch, byte *fout, int *offset);
 
@@ -210,7 +210,7 @@ void huffman_send(node_t *node, node_t *child, byte *fout)
     huffman_send_core(node, child, fout);
 }
 
-void Huff_addRef(huff_t *huff, int ch, msg_t *mbuf, int offset)
+void Huff_addRef(huff_t *huff, int ch)
 {
     node_t *tnode, *tnode2;
 

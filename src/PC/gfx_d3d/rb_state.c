@@ -10,8 +10,12 @@ extern DxGlobals dx;
 
 extern struct DxState dxState;
 extern r_backEndGlobals_t backEnd;
-static const DxTextureStageEnums texStageEnums;
-static const DxTextureStageEnums texStageEnums_002f24ac;
+static const DxTextureStageEnums texStageEnums = {
+    D3DTSS_ALPHAOP, { D3DTSS_ALPHAARG1, D3DTSS_ALPHAARG2, D3DTSS_ALPHAARG0 }
+};
+static const DxTextureStageEnums texStageEnums_002f24ac = {
+    D3DTSS_COLOROP, { D3DTSS_COLORARG1, D3DTSS_COLORARG2, D3DTSS_COLORARG0 }
+};
 extern const byte defaultSamplerStateTable[];
 extern const DWORD s_blendTable[];
 extern const DWORD s_blendOpTable[];
@@ -49,7 +53,7 @@ typedef struct {
 extern void MatrixInverse44(const float *mat, float *dst);
 extern void MatrixIdentity44(float (*out)[4]);
 extern void MatrixSet44(float (*out)[4], const vec_t *origin, vec3_t *axis, vec_t scale);
-extern void MacOpenGLUtils_GetSubPixelOffset(float *xOffset, float *yOffset);
+extern int MacOpenGLUtils_GetSubPixelOffset(float *xOffset, float *yOffset);
 extern void RB_SetCodeConstant(int constant, vec_t x, vec_t y, vec_t z, vec_t w);
 
 enum {

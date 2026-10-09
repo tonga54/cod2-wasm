@@ -260,6 +260,10 @@ void IN_Frame(void)
     int eventCount;
     static int suppressNativeInputFrames;
 
+#ifndef __EMSCRIPTEN__
+    /* The browser framework owns pointer lock and its trusted user gesture.
+     * SDL still delivers movement/buttons, but must not request/release a
+     * second lock independently when native UI state changes. */
     {
         extern void *imp_cl;
         extern SDL_Window *sdl_gl_window;
@@ -274,6 +278,7 @@ void IN_Frame(void)
             grabbed = wantGrab;
         }
     }
+#endif
 
     if (SDL_PumpInputEvents() > 0) {
         suppressNativeInputFrames = 12;
@@ -284,6 +289,10 @@ void IN_Frame(void)
     CL_Gamepad_Frame();
 #endif
 
+#ifdef __EMSCRIPTEN__
+    /* Browser input arrives exclusively through SDL; there is no X11 queue. */
+    return;
+#else
     if (suppressNativeInputFrames > 0) {
 
         for (eventCount = 0;
@@ -326,4 +335,5 @@ void IN_Frame(void)
         }
         }
     }
+#endif
 }

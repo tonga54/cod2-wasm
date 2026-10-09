@@ -469,7 +469,12 @@ int FS_filelength(fileHandle_t f)
 
 #ifdef __EMSCRIPTEN__
     if (entry->zipFile) {
-        return entry->fileSize;
+        unz_file_info info;
+        if (unzGetCurrentFileInfo(entry->handleFiles.file.z, &info,
+                                  NULL, 0, NULL, 0, NULL, 0) != 0) {
+            return -1;
+        }
+        return (int)info.uncompressed_size;
     }
 #endif
 
@@ -520,7 +525,7 @@ void FS_FCloseFile(fileHandle_t h)
     Com_Memset(entry, 0, sizeof(fileHandleData_t));
 }
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 void FS_Shutdown(qboolean closemfp)
 {
     int i;

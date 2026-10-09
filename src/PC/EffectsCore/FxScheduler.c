@@ -207,7 +207,7 @@ void FxScheduler_CreateEffect(const FxScheduler *_this, const EffectTemplate *fx
 
     AxisCopy((const vec_t *)axis, (vec_t *)ax);
 
-    if (primTemp->mSpawnFlags & 1) {
+    if (primTemp->mSpawnFlags & 0x100) {
         vec3_t rotated;
         float angle = flrand(0.0f, 360.0f);
         RotatePointAroundVector(rotated, (const vec_t *)ax, (const vec_t *)axis + 3, angle);
@@ -218,8 +218,10 @@ void FxScheduler_CreateEffect(const FxScheduler *_this, const EffectTemplate *fx
         goto cleanup;
     }
 
+    memset(&prim, 0, sizeof(prim));
     prim.fx = fx;
     prim.primTemp = primTemp;
+    prim.boltFrame = boltFrame;
 
     primType = primTemp->mType;
     if (primType > 12) {
@@ -288,7 +290,7 @@ void FxScheduler_PlayEffect(const FxScheduler *_this, const EffectTemplate *fx, 
     int rangeCheck;
     float culldist;
 
-    helper = *(FxHelper **)&imp_theFxHelper;
+    helper = *(FxHelper **)imp_theFxHelper;
 
     seed = FxHelper_GetSeed(helper);
     ((FxScheduler *)_this)->mSeed = seed;
@@ -305,8 +307,8 @@ void FxScheduler_PlayEffect(const FxScheduler *_this, const EffectTemplate *fx, 
     }
 
     {
-        dvar_t *freezeDvar = *(dvar_t **)&imp_fx_freeze;
-        dvar_t *enableDvar = *(dvar_t **)&imp_fx_enable;
+        dvar_t *freezeDvar = *(dvar_t **)imp_fx_freeze;
+        dvar_t *enableDvar = *(dvar_t **)imp_fx_enable;
         if (freezeDvar->current.enabled != 0)
             return;
         if (enableDvar->current.enabled == 0)
@@ -319,6 +321,7 @@ void FxScheduler_PlayEffect(const FxScheduler *_this, const EffectTemplate *fx, 
             return;
         if (!FX_GetBoneOrientation(bolt, &or_))
             return;
+        AxisCopy((const vec_t *)or_.axis, (vec_t *)ax);
     } else {
 
         if (origin) {
@@ -330,7 +333,12 @@ void FxScheduler_PlayEffect(const FxScheduler *_this, const EffectTemplate *fx, 
             or_.origin[1] = 0.0f;
             or_.origin[2] = 0.0f;
         }
-        AxisCopy((const vec_t *)axis, (vec_t *)ax);
+        if (axis)
+            AxisCopy((const vec_t *)axis, (vec_t *)ax);
+        else {
+            memset(ax, 0, sizeof(ax));
+            ax[0][0] = ax[1][1] = ax[2][2] = 1.0f;
+        }
     }
 
     numAdded = 0;
@@ -348,9 +356,9 @@ void FxScheduler_PlayEffect(const FxScheduler *_this, const EffectTemplate *fx, 
 
         if (prim->mSpawnRange.mMin != 0.0f) {
 
-            distSq = Vec3DistanceSq(origin, helper->mCamera.vieworg);
+            distSq = Vec3DistanceSq(or_.origin, helper->mCamera.vieworg);
             culldist = prim->mSpawnRange.mMin * helper->adsZoomFactor;
-            if (distSq > culldist * culldist) {
+            if (distSq < culldist * culldist) {
                 continue;
             }
             rangeCheck = 1;
@@ -360,7 +368,7 @@ void FxScheduler_PlayEffect(const FxScheduler *_this, const EffectTemplate *fx, 
 
         if (prim->mSpawnRange.mMax != 0.0f) {
             if (!rangeCheck) {
-                distSq = Vec3DistanceSq(origin, helper->mCamera.vieworg);
+                distSq = Vec3DistanceSq(or_.origin, helper->mCamera.vieworg);
             }
             culldist = prim->mSpawnRange.mMax * helper->adsZoomFactor;
             if (distSq > culldist * culldist) {
@@ -368,8 +376,8 @@ void FxScheduler_PlayEffect(const FxScheduler *_this, const EffectTemplate *fx, 
             }
         }
 
-        if (prim->mSpawnFlags & 4) {
-            if (FxHelper_CullSpherePreviousFrame(helper, origin, prim->spawnFrustumCullRadius)) {
+        if (prim->mSpawnFlags & 0x400) {
+            if (FxHelper_CullSpherePreviousFrame(helper, or_.origin, prim->spawnFrustumCullRadius)) {
                 continue;
             }
         }
@@ -437,8 +445,8 @@ void FxScheduler_PlayEffect(const FxScheduler *_this, const EffectTemplate *fx, 
 
                 AxisCopy((const vec_t *)ax, (vec_t *)sfx->mAxis);
 
-                sfx->mScheduledNext = ((FxScheduler *)_this)->mScheduledCount;
-                ((FxScheduler *)_this)->mScheduledCount = (int)(size_t)sfx;
+                sfx->mScheduledNext = (int)(uintptr_t)((FxScheduler *)_this)->mScheduledHead;
+                ((FxScheduler *)_this)->mScheduledHead = sfx;
                 ((FxScheduler *)_this)->mScheduledCount += 1;
             } else {
 
@@ -450,7 +458,7 @@ void FxScheduler_PlayEffect(const FxScheduler *_this, const EffectTemplate *fx, 
     }
 
     if (numAdded) {
-        dvar_t *countDvar = *(dvar_t **)&imp_fx_count;
+        dvar_t *countDvar = *(dvar_t **)imp_fx_count;
         if (countDvar->current.enabled != 0) {
             re.AddPlume(or_.origin, numAdded, *(const vec_t **)&imp_colorYellow, 3000);
         }

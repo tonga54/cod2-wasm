@@ -6,10 +6,37 @@ framework_source_dir="${COD2_WASM_FRAMEWORK_DIR:-${repo_root}/../wasm-game-frame
 repository="${COD2_WASM_IMAGE_REPO:-local/cod2-wasm}"
 tag="${COD2_WASM_IMAGE_TAG:-dev}"
 framework_image="${COD2_WASM_FRAMEWORK_IMAGE:-wasm-game-framework:0.9.2}"
+emsdk_image="${COD2_WASM_EMSDK_IMAGE:-emscripten/emsdk:3.1.64}"
 expected_commit="53bc7e6eeef1ae35dcf3b25dea4e3ec0ab46726f"
 revision="$(git -C "${repo_root}" rev-parse --verify HEAD 2>/dev/null || printf local)"
 
-"${repo_root}/scripts/build-web.sh"
+if [[ ! -s "${repo_root}/data/browser/web/cod2.ico" ]]; then
+  python3 "${repo_root}/scripts/extract-game-icon.py" \
+    "${COD2_ORIGINAL_ZIP:-${HOME}/Downloads/Call of Duty 2 - version 1.3 - English.zip}" \
+    --output "${repo_root}/data/browser/web/cod2.ico"
+fi
+
+if [[ ! -s "${repo_root}/data/browser/web/cod2-startup.png" ]]; then
+  python3 "${repo_root}/scripts/extract-startup-logo.py" \
+    "${repo_root}/data/main/iw_09.iwd"
+fi
+
+if command -v emcmake >/dev/null 2>&1; then
+  "${repo_root}/scripts/build-web.sh"
+else
+  [[ -d "${framework_source_dir}/.git" ]] || {
+    echo "missing framework checkout: ${framework_source_dir}" >&2
+    exit 1
+  }
+  docker run --rm \
+    --platform "${COD2_WASM_EMSDK_PLATFORM:-linux/amd64}" \
+    --env "COD2_BUILD_JOBS=${COD2_BUILD_JOBS:-4}" \
+    --volume "${repo_root}:/workspace/cod2-wasm" \
+    --volume "${framework_source_dir}:/workspace/wasm-game-framework" \
+    --volume cod2-wasm-emscripten-cache:/emsdk/upstream/emscripten/cache \
+    --workdir /workspace/cod2-wasm \
+    "${emsdk_image}" bash -lc './scripts/build-web.sh'
+fi
 framework_parent="$(mktemp -d -t cod2-wasm-framework-image.XXXXXX)"
 framework_dir="${framework_parent}/framework"
 git -C "${framework_source_dir}" worktree add --quiet --detach "${framework_dir}" "${expected_commit}"
@@ -31,7 +58,8 @@ docker build --build-arg "FRAMEWORK_IMAGE=${framework_image}" --build-arg GAME_V
 for image in "${repository}:${tag}" "${repository}:cod2-mp-${tag}"; do
   test "$(docker run --rm --entrypoint node "${image}" -p "require('/opt/wasm-game-framework/package.json').version")" = "0.9.2"
   docker run --rm --entrypoint sh "${image}" -c \
-    "test -f /opt/game-site/cod2_core_probe.wasm && \
+    "test -f /opt/game-site/cod2.wasm && \
+     test -f /opt/game-site/native-game-adapter.js && \
      test -f /opt/game-site/wasm-game.json && \
      test ! -e /opt/game-site/index.html && \
      test ! -e /opt/game-site/service-worker.js && \
@@ -40,3 +68,5 @@ for image in "${repository}:${tag}" "${repository}:cod2-mp-${tag}"; do
 done
 
 echo "Built ${repository}:${tag} and ${repository}:cod2-mp-${tag}"
+bash "${repo_root}/scripts/build-server.sh"
+docker compose --project-directory "${repo_root}" build cod2-server cod2-gateway

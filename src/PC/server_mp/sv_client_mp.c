@@ -93,7 +93,7 @@ extern int FS_SV_FOpenFileRead(const char *filename, fileHandle_t *fp);
 extern int FS_Read(void *buffer, int len, fileHandle_t f);
 extern void *Z_MallocInternal(int size);
 extern void Dvar_SetInt(const dvar_t *dvar, int value);
-extern void MSG_WriteBigString(msg_t *sb, const char *s, msg_t *msg, int key, int oldV, int bits);
+extern void MSG_WriteBigString(msg_t *sb, const char *s);
 extern void MSG_WriteDeltaEntity(msg_t *msg, entityState_t *from, entityState_t *to, qboolean force);
 extern void SV_UpdateServerCommandsToClient(client_t *client, msg_t *msg);
 extern void SV_SendMessageToClient(msg_t *msg, client_t *client);
@@ -600,7 +600,7 @@ void SV_SendClientGameState(client_t *client)
             if (svcfg->configstrings[i][0]) {
                 MSG_WriteByte(&msg, 2);
                 MSG_WriteShort(&msg, i);
-                MSG_WriteBigString(&msg, svcfg->configstrings[i], NULL, 0, 0, 0);
+                MSG_WriteBigString(&msg, svcfg->configstrings[i]);
             }
         }
     }
@@ -1152,6 +1152,8 @@ void SV_DropClient(client_t *drop, const char *reason)
         return;
 
     drop->dropReason = NULL;
+    Com_Printf("[cnx] dropping client %d: %s (serverTime=%d lastPacket=%d)\n",
+               SV_ClientNumForClient(drop), reason, svsPtr->time, drop->lastPacketTime);
     SV_FreeClient(drop);
 
     Com_DPrintf("Going to CS_ZOMBIE for %s\n", drop->name);

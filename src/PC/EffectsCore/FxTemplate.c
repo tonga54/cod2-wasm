@@ -1,7 +1,7 @@
 #include "common_types.h"
 #include "imports.h"
 
-extern const FxFlagEntry fxAttributeFlags[26];
+extern const FxFlagEntry fxAttributeFlags[27];
 extern const FxFlagEntry fxSpawnFlags[13];
 extern Bool g_rendererExists;
 
@@ -606,10 +606,11 @@ void PrimitiveTemplate_Init(const PrimitiveTemplate *_this)
 
 void PrimitiveTemplate_ParseChannelCurve(const PrimitiveTemplate *_this, GPValue *pairs, FxChannelId channel)
 {
-    byte *thisPtr = (byte *)_this;
     GPValue *list;
     int keyCount;
     float *keys;
+    int dimensions = (channel == FXCHAN_COLOR || channel == FXCHAN_COLOR_RAND) ? 3 : 1;
+    int stride = dimensions + 1;
 
     list = GPV_LIST(pairs);
 
@@ -622,25 +623,32 @@ void PrimitiveTemplate_ParseChannelCurve(const PrimitiveTemplate *_this, GPValue
         }
     }
 
-    keys = (float *)Hunk_AllocateTempMemoryInternal(keyCount * 8);
+    if (!keyCount || channel < 0 || channel >= FXCHAN_COUNT)
+        return;
+    keys = (float *)Hunk_AllocateTempMemoryInternal(keyCount * stride * sizeof(float));
 
     if (list) {
         float *cur = keys;
         GPValue *p = list;
         keyCount = 0;
         do {
-            sscanf(GPV_STRING(p), "%f %f", &cur[0], &cur[1]);
+            int parsed = dimensions == 3
+                ? sscanf(GPV_STRING(p), "%f %f %f %f", &cur[0], &cur[1], &cur[2], &cur[3])
+                : sscanf(GPV_STRING(p), "%f %f", &cur[0], &cur[1]);
+            if (parsed != stride) {
+                Hunk_FreeTempMemory(keys);
+                return;
+            }
             keyCount++;
             p = GPV_NEXT(p);
-            cur += 2;
+            cur += stride;
         } while (p);
     } else {
         keyCount = 0;
     }
 
-    int channelOffset = channel * 3;
-    *(const FxCurve **)(((char *)thisPtr + offsetof(PrimitiveTemplate, mFxChannels[0].curve)) + channelOffset * 4) =
-        FxCurve_AllocAndCreateWithKeys(keys, 1, keyCount);
+    ((PrimitiveTemplate *)_this)->mFxChannels[channel].curve =
+        FxCurve_AllocAndCreateWithKeys(keys, dimensions, keyCount);
 
     Hunk_FreeTempMemory(keys);
 }
@@ -708,34 +716,28 @@ Bool PrimitiveTemplate_ParseFlags(const PrimitiveTemplate *_this, const char *li
     lineLen = strlen(line);
     if (lineLen == 0)
         return 0;
-
-    flag = (char *)Hunk_AllocateTempMemoryInternal(lineLen);
-
+    flag = (char *)Hunk_AllocateTempMemoryInternal(lineLen + 1);
     parsedLength = 0;
     while (parsedLength < lineLen) {
-        if (sscanf(line + parsedLength, "%s", flag) != 1) {
-            Hunk_FreeTempMemory(flag);
-            return 0;
-        }
-
-        flagLength = strlen(flag);
-
-        int found = 0;
-        for (entryIndex = 0; entryIndex < flagEntryCount; entryIndex++) {
-            if (stricmp(flagEntries[entryIndex].flag, flag) == 0) {
+        while (parsedLength < lineLen && (unsigned char)line[parsedLength] <= ' ')
+            ++parsedLength;
+        if (parsedLength == lineLen)
+            break;
+        flagLength = 0;
+        while (parsedLength < lineLen && (unsigned char)line[parsedLength] > ' ')
+            flag[flagLength++] = line[parsedLength++];
+        flag[flagLength] = '\0';
+        for (entryIndex = 0; entryIndex < flagEntryCount; ++entryIndex) {
+            if (!stricmp(flagEntries[entryIndex].flag, flag)) {
                 ((PrimitiveTemplate *)thisPtr)->mAttributeFlags |= flagEntries[entryIndex].masks[0];
                 ((PrimitiveTemplate *)thisPtr)->mSpawnFlags |= flagEntries[entryIndex].masks[1];
-                found = 1;
                 break;
             }
         }
-
-        if (!found) {
+        if (entryIndex == flagEntryCount) {
             Hunk_FreeTempMemory(flag);
             return 0;
         }
-
-        parsedLength += flagLength + 1;
     }
 
     Hunk_FreeTempMemory(flag);
@@ -1032,6 +1034,11 @@ Bool PrimitiveTemplate_ParseChannel(const PrimitiveTemplate *_this, BackCompatib
         } else if (stricmp(key, "curve") == 0 || stricmp(key, "graph") == 0) {
             PrimitiveTemplate_ParseChannelCurve(_this, pair, channelId);
             parsed = 1;
+        } else if (stricmp(key, "scale") == 0) {
+            if (!PrimitiveTemplate_ParseChannelRanges(topValue, 1,
+                    &((PrimitiveTemplate *)_this)->mFxChannels[channelId].scaleRange))
+                return 0;
+            parsed = 1;
         }
     }
 
@@ -1302,7 +1309,7 @@ Bool PrimitiveTemplate_ParsePrimitiveInternal(const PrimitiveTemplate *_this, Ba
         }
 
         else if (stricmp(key, "flags") == 0 || stricmp(key, "flag") == 0) {
-            if (!PrimitiveTemplate_ParseFlags(_this, val, fxAttributeFlags, 26))
+            if (!PrimitiveTemplate_ParseFlags(_this, val, fxAttributeFlags, 27))
                 goto error_key;
         }
 

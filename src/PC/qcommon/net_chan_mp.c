@@ -36,7 +36,7 @@ extern void SV_Netchan_PrintProfileStats(int bDumpRecvStats);
 extern void CL_Netchan_PrintProfileStats(int bDumpRecvStats);
 extern qboolean Sys_GetPacket(netadr_t *net_from, msg_t *net_message);
 extern qboolean Sys_StringToAdr(const char *s, netadr_t *a);
-extern Bool Sys_SendPacket(int length, const void *data, netadr_t to);
+extern void Sys_SendPacket(int length, const void *data, netadr_t to);
 extern int Sys_Milliseconds(void);
 #ifndef _WIN32
 extern void *malloc(int size);
@@ -441,7 +441,8 @@ Bool NET_SendPacket(netsrc_t sock, int length, const void *data, netadr_t to)
         return 0;
     } else {
 
-        return Sys_SendPacket(length, data, to);
+        Sys_SendPacket(length, data, to);
+        return 1;
     }
 }
 

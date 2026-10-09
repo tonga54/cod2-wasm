@@ -19,6 +19,7 @@ extern void Dvar_SetFromStringByName(const char *dvarName, const char *value);
 extern const char *GetBspExtension(void);
 extern int Com_sprintf(char *dest, int size, const char *fmt, ...);
 extern void Com_Printf(const char *fmt, ...);
+extern void Com_DPrintf(const char *fmt, ...);
 extern void Com_Error(errorParm_t code, const char *fmt, ...);
 extern const char *CG_Argv(int arg);
 extern int Cmd_Argc(void);
@@ -26,7 +27,7 @@ extern void Cbuf_AddText(const char *text);
 extern const char *va(const char *format, ...);
 extern void I_strncpyz(char *dest, const char *src, int destsize);
 extern int I_stricmp(const char *s1, const char *s2);
-extern int CL_Popup(const char *menuName);
+extern qboolean CL_Popup(const char *menuName);
 extern void CL_ClosePopup(const char *menuName);
 extern const char *Com_Parse(const char **data_p);
 extern WeaponDef *BG_GetWeaponDef(int weaponIndex);
@@ -147,7 +148,7 @@ void CG_ParseCodinfo(void)
     }
 }
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 static void __attribute_regparm__(1) CG_AddToTeamChat(const char *str)
 {
     int chatHeight;
@@ -466,7 +467,10 @@ void CG_MenuShowNotify(int menuToShow)
 
 static void __attribute_regparm__(2) CG_SetClientDvarFromServer(const char *dvarname, const char *value)
 {
-    if (stricmp(dvarname, (const char *)"cg_objectiveText") == 0) {
+    if (stricmp(dvarname, "cg_respawnDeadline") == 0) {
+        extern void CG_SetRespawnDeadline(int deadline);
+        CG_SetRespawnDeadline(atoi(value));
+    } else if (stricmp(dvarname, (const char *)"cg_objectiveText") == 0) {
         I_strncpyz(cg->objectiveText, value, sizeof(cg->objectiveText));
     } else if (stricmp(dvarname, (const char *)"cg_drawHud") == 0) {
         int hud = atoi(value);
@@ -859,6 +863,8 @@ static void CG_ConfigStringModified(int index)
     int shellShockIndex;
 
     configString = CL_GetConfigString(index);
+    if (index >= 15 && index <= 18)
+        Com_DPrintf("[vote] config %i = %s\n", index, configString);
 
     switch (index) {
     case 0:

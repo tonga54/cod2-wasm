@@ -14,7 +14,7 @@ int CFNumberGetValue();
 int CFPreferencesAppSynchronize();
 int CFPreferencesCopyAppValue();
 int CFPreferencesSetAppValue();
-int CFRelease();
+void CFRelease(void *value);
 int CFStringCompare();
 int CFStringCreateWithCString();
 int CFStringCreateWithCharacters();

@@ -19,7 +19,7 @@ extern const dvar_t **dvar_compassFade;
 extern float CG_FadeHudMenu(const dvar_t *fadeDvar, int displayStartTime, int duration);
 extern void CG_UpdateCompPointerOrientation(void);
 extern void CG_ApplySplitScreenCompassScale(float *x, float *y, float *w, float *h);
-extern float UI_DrawHandlePic(float x, float y, float w, float h, int horzAlign, int vertAlign, const vec_t *color, MaterialHandle hMaterial);
+extern void UI_DrawHandlePic(float x, float y, float w, float h, int horzAlign, int vertAlign, const vec_t *color, MaterialHandle hMaterial);
 extern void CG_DrawRotatedPic(float x, float y, float width, float height, int horzAlign, int vertAlign, float angle, const vec_t *color, MaterialHandle material);
 extern const float vectoyaw(const vec_t *vec);
 extern const float AngleNormalize360(const float angle);

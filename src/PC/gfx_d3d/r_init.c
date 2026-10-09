@@ -235,7 +235,7 @@ static HRESULT R_CreateDevice_impl(HWND hwnd, DWORD behavior, void *d3dpp)
 
     for (;;) {
 
-        ((void (*)(int, const char *))ri.Printf)(0, "Creating D3D device...\n");
+        ri.Printf(0, "Creating D3D device...\n");
 
         for (attempt = 0; attempt < 20; attempt++) {
 
@@ -247,7 +247,11 @@ static HRESULT R_CreateDevice_impl(HWND hwnd, DWORD behavior, void *d3dpp)
             if (hr >= 0)
                 return hr;
 
+#ifdef __EMSCRIPTEN__
+            return hr;
+#else
             WinSleep(100);
+#endif
         }
 
         if (dx.adapterIndex == 0)
@@ -684,6 +688,11 @@ static void R_BeginRegistration_impl(vidConfig_t *vidConfigOut)
     ri_printf(0, "----- R_Init -----\n");
     Swap_Init();
     R_RegisterDvars();
+#ifdef __EMSCRIPTEN__
+    /* The browser bridge implements the engine's fixed-function DX7 path.
+     * Select it before sampler, image and material initialization. */
+    ri.Dvar_SetInt(r_rendererInUse, 2);
+#endif
     R_RegisterCmds();
     memset(&rg, 0, sizeof(r_globals_t));
     memset(&rgp, 0, sizeof(r_global_permanent_t));
@@ -750,7 +759,11 @@ static void R_BeginRegistration_impl(vidConfig_t *vidConfigOut)
             d3dpp[8] = 0x4b;
             d3dpp[11] = 1;
 
-            R_CreateDevice_impl(0, 0x40, d3dpp);
+            HRESULT hr = R_CreateDevice_impl(0, 0x40, d3dpp);
+            if (hr < 0) {
+                R_FatalInitError("Could not create the browser graphics context");
+                return;
+            }
 
             vidConfig.width = width;
             vidConfig.height = height;

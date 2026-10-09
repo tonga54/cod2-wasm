@@ -82,7 +82,7 @@ extern Bool CL_IsRenderingSplitScreen(void);
 extern void CL_SetUserCmdAimValues(const vec_t *angles);
 extern void CL_SetUserCmdValue(int weapon, int offHandIndex, float sensitivity);
 extern void CL_RenderScene(const void *refdef);
-extern void CG_DrawShellShockSavedScreenBlend(float r, float g, float b);
+extern qboolean CG_DrawShellShockSavedScreenBlend(const shellshock_parms_t *parms, int start, int duration);
 extern void CG_TileClear(void);
 extern const char *UI_SafeTranslateString(const char *ref);
 extern const char *UI_ReplaceConversionString(const char *sourceString, const char *replaceString);
@@ -113,7 +113,7 @@ extern void CG_PlayerSprites(centity_t *cent);
 extern qboolean CL_PickMaterial(const vec_t *org, const vec_t *dir, char *pszName, char *pszSurfaceFlags, char *pszContents, int iMaxChars);
 extern int CG_DrawSmallDevStringColor(float x, float y, const char *s, const vec_t *color, int align);
 extern int CG_DrawBigDevStringColor(float x, float y, const char *s, const vec_t *color, int align);
-extern int __mh_execute_header;
+
 extern int SND_GetSoundOverlay(snd_overlay_type_t type, snd_overlay_info_t *info, int maxcount, int *cpu);
 extern const char *Dvar_GetString(const char *dvarName);
 extern int Dvar_GetInt(const char *dvarName);
@@ -150,7 +150,7 @@ extern const vec_t colorBlue[4];
 extern void Menus_CloseByName(void *dc, const char *name);
 extern void *Menus_FindByName(void *dc, const char *name);
 extern void Window_AddDynamicFlags(void *window, int flags);
-extern int Window_RemoveDynamicFlags(void *window, int flags);
+extern void Window_RemoveDynamicFlags(void *window, int flags);
 extern void CG_MenuShowNotify(int menuToShow);
 extern float CG_CalcPlayerHealth(void);
 extern Bool CG_CheckPlayerForLowAmmo(void);
@@ -817,7 +817,8 @@ after_buttons:
     if (!menu) {
         return 0;
     }
-    return Window_RemoveDynamicFlags(menu, 4);
+    Window_RemoveDynamicFlags(menu, 4);
+    return 0;
 }
 
 static unsigned int CG_DrawSoundOverlay(void)
@@ -886,7 +887,7 @@ unsigned int CG_DrawMaterial(void)
     char szContents[0x1000];
     float y;
 
-    if (!CL_PickMaterial((const vec_t *)cg->refdef.vieworg, (const vec_t *)cg->refdef.viewaxis, szName, szSurfaceFlags, szContents, (int)&__mh_execute_header)) {
+    if (!CL_PickMaterial((const vec_t *)cg->refdef.vieworg, (const vec_t *)cg->refdef.viewaxis, szName, szSurfaceFlags, szContents, 0x1000)) {
         return 0;
     }
 
@@ -1078,9 +1079,9 @@ void CG_DrawActive(void)
 
     if (!CL_IsRenderingSplitScreen()) {
         CG_DrawShellShockSavedScreenBlend(
-            *(float *)&cg->shellshock.parms,
-            *(float *)&cg->shellshock.startTime,
-            *(float *)&cg->shellshock.duration);
+            cg->shellshock.parms,
+            cg->shellshock.startTime,
+            cg->shellshock.duration);
     }
 
     CG_TileClear();
@@ -1200,7 +1201,7 @@ static void __attribute_regparm__(2) CG_CalcCrosshairPosition(float *x, float *y
     *y = vert / (forward * (float)tan((double)cg->refdef.fov_y * 0.008726646259971648)) * -240.0f;
 }
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 static float CG_DrawFPS(float y)
 {
     int i;
@@ -1353,6 +1354,7 @@ unsigned int CG_DrawCrosshair(void)
     vec4_t color;
     vec4_t reticleColor;
     float posLerp;
+    float reticleVisibility;
     float transScale;
     float centerX;
     float centerY;
@@ -1376,7 +1378,7 @@ unsigned int CG_DrawCrosshair(void)
         return 0;
 
     weapDef = (WeaponDef *)BG_GetWeaponDef(weapIndex);
-    CG_DrawWeapReticle();
+    reticleVisibility = CG_DrawWeapReticle();
 
     if (!drawHudMenus)
         return 0;
@@ -1402,7 +1404,9 @@ unsigned int CG_DrawCrosshair(void)
         color[2] = 1.0f;
     }
 
-    color[3] = posLerp * cg_crosshairAlpha->current.value;
+    /* The overlay returns the remaining hip-fire reticle visibility. ADS
+     * position is zero at the hip, so using it as alpha hides the crosshair. */
+    color[3] = reticleVisibility * cg_crosshairAlpha->current.value;
     if (color[3] < 0.01f)
         return 0;
 
@@ -1480,7 +1484,6 @@ unsigned int CG_DrawCrosshair(void)
     if (!material)
         return 0;
 
-    CG_DrawWeapReticle();
     reticleColor[0] = color[0];
     reticleColor[1] = color[1];
     reticleColor[2] = color[2];
@@ -1488,7 +1491,7 @@ unsigned int CG_DrawCrosshair(void)
         float alpha = transScale * cg_crosshairAlpha->current.value *
                       (ps->aimSpreadScale / -255.0f + 1.0f);
         float alphaMin = (cg_crosshairAlphaMin)->current.value;
-        reticleColor[3] = alpha >= alphaMin ? alpha : alphaMin;
+        reticleColor[3] = (alpha >= alphaMin ? alpha : alphaMin) * reticleVisibility;
     }
 
     {
@@ -1558,6 +1561,7 @@ static void CG_Draw2D_DrawBottomOverlays(cg_t *cg)
 
 unsigned int CG_Draw2D(void)
 {
+    extern int CG_GetRespawnRemaining(void);
     qboolean drawHudMenus;
     qboolean drawHudElems;
     qboolean drewScoreboard;
@@ -1572,6 +1576,27 @@ unsigned int CG_Draw2D(void)
 
     if (!cg_draw2D->current.enabled)
         return 0;
+
+    {
+        int remaining = CG_GetRespawnRemaining();
+        if (remaining >= 0) {
+            float progress = 1.0f - (float)remaining / 3000.0f;
+            if (progress < 0.0f)
+                progress = 0.0f;
+            vec4_t shade = { 0.0f, 0.0f, 0.0f, progress };
+            const char *message = remaining > 0
+                ? va("Reapareces en %d...", (remaining + 999) / 1000)
+                : "Reapareciendo...";
+            FontHandle font = UI_GetFontHandle(0, 0.4f);
+            UI_FillRectPhysical(0.0f, 0.0f, screenWidth, screenHeight, shade);
+            UI_DrawText(message, 0x7fffffff, font,
+                        320.0f - UI_TextWidth(message, 0, font, 0.4f) * 0.5f,
+                        250.0f, 0, 0, 0.4f, colorWhite, 3);
+            CG_DrawChatMessages();
+            CG_DrawScoreboard();
+            return 0;
+        }
+    }
 
     if (cg->fadeRate != 0.0f) {
         int remaining = cg->fadeTime - cg->time;
@@ -1671,14 +1696,14 @@ unsigned int CG_Draw2D(void)
         UI_DrawText(va("%s(%i):%s", UI_SafeTranslateString("CGAME_VOTE"), secs, cgs->voteString),
                     0x7fffffff, font, 8.0f, 200.0f, 0, 0, 0.5f, colorYellow, 3);
 
-        if (cg->nextSnap->ps.eFlags & 0x10) {
+        if (cg->nextSnap->ps.eFlags & 0x100000) {
             UI_DrawText(va("%s:%i, %s:%i", UI_SafeTranslateString("CGAME_YES"), cgs->voteYes,
                            UI_SafeTranslateString("CGAME_NO"), cgs->voteNo),
-                        0x7fffffff, font, 8.0f, 210.0f, 0, 0, 0.5f, colorYellow, 3);
+                        0x7fffffff, font, 8.0f, 222.0f, 0, 0, 0.5f, colorYellow, 3);
         } else {
             UI_DrawText(va("%s(%s):%i, %s(%s):%i", UI_SafeTranslateString("CGAME_YES"), yesKey,
                            cgs->voteYes, UI_SafeTranslateString("CGAME_NO"), noKey, cgs->voteNo),
-                        0x7fffffff, font, 8.0f, 210.0f, 0, 0, 0.5f, colorYellow, 3);
+                        0x7fffffff, font, 8.0f, 222.0f, 0, 0, 0.5f, colorYellow, 3);
         }
     }
 

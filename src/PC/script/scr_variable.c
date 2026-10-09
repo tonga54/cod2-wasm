@@ -428,6 +428,8 @@ static unsigned int ScrVar_NextSiblingId(unsigned int id)
 
 void Scr_DumpScriptVariables(void)
 {
+    extern void Scr_DumpScriptVarSummary(void);
+    Scr_DumpScriptVarSummary();
 }
 
 void Scr_DumpScriptVarSummary(void)
@@ -2023,8 +2025,13 @@ void RemoveNextVariable(unsigned int parentId)
 void RemoveVariable(unsigned int parentId, unsigned int unsignedValue)
 {
     unsigned int index = FindVariableIndexInternal(parentId, unsignedValue);
-    unsigned int id = VG_ID(index);
+    unsigned int id;
 
+    /* Slot zero anchors the free list. Never unlink it when a key is absent. */
+    if (!index)
+        return;
+
+    id = VG_ID(index);
     MakeVariableExternal(ScrVarEntry(index), ScrVarEntry(parentId));
     FreeChildValue_core(id);
 }
@@ -3208,6 +3215,7 @@ void ClearArray(unsigned int parentId, VariableValue *value)
     if (!arrayId)
         return;
 
+    /* GSC assignment to undefined also clears absent array keys. */
     if (value->type == SCRVL_VAR_INTEGER) {
         if (!IsValidArrayIndex((unsigned int)value->u.intValue)) {
             Scr_Error(va("array index %d out of range", value->u.intValue));
@@ -3215,13 +3223,13 @@ void ClearArray(unsigned int parentId, VariableValue *value)
         }
 
         name = GetInternalVariableIndex_core((unsigned int)value->u.intValue);
-        RemoveVariable(arrayId, name);
+        SafeRemoveVariable(arrayId, name);
         return;
     }
 
     if (value->type == SCRVL_VAR_STRING) {
         name = value->u.stringValue;
-        RemoveVariable(arrayId, name);
+        SafeRemoveVariable(arrayId, name);
         SL_RemoveRefToString(name);
         return;
     }

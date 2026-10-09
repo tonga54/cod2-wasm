@@ -17,14 +17,14 @@ extern recordingSample_t *DSOUNDRecord_NewSample(void);
 extern int DSOUNDRecord_DestroySample(recordingSample_t *sample);
 extern void DSOUNDRecord_Shutdown(void);
 extern void DSOUNDRecord_Frame(void);
-extern int DSOUNDRecord_Init(int callInit, const void *handle);
-extern void Encode_Shutdown(void);
+extern int DSOUNDRecord_Init(void);
+extern Bool Encode_Shutdown(void);
 extern int Encode_GetFrameSize(void);
 extern int Encode_Sample(void *audioData, void *outBuf, int outSize);
 extern int Voice_SendVoiceData(void);
 extern int IsTalking(void);
 extern void CL_VoiceTransmit(void);
-extern void Client_SendVoiceData(int size, void *data);
+extern int Client_SendVoiceData(int size, void *data);
 extern void Com_Printf(const char *msg, ...);
 
 extern byte *encode_vol_ptr;
@@ -182,5 +182,5 @@ int Record_AudioCallback(audioSample_t *sample)
 int Record_Init(int callInit, const void *handle)
 {
     *(void **)record_callback_ptr = (void *)Record_AudioCallback;
-    return DSOUNDRecord_Init(1, handle);
+    return DSOUNDRecord_Init();
 }

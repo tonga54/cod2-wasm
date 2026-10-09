@@ -454,7 +454,6 @@ restart:
     }
 
     switch (cmd[0]) {
-    case 'd':
     case 'w':
         if (argc - 1 <= 0) {
             Com_Error(ERR_SERVERDISCONNECT, "EXE_DISCONNECTED");
@@ -466,7 +465,7 @@ restart:
             Com_Error(ERR_SERVERDISCONNECT, msg);
         }
 
-    case 'B':
+    case 'x':
         Cmd_TokenizeString2(s, 3);
         {
             const char *arg2 = Cmd_Argv(2);
@@ -474,7 +473,7 @@ restart:
             Com_sprintf(bigConfigString, 0x2000, "%c %s %s", 'd', arg1, arg2);
         }
         return 0;
-    case 'b':
+    case 'y':
         Cmd_TokenizeString2(s, 3);
         {
             const char *arg2 = Cmd_Argv(2);
@@ -484,7 +483,7 @@ restart:
             strcat(bigConfigString, arg2);
         }
         return 0;
-    case 'c':
+    case 'z':
         Cmd_TokenizeString2(s, 3);
         {
             const char *arg2 = Cmd_Argv(2);
@@ -495,13 +494,14 @@ restart:
         }
         s = bigConfigString;
         goto restart;
-    case 'z':
+    case 'B':
+    case 'n':
         Con_ClearNotify();
         Con_ClearSubtitles();
         memset(CL_LOCAL->cmds, 0, sizeof(CL_LOCAL->cmds));
         RE->ClearFlares();
         return 1;
-    case 'C':
+    case 'd':
         Cmd_TokenizeString2(s, 3);
         CL_ConfigstringModified();
         Cmd_TokenizeString2(s, 3);
@@ -1343,10 +1343,13 @@ void CL_SetCGameTime(void)
             cl->oldServerTime = cl->serverTime;
 
             int serverTime = cl->snap.serverTime;
-            if (timeDelta + realtime < serverTime - 5) {
+            /* Extrapolation means running AHEAD of the newest snapshot. The
+             * reversed comparison kept subtracting time while we were already
+             * behind, until the 500 ms reset snapped prediction backwards. */
+            if (cl->serverTime >= serverTime - 5) {
                 cl->extrapolatedSnapshot = 1;
                 if (CL_DvarCurrentBool(imp_cl_showTimeDelta)) {
-                    Com_Printf("%.6f extrapolating\n");
+                    Com_Printf("%i extrapolating\n", cl->serverTime);
                 }
             }
         } else {
