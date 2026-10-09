@@ -23,6 +23,11 @@ EMSCRIPTEN_KEEPALIVE int web_client_state(void) {
     return 0;
 }
 
+/* Menus/chat can be open during a match. Update notices wait until disconnect. */
+EMSCRIPTEN_KEEPALIVE int web_client_connected(void) {
+    return clientConnections[0].state >= CA_CONNECTING;
+}
+
 /* Desktop splash windows and OS idle timers do not exist in the browser.
  * Loading progress is reported by the web launcher instead. */
 void CMacGameEngine_DrawSplashScreen(const char *fileName) { (void)fileName; }

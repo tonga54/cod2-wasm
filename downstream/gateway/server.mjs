@@ -3,12 +3,16 @@ import dgram from 'node:dgram';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import WebSocket, { WebSocketServer } from 'ws';
+import { createUpdateChecker, readBuildInfo } from './updates.mjs';
 
 export function createGateway({ webHost = 'cod2-web', webPort = 8088,
   udpHost = 'cod2-server', udpPort = 28960, maxClients = 64,
   iconPath = '/game-ui/cod2.ico', startupPath = '/game-ui/cod2-startup.png',
-  roomsEnabled = false, managerPort = 8090 } = {}) {
+  roomsEnabled = false, managerPort = 8090, updateChecker } = {}) {
   const reservations = new Map();
+  const checkUpdates = updateChecker || createUpdateChecker({
+    readBuild: () => readBuildInfo(webHost, webPort)
+  });
   function sameOrigin(request) {
     try {
       const origin = new URL(request.headers.origin);
@@ -43,6 +47,14 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
     response.end(JSON.stringify(value));
   }
   const server = http.createServer((request, response) => {
+    if (request.url === '/version') {
+      if (request.method !== 'GET') {
+        json(response, 405, { error: 'Unsupported method' }); return;
+      }
+      checkUpdates().then(result => json(response, 200, result))
+        .catch(() => json(response, 503, { error: 'Version check unavailable' }));
+      return;
+    }
     if (roomsEnabled && request.url === '/servers') {
       if (!['GET', 'POST'].includes(request.method)) {
         json(response, 405, { error: 'Unsupported method' }); return;

@@ -37,6 +37,11 @@ Start with `./scripts/build-docker.sh` and `docker compose up -d`. The local URL
 is `http://localhost:8088`; other LAN devices use the Mac's current IP and port
 8088. On 2026-10-07 that address changed to `http://192.168.1.10:8088`.
 
+Browser players receive update notices in the main menu after leaving a match.
+Hosts can check with `python3 scripts/update-local.py` and explicitly install
+with `python3 scripts/update-local.py --apply`. Local changes and active players
+block installation. See [the update and asset delivery guide](docs/UPDATES.md).
+
 Original owner assets stay untouched in ignored `data/main/`. The script
 `scripts/prepare-browser-bootstrap.py` prepares a private Toujane asset subset
 (165.6 MB, including 470 original sound files). Archives stay outside the

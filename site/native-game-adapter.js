@@ -7,6 +7,7 @@
   let clientAttributeWarningReported = false;
   let traceInput = () => {};
   let hadInputCapture = false;
+  let updateNotifier;
   const startupStyle = document.createElement('link');
   startupStyle.rel = 'stylesheet';
   startupStyle.href = '/startup.css';
@@ -185,8 +186,24 @@
     });
     return factoryPromise;
   }
+  function startUpdateNotifier(context) {
+    if (!context.config?.updates) return;
+    const script = document.createElement('script');
+    script.src = '/update-notifier.js';
+    script.onload = () => {
+      if (typeof globalThis.createCod2UpdateNotifier !== 'function') return;
+      updateNotifier = globalThis.createCod2UpdateNotifier({
+        canNotify: () => !failed && Boolean(native) && native._web_client_state() === 1 &&
+          typeof native._web_client_connected === 'function' && !native._web_client_connected()
+      });
+    };
+    // Update checks are optional and must never block startup or gameplay.
+    script.onerror = () => context.log('[updates] No se pudo cargar el aviso de actualización.');
+    document.head.appendChild(script);
+  }
   globalThis.WasmGameAdapter = Object.freeze({
     async init(context) {
+      startUpdateNotifier(context);
       // Keep right-click available to the game, including before pointer lock.
       context.elements.canvas.addEventListener('contextmenu', event => event.preventDefault());
       // Window capture runs before the framework's document key guard. A
@@ -330,6 +347,7 @@
       }
     },
     readEngineState() {
+      updateNotifier?.render();
       if (failed) return 'crashed';
       if (!native) return 'launcher';
       const state = native._web_client_state();

@@ -4,6 +4,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 site_dir="${1:-${repo_root}/out/cod2-wasm-core/site}"
 framework_dir="${2:-${COD2_WASM_FRAMEWORK_DIR:-${repo_root}/../wasm-game-framework}}"
 node --check "${site_dir}/native-game-adapter.js"
+node --check "${site_dir}/update-notifier.js"
 node --check "${site_dir}/asset-sha256.js"
 node --check "${site_dir}/cod2.js"
 node "${repo_root}/scripts/test-emscripten-gl.cjs" "${site_dir}/cod2.js"
@@ -13,6 +14,8 @@ node "${repo_root}/scripts/test-lan-validation.cjs"
 node "${repo_root}/scripts/test-web-net-errors.cjs"
 node "${repo_root}/scripts/test-web-qport.cjs"
 node "${repo_root}/scripts/test-web-audio.cjs"
+node "${repo_root}/scripts/test-update-notifier.cjs"
+python3 "${repo_root}/scripts/test-update-local.py"
 node "${framework_dir}/scripts/check-game-package.js" "${site_dir}"
 node - "${site_dir}" <<'NODE'
 const assert = require('node:assert/strict');
@@ -20,8 +23,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const site = process.argv[2];
 const expected = [
-  'asset-sha256.js', 'cod2-diagnostic.svg', 'cod2.js', 'cod2.wasm', 'native-game-adapter.js',
-  'startup.css', 'wasm-game-data.json', 'wasm-game-framework.json', 'wasm-game.json'
+  'asset-sha256.js', 'build-info.json', 'cod2-diagnostic.svg', 'cod2.js', 'cod2.wasm', 'native-game-adapter.js',
+  'startup.css', 'update-notifier.js', 'wasm-game-data.json', 'wasm-game-framework.json', 'wasm-game.json'
 ];
 assert.deepEqual(fs.readdirSync(site).sort(), expected.sort());
 assert.deepEqual([...fs.readFileSync(path.join(site, 'cod2.wasm')).subarray(0, 8)], [0,97,115,109,1,0,0,0]);
@@ -31,6 +34,11 @@ assert.equal(config.engine, 'IW 2.0 reconstruction');
 assert.equal(config.adapter, '/native-game-adapter.js');
 assert.equal(config.pointerLock, true);
 assert.equal(config.autoStart, true);
+assert.equal(config.updates, true);
+const build = JSON.parse(fs.readFileSync(path.join(site, 'build-info.json')));
+assert.match(build.revision, /^[a-f0-9]{40}$/);
+assert.match(build.buildId, /^[a-f0-9]{64}$/);
+assert.equal(typeof build.dirty, 'boolean');
 assert.equal(config.identity, false);
 assert.equal(config.variants['cod2-mp'].title, 'Call of Duty 2 Multiplayer');
 assert.equal(config.variants['cod2-mp'].shortTitle, 'Call of Duty 2 Multiplayer');

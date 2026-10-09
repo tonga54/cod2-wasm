@@ -4,6 +4,7 @@
   "kicker": "",
   "description": "",
   "autoStart": true,
+  "updates": true,
   "defaultVariant": "cod2-mp",
   "preferencesNamespace": "cod2-wasm",
   "adapter": "/native-game-adapter.js",

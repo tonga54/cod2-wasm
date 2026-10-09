@@ -66,3 +66,36 @@
 .wasm-game-framework #loading.cod2-startup #loading-console {
   text-align: left;
 }
+
+#cod2-update {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 10000;
+  width: min(380px, calc(100vw - 40px));
+  box-sizing: border-box;
+  padding: 16px;
+  border: 1px solid #9d8b63;
+  background: #171815f5;
+  color: #f0eee6;
+  font: 15px/1.4 system-ui, sans-serif;
+  box-shadow: 0 4px 24px #0008;
+}
+
+#cod2-update[hidden], #cod2-update [hidden] { display: none !important; }
+#cod2-update p { margin: 0 0 12px; }
+#cod2-update div { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+#cod2-update button, #cod2-update a {
+  color: #d7c59a;
+  font: inherit;
+}
+#cod2-update button {
+  padding: 6px 10px;
+  border: 1px solid #9d8b63;
+  background: #25251f;
+  cursor: pointer;
+}
+#cod2-update button:focus-visible, #cod2-update a:focus-visible {
+  outline: 2px solid #f0eee6;
+  outline-offset: 3px;
+}
