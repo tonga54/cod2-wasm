@@ -23,8 +23,29 @@
     logo.height = 128;
     logo.draggable = false;
     loadingTitle.replaceChildren(logo);
-    loadingStatus.lang = 'en';
+    loadingStatus.lang = 'es';
     loadingProgress.setAttribute('aria-label', 'Progreso de carga de Call of Duty 2');
+  }
+  function downloadProgress(context) {
+    const files = new Map(dataSet.policies.map(file => [file.key, { size: file.size, received: 0 }]));
+    const total = [...files.values()].reduce((sum, file) => sum + file.size, 0);
+    const megabytes = new Intl.NumberFormat('es-UY', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    return event => {
+      const file = files.get(event.key);
+      if (event.key && !file) return;
+      if (file) {
+        const received = event.phase === 'downloading' ? event.received :
+          ['validated', 'restored', 'cached'].includes(event.phase) ? file.size : 0;
+        file.received = Math.max(file.received, Math.min(file.size, Number(received) || 0));
+      }
+      const received = [...files.values()].reduce((sum, file) => sum + file.received, 0);
+      const percent = total ? Math.floor(received / total * 100) : 100;
+      const message = event.phase === 'downloading' ?
+        (percent === 100 ? 'Verificando archivos…' : 'Descargando archivos…') :
+        event.phase === 'checking-cache' ? 'Revisando archivos guardados…' : 'Preparando archivos…';
+      context.setLoading(`${message} ${percent}%`,
+        `${megabytes.format(received / 1000000)} / ${megabytes.format(total / 1000000)} MB`, percent);
+    };
   }
   function lanFilePolicy(file, context) {
     const policy = { ...file, mountName: file.path };
@@ -229,7 +250,7 @@
       if (context.config?.autoStart) {
         showOriginalStartup(context);
         context.showLoading();
-        context.setLoading('Loading…', '', 0);
+        context.setLoading('Preparando el juego…', '', 0);
         if (context.elements.loadingKicker) context.elements.loadingKicker.hidden = true;
         context.elements.console.hidden = !new URLSearchParams(location.search).has('debug');
       }
@@ -302,7 +323,7 @@
       if (native || failed) throw new Error('Recargá la página para iniciar una instancia nueva.');
       context.setEngineState('loading');
       try {
-        context.setLoading('Loading…', '', 10);
+        context.setLoading('Preparando el juego…', '', 0);
         const factory = await loadFactory();
         const meter = performanceMeter(context);
         traceWebGl(context, meter);
@@ -329,14 +350,20 @@
             context.setEngineState('crashed');
           }
         });
-        context.setLoading('Loading…', '', 50);
-        const assets = await context.dataClient.load(dataSet);
+        const onProgress = downloadProgress(context);
+        onProgress({ phase: 'checking-cache' });
+        const assets = await context.dataClient.load(dataSet, { onProgress });
+        context.setLoading('Preparando el juego… 0%', '', 0);
         await context.framework.mountOwnerFiles(native, assets, {
-          root: '/game', preservePaths: true, mode: 'memfs', chunkBytes: 1024 * 1024
+          root: '/game', preservePaths: true, mode: 'memfs', chunkBytes: 1024 * 1024,
+          onProgress: event => {
+            const percent = event.total ? Math.floor(event.copied / event.total * 100) : 100;
+            context.setLoading(`Preparando el juego… ${percent}%`, '', percent);
+          }
         });
         native.FS.mkdirTree('/profile');
         native.FS.chdir('/game');
-        context.setLoading('Loading…', '', 85);
+        context.setLoading('Iniciando el juego…', '', 100);
         native.callMain([
           '+set', 'fs_basepath', '/game', '+set', 'fs_homepath', '/profile',
           '+set', 'dedicated', '0', '+set', 'r_rendererPreference', 'dx7',

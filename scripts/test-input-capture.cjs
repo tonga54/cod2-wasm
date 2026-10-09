@@ -21,6 +21,7 @@ let nativeState = 2;
 let fullscreenRequests = 0;
 let shellState = 'launcher';
 const publishedStates = [];
+const loadingMessages = [];
 const window = {
   addEventListener(name, fn, capture) {
     assert.equal(capture, true, 'input state must refresh before the document key guard');
@@ -59,7 +60,10 @@ const native = {
 const sandbox = {
   document, window, location: {search: ''}, URLSearchParams,
   addEventListener() {},
-  fetch: async () => ({ok: true, json: async () => ({variants: {test: {files: []}}})}),
+  crypto: {subtle: {}},
+  fetch: async () => ({ok: true, json: async () => ({variants: {test: {files: [
+    {key:'saved',size:2000000}, {key:'large',size:18000000}
+  ]}}})}),
   createCod2Client: async options => {
     assert.equal(options.stdin(), null, 'browser stdin must not open a terminal prompt');
     return native;
@@ -74,16 +78,33 @@ const context = {
     loadingTitle: {replaceChildren(logo) {assert.equal(logo.src, '/game-data/files/cod2-startup/original.png');}},
     loadingProgress: {setAttribute(name, value) {assert.equal(name, 'aria-label');assert.ok(value);}},
     loadingStatus: {}}, log() {},
-  framework: {createOwnerDataSet: x => x, mountOwnerFiles: async () => {}},
-  dataClient: {applyGate: async () => ({ready:true}), load: async () => []},
+  framework: {createOwnerDataSet: x => ({policies:x.files}), mountOwnerFiles: async (native,assets,options) => {
+    options.onProgress({phase:'mounting',copied:10000000,total:20000000});
+    options.onProgress({phase:'mounted',copied:20000000,total:20000000});
+  }},
+  dataClient: {applyGate: async () => ({ready:true}), load: async (data,options) => {
+    options.onProgress({phase:'restored',key:'saved',bytes:2000000,total:2});
+    assert.equal(loadingMessages.at(-1)[2],10,'restored files count toward available bytes');
+    options.onProgress({phase:'downloading',key:'large',received:9000000,total:18000000});
+    assert.deepEqual(loadingMessages.at(-1),['Descargando archivos… 55%','11,0 / 20,0 MB',55],
+      'percentage follows received bytes and manifest sizes, not the file count');
+    options.onProgress({phase:'downloading',key:'large',received:8000000,total:0});
+    assert.equal(loadingMessages.at(-1)[2],55,'duplicate or stale progress never moves backward');
+    options.onProgress({phase:'validated',key:'large',bytes:18000000,total:2});
+    options.onProgress({phase:'cached',key:'large',bytes:18000000,total:2});
+    assert.equal(loadingMessages.at(-1)[2],100,'validation/cache events do not double-count bytes');
+    return [];
+  }},
   preferences: {values: () => ({playerName: 'Test'})},
   shell: {engineState: () => shellState},
   setEngineState(state) { shellState = state; publishedStates.push(state); },
-  setLoading() {}, showRuntime() {}, showLoading() { ++loadingShown; }
+  setLoading(...values) {loadingMessages.push(values);}, showRuntime() {}, showLoading() { ++loadingShown; }
 };
 (async () => {
   await adapter.init(context);
   assert.equal(starts, 1, 'initialization starts the actual engine without a Play click');
+  assert.ok(loadingMessages.some(([message,,percent])=>message==='Preparando el juego… 50%' && percent===50),
+    'preparation has its own measured progress after downloading');
   const fullscreenClick = canvasListeners.get('pointerdown');
   fullscreenClick({isTrusted:false,button:0});
   fullscreenClick({isTrusted:true,button:2});
@@ -146,5 +167,5 @@ const context = {
   change(true);
   change(false);
   assert.equal(escapes, 2, 'capture can be reacquired and released');
-  console.log('PASS: automatic launch, console/chat Space state transitions before key capture, native identity, context menu and pointer-lock lifecycle');
+  console.log('PASS: byte-weighted download/cache and preparation progress, automatic launch, console/chat Space state transitions, fullscreen and pointer-lock lifecycle');
 })().catch(error => { console.error(error); process.exitCode = 1; });

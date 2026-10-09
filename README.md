@@ -25,6 +25,8 @@ are still being repaired. A build does not establish that a match is playable.
 The page loads directly into the original main menu without a launcher form or
 automatic server connection. The tab title is **Call of Duty 2 Multiplayer**;
 its favicon is extracted from the owner's original MP executable.
+Startup shows the actual file download percentage and received/total MB,
+counts cached files, and displays preparation progress as a separate stage.
 
 A primary click on the game enters fullscreen when the browser supports it;
 Escape exits fullscreen. Severe damage now draws the original blood overlay,
