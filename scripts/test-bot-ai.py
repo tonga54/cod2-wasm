@@ -178,6 +178,7 @@ int main(void){
  assert(SV_BotSetGoal(0,(float[3]){224,0,1},12,0,-1));
  Bot_FindPath(&s_botAI[0],&clients[0].ps);
  assert(s_botAI[0].waypoint>=0 && s_botNav[s_botAI[0].waypoint].origin[0]>17);
+ traceCount=0;Bot_AdvanceRoute(&s_botAI[0],&clients[0].ps);assert(traceCount<=1);
  for(i=1;i<=6;i++) {
   clients[0].ps.origin[0]=17+i*30;
   Bot_AdvanceRoute(&s_botAI[0],&clients[0].ps);

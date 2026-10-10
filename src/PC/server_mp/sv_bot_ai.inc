@@ -719,9 +719,22 @@ static void Bot_AdvanceRoute(botAIState_t *ai, playerState_t *ps)
     if(ai->waypoint>=0 && svs.time>=ai->nextThink) {
         int next=ai->routeIndex+2;
         if(next>=ai->routeCount) next=ai->routeCount-1;
-        if(next>ai->routeIndex && Bot_WalkEdge(ps->origin,s_botNav[ai->route[next]].origin)) {
-            ai->routeIndex=next;
-            ai->waypoint=ai->route[next];
+        if(next>ai->routeIndex) {
+            const vec_t *a=s_botNav[ai->route[ai->routeIndex]].origin;
+            const vec_t *b=s_botNav[ai->route[next]].origin;
+            int i;
+            qboolean straight=fabsf(ps->origin[2]-a[2])<8;
+            // Collinear flat links already contain sampled floor/cliff checks.
+            // Reuse those checks; only the shortcut capsule needs retracing.
+            for(i=ai->routeIndex;i<=next && straight;++i) {
+                const vec_t *at=s_botNav[ai->route[i]].origin;
+                if(fabsf(at[2]-a[2])>2 || fabsf((at[0]-a[0])*(b[1]-a[1])-
+                   (at[1]-a[1])*(b[0]-a[0]))>.1f) straight=0;
+            }
+            if(straight && Bot_Clear(ps->origin,b,1023,BOT_WORLD_MASK)) {
+                ai->routeIndex=next;
+                ai->waypoint=ai->route[next];
+            }
         }
     }
 }

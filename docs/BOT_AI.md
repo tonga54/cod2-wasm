@@ -71,7 +71,8 @@ checked every eight attempts. A single collision attempt can exceed that budget
 on a slow host; it is a work bound, not a latency guarantee. The spawn envelope
 plus a 512-unit margin bounds exploration so exterior ground planes do not
 consume the graph. Searches share fixed buffers and bots cache up to 64 route
-nodes, smoothing short sections after checking floors and corners. Replanning
+nodes. Flat, collinear sections reuse their sampled floor checks and need just
+one shortcut capsule trace; turns and stairs retain their individual nodes. Replanning
 does not force a bot to walk backward to a grid center.
 
 Immediate collision checks and local steering help bots pass corners and
