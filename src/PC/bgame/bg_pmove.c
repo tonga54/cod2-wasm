@@ -1231,6 +1231,8 @@ static void PM_ApplyGroundPlane(playerState_t *ps, pml_t *pml)
 static void PM_WalkMove(pmove_t *pm, pml_t *pml)
 {
     playerState_t *ps = pm->ps;
+    vec3_t moveAngles = { 0.0f, ps->viewangles[1], 0.0f };
+    vec3_t forward, right;
     vec3_t wishvel;
     vec3_t wishdir;
     float scale;
@@ -1256,10 +1258,15 @@ static void PM_WalkMove(pmove_t *pm, pml_t *pml)
 
     scale = PM_CmdScale(ps, &pm->cmd);
 
-    wishvel[0] = pml->forward[0] * (float)pm->cmd.forwardmove +
-                 pml->right[0] * (float)pm->cmd.rightmove;
-    wishvel[1] = pml->forward[1] * (float)pm->cmd.forwardmove +
-                 pml->right[1] * (float)pm->cmd.rightmove;
+    /* Ground travel follows yaw. Camera pitch/roll must not shorten forward
+     * movement or skew diagonals when aiming at the floor or sky. Keep the
+     * full view basis in pml for jumps, ladders and spectator flight. */
+    AngleVectors(moveAngles, forward, right, NULL);
+
+    wishvel[0] = forward[0] * (float)pm->cmd.forwardmove +
+                 right[0] * (float)pm->cmd.rightmove;
+    wishvel[1] = forward[1] * (float)pm->cmd.forwardmove +
+                 right[1] * (float)pm->cmd.rightmove;
     wishvel[2] = 0.0f;
 
     PM_VectorCopy(wishvel, wishdir);

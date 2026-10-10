@@ -44,7 +44,7 @@ static const NetField playerStateFields[105] = {
     { PSF(legsAnim), 10 },
     { PSF(aimSpreadScale), 0 },
     { PSF(weaponTime), -16 },
-    { PSF(pm_flags), 27 },
+    { PSF(pm_flags), 28 },
     { PSF(events[0]), 8 },
     { PSF(events[1]), 8 },
     { PSF(events[2]), 8 },

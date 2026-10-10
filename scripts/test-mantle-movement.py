@@ -29,7 +29,7 @@ common = r'''
 #define __attribute_regparm__(x)
 #define PMF_MANTLE 4
 #define PMF_LADDER 32
-#define PMF_SPRINT 0x02000000
+#include "cod2_sprint.h"
 #define ENTITYNUM_NONE 1023
 #define qtrue 1
 #define qfalse 0
@@ -251,7 +251,7 @@ with tempfile.TemporaryDirectory(prefix='cod2-mantle-') as directory:
         for index, variant in enumerate([body] + mutants):
             source, binary = path / (name + '.c'), path / name
             source.write_text(common + support + variant + checks)
-            subprocess.run(['cc', '-std=c99', '-O1', '-g', '-fsanitize=address,undefined',
+            subprocess.run(['cc', '-I', str(root / 'src/headers'), '-std=c99', '-O1', '-g', '-fsanitize=address,undefined',
                             str(source), '-lm', '-o', str(binary)], check=True)
             result = subprocess.run([str(binary)], capture_output=True, text=True)
             assert (result.returncode == 0) == (index == 0), (name, index, result.stderr)

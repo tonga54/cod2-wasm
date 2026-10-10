@@ -35,7 +35,7 @@ typedef float vec_t; typedef float vec3_t[3]; typedef int qboolean;
 static void AxisCopy(vec3_t *in,vec3_t *out) {memcpy(out,in,9*sizeof(float));}
 '''
 viewtypes = r'''
-#define PMF_SPRINT 0x02000000
+#include "cod2_sprint.h"
 typedef struct {int pm_type,pm_flags,eFlags,commandTime,weapon,weaponstate;float fWeaponPosFrac;} playerState_t;
 static float sprintViewBlend;
 static int sprintViewTime;
@@ -166,7 +166,7 @@ with tempfile.TemporaryDirectory(prefix='cod2-weapon-regression-') as directory:
     for name,support,body,checks,mutants in suites:
         for index,variant in enumerate([body]+mutants):
             path=tmp/(name+'.c');path.write_text(common+support+variant+checks)
-            subprocess.run(['cc','-std=c99','-O1','-g','-fsanitize=address,undefined',str(path),'-lm','-o',str(tmp/name)],check=True)
+            subprocess.run(['cc', '-I', str(root / 'src/headers'),'-std=c99','-O1','-g','-fsanitize=address,undefined',str(path),'-lm','-o',str(tmp/name)],check=True)
             result=subprocess.run([str(tmp/name)],capture_output=True,text=True)
             assert (result.returncode==0)==(index==0),(name,index,result.stderr)
 print('PASS: 333 world-space scope directions, 11,000 recoil frames, 168 slope/yaw landings, freed entities and 4 failing regression mutants')

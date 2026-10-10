@@ -3128,3 +3128,28 @@ verifies the served build, native SHA, exact images, gateway preservation and al
 four unchanged asset hashes. Recovery tags are `:before-death-fall`; final package
 and native binary are preserved in `out/death-fall-release/`. Reload existing
 browser clients to load the updated animation code.
+
+
+## 2026-10-10 — Ground aim and spectator sprint state
+
+Ground movement now builds its forward/right directions from view yaw. Looking
+at the floor or sky no longer multiplies forward speed by camera pitch or skews
+diagonals. The full view basis remains available to jumps, ladders and flight.
+The movement regression replays 58,240 pitch/roll/input/frame schedules against
+level aim using the production direction and acceleration functions, alongside
+the existing release/momentum checks.
+
+Sprint previously used playerstate bit 25, which already belongs to spectator
+permissions and is cleared by active-player end-frame cleanup. Following an
+idle target consequently enabled the sprint weapon carry pose continuously.
+Sprint now uses bit 27; the shared playerstate network field carries 28 bits.
+This preserves actual sprint through active-player cleanup and archived follow
+states while keeping spectator permissions independent. Update client and
+server together and reload old browser clients.
+
+The spectator regression runs the production spectator end-frame and sprint
+view blend through 264 idle/sprint/stop/free-follow schedules, including forced
+and restricted follow. It also roundtrips the new flag through production
+packet bit I/O at all eight offsets and rejects flag overlap, truncated wire
+state and dropped archived sprint. Existing movement/view tests include the
+shared sprint header so they exercise the actual flag value.

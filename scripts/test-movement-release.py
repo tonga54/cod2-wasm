@@ -30,14 +30,12 @@ typedef int qboolean; typedef float vec_t,vec2_t[2],vec3_t[3];
 #define PMF_LADDER 32
 #define PMF_MANTLE 4
 #define PMF_JUMPING 0x80000
-#define PMF_SPRINT 0x02000000
-#define BUTTON_SPRINT 2
-#define SPRINT_SPEED_SCALE 1.45f
+#include "cod2_sprint.h"
 #define ENTITYNUM_NONE 1023
 typedef struct {struct {float value;int enabled;} current;} dvar_t;
 typedef struct {int surfaceFlags;vec3_t normal;} trace_t;
 typedef struct {int pm_type,pm_flags,groundEntityNum,eFlags,weaponstate,speed,movementDir;
-    float leanf,fWeaponPosFrac;vec3_t origin,velocity;float oldVelocity[2];} playerState_t;
+    float leanf,fWeaponPosFrac;vec3_t origin,velocity,viewangles;float oldVelocity[2];} playerState_t;
 typedef struct {int buttons,forwardmove,rightmove;} usercmd_t;
 typedef struct {playerState_t *ps;usercmd_t cmd;} pmove_t;
 typedef struct {int walking,groundPlane;float frametime;vec3_t forward,right;trace_t groundTrace;} pml_t;
@@ -69,6 +67,9 @@ names = ['PM_DvarFloat', 'PM_DotProduct', 'PM_VectorCopy', 'PM_AbsInt',
          'PM_CmdScale', 'PM_UpdateSprint', 'PM_ClipVelocity', 'PM_Friction',
          'PM_Accelerate', 'PM_SetMovementDir', 'PM_ApplyGroundPlane', 'PM_AirMove']
 body = ''.join(function(name) for name in names)
+math_source = (root / 'src/PC/universal/com_math.c').read_text()
+math_start = math_source.index('void AngleVectors(const vec_t *angles, vec_t *forward, vec_t *right, vec_t *up)\n{')
+body = math_source[math_start:math_source.index('\nvoid AnglesToAxis(', math_start)] + body
 walk = function('PM_WalkMove')
 stop = re.search(r'    /\* Releasing movement.*?\n    }\n', walk, re.S)[0]
 checks = r'''
@@ -91,6 +92,39 @@ static void legacy_coast(float speed) {
 }
 int main(void) {
     legacy_coast(190);legacy_coast(190*SPRINT_SPEED_SCALE);
+    /* Replay the actual acceleration and view basis, comparing every step to
+     * level aim. Pitch must not shorten forward/backward travel or change the
+     * direction and speed of diagonals, including at vertical aim. */
+    int aimCases=0;
+    for(int ms=1;ms<=66;ms+=5)for(int yaw=0;yaw<360;yaw+=45)
+    for(int pitch=-90;pitch<=90;pitch+=15)for(int mode=0;mode<5;mode++)
+    for(int f=-127;f<=127;f+=127)for(int r=-127;r<=127;r+=127)if(f||r) {
+        playerState_t flat=player(0,mode==1?PMF_SPRINT:mode==2?2:mode==3?1:0,0);
+        flat.viewangles[1]=yaw;
+        playerState_t aimed=flat;
+        aimed.viewangles[0]=pitch;aimed.viewangles[2]=16;
+        int move=mode==4?64:127;
+        usercmd_t cmd={.forwardmove=f*move/127,.rightmove=r*move/127};
+        for(int t=0;t<1000;t+=ms) {
+            pml_t a=ground(ms),b=a;
+            AngleVectors(flat.viewangles,a.forward,a.right,NULL);
+            AngleVectors(aimed.viewangles,b.forward,b.right,NULL);
+            vec3_t savedForward,savedRight;
+            memcpy(savedForward,b.forward,sizeof(vec3_t));memcpy(savedRight,b.right,sizeof(vec3_t));
+            pmove_t pa={.ps=&flat,.cmd=cmd},pb={.ps=&aimed,.cmd=cmd};
+            PM_WalkMove(&pa,&a);PM_WalkMove(&pb,&b);
+            for(int i=0;i<3;i++) {
+                assert(fabsf(flat.velocity[i]-aimed.velocity[i])<.0001f);
+                assert(fabsf(flat.origin[i]-aimed.origin[i])<.001f);
+            }
+            assert(!memcmp(savedForward,b.forward,sizeof(vec3_t))&&!memcmp(savedRight,b.right,sizeof(vec3_t)));
+        }
+        float expected=PM_CmdScale(&flat,&cmd)*hypotf(cmd.forwardmove,cmd.rightmove);
+        assert(hypotf(flat.velocity[0],flat.velocity[1])>0);
+        assert(hypotf(flat.velocity[0],flat.velocity[1])<=expected+.001f);
+        aimCases++;
+    }
+    printf("PASS: %d pitch/roll movement replays, vertical aim, eight directions, walk/run/sprint/crouch/prone; full view basis preserved\n",aimCases);
     int cases=0;
     for(int msec=1;msec<=66;msec++)for(int angle=0;angle<360;angle+=15)
     for(int stance=0;stance<4;stance++)for(int slope=-1;slope<=1;slope++) {
@@ -148,15 +182,17 @@ int main(void) {
 variants = [walk, walk.replace(stop, ''),
             walk.replace('if (ps->pm_type == 0 && !pm->cmd.forwardmove && !pm->cmd.rightmove &&',
                          'if (ps->pm_type == 0 &&'),
-            walk.replace('!(ps->pm_flags & (PMF_LADDER | PMF_JUMPING | 0x200 | 0x400))', '1')]
+            walk.replace('!(ps->pm_flags & (PMF_LADDER | PMF_JUMPING | 0x200 | 0x400))', '1'),
+            walk.replace('AngleVectors(moveAngles, forward, right, NULL);',
+                         'AngleVectors(ps->viewangles, forward, right, NULL);')]
 with tempfile.TemporaryDirectory(prefix='cod2-movement-release-') as directory:
     path = Path(directory)
     for index, variant in enumerate(variants):
         (path / 'test.c').write_text(support + body + variant + checks)
-        subprocess.run(['cc', '-std=c99', '-O1', '-fsanitize=address,undefined',
+        subprocess.run(['cc', '-I', str(root / 'src/headers'), '-std=c99', '-O1', '-fsanitize=address,undefined',
                         str(path / 'test.c'), '-lm', '-o', str(path / 'test')], check=True)
         result = subprocess.run([str(path / 'test')], capture_output=True, text=True)
         assert (result.returncode == 0) == (index == 0), (index, result.stdout, result.stderr)
         if index == 0:
             print(result.stdout, end='')
-    print('PASS: coasting, braking held inputs and cancelling forced momentum regressions fail')
+    print('PASS: coasting, braking held inputs, cancelling forced momentum and pitch-dependent speed regressions fail')

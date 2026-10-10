@@ -21,9 +21,7 @@ support = r'''
 #define PMF_MANTLE 4
 #define PMF_LADDER 32
 #define ENTITYNUM_NONE 1023
-#define BUTTON_SPRINT 2
-#define PMF_SPRINT 0x02000000
-#define SPRINT_SPEED_SCALE 1.45f
+#include "cod2_sprint.h"
 typedef unsigned char byte;
 typedef int qboolean;
 typedef struct {int pm_type,pm_flags,groundEntityNum,eFlags,weaponstate,speed;float leanf,fWeaponPosFrac;} playerState_t;
@@ -128,5 +126,5 @@ int main(void) {
 '''
 with tempfile.TemporaryDirectory(prefix='cod2-sprint-') as directory:
     d=Path(directory); (d/'test.c').write_text(support+body+checks)
-    subprocess.run(['cc','-std=c99','-O1','-fsanitize=address,undefined',str(d/'test.c'),'-lm','-o',str(d/'test')],check=True)
+    subprocess.run(['cc', '-I', str(root / 'src/headers'),'-std=c99','-O1','-fsanitize=address,undefined',str(d/'test.c'),'-lm','-o',str(d/'test')],check=True)
     subprocess.run([str(d/'test')],check=True)
