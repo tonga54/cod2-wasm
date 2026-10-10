@@ -172,6 +172,25 @@ static void CG_InterpolatePlayerState(qboolean grabAngles)
                           (next->ps.fWeaponPosFrac - prev->ps.fWeaponPosFrac) * f;
 }
 
+/* CL's clock is monotonic, including its bounded post-stall horizon. Find
+ * the first unacknowledged sample without copying the entire 128-command
+ * ring on every render frame. Duplicated timestamps remain valid. */
+static int CG_FirstPredictionCommand(int oldest, int latest, int commandTime)
+{
+    int low = oldest, high = latest;
+    while (low <= high) {
+        int middle = low + (high - low) / 2;
+        usercmd_t cmd;
+        if (!CL_GetUserCmd(middle, &cmd))
+            return oldest;
+        if (cmd.serverTime <= commandTime)
+            low = middle + 1;
+        else
+            high = middle - 1;
+    }
+    return low;
+}
+
 void CG_PredictPlayerState(void)
 {
     byte ll[32];
@@ -249,6 +268,7 @@ void CG_PredictPlayerState(void)
     if (nextSnap->ps.commandTime >= curCmd.serverTime)
         goto postPredict;
 
+    oldest = CG_FirstPredictionCommand(oldest, cmdNum, ps->commandTime);
     moved = 0;
     for (; oldest <= cmdNum; oldest++) {
 

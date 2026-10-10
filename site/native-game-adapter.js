@@ -158,11 +158,14 @@
     // Fixed-function draws repeatedly submit the same sampler parameters and
     // camera matrices. Keep their values on the JS side to avoid driver calls.
     let unit = gl.TEXTURE0, bindings = new Map();
+    let unitBindings = new Map();
+    bindings.set(unit, unitBindings);
     let samplers = new WeakMap(), matrices = new WeakMap(), vectors = new WeakMap();
     let locations = new WeakMap();
     let pipeline = new Map(), enabled = new Map();
     const reset = () => {
       unit = gl.TEXTURE0; bindings = new Map();
+      unitBindings = new Map(); bindings.set(unit, unitBindings);
       samplers = new WeakMap(); matrices = new WeakMap(); vectors = new WeakMap();
       locations = new WeakMap();
       pipeline = new Map(); enabled = new Map();
@@ -207,31 +210,34 @@
     gl.activeTexture = function (value) {
       if (unit === value) return;
       activeTexture.call(this, value); unit = value;
+      unitBindings = bindings.get(unit);
+      if (!unitBindings) { unitBindings = new Map(); bindings.set(unit, unitBindings); }
     };
     const bindTexture = gl.bindTexture;
     gl.bindTexture = function (target, texture) {
-      const key = `${unit}:${target}`;
-      if (bindings.has(key) && bindings.get(key) === texture) return;
-      bindTexture.call(this, target, texture); bindings.set(key, texture);
+      if (unitBindings.has(target) && unitBindings.get(target) === texture) return;
+      bindTexture.call(this, target, texture); unitBindings.set(target, texture);
     };
     for (const method of ['texParameteri','texParameterf']) {
       const original = gl[method];
       gl[method] = function (target, parameter, value) {
-        const texture = bindings.get(`${unit}:${target}`);
+        const texture = unitBindings.get(target);
         if (!texture) return original.call(this, target, parameter, value);
         let values = samplers.get(texture);
         if (!values) { values = new Map(); samplers.set(texture, values); }
         const previous = values.get(parameter);
         if (previous?.method === method && previous.value === value) return;
         original.call(this, target, parameter, value);
-        values.set(parameter, {method, value});
+        if (previous) { previous.method = method; previous.value = value; }
+        else values.set(parameter, {method, value});
       };
     }
     const deleteTexture = gl.deleteTexture;
     gl.deleteTexture = function (texture) {
       deleteTexture.call(this, texture);
       if (texture) samplers.delete(texture);
-      for (const [key, bound] of bindings) if (bound === texture) bindings.set(key, null);
+      for (const values of bindings.values())
+        for (const [target, bound] of values) if (bound === texture) values.set(target, null);
     };
     const uniformMatrix = gl.uniformMatrix4fv;
     const getUniformLocation = gl.getUniformLocation;
@@ -245,10 +251,10 @@
       const location = getUniformLocation.call(this, program, name);
       names.set(key, location); return location;
     };
-    gl.uniformMatrix4fv = function (location, transpose, values, ...range) {
-      if (!location || transpose || range.length || values.length !== 16) {
+    gl.uniformMatrix4fv = function (location, transpose, values) {
+      if (!location || transpose || arguments.length !== 3 || values.length !== 16) {
         if (location) matrices = new WeakMap();
-        return uniformMatrix.call(this, location, transpose, values, ...range);
+        return uniformMatrix.apply(this, arguments);
       }
       let previous = matrices.get(location);
       if (previous) {
@@ -260,22 +266,42 @@
       previous.set(values);
     };
     const uniformVector = gl.uniform4fv;
-    gl.uniform4fv = function (location, values, ...range) {
-      if (!location || range.length || values.length !== 4) {
+    gl.uniform4fv = function (location, values) {
+      // Include the existing four-light uniforms. They must not invalidate
+      // every material vector when a muzzle flash updates a 16-float array.
+      if (!location || arguments.length !== 2 || !values.length ||
+          values.length % 4 || values.length > 64) {
         if (location) vectors = new WeakMap();
-        return uniformVector.call(this, location, values, ...range);
+        return uniformVector.apply(this, arguments);
       }
       let previous = vectors.get(location);
-      if (previous && previous[0] === values[0] && previous[1] === values[1]
-          && previous[2] === values[2] && previous[3] === values[3]) return;
+      if (previous && previous.length === values.length) {
+        let same = true;
+        for (let i = 0; i < values.length; ++i)
+          if (previous[i] !== values[i]) { same = false; break; }
+        if (same) return;
+      }
       uniformVector.call(this, location, values);
-      if (!previous) { previous = new Float32Array(4); vectors.set(location, previous); }
+      if (!previous || previous.length !== values.length) {
+        previous = new Float32Array(values.length); vectors.set(location, previous);
+      }
       previous.set(values);
     };
     const uniformScalar = gl.uniform4f;
-    gl.uniform4f = function (location, ...values) {
-      if (location) vectors.delete(location);
-      return uniformScalar.call(this, location, ...values);
+    gl.uniform4f = function (location, x, y, z, w) {
+      if (!location || arguments.length !== 5) {
+        if (location) vectors.delete(location);
+        return uniformScalar.apply(this, arguments);
+      }
+      const a = Math.fround(x), b = Math.fround(y), c = Math.fround(z), d = Math.fround(w);
+      let previous = vectors.get(location);
+      if (previous?.length === 4 && previous[0] === a && previous[1] === b &&
+          previous[2] === c && previous[3] === d) return;
+      uniformScalar.call(this, location, x, y, z, w);
+      if (!previous || previous.length !== 4) {
+        previous = new Float32Array(4); vectors.set(location, previous);
+      }
+      previous[0] = a; previous[1] = b; previous[2] = c; previous[3] = d;
     };
     const linkProgram = gl.linkProgram;
     gl.linkProgram = function (program) {

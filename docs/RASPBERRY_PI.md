@@ -260,6 +260,58 @@ not the host's simulation cost. Some Pi kernels disable memory cgroups; Docker
 then ignores `mem_limit` while keeping CPU quotas. Check `docker info` on the
 actual host rather than assuming the requested memory cap is enforced.
 
+### Repeat a connected-player load test
+
+Open eight actual browser clients, join the same room, and select a team and
+weapon in each. Exercise movement and combat while they remain connected.
+Queries alone do not simulate players. Prefer separate client computers;
+eight renderers on one computer compete for CPU/GPU/memory and limit input rate.
+
+From the build computer, observe the running room for 60 seconds:
+
+```sh
+python3 scripts/benchmark-connected-server.py \
+  --ssh USER@PI_LAN_IP \
+  --container cod2-wasm-pi-cod2-server-1 \
+  --seconds 60 --expected-clients 8 --port 28960 \
+  --output out/eight-player-server.json
+```
+
+Use the actual engine UDP port from `/servers` when observing another room.
+An existing SSH multiplexing socket can be passed with `--ssh-control PATH`.
+The script uses the container's existing raw-packet capability via `docker exec`
+as root; it does not expose UDP, change privileges or create clients. Reports
+contain counts/timings, not packet payloads, player names or addresses. It fails
+if the requested number of players is not observed throughout, status queries
+fail, or the capture drops packets. It does not impose a latency acceptance
+threshold: inspect the timing distributions, not only `passed`.
+
+The report measures container CPU, server-interface game packet cadence,
+server-reported pings and snapshot acknowledgement RTT. ACK RTT includes LAN,
+gateway and client scheduling; the status-query RTT is container-local. Capture
+drops concern the observer and do not measure player packet loss. It does not
+measure browser FPS. Use `?perfDebug=1` on each client for frame percentiles and
+run `vcgencmd measure_temp` / `vcgencmd get_throttled` on the Pi separately.
+
+On October 10, 2026, a Pi 5 running the Release i386 engine under QEMU sustained
+eight spawned Carentan players for 60 seconds. Four joined each team; three
+clients exercised sprint/fire/smoke, and two also threw frags during the sample.
+All eight received 1,200 ordered game packets (20/s), using 33.96% of one CPU
+core including the supervisor/observer. CPU throttling and container restarts
+were zero; temperature was 57.6°C with firmware throttling `0x0`. The worst
+per-client server packet-gap p95 was 54.71 ms and maximum 64.80 ms. All 60 status
+queries returned, and the observer dropped no captured packets. Server-reported
+ping p95 was 46 ms; the worst ACK RTT p95 was 123.14 ms.
+
+All eight browser renderers ran on one development Mac and sent about 10–27
+input packets/s each. This exercises actual simulation/snapshots, but does not
+establish capacity for eight independent 60-input/s PCs or continuous combat
+by every player. Their shared rendering resource limits are distinct from Pi
+simulation performance. Single-client graphics/movement checks retain full
+1280×720 rendering, anti-aliasing, original assets and effects. Lower-end client
+hardware still requires direct testing; these results do not guarantee zero
+latency or a universal FPS floor.
+
 ## Troubleshooting
 
 | Symptom | Check / action |

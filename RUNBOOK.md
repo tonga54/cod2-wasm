@@ -3007,3 +3007,78 @@ anti-aliasing. During activity the Pi responded to 300 local UDP queries with
 zero loss, p95 0.530 ms, maximum 3.450 ms and
 14.50% of one CPU core, without throttling. Only disposable
 QA clients/rooms/containers were used; the main Pi stack stayed available.
+
+## Baked shadows, prediction and snapshot work — October 10, 2026
+
+Sun visibility is authored at twice the baked RGB lightmap resolution in each
+axis. Map loading now averages its complete 2×2 footprint instead of selecting
+only the top-left sample. This reduces shadow-edge aliasing without changing
+lightmap dimensions, GPU texture memory, shaders, geometry, original color
+terms or gameplay render passes. Constant fully lit/shadowed regions retain the
+same intensity. This is a modest visual refinement computed at map load.
+
+Local prediction binary-searches the monotonic command history for the first
+unacknowledged input, using at most eight copies instead of scanning all 128
+entries on every frame. The existing loop replays the same outstanding commands,
+predecessors, movement/collision and events. Missing intermediate history falls
+back to the original scan. Map-restart server commands already clear the ring.
+Checks compare 1.3 million replay windows, including duplicate timestamps,
+ring wrap and acknowledgement boundaries, under ASan/UBSan.
+
+Snapshot delta writers search backward for the last changed field and preserve
+the transmitted prefix and original bit order. Unchanged ammunition, clips and
+objectives use bulk equality checks; differing objective padding/unused fields
+still fall back to the original field checks. Tests compare 40,000 field-table
+cases, 327,680 byte-identical ammunition encodings (including overflow/partial
+bytes) and 10,000 objective schedules. No cadence, accuracy or protocol change
+is introduced. This removes work but is not a measured universal CPU speedup.
+
+The browser's texture-binding cache no longer allocates unit/target key strings
+per bind, and common uniform calls no longer allocate rest-argument arrays.
+Sampler metadata is reused. Four-light vector uploads no longer invalidate all
+material vectors; shared scalar/vector uniforms preserve float32 values and
+relink/deletion/context invalidation. A 600-frame changing-light test retains
+all 601 required light/material uploads instead of resubmitting the unchanged
+material each time. Original textures, anti-aliasing, anisotropic filtering,
+point-light values, fog, effects and model detail remain intact. Native/browser
+builds and the full static suite pass.
+
+The fixed Carentan introduction-camera baseline/candidate windows on the M4
+Mac at 1280×720 with anti-aliasing measured 118.6/118.0 FPS, both with frame p95
+10.1 ms. Mean main-thread times were 5.034/5.092 ms; texture-state work measured
+0.471/0.378 ms. The candidate window included one 72.3 ms frame, so this sample
+does not establish an overall FPS improvement or hitch-free guarantee. A later
+single-client Carentan sprint window measured 120.0 FPS, frame p95 9.9 ms,
+maximum 10.4 ms and zero frames above 33 ms across 600 frames. An earlier
+combat/smoke window included one 40.6 ms frame. These are different gameplay
+scenes; no controlled whole-client speedup claim is made. The paired screenshots
+retain architecture/texture detail and show only the intended shadow refinement.
+
+A separate Pi 5 QA stack ran eight real spawned browser clients in one Carentan
+TDM room, four on each team. The 60 s packet capture observed eight active
+bidirectional peers and eight players in every status sample. Three clients
+performed sprint/automatic fire/smoke, two also threw frags; activity was
+sequential, not eight players firing continuously. Each peer received exactly
+1,200 ordered game packets, approximately 20/s. The worst per-peer server packet
+gap p95 was 54.71 ms and maximum 64.80 ms. Server-container CPU, including the
+supervisor and packet observer, used 33.96% of one core with zero CPU throttling.
+All 60 status queries returned; capture socket drops and container restarts were
+zero. Pi temperature was 57.6°C, firmware throttling 0x0. Server-reported ping
+p95 was 46 ms, and worst per-peer snapshot ACK RTT p95 was 123.14 ms; ACK RTT
+includes LAN/gateway and the client's scheduling delay.
+
+The eight full renderers shared one development Mac, reducing their input
+cadence to approximately 10–27 packets/s each and their rendering to roughly
+13–30 FPS with visible contention. This is a real server simulation/snapshot
+load, not a proxy-query-only test, but does not establish capacity for eight
+independent 60-input/s PCs, broader hardware, more rooms or worst-case combat.
+No client runtime warnings/errors appeared. `benchmark-connected-server.py`
+checks connected players and capture completeness, not a latency threshold or
+end-to-end packet loss. Reports retain no raw payloads, names or addresses. The
+Pi guide documents how to repeat the measurement and its limitations.
+
+Single-client Toujane QA exercised movement and automatic fire with no runtime
+warnings/errors. The 600-frame window measured 120.0 FPS, frame p95 10.0 ms,
+maximum 10.3 ms, mean main-thread time 2.867 ms and zero frames above 33 ms,
+with the same 1280×720 canvas and anti-aliasing. This is another scene sample,
+not a low-end hardware qualification.

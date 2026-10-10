@@ -5,9 +5,9 @@ native dedicated server and a WebSocket-to-UDP gateway. Each browser runs its
 own game client; the host runs the authoritative multiplayer simulation.
 
 Play on a LAN using the original maps, models, textures, animations, sounds and
-menus. The project is under active development. Two-browser combat, respawn,
-room creation and map rotation have been exercised on the supported maps;
-large populated matches and other hardware still need broader testing.
+menus. The project is under active development. Combat, respawn, room creation
+and map rotation have been exercised on the supported maps. An eight-client Carentan session has also been measured on a
+Raspberry Pi 5; larger matches and lower-end client hardware need broader testing.
 
 ## Maps and game modes
 
@@ -52,6 +52,9 @@ retail CoD2:
 - **Larger visual effects:** brief muzzle sprites are 40% larger with stronger
   color/alpha; frag fire, smoke and dust are 35% larger. Original effect textures,
   particle counts, lifetimes and grenade damage remain unchanged.
+- **Smoother baked shadows:** sun visibility uses all four source samples when
+  preparing each lightmap texel at map load. Shadow edges have less aliasing,
+  with the same uploaded texture size and no additional gameplay render passes.
 - **Browser hosting and controls:** create/delete rooms without a desktop game
   installation on each client, cached asset downloads with actual byte progress,
   saved gametags, English interface text, update notices, compact chat, and an
@@ -215,26 +218,43 @@ GPU between draws: exact mesh ranges are cached, and authored indices retain
 all of their vertices. Writes, layout changes and map teardown refresh or release
 the cached data. Dynamic/animated geometry keeps its original streaming path;
 its color conversion now needs one pass instead of two, preserving every channel
-and alpha byte.
+and alpha byte. Texture bindings and common uniform calls avoid temporary
+strings/argument arrays. Four-light uniform updates preserve unrelated material
+caches; all authored light values still reach the GPU.
 
 The authoritative simulation runs at the original **20 Hz**, with up to **60
 input packets/s** and a 25 KB/s client rate. Remote motion interpolation uses
 sample timestamps/velocities, smooths sample boundaries and allows bounded
 50 ms extrapolation across short gaps. Command time stays monotonic after
-stalls. Local shot effects are predicted once, avoiding duplicate sound/recoil.
+stalls. Local shot effects are predicted once, avoiding duplicate sound/recoil. Local
+prediction finds the first unacknowledged command in at most eight lookups
+instead of scanning the full 128-command history each frame; it still replays
+the same outstanding inputs and performs the same collision checks.
 
 Server optimizations include UDP-readiness/deadline waits, cached byte-identical
 Huffman encoding/decoding, byte-fragment bit fields, bounded local fragment
 batches, larger receive buffers and gateway startup packet buffering. These
 reduce work and avoid needless waits while preserving packet fields and
-simulation rules. Collision traces reject geometry outside the actual segment
-or beyond the nearest hit and avoid testing shared BSP brushes repeatedly;
+simulation rules. Snapshot writers search backward for the last changed field
+and take an equality fast path for unchanged ammunition/objectives; regression
+checks preserve the original packet bytes and overflow behavior. Collision
+traces reject geometry outside the actual segment or beyond the nearest hit and avoid testing shared BSP brushes repeatedly;
 the same collision geometry, contact margins and hit results are retained.
 An exact-bit, bounded cache also reuses identical immutable-world sweeps in
 the server and client. It resets on map changes, has independent native thread
 storage, and excludes moving entities and temporary/transformed models. Replayed
 prediction commands and repeated sightline checks can reuse their complete
 results without rounding positions or skipping entity collisions.
+
+A 60-second Carentan test on a Raspberry Pi 5 kept **eight real browser players**
+connected throughout, with sprint, automatic fire, smoke and frags exercised.
+Each player received 1,200 game packets (**20/s**); the server container used
+**34.0% of one CPU core**, with no CPU throttling or container restarts. The
+worst per-client packet-gap p95 was **54.7 ms**, and the maximum was **64.8 ms**.
+The eight renderers shared one development Mac and sent approximately 10–27
+input packets/s each, so this is not eight independent PCs at 60 inputs/s or
+eight players continuously firing. See the [Pi load-test instructions](docs/RASPBERRY_PI.md#repeat-a-connected-player-load-test)
+for the measurement scope and a reproducible command.
 
 The optional **`?perfDebug=1`** overlay reports actual submitted frames and
 frame-time percentiles. Building/smoke tests in Carentan and sustained MG fire

@@ -1747,6 +1747,21 @@ static void __attribute_regparm__(3)
     }
 }
 
+/* Only the last changed field sets the transmitted prefix length. Searching
+ * from the tail can stop as soon as it finds that field; the encoding below
+ * still writes every field in the original order, with identical bit rules. */
+static inline int MSG_LastChangedField(const byte *from, const byte *to,
+                                     const NetField *fields, int count)
+{
+    while (count > 0) {
+        int offset = fields[count - 1].offset;
+        if (*(const int *)(from + offset) != *(const int *)(to + offset))
+            break;
+        --count;
+    }
+    return count;
+}
+
 static void __attribute_regparm__(3)
     MSG_WriteDeltaStruct(msg_t *msg, byte *from, byte *to, qboolean force, int numFields, int indexBits, const NetField *stateFields, qboolean bChangeBit)
 {
@@ -1767,13 +1782,7 @@ static void __attribute_regparm__(3)
         return;
     }
 
-    lc = 0;
-    for (i = 0; i < numFields; ++i) {
-        const NetField *field = &stateFields[i];
-        if (*(int *)(from + field->offset) != *(int *)(to + field->offset)) {
-            lc = i + 1;
-        }
-    }
+    lc = MSG_LastChangedField(from, to, stateFields, numFields);
 
     if (!lc) {
         if (!force) {
@@ -1956,6 +1965,10 @@ static inline __attribute__((always_inline)) void MSG_WriteDeltaPlayerstateShort
     int bit;
     int mask;
 
+    if (groupCount > 0 && !memcmp(from, to, (size_t)groupCount * 16 * sizeof(*from))) {
+        MSG_WriteBit0_core(msg);
+        return;
+    }
     anyChanged = 0;
     for (group = 0; group < groupCount; ++group) {
         mask = 0;
@@ -1997,6 +2010,11 @@ static inline __attribute__((always_inline)) void MSG_WriteDeltaPlayerstateShort
     int bit;
     int mask;
 
+    if (groupCount > 0 && !memcmp(from, to, (size_t)groupCount * 16 * sizeof(*from))) {
+        for (group = 0; group < groupCount; ++group)
+            MSG_WriteBit0_core(msg);
+        return;
+    }
     for (group = 0; group < groupCount; ++group) {
         mask = 0;
         for (bit = 0; bit < 16; ++bit) {
@@ -2025,6 +2043,8 @@ static inline __attribute__((always_inline)) qboolean MSG_PlayerstateObjectivesC
     int i;
     int j;
 
+    if (!memcmp(from->objective, to->objective, sizeof(from->objective)))
+        return 0;
     for (i = 0; i < 16; ++i) {
         if (from->objective[i].state != to->objective[i].state) {
             return 1;
@@ -2088,13 +2108,7 @@ void MSG_WriteDeltaPlayerstate(msg_t *msg, playerState_s *from, playerState_s *t
         from = &dummy;
     }
 
-    lc = 0;
-    for (i = 0; i < 105; ++i) {
-        const NetField *field = &playerStateFields[i];
-        if (*(int *)((byte *)from + field->offset) != *(int *)((byte *)to + field->offset)) {
-            lc = i + 1;
-        }
-    }
+    lc = MSG_LastChangedField((byte *)from, (byte *)to, playerStateFields, 105);
 
     MSG_WriteByte_core(msg, lc);
     for (i = 0; i < lc; ++i) {

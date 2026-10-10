@@ -82,3 +82,33 @@ gl.uniform4fv(first,vector);gl.uniform4f(gl.getUniformLocation(program,'tint'),0
 assert.equal(count('getUniformLocation'),1);
 gl.linkProgram(program);assert.notEqual(gl.getUniformLocation(program,'tint'),first);
 assert.equal(count('getUniformLocation'),2);
+// Updating the existing light arrays must leave unrelated material caches hot.
+const lightLocation = {}, materialLocation = {}, lightArray = new Float32Array(16);
+const materialColor = new Float32Array([1, .75, .5, 1]);
+const arrayCalls = count('uniform4fv');
+for (let i=0;i<600;i++) {
+  lightArray[0] = i;
+  gl.uniform4fv(lightLocation,lightArray);
+  gl.uniform4fv(materialLocation,materialColor);
+}
+assert.equal(count('uniform4fv')-arrayCalls,601);
+// Scalar and vector forms refer to the same four float32 values on the GPU.
+const scalarLocation = {}, scalarCalls = count('uniform4f');
+for(let i=0;i<600;i++)gl.uniform4f(scalarLocation,1/3,.25,.5,1);
+assert.equal(count('uniform4f')-scalarCalls,1);
+const scalarVectorCalls = count('uniform4fv');
+gl.uniform4fv(scalarLocation,new Float32Array([1/3,.25,.5,1]));
+assert.equal(count('uniform4fv'),scalarVectorCalls);
+gl.uniform4f(scalarLocation,1/3,.5,.5,1);assert.equal(count('uniform4f')-scalarCalls,2);
+gl.uniform4fv(scalarLocation,new Float32Array([1/3,.25,.5,1]));assert.equal(count('uniform4fv'),scalarVectorCalls+1);
+gl.uniform4fv(lightLocation,new Float32Array(4));gl.uniform4fv(lightLocation,lightArray);
+assert.equal(count('uniform4fv'),scalarVectorCalls+3);
+// One texture shared between units still has one mutable sampler state.
+const shared = {}, samplerCalls = count('texParameteri');
+gl.activeTexture(100);gl.bindTexture(3553,shared);gl.texParameteri(3553,10241,9987);
+gl.activeTexture(101);gl.bindTexture(3553,shared);gl.texParameteri(3553,10241,9728);
+gl.activeTexture(100);gl.texParameteri(3553,10241,9987);
+assert.equal(count('texParameteri')-samplerCalls,3);
+gl.deleteTexture(shared);gl.activeTexture(101);gl.texParameteri(3553,10241,9987);
+assert.equal(count('texParameteri')-samplerCalls,4);
+console.log('PASS: 600 changing muzzle-light arrays preserve material caches; scalar/vector float32 equivalence, array length changes and shared samplers retain values');

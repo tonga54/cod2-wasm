@@ -50,6 +50,15 @@ typedef void (*loader_regparm_fn)(void *) __attribute_regparm__(1);
 #define LIGHTMAP_BYTES (LIGHTMAP_PIXELS * 4)
 #define MAX_MERGED_GROUPS 32
 
+/* The sun-visibility plane has twice the baked RGB resolution. Filter its
+ * complete 2x2 footprint once at map load instead of aliasing shadow edges
+ * with a single top-left sample. The uploaded size and draw shaders stay the
+ * same; this adds no work to gameplay frames. */
+static float R_FilterSunVisibility(const byte *pixel, int rowBytes)
+{
+    return (pixel[0] + pixel[1] + pixel[rowBytes] + pixel[rowBytes + 1]) * 0.25f;
+}
+
 static void R_PrintLoadProgress(const char *what)
 {
     ri.Printf(0, "Loading %s...\n", what);
@@ -491,7 +500,7 @@ GfxWorld *R_LoadWorldInternal(const char *name)
 
                             for (int x = 1; x <= pixWidth; x++) {
 
-                                float sunVis = (float)(unsigned char)(*hiResPtr);
+                                float sunVis = R_FilterSunVisibility(hiResPtr, pixWidth * 2);
 
                                 float valR = (float)(unsigned char)(*loR) + sunR * sunVis;
                                 valR = floorf(valR * 0.5f + 0.5f);
