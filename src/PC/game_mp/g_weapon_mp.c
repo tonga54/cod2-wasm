@@ -145,6 +145,10 @@ void Weapon_Melee(gentity_s (*ent)[16], weaponParms *wp, float range, float widt
 
     weaponIndex = ((gentity_t *)ent)->s.weapon;
     damage = ((WeaponDef *)BG_GetWeaponDef(weaponIndex))->iMeleeDamage;
+    /* Custom LAN balance: two butt strikes against a full-health player.
+     * Keep weapons with weaker melee damage at their original value. */
+    if (damage > 50)
+        damage = 50;
 
     if (!Melee_Trace((gentity_t *)ent, wp, damage, range, width, height, &tr, endpos))
         return;
@@ -161,7 +165,7 @@ void Weapon_Melee(gentity_s (*ent)[16], weaponParms *wp, float range, float widt
         return;
 
     G_Damage(traceEnt, (gentity_t *)ent, (gentity_t *)ent, wp->forward, endpos,
-             damage + (rand() % 5), 7, 0, tr.partGroup, 0);
+             damage, 0, 7, tr.partGroup, 0);
 }
 
 void FireWeaponMelee(gentity_s (*ent)[16])
