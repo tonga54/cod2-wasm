@@ -203,7 +203,9 @@ Server optimizations include UDP-readiness/deadline waits, cached byte-identical
 Huffman encoding/decoding, byte-fragment bit fields, bounded local fragment
 batches, larger receive buffers and gateway startup packet buffering. These
 reduce work and avoid needless waits while preserving packet fields and
-simulation rules.
+simulation rules. Collision traces reject geometry outside the actual segment
+or beyond the nearest hit and avoid testing shared BSP brushes repeatedly;
+the same collision geometry, contact margins and hit results are retained.
 
 The optional **`?perfDebug=1`** overlay reports actual submitted frames and
 frame-time percentiles. Building/smoke tests in Carentan and sustained MG fire

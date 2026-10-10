@@ -102,8 +102,12 @@ same deployment helper again while no players are connected. Use this procedure
 instead of `update-local.py --apply`, which builds the standard server layout.
 
 Client rendering quality and assets remain identical to the standard deployment.
-The server retains the original 20 Hz simulation. QEMU adds CPU cost; configured
-64-player slots and three rooms do not establish that the Pi can sustain that
+The server retains the original 20 Hz simulation. Long sightlines use
+segment/nearest-hit rejection and shared-brush deduplication
+to avoid repeatedly solving collisions across the map. This also applies to
+the browser client and keeps the original geometry and contact margins.
+QEMU adds CPU cost; configured 64-player slots and three rooms do not establish
+that the Pi can sustain that
 load. Check `docker stats`, temperature and response/frame timings with your
 actual player count. The browser `?perfDebug=1` overlay measures client rendering,
 not the host's simulation cost. Some Pi kernels disable memory cgroups; Docker

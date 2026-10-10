@@ -42,6 +42,7 @@ cmodel_t *CM_ClipHandleToModel(clipHandle_t handle)
 
 extern clipMap_t cm;
 extern void CM_CalcTraceEntents(TraceExtents *extents);
+extern qboolean CM_TraceBox(const TraceExtents *extents, const vec_t *mins, const vec_t *maxs, float fraction);
 extern int CM_BoxLeafnums(const vec_t *mins, const vec_t *maxs, int *list, int listsize, int *lastLeaf);
 extern short int CM_MeshTestInLeaf(const traceWork_t *tw, cLeaf_t *leaf, trace_t *trace);
 extern void CM_TraceThroughAabbTree(const traceWork_t *tw, CollisionAabbTree *aabbTree, trace_t *trace);
@@ -186,6 +187,23 @@ static void CM_SetTraceMaterial(trace_t *trace, int materialNum, int contents)
     }
 }
 
+static qboolean CM_TraceMayHitBounds(const traceWork_t *tw, const vec_t *mins,
+                                    const vec_t *maxs, const trace_t *trace)
+{
+    vec3_t expandedMins, expandedMaxs;
+    int axis;
+
+    /* A diagonal 8192-unit sight trace has a large bounding box. Test the
+     * actual segment, shortened to the nearest hit, before visiting geometry.
+     * Keep the old one-unit broad-phase margin, including the contact epsilon. */
+    for (axis = 0; axis < 3; axis++) {
+        float padding = tw->radiusOffset[axis] + 1.0f;
+        expandedMins[axis] = mins[axis] - padding;
+        expandedMaxs[axis] = maxs[axis] + padding;
+    }
+    return !CM_TraceBox(&tw->extents, expandedMins, expandedMaxs, trace->fraction);
+}
+
 static void CM_TraceBrushPlane(const traceWork_t *tw, const vec_t *normal, float dist,
                                int materialNum, float *enterFrac, float *leaveFrac,
                                vec3_t enterNormal, int *enterMaterial, int *startsOut,
@@ -264,6 +282,9 @@ static void CM_TraceThroughBrush(const traceWork_t *tw, cbrush_t *brush, trace_t
             return;
     }
 
+    if (!CM_TraceMayHitBounds(tw, brush->mins, brush->maxs, trace))
+        return;
+
     for (axis = 0; axis < 3; axis++) {
         vec3_t normal;
 
@@ -322,7 +343,7 @@ static void CM_TraceThroughBrush(const traceWork_t *tw, cbrush_t *brush, trace_t
 }
 
 static void CM_TraceLeafBrushNode_r(const traceWork_t *tw, cLeafBrushNode_t *node,
-                                    trace_t *trace, int depth)
+                                    trace_t *trace, int depth, byte *brushSeen)
 {
     int i;
 
@@ -335,8 +356,21 @@ static void CM_TraceLeafBrushNode_r(const traceWork_t *tw, cLeafBrushNode_t *nod
     if (node->leafBrushCount > 0) {
         for (i = 0; i < node->leafBrushCount; i++) {
             unsigned short brushIndex = node->data.leaf.brushes[i];
-            if (brushIndex < cm.numBrushes)
+            if (brushIndex < cm.numBrushes) {
+                /* BSP leaves share brushes. A trace tests the full segment,
+                 * so revisiting one cannot find an earlier collision. The
+                 * bitmap belongs to this trace, including recursive calls. */
+                if (brushSeen) {
+                    byte bit = (byte)(1u << (brushIndex & 7));
+                    if (brushSeen[brushIndex >> 3] & bit)
+                        continue;
+                }
                 CM_TraceThroughBrush(tw, &cm.brushes[brushIndex], trace);
+                /* Preserve the exhaustive solver's contents/material updates
+                 * for overlapping brushes when the trace starts in solid. */
+                if (brushSeen && !trace->startsolid)
+                    brushSeen[brushIndex >> 3] |= (byte)(1u << (brushIndex & 7));
+            }
             if (trace->allsolid)
                 return;
         }
@@ -344,22 +378,25 @@ static void CM_TraceLeafBrushNode_r(const traceWork_t *tw, cLeafBrushNode_t *nod
     }
 
     if (node->leafBrushCount < 0)
-        CM_TraceLeafBrushNode_r(tw, node + 1, trace, depth + 1);
+        CM_TraceLeafBrushNode_r(tw, node + 1, trace, depth + 1, brushSeen);
 
     if (node->data.children.childOffset[0] != 0)
-        CM_TraceLeafBrushNode_r(tw, node + node->data.children.childOffset[0], trace, depth + 1);
+        CM_TraceLeafBrushNode_r(tw, node + node->data.children.childOffset[0], trace, depth + 1, brushSeen);
     if (node->data.children.childOffset[1] != 0 &&
         node->data.children.childOffset[1] != node->data.children.childOffset[0])
-        CM_TraceLeafBrushNode_r(tw, node + node->data.children.childOffset[1], trace, depth + 1);
+        CM_TraceLeafBrushNode_r(tw, node + node->data.children.childOffset[1], trace, depth + 1, brushSeen);
 }
 
-static void CM_TraceLeafBrushes(const traceWork_t *tw, cLeaf_t *leaf, trace_t *trace)
+static void CM_TraceLeafBrushes(const traceWork_t *tw, cLeaf_t *leaf, trace_t *trace, byte *brushSeen)
 {
     if (!leaf || !(leaf->brushContents & tw->contents))
         return;
 
+    if (!CM_TraceMayHitBounds(tw, leaf->mins, leaf->maxs, trace))
+        return;
+
     if (leaf->leafBrushNode >= 0 && leaf->leafBrushNode < cm.leafbrushNodesCount)
-        CM_TraceLeafBrushNode_r(tw, &cm.leafbrushNodes[leaf->leafBrushNode], trace, 0);
+        CM_TraceLeafBrushNode_r(tw, &cm.leafbrushNodes[leaf->leafBrushNode], trace, 0, brushSeen);
 }
 
 static void CM_TraceLeafTerrain(const traceWork_t *tw, cLeaf_t *leaf, trace_t *trace)
@@ -378,9 +415,9 @@ static void CM_TraceLeafTerrain(const traceWork_t *tw, cLeaf_t *leaf, trace_t *t
     }
 }
 
-static void CM_TraceLeaf(const traceWork_t *tw, cLeaf_t *leaf, trace_t *trace)
+static void CM_TraceLeaf(const traceWork_t *tw, cLeaf_t *leaf, trace_t *trace, byte *brushSeen)
 {
-    CM_TraceLeafBrushes(tw, leaf, trace);
+    CM_TraceLeafBrushes(tw, leaf, trace, brushSeen);
     if (!trace->allsolid)
         CM_TraceLeafTerrain(tw, leaf, trace);
 }
@@ -402,21 +439,24 @@ static int __attribute_regparm__(3) CM_Trace(trace_t *results, const vec_t *star
     if (model != 0) {
         cmodel = CM_ModelForHandle(model);
         if (cmodel)
-            CM_TraceLeaf(&tw, &cmodel->leaf, results);
+            CM_TraceLeaf(&tw, &cmodel->leaf, results, NULL);
         return 0;
     }
 
     {
         int leafs[1024];
+        /* Leaf brush indexes are unsigned 16-bit values. */
+        byte brushSeen[65536 / 8];
         int lastLeaf = 0;
         int leafCount;
         int i;
 
+        memset(brushSeen, 0, sizeof(brushSeen));
         leafCount = CM_BoxLeafnums(tw.bounds[0], tw.bounds[1], leafs, 1024, &lastLeaf);
         for (i = 0; i < leafCount; i++) {
             int leafIndex = leafs[i];
             if (leafIndex >= 0 && leafIndex < cm.numLeafs)
-                CM_TraceLeaf(&tw, &cm.leafs[leafIndex], results);
+                CM_TraceLeaf(&tw, &cm.leafs[leafIndex], results, brushSeen);
             if (results->allsolid || results->fraction == 0.0f)
                 break;
         }

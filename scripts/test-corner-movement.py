@@ -26,10 +26,11 @@ support = r'''
 #include <stdlib.h>
 #include <string.h>
 typedef int qboolean;typedef float vec_t,vec3_t[3];
+typedef struct {float start[3],end[3],invDelta[3];} TraceExtents;
 #define PM_SLIDEMOVE_ABI
 #define MAX_CLIP_PLANES 5
 typedef struct {float fraction,normal[3];int startsolid,allsolid,contents,entityNum,surfaceFlags;const char *material;} trace_t;
-typedef struct {struct {float start[3],end[3],invDelta[3];} extents;
+typedef struct {TraceExtents extents;
  float size[3],midpoint[3],delta[3],halfDelta[3],halfDeltaAbs[3],deltaLenSq,deltaLen,
        radius,offsetZ,bounds[2][3],radiusOffset[3];int contents,isPoint,axialCullOnly;} traceWork_t;
 typedef struct {float normal[3],dist;} cplane_t;
@@ -41,7 +42,6 @@ typedef struct {float frametime,impactSpeed;int groundPlane;trace_t groundTrace;
 static cbrush_t wall,floorBrush;
 static cplane_t face,back;
 static cbrushside_t sides[2];
-static void CM_CalcTraceEntents(void *p) {}
 static void CM_InitTraceThreadInfo(traceWork_t *tw) {}
 static void CM_SetTraceMaterial(trace_t *t,int m,int contents) {t->contents=contents;}
 static float Vec3NormalizeTo(const float *v,float *out) {
@@ -62,7 +62,10 @@ static void PM_ApplyStepEvent(pmove_t *pm,pml_t *pml,playerState_t *ps,const flo
 '''
 brush_code = ''.join(function(trace, n) for n in (
     'CM_DotProduct', 'CM_AbsFloat', 'CM_MinFloat', 'CM_InitTraceWork',
-    'CM_TraceBrushPlane', 'CM_TraceThroughBrush'))
+    'CM_TraceMayHitBounds', 'CM_TraceBrushPlane', 'CM_TraceThroughBrush'))
+box_code = (root / 'src/PC/qcommon/cm_tracebox.c').read_text()
+brush_code = ''.join(function(box_code, n) for n in
+                     ('CM_CalcTraceEntents', 'CM_TraceBox')) + brush_code
 player_trace = r'''
 static void PM_playerTrace(pmove_t *pm,trace_t *t,const float *start,
  const float *mins,const float *maxs,const float *end,int client,int mask) {

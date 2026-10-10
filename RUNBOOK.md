@@ -2858,3 +2858,38 @@ mounts, native/gateway preservation and QA cleanup are recorded in
   1.90% of one core. Neither sample was CPU-throttled. These are empty-room
   response checks, not a populated-match load test or an end-to-end latency claim.
   The supervisor started and finished with zero rooms.
+
+## Long sightline collision cost on the Pi — October 10, 2026
+
+A populated Pi room exhausted one core and accumulated multi-second dedicated
+frame hitches. Sampling the running QEMU process with Debian's matching debug
+symbols located the guest stack in `TeamplayInfoMessage -> G_TraceCapsule ->
+SV_Trace -> CM_BoxTrace -> CM_TraceLeafBrushes -> CM_TraceThroughBrush`. The
+8192-unit HUD sightline visited brushes throughout its large diagonal bounding
+box, repeatedly solving shared BSP brushes even after finding a nearer wall.
+
+`cm_trace.c` now uses the existing segment/box solver before leaf-brush traversal
+and detailed brush planes, expands bounds by the same capsule extents and
+one-unit broad-phase margin, and clips candidates to the current hit fraction.
+A per-call 16-bit-index bitmap avoids revisiting shared brushes; traces that
+start in solid preserve the exhaustive contents/material update behavior.
+Geometry, collision planes, contact epsilon, simulation frequency and native
+floating-point compilation flags remain unchanged. The same source builds into
+the native server and WebAssembly client.
+
+The ASan/UBSan regression compares 100,000 randomized point/capsule sweeps,
+partial-hit fractions, stationary traces, overlaps and angled brush planes with
+the exhaustive solver. A 10,000-building diagonal fixture has the exact same
+hit with 35,250 plane tests reduced to 6. The actual world-trace path also covers
+1,024 shared leaves, recursive brush nodes, independent invocation state and
+content masks. All 4,608 existing angled-wall walk/sprint/step schedules pass.
+Native and browser builds and the existing full static regression suite pass.
+
+Pi QA after the collision change used actual browser clients: both maps accepted
+movement, automatic fire and smoke without a runtime error. The two-client
+Carentan sample made 300 UDP getinfo queries over 15 s with zero lost, mean
+0.379 ms, p95 0.731 ms and max 2.752 ms; supervisor plus both room processes used
+40.72% of one core, with no CPU throttling. The single-client Toujane sample
+made 300 queries over 15 s with zero lost, mean 2.619 ms, p95 4.180 ms and max
+25.647 ms, using 27.46% of one core. These are host responsiveness observations,
+not full network latency measurements or a large-player capacity claim.
