@@ -564,14 +564,11 @@ static const byte *CDirect3DDevice_InterleavedColors(const byte *vertices,
 {
     static byte *scratch;
     static size_t capacity;
-    const byte *colors;
     size_t bytes;
     UINT i;
     if (byteOrder == COLOR_BYTES_RGBA || colorOffset < 0 ||
         (UINT)colorOffset + 4 > stride || !count || count > SIZE_MAX / stride)
         return NULL;
-    colors = CDirect3DDevice_ConvertColorArray(vertices, stride, colorOffset, count, byteOrder);
-    if (!colors) return NULL;
     bytes = (size_t)stride * count;
     if (bytes > capacity) {
         byte *grown = realloc(scratch, bytes);
@@ -580,8 +577,15 @@ static const byte *CDirect3DDevice_InterleavedColors(const byte *vertices,
         capacity = bytes;
     }
     memcpy(scratch, vertices, bytes);
-    for (i = 0; i < count; ++i)
-        memcpy(scratch + (size_t)i * stride + colorOffset, colors + i * 4, 4);
+    for (i = 0; i < count; ++i) {
+        const byte *src = vertices + (size_t)i * stride + colorOffset;
+        byte *dst = scratch + (size_t)i * stride + colorOffset;
+        if (byteOrder == COLOR_BYTES_ARGB) {
+            dst[0] = src[1]; dst[1] = src[2]; dst[2] = src[3]; dst[3] = src[0];
+        } else {
+            dst[0] = src[2]; dst[1] = src[1]; dst[2] = src[0]; dst[3] = src[3];
+        }
+    }
     return scratch;
 }
 #endif
@@ -1761,6 +1765,23 @@ static const unsigned short *CDirect3DDevice_IndexRange(const unsigned short *in
     return g_indexArrayScratch;
 }
 
+#ifdef __EMSCRIPTEN__
+static int CDirect3DDevice_BindStaticWebIndices(const CDirect3DIndexBuffer *buffer,
+    int staticVertexBuffer, UINT offset, INT baseVertex, UINT stride, UINT startIndex,
+    const byte **attributeBase, const unsigned short **drawIndices)
+{
+    extern unsigned CDirect3DIndexBuffer_BindStaticWeb(const CDirect3DIndexBuffer *);
+    long long baseByte = (long long)offset + (long long)baseVertex * stride;
+    /* Persistent indices retain their authored numbering. Negative bases and
+     * CPU-converted attributes continue using the rebased client-array path. */
+    if (!staticVertexBuffer || baseByte < 0 || !CDirect3DIndexBuffer_BindStaticWeb(buffer))
+        return 0;
+    *attributeBase = (const byte *)(uintptr_t)baseByte;
+    *drawIndices = (const unsigned short *)(uintptr_t)(startIndex * 2);
+    return 1;
+}
+#endif
+
 HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                                              D3DPRIMITIVETYPE PrimitiveType, INT BaseVertexIndex, UINT MinVertexIndex,
                                              UINT NumVertices, UINT startIndex, UINT primCount)
@@ -1799,6 +1820,9 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
 #define WEB_DRAW_PERF(name) do { if (measure) { double now = emscripten_get_now(); WebDrawPerfAdd(name, now - perfStart); perfStart = now; } } while (0)
     static unsigned int webStateChecks;
     int webCheck = webStateChecks++ < 2;
+    int staticIndexRange = 0;
+    int staticVertexBuffer = 0;
+    int staticIndexBuffer = 0;
 #define WEB_STATE_CHECK(stage) do { if (webCheck) fprintf(stdout, "[web-state] %s error=0x%x\n", stage, glGetError()); } while (0)
 #else
 #define WEB_DRAW_PERF(name) do {} while (0)
@@ -1870,6 +1894,18 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
         startIndex > ibBytes / 2 || primCount * 3 > ibBytes / 2 - startIndex)
         return 0;
     indexCount = primCount * 3;
+#ifdef __EMSCRIPTEN__
+    {
+        extern int CDirect3DIndexBuffer_StaticWebRange(const CDirect3DIndexBuffer *,
+            UINT, UINT, UINT *, UINT *);
+        staticIndexRange = CDirect3DIndexBuffer_StaticWebRange(
+            (const CDirect3DIndexBuffer *)dev->indexBuffer, startIndex, indexCount,
+            &firstVertex, &drawVertexCount);
+    }
+    if (staticIndexRange)
+        drawIndices = (const unsigned short *)(ibData + startIndex * 2);
+    else
+#endif
     drawIndices = CDirect3DDevice_IndexRange(
         (const unsigned short *)(ibData + startIndex * 2), indexCount,
         &firstVertex, &drawVertexCount);
@@ -1886,7 +1922,8 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
         static unsigned int traceStrides[128];
         if (!is2D && stride < 128 && traceStrides[stride] < 3 && getenv("GTRACE")) {
             const unsigned short *indices = drawIndices;
-            const byte *first = vertBase + indices[0] * stride;
+            const byte *first = vertBase + (indices[0] -
+                (staticIndexRange ? firstVertex : 0)) * stride;
             const float *uv = (const float *)(first + texOffset);
             const byte *color = first + colorOffset;
             const materialCommands_t *commands = (const materialCommands_t *)imp_tess;
@@ -2171,10 +2208,20 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
     attributeBase = vertBase;
 #ifdef __EMSCRIPTEN__
     {
-        extern unsigned CDirect3DVertexBuffer_BindStaticWeb(const CDirect3DVertexBuffer *buffer);
+        extern unsigned CDirect3DVertexBuffer_BindStaticWebColors(
+            const CDirect3DVertexBuffer *, UINT, int, int, UINT);
         extern void glBindBuffer(unsigned target, unsigned buffer);
         glBindBuffer(0x8892, 0);
-        if (stage0Target == 0x0DE1) {
+        /* Immutable geometry and its exact converted colors stay on the GPU.
+         * A format/offset change or a write refreshes the original buffer. */
+        if (!is2D && stage0Target == 0x0DE1 &&
+            CDirect3DVertexBuffer_BindStaticWebColors(
+                (const CDirect3DVertexBuffer *)dev->streams[0], stride,
+                colorOffset, colorByteOrder, offset % stride)) {
+            attributeBase = (const byte *)(uintptr_t)firstByte;
+            colorByteOrder = COLOR_BYTES_RGBA;
+            staticVertexBuffer = 1;
+        } else if (stage0Target == 0x0DE1) {
             const byte *converted = CDirect3DDevice_InterleavedColors(
                 vertBase, stride, colorOffset, drawVertexCount, colorByteOrder);
             if (converted) {
@@ -2182,11 +2229,20 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                 colorByteOrder = COLOR_BYTES_RGBA;
             }
         }
-        /* Original RGBA world vertices can stay on the GPU between frames.
-         * Converted colors and camera-generated cube coordinates use CPU data. */
-        if (!is2D && attributeBase == vertBase && colorByteOrder == COLOR_BYTES_RGBA && stage0Target == 0x0DE1 &&
-            CDirect3DVertexBuffer_BindStaticWeb((const CDirect3DVertexBuffer *)dev->streams[0]))
-            attributeBase = (const byte *)(uintptr_t)firstByte;
+        if (staticIndexRange) {
+            staticIndexBuffer = CDirect3DDevice_BindStaticWebIndices(
+                (const CDirect3DIndexBuffer *)dev->indexBuffer, staticVertexBuffer,
+                offset, BaseVertexIndex, stride, startIndex, &attributeBase, &drawIndices);
+            if (!staticIndexBuffer) {
+                drawIndices = CDirect3DDevice_IndexRange(
+                    (const unsigned short *)(ibData + startIndex * 2), indexCount,
+                    &firstVertex, &drawVertexCount);
+                if (!drawIndices) {
+                    glBindBuffer(0x8892, 0);
+                    return 0;
+                }
+            }
+        }
     }
 #endif
     glEnableClientState(0x8074);
@@ -2295,6 +2351,7 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
     {
         extern void glBindBuffer(unsigned target, unsigned buffer);
         glBindBuffer(0x8892, 0);
+        if (staticIndexBuffer) glBindBuffer(0x8893, 0);
     }
 #endif
 

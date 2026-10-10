@@ -16,6 +16,8 @@ typedef struct {
 #ifdef __EMSCRIPTEN__
     unsigned webBuffer;
     int webDirty;
+    UINT webStride, webPhase;
+    int webColorOffset, webColorOrder, webLocked;
 #endif
 } CDirect3DVertexBufferClean;
 
@@ -25,22 +27,66 @@ extern void glDeleteBuffers(int count, const unsigned *buffers);
 extern void glBindBuffer(unsigned target, unsigned buffer);
 extern void glBufferData(unsigned target, ptrdiff_t size, const void *data, unsigned usage);
 
-unsigned CDirect3DVertexBuffer_BindStaticWeb(const CDirect3DVertexBuffer *_this)
+/* Color order matches the bridge: RGBA=0, BGRA=1, ARGB=2. Stream phase
+ * is part of the key because one buffer may serve different vertex layouts. */
+unsigned CDirect3DVertexBuffer_BindStaticWebColors(const CDirect3DVertexBuffer *_this,
+    UINT stride, int colorOffset, int colorOrder, UINT phase)
 {
     CDirect3DVertexBufferClean *vb = (CDirect3DVertexBufferClean *)_this;
+    byte *converted = NULL;
+    const byte *upload = vb->data;
+    size_t i;
     /* Dynamic tessellation, animated models and HUD keep the client-array path. */
-    if ((vb->usage & 0x200) || !vb->data || !vb->lengthBytes) return 0;
+    if ((vb->usage & 0x200) || vb->webLocked || !vb->data || !vb->lengthBytes) return 0;
+    if (!colorOrder || colorOffset < 0) {
+        stride = phase = 0;
+        colorOffset = -1;
+        colorOrder = 0;
+    } else if (!stride || phase >= stride || (UINT)colorOffset > stride ||
+        stride - (UINT)colorOffset < 4 || colorOrder > 2 || colorOrder < 0) {
+        return 0;
+    }
+    if (vb->webStride != stride || vb->webPhase != phase ||
+        vb->webColorOffset != colorOffset || vb->webColorOrder != colorOrder)
+        vb->webDirty = 1;
+    if (vb->webDirty && colorOrder) {
+        converted = malloc(vb->lengthBytes);
+        if (!converted) return 0;
+        memcpy(converted, vb->data, vb->lengthBytes);
+        /* Match the client-array RGBA conversion byte for byte. Only colors
+         * change; positions, normals, texture coordinates and padding survive. */
+        for (i = (size_t)phase + colorOffset; i + 4 <= vb->lengthBytes; i += stride) {
+            const byte *src = vb->data + i;
+            byte *dst = converted + i;
+            if (colorOrder == 2) { /* ARGB */
+                dst[0] = src[1]; dst[1] = src[2]; dst[2] = src[3]; dst[3] = src[0];
+            } else { /* BGRA */
+                dst[0] = src[2]; dst[1] = src[1]; dst[2] = src[0]; dst[3] = src[3];
+            }
+        }
+        upload = converted;
+    }
     if (!vb->webBuffer) {
         glGenBuffers(1, &vb->webBuffer);
         vb->webDirty = 1;
     }
-    if (!vb->webBuffer) return 0;
+    if (!vb->webBuffer) { free(converted); return 0; }
     glBindBuffer(0x8892, vb->webBuffer);
     if (vb->webDirty) {
-        glBufferData(0x8892, vb->lengthBytes, vb->data, 0x88E4);
+        glBufferData(0x8892, vb->lengthBytes, upload, 0x88E4);
         vb->webDirty = 0;
+        vb->webStride = stride;
+        vb->webPhase = phase;
+        vb->webColorOffset = colorOffset;
+        vb->webColorOrder = colorOrder;
     }
+    free(converted);
     return vb->webBuffer;
+}
+
+unsigned CDirect3DVertexBuffer_BindStaticWeb(const CDirect3DVertexBuffer *_this)
+{
+    return CDirect3DVertexBuffer_BindStaticWebColors(_this, 0, -1, 0, 0);
 }
 #endif
 
@@ -79,6 +125,10 @@ HRESULT CDirect3DVertexBuffer_Lock(const CDirect3DVertexBuffer *_this, UINT Offs
     CDirect3DVertexBufferClean *vb = (CDirect3DVertexBufferClean *)_this;
     (void)SizeToLock;
     (void)Flags;
+#ifdef __EMSCRIPTEN__
+    vb->webDirty = 1;
+    vb->webLocked = 1;
+#endif
     *ppbData = vb->data + OffsetToLock;
     return 0;
 }
@@ -87,6 +137,7 @@ HRESULT CDirect3DVertexBuffer_Unlock(const CDirect3DVertexBuffer *_this)
 {
 #ifdef __EMSCRIPTEN__
     ((CDirect3DVertexBufferClean *)_this)->webDirty = 1;
+    ((CDirect3DVertexBufferClean *)_this)->webLocked = 0;
 #endif
     (void)_this;
     return 0;
@@ -139,6 +190,9 @@ void CDirect3DVertexBuffer_CDirect3DVertexBuffer(const CDirect3DVertexBuffer *_t
 #ifdef __EMSCRIPTEN__
     vb->webBuffer = 0;
     vb->webDirty = 1;
+    vb->webStride = vb->webPhase = 0;
+    vb->webColorOffset = -1;
+    vb->webColorOrder = vb->webLocked = 0;
 #endif
 }
 

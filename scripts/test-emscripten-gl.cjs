@@ -159,3 +159,22 @@ pointers.Vertex(3,0x1406,24,4096);pointers.Color(4,0x1401,24,4108);
 pointers.TexCoord(2,0x1406,24,4112);pointers.Normal(0x1406,36,8192);
 assert.equal(attributes.length,5);assert.equal(deferred.length,9);
 console.log('PASS: fixed-function GPU world/model attributes retain position, normalized colors/normals and both UV sets; dynamic CPU arrays remain deferred');
+
+// Persistent VBO+IBO draws use authored byte offsets and never read/upload CPU
+// indices. Run the same linked SDK flush exercised above for dynamic draws.
+const persistentDraws = [];
+let persistentPrepare = 0;
+const persistentGL = {currentArrayBufferBinding:1,currentElementArrayBufferBinding:2,UNSIGNED_SHORT:0x1403,
+  drawElements(...args) {persistentDraws.push(args);},
+  bufferData() {throw new Error('Static indices must not be uploaded again');},
+  bufferSubData() {throw new Error('Static indices must not be copied again');},
+  bindBuffer() {throw new Error('Persistent binding must remain intact during flush');}};
+const persistentImmediate = {mode:4,stride:32,vertexCounter:48,
+  getRenderer() {return {prepare() {persistentPrepare++;}};}};
+const persistentFlush = Function('GLImmediate','GLctx','assert',
+  'return function '+source.slice(flushStart,flushEnd))(persistentImmediate,persistentGL,assert);
+for(let frame=0;frame<600;frame++)persistentFlush(6,0,20);
+persistentFlush(6,0,0);
+assert.equal(persistentPrepare,601);assert.equal(persistentDraws.length,601);
+assert.deepEqual(persistentDraws[0],[4,6,0x1403,20]);assert.deepEqual(persistentDraws[600],[4,6,0x1403,0]);
+console.log('PASS: 601 linked persistent index draws preserve byte offsets, vertex zero and shader preparation without CPU index reads/uploads');

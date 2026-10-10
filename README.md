@@ -210,7 +210,12 @@ they do not reduce texture quality or remove map geometry/effects. Up to four
 FX point lights are combined into existing opaque geometry passes. The browser
 uses Emscripten's fixed-function-only GL path to avoid restoring an unused
 programmable pipeline between draws; shader attributes, lighting and texture
-filtering remain intact.
+filtering remain intact. Static model colors and index buffers also stay on the
+GPU between draws: exact mesh ranges are cached, and authored indices retain
+all of their vertices. Writes, layout changes and map teardown refresh or release
+the cached data. Dynamic/animated geometry keeps its original streaming path;
+its color conversion now needs one pass instead of two, preserving every channel
+and alpha byte.
 
 The authoritative simulation runs at the original **20 Hz**, with up to **60
 input packets/s** and a 25 KB/s client rate. Remote motion interpolation uses

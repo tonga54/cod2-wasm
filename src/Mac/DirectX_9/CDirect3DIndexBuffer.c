@@ -5,6 +5,13 @@
 typedef void (*fnptr_t)(void);
 extern fnptr_t vtbl_CDirect3DIndexBuffer[];
 
+#ifdef __EMSCRIPTEN__
+#define WEB_INDEX_RANGE_SLOTS 256
+typedef struct {
+    UINT start, count, firstVertex, vertexCount;
+} WebIndexRange;
+#endif
+
 typedef struct {
     void **vtable;
     ULONG refCount;
@@ -15,7 +22,77 @@ typedef struct {
     byte *lockPtr;
     UINT32 lockSize;
     unsigned char isLocked;
+#ifdef __EMSCRIPTEN__
+    unsigned webBuffer;
+    int webDirty;
+    WebIndexRange *webRanges;
+#endif
 } CDirect3DIndexBufferClean;
+
+#ifdef __EMSCRIPTEN__
+extern void glGenBuffers(int count, unsigned *buffers);
+extern void glDeleteBuffers(int count, const unsigned *buffers);
+extern void glBindBuffer(unsigned target, unsigned buffer);
+extern void glBufferData(unsigned target, ptrdiff_t size, const void *data, unsigned usage);
+
+/* Only unlocked, non-dynamic 16-bit data can persist across frames. Range
+ * metadata is bounded and invalidated before every write, including partial
+ * locks and address reuse after destruction. Indices themselves never change. */
+int CDirect3DIndexBuffer_StaticWebRange(const CDirect3DIndexBuffer *_this,
+    UINT start, UINT count, UINT *firstVertex, UINT *vertexCount)
+{
+    CDirect3DIndexBufferClean *ib = (CDirect3DIndexBufferClean *)_this;
+    WebIndexRange *range;
+    const unsigned short *indices;
+    UINT i, lo = 65535, hi = 0;
+    unsigned hash;
+    if ((ib->usage & 0x200) || ib->isLocked || ib->indexSizeBytes != 2 ||
+        !ib->data || !count || start > ib->lengthBytes / 2 ||
+        count > ib->lengthBytes / 2 - start)
+        return 0;
+    if (!ib->webRanges)
+        ib->webRanges = calloc(WEB_INDEX_RANGE_SLOTS, sizeof(*ib->webRanges));
+    if (!ib->webRanges)
+        return 0;
+    hash = start * 2654435761u ^ count * 2246822519u;
+    hash ^= hash >> 16;
+    range = &ib->webRanges[hash & (WEB_INDEX_RANGE_SLOTS - 1)];
+    if (range->count != count || range->start != start) {
+        indices = (const unsigned short *)ib->data + start;
+        for (i = 0; i < count; ++i) {
+            if (indices[i] < lo) lo = indices[i];
+            if (indices[i] > hi) hi = indices[i];
+        }
+        range->start = start;
+        range->count = count;
+        range->firstVertex = lo;
+        range->vertexCount = hi - lo + 1;
+    }
+    *firstVertex = range->firstVertex;
+    *vertexCount = range->vertexCount;
+    return 1;
+}
+
+unsigned CDirect3DIndexBuffer_BindStaticWeb(const CDirect3DIndexBuffer *_this)
+{
+    CDirect3DIndexBufferClean *ib = (CDirect3DIndexBufferClean *)_this;
+    if ((ib->usage & 0x200) || ib->isLocked || ib->indexSizeBytes != 2 ||
+        !ib->data || !ib->lengthBytes)
+        return 0;
+    if (!ib->webBuffer) {
+        glGenBuffers(1, &ib->webBuffer);
+        ib->webDirty = 1;
+    }
+    if (!ib->webBuffer)
+        return 0;
+    glBindBuffer(0x8893, ib->webBuffer);
+    if (ib->webDirty) {
+        glBufferData(0x8893, ib->lengthBytes, ib->data, 0x88E4);
+        ib->webDirty = 0;
+    }
+    return ib->webBuffer;
+}
+#endif
 
 ULONG CDirect3DIndexBuffer_AddRef(const CDirect3DIndexBuffer *_this);
 void ZN20CDirect3DIndexBufferD0Ev(const CDirect3DIndexBuffer *_this);
@@ -49,6 +126,12 @@ void ZN20CDirect3DIndexBufferD1Ev(const CDirect3DIndexBuffer *_this)
 {
     CDirect3DIndexBufferClean *ib = (CDirect3DIndexBufferClean *)_this;
     ib->vtable = vtbl_CDirect3DIndexBuffer;
+#ifdef __EMSCRIPTEN__
+    if (ib->webBuffer) glDeleteBuffers(1, &ib->webBuffer);
+    free(ib->webRanges);
+    ib->webRanges = NULL;
+    ib->webBuffer = 0;
+#endif
     free(ib->data);
     ib->data = NULL;
 }
@@ -63,6 +146,11 @@ HRESULT CDirect3DIndexBuffer_Lock(const CDirect3DIndexBuffer *_this, UINT Offset
 {
     CDirect3DIndexBufferClean *ib = (CDirect3DIndexBufferClean *)_this;
     (void)Flags;
+#ifdef __EMSCRIPTEN__
+    ib->webDirty = 1;
+    if (ib->webRanges)
+        memset(ib->webRanges, 0, WEB_INDEX_RANGE_SLOTS * sizeof(*ib->webRanges));
+#endif
     ib->isLocked = 1;
     ib->lockSize = SizeToLock ? SizeToLock : ib->lengthBytes;
     ib->lockPtr = ib->data + OffsetToLock;
@@ -72,7 +160,7 @@ HRESULT CDirect3DIndexBuffer_Lock(const CDirect3DIndexBuffer *_this, UINT Offset
 
 HRESULT CDirect3DIndexBuffer_Unlock(const CDirect3DIndexBuffer *_this)
 {
-    (void)_this;
+    ((CDirect3DIndexBufferClean *)_this)->isLocked = 0;
     return 0;
 }
 
@@ -101,6 +189,11 @@ void CDirect3DIndexBuffer_CDirect3DIndexBuffer(const CDirect3DIndexBuffer *_this
     ib->lockPtr = NULL;
     ib->lockSize = 0;
     ib->isLocked = 0;
+#ifdef __EMSCRIPTEN__
+    ib->webBuffer = 0;
+    ib->webDirty = 1;
+    ib->webRanges = NULL;
+#endif
 }
 
 HRESULT CDirect3DIndexBuffer_GetDevice(const CDirect3DIndexBuffer *_this, IDirect3DDevice9 **ppDevice)

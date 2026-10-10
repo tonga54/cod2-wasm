@@ -2943,3 +2943,67 @@ over 33 ms in either 600-frame window and anti-aliasing enabled at 1280×720.
 Running both rendering clients on the same Mac increased client CPU contention;
 these measurements do not guarantee that cadence on every device, view or load.
 QA rooms and containers were removed before updating the main Pi services.
+
+
+## Persistent mesh indices and exact model colors — October 10, 2026
+
+Unlocked, non-dynamic 16-bit index buffers now retain their authored data on the
+GPU. A bounded 256-entry per-buffer range cache avoids repeatedly scanning the
+same mesh. Attribute offsets include the original stream offset/base vertex,
+so no vertices, indices or triangles are removed. Negative effective bases and
+CPU-generated/cube-map attributes retain the rebased streaming route. Dynamic
+buffers keep the original update path. Partial writes invalidate ranges and GPU
+storage, and destruction releases all cached resources before map/address reuse.
+
+Static vertex buffers can also retain exact ARGB/BGRA-to-RGBA conversion on the
+GPU. Cache keys include stride, color offset, order and stream phase. Only color
+byte order changes; positions, normals, UVs, padding and alpha are preserved.
+Writes/locks and layout changes refresh storage. Dynamic/HUD conversion now
+swizzles directly into its interleaved copy, avoiding a separate color scratch
+copy/pass. Index-buffer unbinding is only required after a persistent bind.
+Resolution, assets, filtering, lighting, fog, geometry, effects and authoritative
+simulation/network cadence remain unchanged.
+
+ASan/UBSan checks exercise the real buffer lifecycle and layout conversion:
+600 repeated static draws scan/upload/convert once; 40,000 range/cache-collision
+cases preserve every vertex address; partial writes, locked/dynamic/32-bit
+buffers, allocation failure, layout phases, destruction and address reuse remain
+fresh. The linked Emscripten GL flush executes 601 persistent draws with the
+original byte offsets, including vertex zero, without CPU index reads/uploads.
+Existing streaming, shader, point-light, light-mask, indexed-model and color/alpha
+checks pass, as do the full static suite, native build and eight gateway checks.
+
+
+A fixed Carentan introduction-camera comparison on the development Mac at
+1280×720, anti-aliasing enabled and 120 Hz, used the same Pi-hosted engine and
+one browser at a time, after builds/tests finished. The 600-frame baseline and
+candidate windows measured 4.9805 and 4.8340 ms mean main-thread time; attribute
+setup measured 1.2762 and 1.0680 ms. Both held about 120 FPS, with frame p95
+10.1 ms and zero frames over 33 ms. This is a single paired scene sample, not a
+universal speedup or hardware/player-capacity guarantee. An 87,500-pixel static
+building region was exactly identical between screenshots; animated foliage
+outside that region varies over time.
+
+
+Carentan gameplay QA exercised sprint, turning, stance changes, automatic fire,
+reloads and smoke with two opposing browser clients. The Pi sample made 300
+local UDP getinfo queries over 15 s with zero loss, mean 0.415 ms,
+p95 0.568 ms and maximum 3.974 ms. Server-container CPU used
+19.47% of one core without throttling, including a second
+empty Toujane room. The engine/network rules are unchanged in this rendering
+pass; this is responsiveness validation, not an additional server speedup claim.
+Running both renderers on the same Mac produced an 87 FPS window and one
+449.9 ms frame; they share client CPU/GPU resources. A single Carentan gameplay
+window held 120 FPS with p95 10.0 ms and no frames over 33 ms. No browser runtime
+warnings/errors appeared in either client. Host-local queries do not measure
+end-to-end LAN latency, and these two clients are not a many-player load test.
+
+
+Single-client Toujane QA also exercised movement, automatic fire and smoke,
+with no browser runtime warnings/errors. The recorded 600-frame window measured
+119.8 FPS, frame p95 9.4 ms, main-thread mean
+3.030 ms and zero frames over 33 ms, at 1280×720 with
+anti-aliasing. During activity the Pi responded to 300 local UDP queries with
+zero loss, p95 0.530 ms, maximum 3.450 ms and
+14.50% of one CPU core, without throttling. Only disposable
+QA clients/rooms/containers were used; the main Pi stack stayed available.
