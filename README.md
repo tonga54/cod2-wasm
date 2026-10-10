@@ -178,11 +178,27 @@ in the web runtime image.
 
 ### Raspberry Pi
 
-See [Raspberry Pi hosting](docs/RASPBERRY_PI.md) for deploying a prepared build
-to a 64-bit Raspberry Pi. The web/gateway/supervisor run as ARM64 processes;
+The [Raspberry Pi installation guide](docs/RASPBERRY_PI.md) covers a fresh host,
+the Pi 5 kernel requirement, building on your computer, deployment over SSH,
+updates and troubleshooting. The repository includes a dedicated
+[`Dockerfile.pi`](downstream/server/Dockerfile.pi),
+[`compose.pi.yaml`](compose.pi.yaml), and deployment/runtime preparation scripts.
+The tested host is a Pi 5 with 8 GB RAM and 64-bit Debian; the required host page
+size is 4 KiB. The web/gateway/supervisor run as ARM64 processes;
 only the 32-bit x86 game executable uses QEMU. This preserves the engine's
 32-bit layouts without claiming a native ARM engine port. Measure the host
 under your expected player/room load before increasing it.
+
+After preparing your own original assets, build on your computer and deploy:
+
+```sh
+DOCKER_DEFAULT_PLATFORM=linux/arm64 ./scripts/build-docker.sh
+./scripts/deploy-pi.sh USER@PI_LAN_IP
+```
+
+Open **http://PI_LAN_IP:8088/** from another computer on the same LAN. The Pi
+starts automatically after reboot, with users creating their own rooms. Follow
+the full guide before running these commands on a new installation.
 
 ## Performance and verification
 
