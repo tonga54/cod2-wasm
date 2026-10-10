@@ -82,7 +82,8 @@ qboolean PM_ShouldMakeFootsteps(pmove_t *pm);
 void PM_ClipVelocity(const vec_t *in, const vec_t *normal, vec_t *out);
 static void PM_ACCELERATE_ABI PM_Accelerate(playerState_t *ps, pml_t *pml, const vec_t *wishdir, float wishspeed, float accel);
 static void PM_REGPARM2_ABI PM_Friction(playerState_t *ps, pml_t *pml);
-void PM_UpdateLean(playerState_t *ps, float msec, usercmd_t *cmd, void (*capsuleTrace)());
+void PM_UpdateLean(playerState_t *ps, float msec, usercmd_t *cmd,
+                   void (*capsuleTrace)(trace_t *, const vec_t *, const vec_t *, const vec_t *, const vec_t *, int, int));
 void PM_UpdateViewAngles(playerState_t *ps, float msec, usercmd_t *cmd, int handler);
 void PM_UpdatePronePitch(pmove_t *pm, pml_t *pml);
 void PM_playerTrace(pmove_t *pm, trace_t *results, const vec_t *start, const vec_t *mins, const vec_t *maxs, const vec_t *end, int passEntityNum, int contentMask);
@@ -114,6 +115,7 @@ extern void Mantle_CapView(playerState_t *ps);
 extern void Mantle_Check(pmove_t *pm, pml_t *pml);
 extern void Mantle_Move(pmove_t *pm, playerState_t *ps, pml_t *pml);
 extern void AngleVectors(const vec_t *angles, vec_t *forward, vec_t *right, vec_t *up);
+extern void AddLeanToPosition(vec_t *position, float yaw, float lean, float roll, float distance);
 extern void Sys_SnapVector(vec_t *v);
 
 extern void Jump_ActivateSlowdown(playerState_t *ps);
@@ -449,12 +451,73 @@ static void PM_DropTimers(playerState_t *ps, int msec)
      * here cancels its usage increment and allows an unlimited steady aim. */
 }
 
-void PM_UpdateLean(playerState_t *ps, float msec, usercmd_t *cmd, void (*capsuleTrace)())
+static qboolean PM_CanLean(const playerState_t *ps)
 {
-    (void)msec;
-    (void)cmd;
-    (void)capsuleTrace;
-    ps->leanf = 0.0f;
+    return (unsigned int)ps->pm_type <= 1 &&
+           !(ps->pm_flags & (PMF_MANTLE | PMF_LADDER | 0x10000)) &&
+           !(ps->eFlags & 0x300);
+}
+
+void PM_UpdateLean(playerState_t *ps, float msec, usercmd_t *cmd,
+                   void (*capsuleTrace)(trace_t *, const vec_t *, const vec_t *, const vec_t *, const vec_t *, int, int))
+{
+    float target, step, candidate;
+    vec3_t start, end;
+    const vec3_t mins = {-4.0f, -4.0f, -4.0f};
+    const vec3_t maxs = {4.0f, 4.0f, 4.0f};
+    trace_t trace;
+
+    if (!PM_CanLean(ps) || !capsuleTrace) {
+        ps->leanf = 0.0f;
+        return;
+    }
+
+    /* Both keys cancel each other. Use command time, so prediction and the
+     * dedicated server reach the same pose regardless of rendering cadence. */
+    target = 0.0f;
+    if (!(cmd->buttons & 0x40000)) {
+        if ((cmd->buttons & 0xc0) == 0x40)
+            target = -1.0f;
+        else if ((cmd->buttons & 0xc0) == 0x80)
+            target = 1.0f;
+    }
+    step = fmaxf(msec, 0.0f) / 200.0f;
+    candidate = ps->leanf;
+    if (candidate < target)
+        candidate = fminf(candidate + step, target);
+    else if (candidate > target)
+        candidate = fmaxf(candidate - step, target);
+    if (fabsf(candidate - target) < 0.00001f)
+        candidate = target;
+
+    if (candidate != 0.0f) {
+        float safe = 0.0f, blocked = candidate;
+        int i;
+
+        PM_VectorCopy(ps->origin, start);
+        start[2] += ps->viewHeightCurrent;
+        PM_VectorCopy(start, end);
+        AddLeanToPosition(end, ps->viewangles[1], candidate, 16.0f, 20.0f);
+        capsuleTrace(&trace, start, mins, maxs, end, ps->clientNum, 0x02810011);
+        if (trace.startsolid || trace.allsolid) {
+            candidate = 0.0f;
+        } else if (trace.fraction < 1.0f) {
+            /* The eye follows an arc, so multiplying a linear trace fraction
+             * can still put it through a wall. Search actual eye positions. */
+            for (i = 0; i < 8; ++i) {
+                float middle = (safe + blocked) * 0.5f;
+                PM_VectorCopy(start, end);
+                AddLeanToPosition(end, ps->viewangles[1], middle, 16.0f, 20.0f);
+                capsuleTrace(&trace, start, mins, maxs, end, ps->clientNum, 0x02810011);
+                if (trace.fraction == 1.0f && !trace.startsolid && !trace.allsolid)
+                    safe = middle;
+                else
+                    blocked = middle;
+            }
+            candidate = safe;
+        }
+    }
+    ps->leanf = candidate;
 }
 
 void PM_UpdateViewAngles(playerState_t *ps, float msec, usercmd_t *cmd, int handler)
@@ -470,6 +533,10 @@ void PM_UpdateViewAngles(playerState_t *ps, float msec, usercmd_t *cmd, int hand
 
     if (!ps || !cmd)
         return;
+
+    /* These paths return before PM_UpdateLean, but must release an old lean. */
+    if (!PM_CanLean(ps))
+        ps->leanf = 0.0f;
 
     if (ps->pm_type == 5)
         return;
@@ -2007,6 +2074,7 @@ void Pmove(pmove_t *pm)
             ps->velocity[0] = ps->velocity[1] = ps->velocity[2] = 0.0f;
             ps->eFlags &= ~0x40;
             ps->pm_flags &= ~(PMF_LADDER | PMF_SPRINT);
+            ps->leanf = 0.0f;
             pm->xyspeed = 0.0f;
             PM_ResetWeaponState(ps);
             ps->commandTime = pm->cmd.serverTime;

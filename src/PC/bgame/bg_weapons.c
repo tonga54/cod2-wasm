@@ -3094,7 +3094,7 @@ void BG_CalculateViewAngles(viewState_t *vs, vec_t *angles)
 
     angles[0] = 0.0f;
     angles[1] = 0.0f;
-    angles[2] = 0.0f;
+    angles[2] = GetLeanFraction(ps->leanf) * 16.0f;
 
     weapDef = bg_weaponDefs[BG_GetViewmodelWeaponIndex(ps)];
 

@@ -612,7 +612,7 @@ void G_GetPlayerViewOrigin(const gentity_t *ent, vec_t *origin)
     origin[1] += horzBob * vRight[1];
     origin[2] += horzBob * vRight[2];
 
-    AddLeanToPosition(origin, client->ps.viewangles[1], client->ps.leanf, 20.0f, 16.0f);
+    AddLeanToPosition(origin, client->ps.viewangles[1], client->ps.leanf, 16.0f, 20.0f);
 
     {
         float minZ = client->ps.origin[2] + 8.0f;

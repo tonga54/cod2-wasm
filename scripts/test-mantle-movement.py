@@ -42,7 +42,7 @@ typedef struct {struct {int enabled;float value;} current;} dvar_t;
 typedef struct {int pm_type,pm_flags,eFlags,weaponstate,clientNum,groundEntityNum;
     int commandTime,gravity,pm_time,jumpTime,delta_angles[3];
     vec3_t origin,velocity,mins,maxs,viewangles,vLadderVec;
-    float aimSpreadScale,jumpOriginZ;MantleState mantleState;} playerState_t;
+    float aimSpreadScale,jumpOriginZ,leanf;MantleState mantleState;} playerState_t;
 typedef struct {int serverTime,buttons,forwardmove,rightmove;} usercmd_t;
 typedef struct {playerState_t *ps;usercmd_t cmd,oldcmd;int numtouch,mantleStarted;
     int tracemask,handler,mantleDuration;vec3_t mins,maxs,mantleEndPos;float xyspeed;} pmove_t;
@@ -192,10 +192,11 @@ int main(void) {
         assert(adsTicks==moves&&adsMsec==packet);
     }
     for(int mode=0;mode<10;mode++)for(int attempt=0;attempt<2;attempt++) {
-        playerState_t ps={.commandTime=1000,.pm_type=mode};
+        playerState_t ps={.commandTime=1000,.pm_type=mode,.leanf=1};
         pmove_t pm={.ps=&ps,.mantleStarted=1,.cmd={.serverTime=1200,.buttons=0x400}};
         canMantle=attempt;checks=moves=slides=weapons=groundCalls=noclip=adsTicks=adsTime=adsMsec=0;Pmove(&pm);
         assert(ps.commandTime==1200&&!pm.mantleStarted);
+        if(mode==6||mode==7)assert(ps.leanf==0);
         if(mode<=5){assert(checks==4&&weapons==4);assert(attempt?moves==4&&slides==0:moves==0&&slides==4);}
         else {assert(!checks&&!moves&&!slides&&!weapons);assert(noclip==(mode>=8?4:0));}
         assert(adsTicks==(mode==6||mode==7?0:4));
