@@ -5,6 +5,42 @@
 /* Room addresses are virtual 127.0.0.1..3 endpoints, never arbitrary UDP hosts.
  * A browser opens a gameplay socket only after selecting a native-menu room. */
 extern void Com_Printf(const char *fmt, ...);
+extern const dvar_t *com_sv_running;
+
+EM_JS(int, WebP2P_HostReceive, (void *destination, int capacity, int *peer), {
+    const next = Module.cod2P2P.hostNext(capacity);
+    if (!next) return 0;
+    HEAPU8.set(next.packet, destination);
+    HEAP32[peer >> 2] = next.peer;
+    return next.packet.length;
+});
+
+EM_JS(void, WebP2P_HostSend, (int peer, const void *data, int length), {
+    Module.cod2P2P.hostSend(peer, HEAPU8.subarray(data, data + length));
+});
+
+EM_JS(int, WebP2P_ClientReceive, (void *destination, int capacity, int *slot), {
+    const next = Module.cod2P2P.clientNext(capacity);
+    if (!next) return 0;
+    HEAPU8.set(next.packet, destination);
+    HEAP32[slot >> 2] = next.slot;
+    return next.packet.length;
+});
+
+EM_JS(void, WebP2P_ClientSend, (int slot, const void *data, int length), {
+    Module.cod2P2P.clientSend(slot, HEAPU8.subarray(data, data + length));
+});
+
+static qboolean WebNet_IsHostPeer(netadr_t address) {
+    return address.type == NA_IP && address.ip[0] == 10 && address.ip[1] == 66;
+}
+
+static int WebNet_LocalRoomSlot(netadr_t address) {
+    if (address.type != NA_IP || address.ip[0] != 127 || address.ip[1] || address.ip[2] != 1 ||
+        !address.ip[3] || address.ip[3] > 250)
+        return 0;
+    return address.ip[3];
+}
 
 EM_JS(void, WebNet_Open, (int room), {
     let state = Module.cod2Transport;
@@ -115,30 +151,58 @@ EM_JS(void, WebNet_Send, (const void *data, int length), {
 qboolean Sys_IsLANAddress(netadr_t address) {
     return address.type == NA_LOOPBACK ||
         (address.type == NA_IP && address.ip[0] == 127 && !address.ip[1] && !address.ip[2] &&
-         address.ip[3] >= 1 && address.ip[3] <= 3);
+         address.ip[3] >= 1 && address.ip[3] <= 3) ||
+        WebNet_IsHostPeer(address) || WebNet_LocalRoomSlot(address);
 }
 
 void Sys_ShowIP(void) { Com_Printf("Browser transport: same-host WebSocket gateway\n"); }
 
 qboolean Sys_StringToAdr(const char *name, netadr_t *address) {
     int last = 1;
-    if (strcmp(name, "cod2-server")) {
+    int local = 0;
+    if (!strncmp(name, "127.0.1.", 8)) {
+        const char *digit = name + 8;
+        last = 0;
+        if (*digit < '1' || *digit > '9') return 0;
+        while (*digit >= '0' && *digit <= '9' && last <= 250)
+            last = last * 10 + *digit++ - '0';
+        if (*digit || last > 250) return 0;
+        local = 1;
+    } else if (strcmp(name, "cod2-server")) {
         if (strncmp(name, "127.0.0.", 8) || name[8] < '1' || name[8] > '3' || name[9]) return 0;
         last = name[8] - '0';
     }
     memset(address, 0, sizeof(*address));
     address->type = NA_IP;
     address->ip[0] = 127;
+    address->ip[2] = local;
     address->ip[3] = last;
     return 1;
 }
 
 qboolean Sys_GetPacket(netadr_t *from, msg_t *message) {
-    int room = 0;
-    int size = WebNet_Receive(message->data, message->maxsize, &room);
-    if (!size) return 0;
-    Sys_StringToAdr("cod2-server", from);
-    from->ip[3] = room + 1;
+    int source = 0;
+    int size = 0;
+    if (com_sv_running && com_sv_running->current.enabled)
+        size = WebP2P_HostReceive(message->data, message->maxsize, &source);
+    if (size) {
+        memset(from, 0, sizeof(*from));
+        from->type = NA_IP;
+        from->ip[0] = 10;
+        from->ip[1] = 66;
+        from->ip[2] = source >> 8;
+        from->ip[3] = source & 255;
+    } else if ((size = WebP2P_ClientReceive(message->data, message->maxsize, &source))) {
+        Sys_StringToAdr("cod2-server", from);
+        from->ip[2] = 1;
+        from->ip[3] = source;
+    } else {
+        int room = 0;
+        size = WebNet_Receive(message->data, message->maxsize, &room);
+        if (!size) return 0;
+        Sys_StringToAdr("cod2-server", from);
+        from->ip[3] = room + 1;
+    }
     from->port = 0x2071; /* network byte order, UDP 28960 */
     message->cursize = size;
     message->readcount = 0;
@@ -146,8 +210,18 @@ qboolean Sys_GetPacket(netadr_t *from, msg_t *message) {
 }
 
 void Sys_SendPacket(int length, const void *data, netadr_t to) {
-    if (length <= 0 || length > 65507 || to.type != NA_IP ||
-        to.ip[0] != 127 || to.ip[1] || to.ip[2] || to.ip[3] < 1 || to.ip[3] > 3 || to.port != 0x2071) return;
+    int slot;
+    if (length <= 0 || length > 65507 || to.type != NA_IP) return;
+    if (WebNet_IsHostPeer(to)) {
+        WebP2P_HostSend((to.ip[2] << 8) | to.ip[3], data, length);
+        return;
+    }
+    slot = WebNet_LocalRoomSlot(to);
+    if (slot && to.port == 0x2071) {
+        WebP2P_ClientSend(slot, data, length);
+        return;
+    }
+    if (to.ip[0] != 127 || to.ip[1] || to.ip[2] || to.ip[3] < 1 || to.ip[3] > 3 || to.port != 0x2071) return;
     WebNet_Open(to.ip[3] - 1);
     WebNet_Send(data, length);
 }
@@ -157,6 +231,7 @@ void NET_Config(qboolean enabled) {
         const state = Module.cod2Transport;
         if (state) { state.stopped = true; state.socket.close(1000); }
         Module.cod2Transport = null;
+        Module.cod2P2P.closeLink();
     });
 }
 void NET_OpenIP(void) { }
@@ -193,6 +268,18 @@ EMSCRIPTEN_KEEPALIVE void web_add_room(int room, const char *info, int ping) {
     CL_SetServerInfo(server, info, ping > 0 ? ping : 1);
 }
 
+EMSCRIPTEN_KEEPALIVE void web_add_local_room(int slot, const char *info, int ping) {
+    if (slot < 1 || slot > 250 || cls.numlocalservers >= 128) return;
+    serverInfo_t *server = &cls.localServers[cls.numlocalservers++];
+    memset(server, 0, sizeof(*server));
+    Sys_StringToAdr("cod2-server", &server->adr);
+    server->adr.ip[2] = 1;
+    server->adr.ip[3] = slot;
+    server->adr.port = 0x2071;
+    server->dirty = 1;
+    CL_SetServerInfo(server, info, ping > 0 ? ping : 1);
+}
+
 EM_JS(void, Web_DiscoverServers, (), {
     const generation = (Module.roomListGeneration || 0) + 1;
     Module.roomListGeneration = generation;
@@ -223,7 +310,16 @@ EM_JS(void, Web_DiscoverServers, (), {
                     try { _web_add_room(room.id, info, room.ping); }
                     finally { _free(info); }
                 }
-                if (seen.size) return;
+                const hosted = new Set();
+                for (const room of Array.isArray(list.localRooms) ? list.localRooms : []) {
+                    if (!room || !Number.isInteger(room.slot) || room.slot < 1 || room.slot > 250 ||
+                        typeof room.info !== 'string' || hosted.has(room.slot)) continue;
+                    hosted.add(room.slot);
+                    const info = stringToNewUTF8(room.info.slice(0, 1023));
+                    try { _web_add_local_room(room.slot, info, room.ping); }
+                    finally { _free(info); }
+                }
+                if (seen.size || hosted.size) return;
             } catch (error) {
                 if (Module.roomListGeneration !== generation) return;
                 if (attempt === 15 || Date.now() >= deadline) err('[servers] ' + error.message);

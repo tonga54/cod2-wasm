@@ -9,6 +9,7 @@ import struct
 import zipfile
 from browser_sound_assets import collect_sound_assets
 from browser_bot_menu import apply_bot_menu
+from browser_host_menu import apply_host_menu
 from browser_objective_assets import objective_asset_roots
 from weapon_balance import apply_weapon_balance, load_profile
 
@@ -163,7 +164,7 @@ try:
             data = data.replace(b'"@MENU_MELEE_STEADY"', b'"Sprint / Hold Breath"')
             data = data.replace(b'"+melee_breath"', b'"+sprint"')
         if name == "ui_mp/createserver.menu":
-            data = apply_bot_menu(data)
+            data = apply_host_menu(apply_bot_menu(data))
         if name == "ui_mp/joinserver.menu":
             # Add an owner-only action to the retail server browser layout.
             marker = b'\n//\tBACK AND NEXT BUTTONS'

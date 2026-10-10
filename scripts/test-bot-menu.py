@@ -17,7 +17,7 @@ code=r'''
 #define I_stricmp strcasecmp
 typedef struct {const char *name;int ownerDraw;} window_t;
 typedef struct {window_t window;const char *text,*dvar;int type;void *action;} itemDef_t;
-typedef struct {window_t window;int itemCount;itemDef_t *items[12];} menuDef_t;
+typedef struct {window_t window;int itemCount;itemDef_t *items[14];} menuDef_t;
 '''+source[a:b]+r'''
 int main(void){
  itemDef_t entries[]={
@@ -25,14 +25,16 @@ int main(void){
  {{0,0},"Bots",0,0,0},{{0,0}," ","ui_botCount",12,0},
  {{0,0},"Bot Difficulty",0,0,0},{{0,0}," ","ui_botDifficulty",12,0},
  {{0,0},"@MENU_MAXIMUM_PLAYERS",0,0,0},{{0,0}," ","sv_maxclients",4,(void*)1},
- {{0,0},"@MENU_SERVER_SETTINGS",0,0,0},{{0,0}," ","sv_pure",11,0}};
- menuDef_t menu={{"createserver_serversettings",0},10,{0}};
- for(int i=0;i<10;i++)menu.items[i]=&entries[i];
- UI_ConfigureBrowserMenu(&menu);assert(menu.itemCount==9);
+ {{0,0},"@MENU_SERVER_SETTINGS",0,0,0},{{0,0}," ","sv_pure",11,0},
+ {{0,0},"Game Host",0,0,0},{{0,0}," ","ui_gameHost",12,0}};
+ menuDef_t menu={{"createserver_serversettings",0},12,{0}};
+ for(int i=0;i<12;i++)menu.items[i]=&entries[i];
+ UI_ConfigureBrowserMenu(&menu);assert(menu.itemCount==11);
  for(int i=0;i<9;i++)assert(menu.items[i]==&entries[i]);
- assert(entries[3].type==12&&entries[5].type==12);
+ assert(menu.items[9]==&entries[10]&&menu.items[10]==&entries[11]);
+ assert(entries[3].type==12&&entries[5].type==12&&entries[11].type==12);
  assert(entries[7].type==0&&entries[7].dvar==NULL&&entries[7].action==NULL&&!strcmp(entries[7].text,"64"));
- UI_ConfigureBrowserMenu(&menu);assert(menu.itemCount==9);
+ UI_ConfigureBrowserMenu(&menu);assert(menu.itemCount==11);
  return 0;
 }
 '''
@@ -40,7 +42,7 @@ with tempfile.TemporaryDirectory(prefix='cod2-bot-menu-') as directory:
  p=Path(directory);(p/'test.c').write_text(code)
  subprocess.run(['cc','-std=c99','-Wall','-Wextra',str(p/'test.c'),'-o',str(p/'test')],check=True)
  subprocess.run([str(p/'test')],check=True)
-print('PASS: bot count/difficulty labels and native multi controls survive browser filtering, fixed slots and repeated configuration')
+print('PASS: bot count/difficulty and Game Host labels and native multi controls survive browser filtering, fixed slots and repeated configuration')
 
 # The original native MULTI control stores at most 32 entries. Keep every small
 # count and practical large presets without overflowing its fixed list.

@@ -210,7 +210,7 @@ check_held_use:
         Scr_AddEntity(ent);
         Scr_Notify(useEnt, SCR_CONST()->trigger, 1);
         if (useFn) {
-            useFn(useEnt, ent, ent);
+            ((void (*)(gentity_t *, gentity_t *, gentity_t *))useFn)(useEnt, ent, ent);
         }
     }
 

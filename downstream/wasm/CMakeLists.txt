@@ -29,12 +29,23 @@ list(FILTER COD2_CLIENT_SOURCES EXCLUDE REGEX "/Mac/Tools/MacMSS\\.c$")
 # server_mp. Keep their real definitions while repairing the portable graph;
 # the browser startup selects a remote client, never a local dedicated server.
 
+set(COD2_BROWSER_BOTS "${COD2_ROOT}/downstream/server/browser_bots.gsc")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${COD2_BROWSER_BOTS}")
+file(READ "${COD2_BROWSER_BOTS}" COD2_BROWSER_BOTS_HEX HEX)
+string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," COD2_BROWSER_BOTS_BYTES "${COD2_BROWSER_BOTS_HEX}")
+file(WRITE "${CMAKE_BINARY_DIR}/web_browser_bots.c.in"
+  "const unsigned char web_browser_bots[] = {${COD2_BROWSER_BOTS_BYTES}};\n"
+  "const unsigned int web_browser_bots_size = sizeof(web_browser_bots);\n")
+configure_file("${CMAKE_BINARY_DIR}/web_browser_bots.c.in" "${CMAKE_BINARY_DIR}/web_browser_bots.c" COPYONLY)
+
 list(APPEND COD2_CLIENT_SOURCES
   "${COD2_SRC}/blobs/bss.c"
   "${COD2_SRC}/unix/linux_input.c"
   "${COD2_SRC}/unix/linux_net.c"
   "${CMAKE_CURRENT_LIST_DIR}/web_platform.c"
   "${CMAKE_CURRENT_LIST_DIR}/web_net.c"
+  "${CMAKE_CURRENT_LIST_DIR}/web_host.c"
+  "${CMAKE_BINARY_DIR}/web_browser_bots.c"
   "${CMAKE_CURRENT_LIST_DIR}/web_audio.c"
   "${COD2_ROOT}/build/native_gen/data32.c"
   "${COD2_ROOT}/build/native_gen/literals32.c"
@@ -77,6 +88,7 @@ target_link_options(cod2_client PRIVATE
   "SHELL:-s USE_SDL=2"
   "SHELL:-s USE_ZLIB=1"
   "SHELL:--pre-js ${CMAKE_CURRENT_LIST_DIR}/web_audio.js"
+  "SHELL:--pre-js ${CMAKE_CURRENT_LIST_DIR}/web_p2p.js"
   # SDL2 in Emscripten 3.1.64 addresses Module.canvas with the #canvas alias.
   # The framework owns that element and uses its own DOM id.
   "SHELL:-s DISABLE_DEPRECATED_FIND_EVENT_TARGET_BEHAVIOR=0"
@@ -96,7 +108,7 @@ target_link_options(cod2_client PRIVATE
   "SHELL:-s EXPORT_NAME=createCod2Client"
   "SHELL:-s INVOKE_RUN=0"
   "SHELL:-s EXPORTED_RUNTIME_METHODS=FS,callMain"
-  "SHELL:-s EXPORTED_FUNCTIONS=_main,_free,_web_client_state,_web_client_connected,_web_capture_lost,_web_chat_char,_web_background_frame,_web_input_lost"
+  "SHELL:-s EXPORTED_FUNCTIONS=_main,_free,_web_client_state,_web_client_connected,_web_capture_lost,_web_chat_char,_web_background_frame,_web_input_lost,_web_local_server_running"
   "SHELL:-s EXIT_RUNTIME=0"
   "SHELL:-s ASSERTIONS=1"
   "SHELL:-s ENVIRONMENT=web"
@@ -112,6 +124,7 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(COD2_GL_PATCH "${COD2_ROOT}/scripts/patch-emscripten-gl.py")
 set_property(TARGET cod2_client APPEND PROPERTY LINK_DEPENDS "${COD2_GL_PATCH}")
 set_property(TARGET cod2_client APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/web_audio.js")
+set_property(TARGET cod2_client APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/web_p2p.js")
 add_custom_command(TARGET cod2_client POST_BUILD
   COMMAND "${Python3_EXECUTABLE}" "${COD2_GL_PATCH}" "$<TARGET_FILE:cod2_client>"
   COMMENT "Repairing pinned Emscripten legacy-GL texture-call generation"

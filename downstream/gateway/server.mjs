@@ -5,12 +5,58 @@ import { pathToFileURL } from 'node:url';
 import WebSocket, { WebSocketServer } from 'ws';
 import { createUpdateChecker, readBuildInfo } from './updates.mjs';
 
+const STUN_MAGIC = 0x2112a442;
+
+export function attachStunResponder(socket) {
+  socket.on('message', (request, source) => {
+    if (request.length < 20 || request.readUInt16BE(0) !== 0x0001 ||
+        request.readUInt32BE(4) !== STUN_MAGIC || source.family !== 'IPv4') return;
+    const reply = Buffer.alloc(32);
+    reply.writeUInt16BE(0x0101, 0);
+    reply.writeUInt16BE(12, 2);
+    reply.writeUInt32BE(STUN_MAGIC, 4);
+    request.copy(reply, 8, 8, 20);
+    reply.writeUInt16BE(0x0020, 20);
+    reply.writeUInt16BE(8, 22);
+    reply.writeUInt16BE(0x0001, 24);
+    reply.writeUInt16BE(source.port ^ (STUN_MAGIC >>> 16), 26);
+    const address = source.address.split('.').reduce((value, octet) => (value << 8) + Number(octet), 0);
+    reply.writeUInt32BE((address ^ STUN_MAGIC) >>> 0, 28);
+    socket.send(reply, source.port, source.address);
+  });
+  return socket;
+}
+
+function parseInfo(info) {
+  const fields = info.split('\\');
+  const values = {};
+  for (let i = 1; i + 1 < fields.length; i += 2) values[fields[i]] = fields[i + 1];
+  return values;
+}
+
 export function createGateway({ webHost = 'cod2-web', webPort = 8088,
   udpHost = 'cod2-server', udpPort = 28960, maxClients = 64,
   iconPath = '/game-ui/cod2.ico', startupPath = '/game-ui/cod2-startup.png',
   roomsEnabled = false, managerPort = 8090, updateChecker,
+  maxLocalRooms = 8,
   udpSocketFactory = () => dgram.createSocket('udp4') } = {}) {
   const reservations = new Map();
+  const localRooms = new Map();
+  function listedLocalRooms() {
+    const listed = [];
+    for (const room of localRooms.values()) {
+      if (!room.info) continue;
+      const values = parseInfo(room.info);
+      const fields = room.info.split('\\');
+      for (let i = 1; i + 1 < fields.length; i += 2)
+        if (fields[i] === 'hostname') fields[i + 1] = `${fields[i + 1]} [Local]`;
+      listed.push({ slot: room.slot, info: fields.join('\\'), ping: room.ping,
+        players: Number.parseInt(values.clients, 10) || 0,
+        bots: Number.parseInt(values.bots, 10) || 0,
+        connections: room.peers.size + 1, maxPlayers: maxClients });
+    }
+    return listed;
+  }
   const checkUpdates = updateChecker || createUpdateChecker({
     readBuild: () => readBuildInfo(webHost, webPort)
   });
@@ -115,6 +161,7 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
             room.maxPlayers = maxClients;
             room.maxHumans = maxClients - Math.max(room.botCount || 0, room.bots || 0);
           }
+          result.value.localRooms = listedLocalRooms();
         }
         json(response, result.status, result.value);
       })().catch(() => json(response, 503, {error:'The server manager is unavailable.'}));
@@ -138,7 +185,8 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
     }
     if (request.url === '/gateway/health') {
       response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-      response.end(JSON.stringify({ gateway: 'ready', clients: wss.clients.size, maxClients }));
+      response.end(JSON.stringify({ gateway: 'ready', clients: wss.clients.size + signals.clients.size,
+        maxClients, localRooms: localRooms.size }));
       return;
     }
     const upstream = http.request({ hostname: webHost, port: webPort,
@@ -157,7 +205,126 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
   });
   const wss = new WebSocketServer({ noServer: true, maxPayload: 65507,
     perMessageDeflate: false });
+  const signals = new WebSocketServer({ noServer: true, maxPayload: 65507 + 2,
+    perMessageDeflate: false });
+  function rejectUpgrade(socket, status) {
+    socket.end(`HTTP/1.1 ${status} Rejected\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
+  }
+  function sendJson(ws, value) {
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(value));
+  }
+  function readJson(data) {
+    if (data.length > 32768) return null;
+    try {
+      const value = JSON.parse(data);
+      return value && typeof value === 'object' ? value : null;
+    } catch { return null; }
+  }
+  const validSdp = value => typeof value === 'string' && value.length > 0 && value.length <= 16384;
+  const validCandidate = value => value && typeof value === 'object' &&
+    typeof value.candidate === 'string' && value.candidate.length <= 1024;
+  function keepAlive(ws, room) {
+    let alive = true;
+    let sent = 0;
+    ws.on('pong', () => {
+      alive = true;
+      if (room && sent) room.ping = Math.max(1, Math.min(999, Date.now() - sent));
+    });
+    const heartbeat = setInterval(() => {
+      if (!alive) { ws.terminate(); return; }
+      alive = false;
+      sent = Date.now();
+      ws.ping();
+    }, 15000);
+    heartbeat.unref();
+    ws.once('close', () => clearInterval(heartbeat));
+  }
+  function hostRoom(ws) {
+    let slot = 1;
+    while (localRooms.has(slot)) ++slot;
+    const room = { slot, host: ws, info: '', ping: 1, peers: new Map(), nextPeer: 1 };
+    localRooms.set(slot, room);
+    keepAlive(ws, room);
+    ws.on('message', (data, binary) => {
+      if (binary) {
+        if (data.length < 3) return;
+        const peer = room.peers.get(data.readUInt16BE(0));
+        if (peer?.readyState === WebSocket.OPEN && peer.bufferedAmount < 262144)
+          peer.send(data.subarray(2), { binary: true, compress: false });
+        return;
+      }
+      const message = readJson(data);
+      if (!message) return;
+      if (message.type === 'info') {
+        if (typeof message.info === 'string' && message.info.length <= 1024 && message.info.startsWith('\\'))
+          room.info = message.info;
+        return;
+      }
+      const peer = Number.isInteger(message.peer) ? room.peers.get(message.peer) : undefined;
+      if (!peer) return;
+      if (message.type === 'answer' && validSdp(message.sdp))
+        sendJson(peer, { type: 'answer', sdp: message.sdp });
+      else if (message.type === 'candidate' && validCandidate(message.candidate))
+        sendJson(peer, { type: 'candidate', candidate: message.candidate });
+    });
+    ws.once('close', () => {
+      if (localRooms.get(slot) === room) localRooms.delete(slot);
+      for (const peer of room.peers.values()) peer.close(4000, 'The host left the game.');
+      room.peers.clear();
+    });
+    sendJson(ws, { type: 'hosted', slot });
+  }
+  function joinRoom(room, ws) {
+    let id = room.nextPeer;
+    while (room.peers.has(id)) id = id % 65534 + 1;
+    room.nextPeer = id % 65534 + 1;
+    room.peers.set(id, ws);
+    keepAlive(ws);
+    const header = Buffer.alloc(2);
+    header.writeUInt16BE(id);
+    ws.on('message', (data, binary) => {
+      if (binary) {
+        if (data.length && room.host.readyState === WebSocket.OPEN && room.host.bufferedAmount < 1048576)
+          room.host.send(Buffer.concat([header, data]), { binary: true, compress: false });
+        return;
+      }
+      const message = readJson(data);
+      if (message?.type === 'offer' && validSdp(message.sdp))
+        sendJson(room.host, { type: 'offer', peer: id, sdp: message.sdp });
+      else if (message?.type === 'candidate' && validCandidate(message.candidate))
+        sendJson(room.host, { type: 'candidate', peer: id, candidate: message.candidate });
+    });
+    ws.once('close', () => {
+      if (room.peers.get(id) !== ws) return;
+      room.peers.delete(id);
+      sendJson(room.host, { type: 'leave', peer: id });
+    });
+    sendJson(room.host, { type: 'join', peer: id });
+  }
+  function upgradeSignal(request, socket, head) {
+    if (!sameOrigin(request)) { rejectUpgrade(socket, 403); return; }
+    const query = new URL(request.url, 'http://gateway').searchParams;
+    if (query.get('role') === 'host') {
+      if (localRooms.size >= maxLocalRooms) { rejectUpgrade(socket, 503); return; }
+      signals.handleUpgrade(request, socket, head, ws => {
+        if (localRooms.size >= maxLocalRooms) ws.close(1013, 'Too many browser-hosted games.');
+        else hostRoom(ws);
+      });
+      return;
+    }
+    const room = localRooms.get(Number(query.get('room')));
+    if (!room?.info) { rejectUpgrade(socket, 404); return; }
+    if (room.peers.size + 1 >= maxClients) { rejectUpgrade(socket, 503); return; }
+    signals.handleUpgrade(request, socket, head, ws => {
+      if (localRooms.get(room.slot) === room) joinRoom(room, ws);
+      else ws.close(4000, 'The host left the game.');
+    });
+  }
   server.on('upgrade', async (request, socket, head) => {
+    if (roomsEnabled && /^\/signal(?:\?|$)/.test(request.url)) {
+      upgradeSignal(request, socket, head);
+      return;
+    }
     const roomMatch = /^\/game(?:\?room=([0-2]))?$/.exec(request.url);
     const roomId = roomMatch?.[1] ? Number(roomMatch[1]) : 0;
     const occupied = [...wss.clients].filter(ws => ws.roomId === roomId).length + (reservations.get(roomId) || 0);
@@ -250,9 +417,11 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
     heartbeat.unref();
     ws.once('close', () => clearInterval(heartbeat));
   });
-  return { server, wss, async close() {
+  return { server, wss, signals, async close() {
     for (const client of wss.clients) client.terminate();
+    for (const client of signals.clients) client.terminate();
     await new Promise(resolve => wss.close(resolve));
+    await new Promise(resolve => signals.close(resolve));
     await new Promise(resolve => server.close(resolve));
   } };
 }
@@ -267,6 +436,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   });
   gateway.server.listen(Number(process.env.PORT || 8088), '0.0.0.0',
     () => console.log('[gateway] LAN HTTP/WebSocket endpoint ready'));
+  const stun = attachStunResponder(dgram.createSocket('udp4'));
+  stun.on('error', error => console.error('[gateway] STUN:', error.code));
+  stun.bind(Number(process.env.STUN_PORT || 3478), '0.0.0.0',
+    () => console.log('[gateway] LAN STUN endpoint ready'));
   for (const signal of ['SIGTERM', 'SIGINT'])
-    process.once(signal, async () => { await gateway.close(); process.exit(0); });
+    process.once(signal, async () => { stun.close(); await gateway.close(); process.exit(0); });
 }

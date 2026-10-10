@@ -42,6 +42,7 @@ services:
       - "${COD2_WEB_DATA_DIR:-./data/browser}/web:/game-ui:ro"
     ports:
       - "${COD2_WEB_PORT:-8088}:8088"
+      - "3478:3478/udp"
     depends_on:
       - cod2-web
       - cod2-server

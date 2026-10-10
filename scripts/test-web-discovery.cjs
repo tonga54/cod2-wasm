@@ -32,6 +32,7 @@ function fixture(reply) {
     },
     stringToNewUTF8(info) { const pointer = {info}; allocated.add(pointer); return pointer; },
     _web_add_room(id, pointer, ping) { added.push({id,info:pointer.info,ping}); },
+    _web_add_local_room(slot, pointer, ping) { added.push({slot,info:pointer.info,ping}); },
     _free(pointer) {assert.ok(allocated.delete(pointer));},
     err(message) {errors.push(message);}
   });
@@ -94,5 +95,14 @@ const response = rooms => ({ok:true,json:async()=>({rooms})});
   const first = stale.discover();
   await stale.discover(); finishOld(response([room])); await first;
   assert.deepEqual(stale.added,[{...room,id:1}]); stale.clean();
-  console.log('PASS: ready/starting rooms, transient HTTP errors, timeout recovery, bounded retries, stale refreshes, duplicate/malformed rooms and resource cleanup');
+  const local = {slot:2,info:'\\hostname\\Patio [Local]',ping:3};
+  const browserHosted = fixture(()=>({ok:true,json:async()=>({rooms:[],localRooms:[local,local,null,{slot:0,info:'x'},
+    {slot:251,info:'x'},{slot:3},{slot:4,info:'y'.repeat(2000),ping:1}]})}));
+  await browserHosted.discover(); assert.equal(browserHosted.calls(),1);
+  assert.deepEqual(browserHosted.added.slice(0,1),[local]); assert.equal(browserHosted.added.length,2);
+  assert.equal(browserHosted.added[1].slot,4); assert.equal(browserHosted.added[1].info.length,1023);
+  browserHosted.clean();
+  const mixed = fixture(()=>({ok:true,json:async()=>({rooms:[room],localRooms:[local]})}));
+  await mixed.discover(); assert.deepEqual(mixed.added,[room,local]); mixed.clean();
+  console.log('PASS: ready/starting rooms, browser-hosted rooms, transient HTTP errors, timeout recovery, bounded retries, stale refreshes, duplicate/malformed rooms and resource cleanup');
 })().catch(error=>{console.error(error);process.exitCode=1;});

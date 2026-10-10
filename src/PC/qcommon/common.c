@@ -1447,11 +1447,11 @@ int Com_EventLoop(void)
         case 0:
             { static int c0; if (c0++ < 3) Com_Printf("[cnx] evloop case0 sv_running=%d\n", com_sv_running->current.enabled); }
             while (NET_GetLoopPacket(0, &evFrom, &buf)) {
-                Com_Printf("[cnx] loop0 packet (server->client)\n");
+                { static int l0; if (l0++ < 3) Com_Printf("[cnx] loop0 packet (server->client)\n"); }
                 CL_PacketEvent(evFrom, &buf, evTime);
             }
             while (NET_GetLoopPacket(1, &evFrom, &buf)) {
-                Com_Printf("[cnx] loop1 packet (client->server) sv_running=%d\n", com_sv_running->current.enabled);
+                { static int l1; if (l1++ < 3) Com_Printf("[cnx] loop1 packet (client->server) sv_running=%d\n", com_sv_running->current.enabled); }
                 CL_SwitchToLocalClient(0);
                 if (com_sv_running->current.enabled) {
                     SV_PacketEvent(evFrom, &buf);

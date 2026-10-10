@@ -16,15 +16,16 @@ typedef struct {const char *gameType, *gameTypeName;} gameType_t;
 static struct {int numGameTypes,mapCount;gameType_t gameTypes[5];struct {const char *mapLoadName;} mapList[2];} sharedUiInfo;
 static dvar_t gt,map;static dvar_t *ui_netGameType=&gt,*ui_currentNetMap=&map;
 static char selectedName[32];static char *ui_netGameTypeName=selectedName;
-static int botCount=8,botDifficulty=2;
-static int visibilityCalls,selectionCalls,creates;static const char *createdMap,*createdType;
+static int botCount=8,botDifficulty=2,gameHost;
+static int visibilityCalls,selectionCalls,creates,locals;static const char *createdMap,*createdType;
 static void Dvar_SetInt(dvar_t *var,int value){var->current.integer=value;}
 static void Dvar_SetString(char *var,const char *value){strcpy(var,value);}
 static const char *Dvar_GetString(const char *name){assert(!strcmp(name,"sv_hostname"));return "Mode test";}
-static int Dvar_GetInt(const char *name){if(!strcmp(name,"ui_botCount"))return botCount;assert(!strcmp(name,"ui_botDifficulty"));return botDifficulty;}
+static int Dvar_GetInt(const char *name){if(!strcmp(name,"ui_gameHost"))return gameHost;if(!strcmp(name,"ui_botCount"))return botCount;assert(!strcmp(name,"ui_botDifficulty"));return botDifficulty;}
 static void UI_UpdateMapVisibility(int value){assert(value==gt.current.integer);visibilityCalls++;}
 static void UI_SelectFirstVisibleMap(int value){assert(value==map.current.integer);selectionCalls++;}
 static void Web_CreateServer(const char *name,const char *mapName,const char *gameType,int count,int difficulty){assert(count==botCount&&difficulty==botDifficulty);assert(!strcmp(name,"Mode test"));createdMap=mapName;createdType=gameType;creates++;}
+static void Web_StartLocalServer(const char *mapName,const char *gameType,int count,int difficulty){assert(gameHost==1);assert(count==botCount&&difficulty==botDifficulty);createdMap=mapName;createdType=gameType;locals++;}
 static int UI_IsActionKey(int key)
 '''+key+r'''
 static int selectMode(int key){
@@ -50,6 +51,10 @@ int main(void){
  assert(creates==109);
  gt.current.integer=5;createRoom();gt.current.integer=-1;createRoom();
  gt.current.integer=1;map.current.integer=2;createRoom();map.current.integer=-1;createRoom();assert(creates==109);
+ gameHost=1;botCount=4;botDifficulty=0;
+ for(int i=0;i<5;i++)for(int m=0;m<2;m++){gt.current.integer=i;map.current.integer=m;createRoom();assert(createdMap==sharedUiInfo.mapList[m].mapLoadName);assert(createdType==modes[i]);}
+ assert(locals==10&&creates==109);
+ gt.current.integer=5;createRoom();map.current.integer=-1;createRoom();assert(locals==10&&creates==109);
  return 0;
 }
 '''
@@ -57,4 +62,4 @@ with tempfile.TemporaryDirectory(prefix='cod2-ui-modes-') as directory:
  p=Path(directory);(p/'test.c').write_text(code)
  subprocess.run(['cc','-std=c99','-fsanitize=address,undefined',str(p/'test.c'),'-o',str(p/'test')],check=True)
  subprocess.run([str(p/'test')],check=True)
-print('PASS: Game Type ownerdraw 245 cycles all five modes in both directions; creation sends selected map/mode; invalid indices do not launch')
+print('PASS: Game Type ownerdraw 245 cycles all five modes in both directions; Server and Local hosts receive the selected map/mode; invalid indices do not launch')

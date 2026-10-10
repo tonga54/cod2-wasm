@@ -147,6 +147,7 @@
     return policy;
   }
   function closeTransport() {
+    native?.cod2P2P?.closeAll();
     const transport = native?.cod2Transport;
     if (!transport) return;
     transport.stopped = true;

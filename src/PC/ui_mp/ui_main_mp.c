@@ -1270,6 +1270,7 @@ void UI_Init(void)
     ui_dedicated = Dvar_RegisterInt("ui_dedicated", 0, 0, 2, 0x1001);
     Dvar_RegisterInt("ui_botCount", 0, 0, 32, 0x1001);
     Dvar_RegisterInt("ui_botDifficulty", 1, 0, 2, 0x1001);
+    Dvar_RegisterInt("ui_gameHost", 0, 0, 1, 0x1001);
     ui_currentNetMap = Dvar_RegisterInt("ui_currentNetMap", 0, 0, 0x7fffffff, 0x1001);
     ui_browserShowFull = Dvar_RegisterBool_mac("ui_browserShowFull", 1, 0x1001);
     ui_browserShowEmpty = Dvar_RegisterBool_mac("ui_browserShowEmpty", 1, 0x1001);
@@ -3324,11 +3325,18 @@ void UI_RunMenuScript(const char **args)
     if (I_stricmp(name, "StartServer") == 0) {
 #ifdef __EMSCRIPTEN__
         extern void Web_CreateServer(const char *name, const char *mapName, const char *gameType, int botCount, int botDifficulty);
+        extern void Web_StartLocalServer(const char *mapName, const char *gameType, int botCount, int botDifficulty);
         int mapIdx = (ui_currentNetMap)->current.integer;
         int gameTypeIdx = (ui_netGameType)->current.integer;
         if (mapIdx < 0 || mapIdx >= sharedUiInfo.mapCount ||
             gameTypeIdx < 0 || gameTypeIdx >= sharedUiInfo.numGameTypes)
             return;
+        if (Dvar_GetInt("ui_gameHost") == 1) {
+            Web_StartLocalServer(sharedUiInfo.mapList[mapIdx].mapLoadName,
+                                 sharedUiInfo.gameTypes[gameTypeIdx].gameType,
+                                 Dvar_GetInt("ui_botCount"), Dvar_GetInt("ui_botDifficulty"));
+            return;
+        }
         Web_CreateServer(Dvar_GetString("sv_hostname"), sharedUiInfo.mapList[mapIdx].mapLoadName,
                          sharedUiInfo.gameTypes[gameTypeIdx].gameType,
                          Dvar_GetInt("ui_botCount"), Dvar_GetInt("ui_botDifficulty"));
@@ -4992,6 +5000,7 @@ void UI_Init(void)
     ui_dedicated = Dvar_RegisterInt("ui_dedicated", 0, 0, 2, 0x1001);
     Dvar_RegisterInt("ui_botCount", 0, 0, 32, 0x1001);
     Dvar_RegisterInt("ui_botDifficulty", 1, 0, 2, 0x1001);
+    Dvar_RegisterInt("ui_gameHost", 0, 0, 1, 0x1001);
     ui_currentNetMap = Dvar_RegisterInt("ui_currentNetMap", 0, 0, 0x7fffffff, 0x1001);
     ui_browserShowFull = Dvar_RegisterBool_mac("ui_browserShowFull", 1, 0x1001);
     ui_browserShowEmpty = Dvar_RegisterBool_mac("ui_browserShowEmpty", 1, 0x1001);

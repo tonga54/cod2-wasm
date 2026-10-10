@@ -32,6 +32,25 @@ private token; changing browsers or clearing site storage loses that record.
 The slot limit is configuration, not a claim that 64-player matches have been
 load-tested.
 
+## Game Host
+
+**Start New Server** has a **Game Host** setting. **Server** (the default) asks
+the host machine to start a dedicated room, as before. **Local** runs the
+authoritative simulation in the creator's own browser instead, using the same
+engine code, settings, map rotation and bots as a dedicated room.
+
+Local games appear in **Join Game** next to dedicated rooms, marked
+**[Local]**. The gateway lists them, relays WebRTC signaling and answers STUN
+on UDP 3478, so players on the LAN learn each other's address even when mDNS
+names do not resolve. Each player first reaches the host through the gateway
+relay, then switches to a direct, unordered WebRTC data channel once it opens;
+if a direct channel cannot be established, the relay keeps working.
+
+The creator's browser carries every player's simulation, so use a computer
+rather than a phone to host. The game keeps running while that tab is hidden.
+When the creator leaves the match, the game disappears from the list and the
+other players are disconnected.
+
 ## Bots
 
 In **Start New Server**, choose **Bots** (None, 1–16, 20, 24, 28 or 32) and **Bot Difficulty**
@@ -229,7 +248,8 @@ startup.
 | `cod2-server` | Internal room supervisor and one authoritative engine process per room |
 
 The game network is internal to Docker; raw UDP and the room supervisor are not
-published to the LAN. Private files are mounted read-only. Set `COD2_WEB_PORT`
+published to the LAN. The gateway also answers STUN on UDP 3478 for
+[Local games](#game-host). Private files are mounted read-only. Set `COD2_WEB_PORT`
 to change the public port or `COD2_WEB_DATA_DIR` to use another private-data
 location.
 

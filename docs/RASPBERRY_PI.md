@@ -190,8 +190,9 @@ Pi origin has a separate cache from a previous Mac URL.
 
 The host starts without rooms. Create a named room using **Start New Server**,
 select its map and mode, and use **Join Game** from another browser. Only HTTP
-and WebSocket port 8088 are published; game UDP and room management stay inside
-the Docker network. Private archives are mounted read-only.
+and WebSocket port 8088 and the LAN STUN responder on UDP 3478 are published;
+game UDP and room management stay inside the Docker network. Private archives
+are mounted read-only.
 
 From your computer, check the running stack:
 

@@ -398,7 +398,10 @@ qboolean G_CallSpawnEntity(gentity_t *ent)
 
     for (i = 0; spawns[i].name; ++i) {
         if (!strcmp(spawns[i].name, classname)) {
-            ((void (*)(gentity_t *))spawns[i].spawn)(ent);
+            if ((void *)spawns[i].spawn == (void *)G_FreeEntity)
+                G_FreeEntity(ent);
+            else
+                ((void (*)(gentity_t *))spawns[i].spawn)(ent);
             return 1;
         }
     }

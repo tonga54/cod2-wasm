@@ -893,7 +893,9 @@ static void UI_ConfigureBrowserMenu(menuDef_t *menu)
                 item->action = NULL;
             } else if (I_stricmp(dvar, "sv_hostname") &&
                        I_stricmp(dvar, "ui_botCount") && I_stricmp(dvar, "ui_botDifficulty") &&
+                       I_stricmp(dvar, "ui_gameHost") &&
                        I_stricmp(text, "Bots") && I_stricmp(text, "Bot Difficulty") &&
+                       I_stricmp(text, "Game Host") &&
                        !item->window.ownerDraw &&
                        I_stricmp(text, "@MENU_SERVER_SETTINGS") &&
                        I_stricmp(text, "@MENU_GAME_TYPE") &&

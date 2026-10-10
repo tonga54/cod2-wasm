@@ -32,16 +32,21 @@ static struct {struct {int integer;} current;} selectedMap, selectedType;
 #define ui_currentNetMap (&selectedMap)
 #define ui_netGameType (&selectedType)
 static char output[256];
-static int calls;
+static int calls, gameHost, locals;
 static int I_stricmp(const char *a, const char *b) {return strcmp(a,b);}
 static const char *Dvar_GetString(const char *name) {assert(!strcmp(name,"sv_hostname"));return "Test room";}
 static int Dvar_GetInt(const char *name) {
+    if(!strcmp(name,"ui_gameHost")) return gameHost;
     if(!strcmp(name,"ui_botCount")) return 8;
     assert(!strcmp(name,"ui_botDifficulty")); return 2;
 }
 void Web_CreateServer(const char *name, const char *map, const char *gameType, int botCount, int botDifficulty) {
     assert(!strcmp(gameType,"tdm") && botCount==8 && botDifficulty==2);
     assert(!strcmp(name,"Test room")); ++calls; snprintf(output,sizeof output,"%s",map);
+}
+void Web_StartLocalServer(const char *map, const char *gameType, int botCount, int botDifficulty) {
+    assert(gameHost==1 && !strcmp(gameType,"tdm") && botCount==8 && botDifficulty==2);
+    ++calls; ++locals; snprintf(output,sizeof output,"local %s",map);
 }
 static const char *va(const char *format, ...) {
     static char buffer[256]; va_list args; va_start(args,format);
@@ -70,6 +75,13 @@ int main(void) {
         selectedMap.current.integer=i; int before=calls;
         create(); vote("voteMap"); vote("voteTypeMap"); assert(calls==before);
     }
+    gameHost=1;
+    for(int i=0;i<3;++i) {
+        char expected[256];
+        selectedMap.current.integer=i; create(); snprintf(expected,sizeof expected,"local %s",maps[i]);
+        assert(!strcmp(output,expected));
+    }
+    selectedMap.current.integer=3; create(); assert(locals==3);
     puts("PASS: actual UI creation/map/type-map votes select all three indices and reject invalid indices");
 }
 '''

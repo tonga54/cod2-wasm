@@ -1017,7 +1017,11 @@ static inline __attribute__((always_inline)) int G_RunThink_core(gentity_t *ent)
     if (!think) {
         Com_Error(1, "\x15NULL ent->think");
     }
-    return ((int (*)(gentity_t *))think)(ent);
+    if ((void *)think == (void *)G_FreeEntity)
+        G_FreeEntity(ent);
+    else
+        ((void (*)(gentity_t *))think)(ent);
+    return 0;
 }
 
 int G_RunThink(gentity_t *ent)

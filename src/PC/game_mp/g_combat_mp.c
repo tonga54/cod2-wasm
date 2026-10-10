@@ -390,10 +390,10 @@ void G_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 
     if (health > 0) {
 
-        void (*pain)(gentity_t *, gentity_t *, int, const vec_t *, int, hitLocation_t) =
+        void (*pain)(gentity_t *, gentity_t *, int, const vec_t *, int, const vec_t *, hitLocation_t) =
             ((entityHandler_t *)imp_entityHandlers)[targ->handler].pain;
         if (pain != NULL) {
-            pain(targ, attacker, damage, point, mod, hitLoc);
+            pain(targ, attacker, damage, point, mod, localdir, hitLoc);
         }
     } else {
 
