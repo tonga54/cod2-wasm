@@ -1,4 +1,5 @@
 #include "common_types.h"
+#include "cod2_grenade.h"
 #include "imports.h"
 #include "bytematch.h"
 #include "headers/PC/cgame_mp/cg_local.h"
@@ -305,6 +306,24 @@ static void CG_DrawCursorhint(const rectDef_t *rect, struct Font_s *font, float 
 
     if (!cg_cursorHints->current.integer)
         return;
+
+    snap = cg->nextSnap ? cg->nextSnap : cg->snap;
+    if (snap &&
+        (snap->ps.cursorHint == GRENADE_THROWBACK_HINT ||
+         (cg->predictedPlayerState.pm_flags & PMF_GRENADE_THROWBACK))) {
+        float hintColor[4] = {1.0f, 0.9f, 0.75f, 1.0f};
+        cg->cursorHintIcon = 0;
+        if (cg->renderingThirdPerson || snap->ps.stats[0] <= 0)
+            return;
+        GetKeyBindingLocalizedString("+frag", binding);
+        text = va((cg->predictedPlayerState.pm_flags & PMF_GRENADE_THROWBACK) ?
+                  "Release %s to throw back grenade" : "Hold %s to throw back grenade", binding);
+        UI_DrawText(text, 0x7fffffff, font,
+                    -(float)UI_TextWidth(text, 0, font, fontscale) * 0.5f,
+                    rect->y + (float)UI_TextHeight(font, fontscale) * 0.5f,
+                    rect->horzAlign, rect->vertAlign, fontscale, hintColor, textStyle);
+        return;
+    }
 
     if (!cg->renderingThirdPerson) {
 

@@ -211,6 +211,8 @@ EM_JS(void, Web_DiscoverServers, (), {
                 const list = await response.json();
                 if (Module.roomListGeneration !== generation) return;
                 if (!Array.isArray(list.rooms)) throw new Error('Invalid server list');
+                Module.roomListInstances = new Map(list.rooms.filter(room => room && Number.isInteger(room.id))
+                    .map(room => [room.id, room.instance]));
                 const seen = new Set();
                 for (const room of list.rooms) {
                     if (!room || !Number.isInteger(room.id) || room.id < 0 || room.id > 2 ||
@@ -240,20 +242,75 @@ EMSCRIPTEN_KEEPALIVE void web_created_room(int room, const char *error) {
     Cbuf_ExecuteText(2, va("connect 127.0.0.%d:28960\n", room + 1));
 }
 
-EM_JS(void, Web_CreateServer, (const char *name, const char *mapName), {
+EM_JS(void, Web_CreateServer, (const char *name, const char *mapName, const char *gameType), {
     if (Module.roomCreationPending) return;
     Module.roomCreationPending = true;
     fetch('/servers', {method:'POST', headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({name:UTF8ToString(name).slice(0, 128), map:UTF8ToString(mapName)})})
+        body:JSON.stringify({name:UTF8ToString(name).slice(0, 128), map:UTF8ToString(mapName),
+            gametype:UTF8ToString(gameType)})})
       .then(async response => {
         const result = await response.json();
-        if (!response.ok) throw new Error(result.error || 'No se pudo crear la partida.');
-        if (!Number.isInteger(result.id) || result.id < 1 || result.id > 2)
-            throw new Error('Respuesta de partida inválida.');
+        if (!response.ok) throw new Error(result.error || 'Unable to create the server.');
+        if (!Number.isInteger(result.id) || result.id < 0 || result.id > 2)
+            throw new Error('Invalid server response.');
+        if (/^[0-9a-f]{64}$/.test(result.ownerToken) && /^[0-9a-f]{32}$/.test(result.instance)) {
+            const ownership = {instance:result.instance, ownerToken:result.ownerToken};
+            (Module.ownedRooms ||= new Map()).set(result.id, ownership);
+            try { localStorage.setItem('cod2-owned-room-' + result.id, JSON.stringify(ownership)); } catch (_) {}
+        }
         _web_created_room(result.id, 0);
       }).catch(error => {
         const message = stringToNewUTF8(String(error.message).slice(0, 512));
         _web_created_room(-1, message);
         _free(message);
       }).finally(() => { Module.roomCreationPending = false; });
+});
+
+EM_JS(int, Web_CanDeleteServer, (const char *address), {
+    const match = /^127\.0\.0\.([1-3]):28960$/.exec(UTF8ToString(address));
+    if (!match) return 0;
+    const room = Number(match[1]) - 1;
+    Module.ownedRooms ||= new Map();
+    if (!Module.ownedRooms.has(room)) {
+        try { Module.ownedRooms.set(room, JSON.parse(localStorage.getItem('cod2-owned-room-' + room))); } catch (_) {}
+    }
+    const owned = Module.ownedRooms.get(room);
+    return Boolean(owned && owned.instance === Module.roomListInstances?.get(room) &&
+        /^[0-9a-f]{64}$/.test(owned.ownerToken));
+});
+
+EMSCRIPTEN_KEEPALIVE void web_deleted_room(int room, const char *error) {
+    if (room < 0) {
+        Dvar_SetStringByName("com_errorMessage", error);
+        UI_SetActiveMenu(1);
+    } else {
+        extern void UI_RunMenuScript(const char **args);
+        const char *refresh = "UpdateFilter";
+        UI_RunMenuScript(&refresh);
+    }
+}
+
+EM_JS(void, Web_DeleteServer, (const char *address), {
+    if (Module.roomDeletionPending) return;
+    const match = /^127\.0\.0\.([1-3]):28960$/.exec(UTF8ToString(address));
+    const room = match ? Number(match[1]) - 1 : -1;
+    const owned = Module.ownedRooms?.get(room);
+    const fail = error => {
+        const message = stringToNewUTF8(String(error.message).slice(0, 512));
+        try { _web_deleted_room(-1, message); } finally { _free(message); }
+    };
+    if (!owned || owned.instance !== Module.roomListInstances?.get(room)) {
+        fail(new Error('You can only delete servers created in this browser.')); return;
+    }
+    Module.roomDeletionPending = true;
+    fetch('/servers', {method:'DELETE', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({id:room, ownerToken:owned.ownerToken})})
+      .then(async response => {
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Unable to delete the server.');
+        Module.ownedRooms.delete(room);
+        Module.roomListInstances.delete(room);
+        try { localStorage.removeItem('cod2-owned-room-' + room); } catch (_) {}
+        _web_deleted_room(room, 0);
+      }).catch(fail).finally(() => { Module.roomDeletionPending = false; });
 });

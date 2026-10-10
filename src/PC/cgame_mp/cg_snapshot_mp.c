@@ -252,8 +252,8 @@ static inline __attribute__((always_inline)) void CG_TransitionSnapshot_Inline(v
 
     numClients = *(int *)((char *)snap + SNAP_NUMCLIENTS);
     for (i = 0; i < numClients; i++) {
-        char *clState = (char *)snap + SNAP_CLIENTS + i * CLSTATE_STRIDE;
-        int clientNum = *(int *)(clState + 0xc) ;
+        clientState_t *clState = &((snapshot_t *)snap)->clients[i];
+        int clientNum = clState->clientIndex ;
         char *ci = (char *)&((cg_t *)cg)->bgs.clientinfo[clientNum];
 
         if (((clientInfo_t *)ci)->nextValid != 0) {
@@ -337,6 +337,10 @@ void CG_SetNextSnap(snapshot_t *snap_param)
         return;
     }
 
+#ifdef __EMSCRIPTEN__
+    /* Flush reliable obituaries after this snapshot updates player names. */
+    extern void CG_FlushObituaries(void);
+#endif
     CL_ResetSkeletonCache(0);
 
     CG_SetFrameInterpolation();
@@ -349,31 +353,30 @@ void CG_SetNextSnap(snapshot_t *snap_param)
         int numClients = ((snapshot_t *)snap)->numClients;
         if (numClients > 0) {
             for (i = 0; i < numClients; i++) {
-                char *clState = (char *)snap + SNAP_CLIENTS + i * CLSTATE_STRIDE;
+                clientState_t *clState = &((snapshot_t *)snap)->clients[i];
                 int clientNum;
                 char *ci;
                 int modelIndex;
                 const char *configStr;
 
-                char *clData = clState + 0xc;
-
-                clientNum = *(int *)(clState + 0xc) ;
+                clientNum = clState->clientIndex ;
+                if ((unsigned)clientNum >= 64) continue;
                 ci = (char *)&cg->bgs.clientinfo[clientNum];
 
                 if (((clientInfo_t *)ci)->infoValid == 0)
-                    modelIndex = *(int *)(clState + 0x10) ;
+                    modelIndex = clState->team ;
                 else
                     modelIndex = ((clientInfo_t *)ci)->team;
 
                 ((clientInfo_t *)ci)->oldteam = modelIndex;
                 ((clientInfo_t *)ci)->infoValid = 1;
                 ((clientInfo_t *)ci)->nextValid = 1;
-                ((clientInfo_t *)ci)->clientNum = *(int *)(clState + 0xc) ;
-                ((clientInfo_t *)ci)->team = *(int *)(clState + 0x10) ;
+                ((clientInfo_t *)ci)->clientNum = clState->clientIndex ;
+                ((clientInfo_t *)ci)->team = clState->team ;
 
                 {
                     char *ciName = ((clientInfo_t *)ci)->name;
-                    char *clName = clState + 0xc + 0x3c;
+                    char *clName = clState->name;
 
                     if (strcmp(ciName, clName) != 0) {
 
@@ -389,7 +392,7 @@ void CG_SetNextSnap(snapshot_t *snap_param)
                 }
 
                 {
-                    int configIndex = *(int *)(clState + 0x14) ;
+                    int configIndex = clState->modelindex ;
                     configStr = CL_GetConfigString(configIndex + 0x14e);
                 }
 
@@ -403,14 +406,13 @@ void CG_SetNextSnap(snapshot_t *snap_param)
                 }
 
                 {
-                    char *clStateSlots = clState + 0xc;
                     int slot;
                     char *ciAttachModel = ((clientInfo_t *)ci)->attachModelNames[0];
                     char *ciAttachTag = ((clientInfo_t *)ci)->attachTagNames[0];
 
                     for (slot = 0; slot < 6; slot++) {
 
-                        int attachModelIdx = *(int *)(clStateSlots + 0x0c) ;
+                        int attachModelIdx = clState->attachModelIndex[slot] ;
                         configStr = CL_GetConfigString(attachModelIdx + 0x14e);
 
                         if (strcmp(ciAttachModel, configStr) != 0) {
@@ -420,7 +422,7 @@ void CG_SetNextSnap(snapshot_t *snap_param)
                         }
 
                         {
-                            int attachTagIdx = *(int *)(clStateSlots + 0x24) ;
+                            int attachTagIdx = clState->attachTagIndex[slot] ;
                             const char *tagStr = CL_GetConfigString(attachTagIdx + 0x6e);
 
                             if (strcmp(ciAttachTag, tagStr) != 0) {
@@ -432,13 +434,15 @@ void CG_SetNextSnap(snapshot_t *snap_param)
 
                         ciAttachModel += 0x40;
                         ciAttachTag += 0x40;
-                        clStateSlots += 4;
                     }
                 }
             }
         }
     }
 
+#ifdef __EMSCRIPTEN__
+    CG_FlushObituaries();
+#endif
     cg->identifyClientNum = ((snapshot_t *)snap)->ps.stats[3];
     cg->identifyClientHealth = ((snapshot_t *)snap)->ps.stats[4];
 
@@ -526,8 +530,8 @@ void CG_SetNextSnap(snapshot_t *snap_param)
     {
         int numClients = ((snapshot_t *)snap)->numClients;
         for (i = 0; i < numClients; i++) {
-            char *clState = (char *)snap + SNAP_CLIENTS + i * CLSTATE_STRIDE;
-            int clientNum = *(int *)(clState + 0xc) ;
+            clientState_t *clState = &((snapshot_t *)snap)->clients[i];
+            int clientNum = clState->clientIndex ;
             CG_UpdatePlayerDObj(CG_EntityPtr(clientNum));
         }
     }
@@ -624,7 +628,10 @@ void CG_SetNextSnap(snapshot_t *snap_param)
 
         if (!isDemo) {
             char *nextSnap = (char *)cg->nextSnap;
-            if (!(((snapshot_t *)nextSnap)->ps.pm_flags & 0x40)) {
+            /* Live players deliver their effects through prediction. ADS
+             * (0x40) must not also replay them from the authoritative snapshot.
+             * Only followed/interpolated players use snapshot transitions. */
+            if (!(((snapshot_t *)nextSnap)->ps.pm_flags & 0x400000)) {
 
                 const dvar_t *dv1 = cg_dvar1 ? (const dvar_t *)*cg_dvar1 : NULL;
                 if (!dv1 || dv1->current.enabled == 0) {

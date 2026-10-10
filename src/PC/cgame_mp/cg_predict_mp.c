@@ -409,6 +409,19 @@ postPredict:
 
     CG_TransitionPlayerState(ps, (playerState_t *)oldPlayerState);
 
+    if (getenv("PTRACE")) {
+        static int lastTraceTime;
+        if (cg->time - lastTraceTime >= 250 || cg->time < lastTraceTime) {
+            lastTraceTime = cg->time;
+            fprintf(stderr, "[prediction] time=%d command=%d snapshot=%d flags=0x%x "
+                    "origin=(%.2f,%.2f,%.2f) velocity=(%.1f,%.1f,%.1f) error=(%.3f,%.3f,%.3f)\n",
+                    cg->time, ps->commandTime, cg->nextSnap->ps.commandTime, ps->pm_flags,
+                    ps->origin[0], ps->origin[1], ps->origin[2],
+                    ps->velocity[0], ps->velocity[1], ps->velocity[2],
+                    cg->predictedError[0], cg->predictedError[1], cg->predictedError[2]);
+        }
+    }
+
 cleanup:
     ZN10LargeLocalD1Ev(ll);
 

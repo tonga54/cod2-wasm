@@ -2,11 +2,19 @@
 #include "imports.h"
 #include <stdlib.h>
 #include <string.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+EM_JS(void, WebDrawPerfAdd, (const char *name, double elapsed), {
+    Module.cod2Performance.add(UTF8ToString(name), elapsed);
+});
+extern void WebPointLights_Draw(const float *view, int enabled);
+#endif
 
 /* This reconstructed translation unit doesn't include the GL header. Keep
  * the actual OpenGL void-returning signature instead of an implicit int. */
 extern void glClear(unsigned int mask);
 extern void glClearColor(float red, float green, float blue, float alpha);
+extern void glTexParameterf(unsigned int target, unsigned int parameter, float value);
 
 float g_scale1 = 1.0f;
 float g_scale2 = 16777216.0f;
@@ -548,6 +556,36 @@ static int CDirect3DDevice_ColorByteOrder(UINT stride, int positionComponents)
     return COLOR_BYTES_BGRA;
 }
 
+#ifdef __EMSCRIPTEN__
+/* Keep converted model/UI colors in the same stride as positions and UVs.
+ * Separate arrays make the legacy WebGL bridge reshuffle every vertex in JS. */
+static const byte *CDirect3DDevice_InterleavedColors(const byte *vertices,
+    UINT stride, int colorOffset, UINT count, int byteOrder)
+{
+    static byte *scratch;
+    static size_t capacity;
+    const byte *colors;
+    size_t bytes;
+    UINT i;
+    if (byteOrder == COLOR_BYTES_RGBA || colorOffset < 0 ||
+        (UINT)colorOffset + 4 > stride || !count || count > SIZE_MAX / stride)
+        return NULL;
+    colors = CDirect3DDevice_ConvertColorArray(vertices, stride, colorOffset, count, byteOrder);
+    if (!colors) return NULL;
+    bytes = (size_t)stride * count;
+    if (bytes > capacity) {
+        byte *grown = realloc(scratch, bytes);
+        if (!grown) return NULL;
+        scratch = grown;
+        capacity = bytes;
+    }
+    memcpy(scratch, vertices, bytes);
+    for (i = 0; i < count; ++i)
+        memcpy(scratch + (size_t)i * stride + colorOffset, colors + i * 4, 4);
+    return scratch;
+}
+#endif
+
 /* The engine derives up to eight directional lights from its original light
  * grid. Upload them in view space; normals use the full model-view matrix.
  * Emscripten performs the lighting in the generated WebGL vertex shader. */
@@ -992,6 +1030,18 @@ static void CDirect3DDevice_ApplyTextureStageState(UINT stage)
     CDirect3DDevice_ApplyTextureCombineAlpha(alphaOp, alphaArg0, alphaArg1, alphaArg2);
 }
 
+#ifdef __EMSCRIPTEN__
+float CDirect3DDevice_WebMaxAnisotropy(void)
+{
+    static float maximum = -1;
+    if (maximum < 0) maximum = EM_ASM_DOUBLE({
+        const ext = GLctx.getExtension('EXT_texture_filter_anisotropic');
+        return ext ? GLctx.getParameter(ext.MAX_TEXTURE_MAX_ANISOTROPY_EXT) : 0;
+    });
+    return maximum;
+}
+#endif
+
 static void CDirect3DDevice_ApplySamplerState(UINT sampler, GLenum target)
 {
     DWORD addressU = g_samplerState[sampler][D3DSAMP_ADDRESSU];
@@ -1024,6 +1074,18 @@ static void CDirect3DDevice_ApplySamplerState(UINT sampler, GLenum target)
                     CDirect3DDevice_MapTextureMinFilter(minFilter, mipFilter));
     glTexParameteri(target, 0x2800 ,
                     CDirect3DDevice_MapTextureMagFilter(magFilter));
+#ifdef __EMSCRIPTEN__
+    {
+        float maximum = CDirect3DDevice_WebMaxAnisotropy();
+        if (maximum > 0) {
+            float amount = minFilter == D3DTEXF_ANISOTROPIC
+                ? (float)g_samplerState[sampler][D3DSAMP_MAXANISOTROPY] : 1.0f;
+            if (amount < 1) amount = 1;
+            if (amount > maximum) amount = maximum;
+            glTexParameterf(target, 0x84FE, amount);
+        }
+    }
+#endif
 }
 
 static void CDirect3DDevice_UpdateTextureIfNeeded(IDirect3DBaseTexture9 *texture)
@@ -1705,6 +1767,7 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
 {
     DeviceImpl *dev = (DeviceImpl *)_this;
     byte *vbData, *ibData, *vertBase;
+    const byte *attributeBase;
     UINT stride, offset;
     int indexCount;
     const unsigned short *drawIndices;
@@ -1724,13 +1787,21 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
     int normalOffset;
     float textureWorldView[16];
     int textureWorldViewValid = 0;
+    float pointLightView[16];
+    int pointLightViewValid = 0;
     const D3DVERTEXELEMENT9 *element;
 
 #ifdef __EMSCRIPTEN__
+    static int measure = -1;
+    double perfStart = 0;
+    if (measure < 0) measure = EM_ASM_INT({ return Boolean(Module.cod2Performance); });
+    if (measure) perfStart = emscripten_get_now();
+#define WEB_DRAW_PERF(name) do { if (measure) { double now = emscripten_get_now(); WebDrawPerfAdd(name, now - perfStart); perfStart = now; } } while (0)
     static unsigned int webStateChecks;
     int webCheck = webStateChecks++ < 2;
 #define WEB_STATE_CHECK(stage) do { if (webCheck) fprintf(stdout, "[web-state] %s error=0x%x\n", stage, glGetError()); } while (0)
 #else
+#define WEB_DRAW_PERF(name) do {} while (0)
 #define WEB_STATE_CHECK(stage) do {} while (0)
 #endif
     WEB_STATE_CHECK("entry");
@@ -1935,6 +2006,8 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                 view[6] = -view[6];
                 view[10] = -view[10];
                 view[14] = -view[14];
+                memcpy(pointLightView, view, sizeof(pointLightView));
+                pointLightViewValid = 1;
                 D3DXMatrixMultiply(modelView, world, view);
 
                 MacOpenGLUtils_ConvertD3DProjectionMatrixToOpenGL(
@@ -1973,6 +2046,7 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
     }
 
     WEB_STATE_CHECK("matrices");
+    WEB_DRAW_PERF("backendSetup");
     if (1)
     {
 #ifndef __EMSCRIPTEN__
@@ -2093,12 +2167,34 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
     }
 
     WEB_STATE_CHECK("blend");
+    WEB_DRAW_PERF("backendTextures");
+    attributeBase = vertBase;
+#ifdef __EMSCRIPTEN__
+    {
+        extern unsigned CDirect3DVertexBuffer_BindStaticWeb(const CDirect3DVertexBuffer *buffer);
+        extern void glBindBuffer(unsigned target, unsigned buffer);
+        glBindBuffer(0x8892, 0);
+        if (stage0Target == 0x0DE1) {
+            const byte *converted = CDirect3DDevice_InterleavedColors(
+                vertBase, stride, colorOffset, drawVertexCount, colorByteOrder);
+            if (converted) {
+                attributeBase = converted;
+                colorByteOrder = COLOR_BYTES_RGBA;
+            }
+        }
+        /* Original RGBA world vertices can stay on the GPU between frames.
+         * Converted colors and camera-generated cube coordinates use CPU data. */
+        if (!is2D && attributeBase == vertBase && colorByteOrder == COLOR_BYTES_RGBA && stage0Target == 0x0DE1 &&
+            CDirect3DVertexBuffer_BindStaticWeb((const CDirect3DVertexBuffer *)dev->streams[0]))
+            attributeBase = (const byte *)(uintptr_t)firstByte;
+    }
+#endif
     glEnableClientState(0x8074);
     glVertexPointer(positionComponents, 0x1406 , stride,
-                    vertBase + positionOffset);
+                    attributeBase + positionOffset);
     if (!is2D && dev->lighting && normalOffset >= 0) {
         glEnableClientState(0x8075);
-        glNormalPointer(0x1406, stride, vertBase + normalOffset);
+        glNormalPointer(0x1406, stride, attributeBase + normalOffset);
     }
 
     {
@@ -2112,13 +2208,13 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                 glColorPointer(4, 0x1401 , 0, colors);
             else
                 glColorPointer(4, 0x1401 , stride,
-                               vertBase + colorOffset);
+                               attributeBase + colorOffset);
 
             if (lightmapOffset >= 0) {
                 glClientActiveTextureARB(0x84C1);
                 glEnableClientState(0x8078);
                 glTexCoordPointer(2, 0x1406 , stride,
-                                  vertBase + lightmapOffset);
+                                  attributeBase + lightmapOffset);
                 glClientActiveTextureARB(0x84C0);
             }
         } else if (colorOffset >= 0) {
@@ -2130,7 +2226,7 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
             if (colors)
                 glColorPointer(4, 0x1401 , 0, colors);
             else
-                glColorPointer(4, 0x1401 , stride, vertBase + colorOffset);
+                glColorPointer(4, 0x1401 , stride, attributeBase + colorOffset);
         }
         if (texOffset >= 0) {
             glEnableClientState(0x8078);
@@ -2146,9 +2242,9 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                     glTexCoordPointer(3, 0x1406 , stride,
                                       vertBase + normalOffset);
                 else
-                    glTexCoordPointer(2, 0x1406 , stride, vertBase + texOffset);
+                    glTexCoordPointer(2, 0x1406 , stride, attributeBase + texOffset);
             } else {
-                glTexCoordPointer(2, 0x1406 , stride, vertBase + texOffset);
+                glTexCoordPointer(2, 0x1406 , stride, attributeBase + texOffset);
             }
         }
     }
@@ -2176,21 +2272,36 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
         }
 #endif
         WEB_STATE_CHECK("attributes");
+        WEB_DRAW_PERF("backendAttributes");
+#ifdef __EMSCRIPTEN__
+        WebPointLights_Draw(pointLightViewValid ? pointLightView : NULL,
+            !is2D && dev->zWriteEnable && !dev->alphaBlendEnable &&
+            stage0Target == 0x0DE1 && (usesLightmap || dev->lighting));
+#endif
         glDrawElements(0x0004 , indexCount,
                        0x1403 ,
                        drawIndices);
     }
 
     WEB_STATE_CHECK("draw");
+    WEB_DRAW_PERF("backendDraw");
     glDisableClientState(0x8074);
     glDisableClientState(0x8075);
     glDisableClientState(0x8076);
     glDisableClientState(0x8078);
     CDirect3DDevice_DisableExtraTextureUnits();
 
+#ifdef __EMSCRIPTEN__
+    {
+        extern void glBindBuffer(unsigned target, unsigned buffer);
+        glBindBuffer(0x8892, 0);
+    }
+#endif
+
     return 0;
 }
 #undef WEB_STATE_CHECK
+#undef WEB_DRAW_PERF
 
 HRESULT CDirect3DDevice_DrawPrimitiveUP(const CDirect3DDevice *_this,
                                         D3DPRIMITIVETYPE PrimitiveType, UINT PrimitiveCount,
@@ -3366,11 +3477,17 @@ void CDirect3DDevice_Init(void *device)
     dev->alphaFuncVal = 8;
     dev->viewportX = 0;
     dev->viewportY = 0;
+#ifdef __EMSCRIPTEN__
+    extern int sdl_gl_width, sdl_gl_height;
+    dev->viewportW = sdl_gl_width;
+    dev->viewportH = sdl_gl_height;
+#else
     dev->viewportW = 640;
     dev->viewportH = 480;
+#endif
     dev->viewportMinZ = 0.0f;
     dev->viewportMaxZ = 1.0f;
-    glViewport(0, 0, 640, 480);
+    glViewport(0, 0, dev->viewportW, dev->viewportH);
     glDepthRange(0.0, 1.0);
     dev->zEnable = 1;
     dev->zWriteEnable = 1;

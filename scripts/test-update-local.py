@@ -55,9 +55,9 @@ class UpdateTests(unittest.TestCase):
         with patch.object(updater.subprocess, 'check_output', return_value='container'), \
                 patch.object(updater.urllib.request, 'urlopen') as request:
             request.return_value.__enter__.return_value.read.return_value = b'{"gateway":"ready","clients":2}'
-            with self.assertRaisesRegex(RuntimeError, 'personas conectadas'): updater.ensure_idle()
+            with self.assertRaisesRegex(RuntimeError, 'Players are connected'): updater.ensure_idle()
             request.side_effect = OSError('offline')
-            with self.assertRaisesRegex(RuntimeError, 'comprobar'): updater.ensure_idle()
+            with self.assertRaisesRegex(RuntimeError, 'Unable to check'): updater.ensure_idle()
 
     def test_check_only_never_builds_or_merges(self):
         with patch.object(sys, 'argv', ['update-local.py']), \

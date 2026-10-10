@@ -4,6 +4,16 @@
 #include "headers/PC/cgame_mp/cg_local.h"
 #include <math.h>
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+EM_JS(void, CG_WebPerfMark, (const char *name), {
+    Module.cod2Performance.mark(UTF8ToString(name));
+});
+#define CG_PERF_MARK(name) do { if (measure) CG_WebPerfMark(name); } while (0)
+#else
+#define CG_PERF_MARK(name) ((void)0)
+#endif
+
 vec3_t maxs = { 4.0f, 4.0f, 4.0f };
 
 extern const dvar_t *bg_bobMax;
@@ -770,6 +780,11 @@ qboolean CG_DrawActiveFrame(int serverTime, DemoType demoType,
 {
     snapshot_t *snap;
     snapshot_t *nextSnap;
+#ifdef __EMSCRIPTEN__
+    static int measure = -1;
+    if (measure < 0) measure = EM_ASM_INT({ return Boolean(Module.cod2Performance); });
+    CG_PERF_MARK("beforeCgame");
+#endif
 
     cg->oldTime = cg->time;
     cg->time = serverTime;
@@ -796,6 +811,7 @@ qboolean CG_DrawActiveFrame(int serverTime, DemoType demoType,
     *(void **)imp_bgs = &cg->bgs;
 
     CG_ProcessSnapshots();
+    CG_PERF_MARK("snapshots");
 
     {
         LegacyHacks *legacyHacks = *(LegacyHacks **)imp_legacyHacks;
@@ -856,11 +872,13 @@ qboolean CG_DrawActiveFrame(int serverTime, DemoType demoType,
 
     CL_ResetSkeletonCache(0);
     CG_AddPacketEntities();
+    CG_PERF_MARK("entities");
     R_UpdateEffectsNonBolt();
     CG_AddLocalEntities();
     CG_UpdateViewKick();
     CL_Input();
     CG_PredictPlayerState();
+    CG_PERF_MARK("predictionAndEffects");
 
     CG_UpdateViewWeaponAnim(&cg->predictedPlayerState);
     CG_CalcViewValues();
@@ -907,6 +925,7 @@ qboolean CG_DrawActiveFrame(int serverTime, DemoType demoType,
     }
 
     R_UpdateEffectsBolt();
+    CG_PERF_MARK("viewAndWeapon");
 
     {
         int delayedHandle = CL_BeginDelayedDrawing();
@@ -915,6 +934,7 @@ qboolean CG_DrawActiveFrame(int serverTime, DemoType demoType,
         CG_Draw3dHudElems();
         CG_Draw2D();
         CL_EndDelayedDrawing(delayedHandle);
+        CG_PERF_MARK("hud");
 
         if (cg->weaponSelect < 0 || cg->weaponSelect > BG_GetNumWeapons()) {
             int slot;
@@ -930,6 +950,7 @@ qboolean CG_DrawActiveFrame(int serverTime, DemoType demoType,
 
         CG_DrawActive();
         CL_IssueDelayedDrawing(delayedHandle);
+        CG_PERF_MARK("render");
     }
 
 #if COD2_FEATURE_RUMBLE

@@ -29,6 +29,7 @@ common = r'''
 #define __attribute_regparm__(x)
 #define PMF_MANTLE 4
 #define PMF_LADDER 32
+#define PMF_SPRINT 0x02000000
 #define ENTITYNUM_NONE 1023
 #define qtrue 1
 #define qfalse 0
@@ -142,7 +143,7 @@ int main(void) {
 }
 '''
 dispatch_support = r'''
-static int checks,moves,slides,weapons,groundCalls,noclip,canMantle=1;
+static int checks,moves,slides,weapons,groundCalls,noclip,canMantle=1,adsTicks,adsTime,adsMsec;
 static void PM_VectorCopy(const float *a,float *b) {memcpy(b,a,sizeof(vec3_t));}
 static float PM_VectorLength2D(float *a) {return hypotf(a[0],a[1]);}
 static void BG_AnimUpdatePlayerStateConditions(pmove_t *pm) {}
@@ -156,13 +157,14 @@ static void PM_CheckDuck(pmove_t *pm,pml_t *pml) {}
 static void PM_UpdateAimDownSightFlag(pmove_t *pm,pml_t *pml) {}
 static void PM_GroundTrace(pmove_t *pm,pml_t *pml) {groundCalls++;pml->walking=1;pm->ps->groundEntityNum=1022;}
 static void PM_CheckLadderMove(pmove_t *pm,pml_t *pml) {}
+static void PM_UpdateSprint(pmove_t *pm,pml_t *pml) {}
 static void PM_LadderMove(pmove_t *pm,pml_t *pml) {slides++;}
 static void PM_WalkMove(pmove_t *pm,pml_t *pml) {slides++;}
 static void PM_AirMove(pmove_t *pm,pml_t *pml) {slides++;}
 static void PM_NoclipMove(pmove_t *pm,pml_t *pml) {noclip++;}
 static void PM_Footsteps(pmove_t *pm,pml_t *pml) {}
-static void PM_Weapon(pmove_t *pm,pml_t *pml) {weapons++;}
-static void PM_UpdateAimDownSightLerp(pmove_t *pm,pml_t *pml) {}
+static void PM_Weapon(pmove_t *pm,pml_t *pml) {assert(adsTime==pm->cmd.serverTime);weapons++;}
+static void PM_UpdateAimDownSightLerp(pmove_t *pm,pml_t *pml) {adsTicks++;adsMsec+=pml->msec;adsTime=pm->cmd.serverTime;}
 static void PM_ViewHeightAdjust(pmove_t *pm,pml_t *pml) {}
 static void Sys_SnapVector(float *v) {}
 static void Mantle_Check(pmove_t *pm,pml_t *pml) {
@@ -183,18 +185,21 @@ int main(void) {
     for(int packet=1;packet<200;packet++) {
         playerState_t ps={.commandTime=1000,.pm_flags=32};
         pmove_t pm={.ps=&ps,.cmd={.serverTime=1000+packet,.buttons=0x400}};
-        checks=moves=slides=weapons=groundCalls=noclip=0;Pmove(&pm);
+        checks=moves=slides=weapons=groundCalls=noclip=adsTicks=adsTime=adsMsec=0;Pmove(&pm);
         assert(ps.origin[2]==packet&&ps.mantleState.timer==packet&&ps.commandTime==1000+packet);
         assert(moves==(packet+65)/66&&checks==moves&&weapons==moves&&!slides&&!groundCalls);
         assert(pm.mantleStarted&&(ps.pm_flags&4));
+        assert(adsTicks==moves&&adsMsec==packet);
     }
     for(int mode=0;mode<10;mode++)for(int attempt=0;attempt<2;attempt++) {
         playerState_t ps={.commandTime=1000,.pm_type=mode};
         pmove_t pm={.ps=&ps,.mantleStarted=1,.cmd={.serverTime=1200,.buttons=0x400}};
-        canMantle=attempt;checks=moves=slides=weapons=groundCalls=noclip=0;Pmove(&pm);
+        canMantle=attempt;checks=moves=slides=weapons=groundCalls=noclip=adsTicks=adsTime=adsMsec=0;Pmove(&pm);
         assert(ps.commandTime==1200&&!pm.mantleStarted);
         if(mode<=5){assert(checks==4&&weapons==4);assert(attempt?moves==4&&slides==0:moves==0&&slides==4);}
         else {assert(!checks&&!moves&&!slides&&!weapons);assert(noclip==(mode>=8?4:0));}
+        assert(adsTicks==(mode==6||mode==7?0:4));
+        assert(adsMsec==(mode==6||mode==7?0:200));
     }
     return 0;
 }
@@ -234,7 +239,8 @@ suites = [
                             'if (tr->allsolid == 0 && tr->startsolid == 0)')]),
     ('dispatch', dispatch_support, dispatch_body, dispatch_checks, [
         dispatch_body.replace('Mantle_Check(pm, &pml);', ''),
-        dispatch_body.replace('if (ps->pm_flags & PMF_MANTLE)', 'if (0)')]),
+        dispatch_body.replace('if (ps->pm_flags & PMF_MANTLE)', 'if (0)'),
+        dispatch_body.replace('PM_UpdateAimDownSightLerp(pm, &pml);', 'PM_UpdateAimDownSightLerp(pm, &pml); PM_UpdateAimDownSightLerp(pm, &pml);')]),
     ('jump', jump_support, jump_body, jump_checks, []),
 ]
 with tempfile.TemporaryDirectory(prefix='cod2-mantle-') as directory:
@@ -248,4 +254,4 @@ with tempfile.TemporaryDirectory(prefix='cod2-mantle-') as directory:
                             str(source), '-lm', '-o', str(binary)], check=True)
             result = subprocess.run([str(binary)], capture_output=True, text=True)
             assert (result.returncode == 0) == (index == 0), (name, index, result.stderr)
-print('PASS: 168 ledge/root-motion paths, 9 invalid ledges, 219 movement schedules, original jump height and 3 failing regression mutants')
+print('PASS: 168 ledge/root-motion paths, 9 invalid ledges, 219 movement schedules with one ADS integration before firing, original jump height and 4 failing regression mutants')

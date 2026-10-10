@@ -1106,8 +1106,16 @@ void CL_AdjustTimeDelta(void)
     if (deltaDiff > 500) {
         cl->serverTimeDelta = newDelta;
         cl = CL_LOCAL;
+#ifdef __EMSCRIPTEN__
+        /* A delayed snapshot may rebase the clock behind commands already
+         * predicted. Keep time monotonic while the new delta catches up. */
+        if (cl->serverTime < cl->snap.serverTime)
+            cl->serverTime = cl->snap.serverTime;
+        cl->oldServerTime = cl->serverTime;
+#else
         cl->oldServerTime = cl->snap.serverTime;
         cl->serverTime = cl->snap.serverTime;
+#endif
         if ((*(const dvar_t **)imp_cl_showTimeDelta)->current.enabled) {
             Com_Printf("cl_showTimeDelta: reset\n");
         }
@@ -1335,6 +1343,12 @@ void CL_SetCGameTime(void)
             int timeDelta = cl->serverTimeDelta;
             int realtime = cls->realtime;
             cl->serverTime = realtime + timeDelta;
+#ifdef __EMSCRIPTEN__
+            /* ClientThink_real accepts commands up to 200 ms ahead. Beyond
+             * that horizon a stalled server clamps them and rewinds movement. */
+            if (cl->serverTime > cl->snap.serverTime + 200)
+                cl->serverTime = cl->snap.serverTime + 200;
+#endif
 
             int oldServerTime = cl->oldServerTime;
             if (cl->serverTime < oldServerTime) {

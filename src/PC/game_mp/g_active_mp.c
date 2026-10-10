@@ -54,6 +54,10 @@ extern void I_strncpyz(char *dest, const char *src, int destsize);
 extern void ClientSpawn(gentity_t *ent, const vec_t *spawn_origin, const vec_t *spawn_angles);
 extern void Player_UpdateLookAtEntity(gentity_t *ent);
 extern void Player_UpdateCursorHints(gentity_t *ent);
+extern void G_UpdateGrenadeHint(gentity_t *ent);
+extern void G_BeginGrenadeInput(gentity_t *ent, const usercmd_t *cmd);
+extern void G_EndGrenadeInput(gentity_t *ent);
+extern void G_GrenadeCookOff(gentity_t *ent);
 extern void G_GetPlayerViewOrigin(const gentity_t *ent, vec_t *origin);
 extern int G_GetNonPVSFriendlyInfo(gentity_t *pSelf, vec_t *vPosition, int iLastUpdateEnt);
 extern void BG_PlayerStateToEntityState(playerState_t *ps, gentity_t *ent, qboolean snap, qboolean forceSnap);
@@ -481,7 +485,7 @@ void G_TouchTriggers(gentity_t *ent)
         if (!hitTouch && !entTouch)
             continue;
 
-        if (hit->s.eType == 3) {
+        if (hit->s.eType == 3 && getenv("DBGSPAM")) {
             Com_Printf("[touch] num=%d i=%d touch[i]=%d hit#=%d eType=%d posTr=%d\n",
                        num, i, touch[i], hit->s.number, hit->s.eType, hit->s.pos.trType);
         }
@@ -572,11 +576,8 @@ void ClientEvents(gentity_t *ent, int oldEventSequence)
             Scr_Notify(ent, SCR_CONST()->binocular_drop, 0);
             break;
         case 0xc5: /* EV_GRENADE_SUICIDE */
-            if (ent->client && !((byte)ent->flags & 3)) {
-                ent->health = 0;
-                ent->client->ps.stats[0] = 0;
-                player_die(ent, ent, ent, 100000, 12, 0, NULL, 0, 0);
-            }
+            if (ent->client)
+                G_GrenadeCookOff(ent);
             break;
         default:
             break;
@@ -663,7 +664,7 @@ qboolean StuckInClient(gentity_t *self)
     if (self->r.contents != 0x2000000 && self->r.contents != 0x4000000)
         return qfalse;
 
-    for (i = 0; i < level.num_entities; ++i) {
+    for (i = 0; i < level.maxclients; ++i) {
         gentity_t *ent = &g_entities[i];
         gclient_t *client;
         vec2_t vDelta;
@@ -673,10 +674,12 @@ qboolean StuckInClient(gentity_t *self)
         float ejectSpeed;
         const dvar_t *ejectDvar;
 
-        if (!ent->takedamage)
+        if (!ent->r.inuse || !ent->takedamage || !ent->client)
             continue;
 
         client = ent->client;
+        if (client->sess.connected != CON_CONNECTED)
+            continue;
         if (!(client->ps.pm_flags & 0x800000))
             continue;
         if (client->sess.sessionState)
@@ -725,12 +728,14 @@ qboolean StuckInClient(gentity_t *self)
         client->ps.velocity[0] = otherSpeed * vDelta[0];
         client->ps.velocity[1] = otherSpeed * vDelta[1];
         client->ps.pm_time = 300;
-        client->ps.eFlags |= 0x200;
+        /* Timed collision ejection is a movement flag. The same bit in
+           eFlags means mounted turret and makes view code require its tag. */
+        client->ps.pm_flags |= 0x200;
 
         selfClient->ps.velocity[0] = -selfSpeed * vDelta[0];
         selfClient->ps.velocity[1] = -selfSpeed * vDelta[1];
         selfClient->ps.pm_time = 300;
-        selfClient->ps.eFlags |= 0x200;
+        selfClient->ps.pm_flags |= 0x200;
         return qtrue;
     }
 
@@ -1017,7 +1022,9 @@ void ClientThink_real(gentity_t *ent, usercmd_t *ucmd)
     client->fGunPitch = viewangles[0];
     client->fGunYaw = viewangles[1];
 
+    G_BeginGrenadeInput(ent, &pm.cmd);
     Pmove(&pm);
+    G_EndGrenadeInput(ent);
 
     if (pm.mantleStarted) {
         gentity_t *owner;
@@ -1309,6 +1316,7 @@ void ClientEndFrame(gentity_t *ent)
 
     Player_UpdateLookAtEntity(ent);
     Player_UpdateCursorHints(ent);
+    G_UpdateGrenadeHint(ent);
     P_DamageFeedback(ent);
 
     if (level.time - client->lastCmdTime > 1000) {

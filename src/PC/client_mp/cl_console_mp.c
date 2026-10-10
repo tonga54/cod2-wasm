@@ -232,7 +232,7 @@ static void Con_ChatModePublic_f(void)
     **(int **)imp_chat_team = 0;
     field = (field_t **)imp_chatField;
     Field_Clear(*field);
-    (*field)->widthInPixels = 0x24c;
+    (*field)->widthInPixels = 360;
     (*field)->charHeight = 10.0f;
     (*field)->fixedSize = 0;
     (*(clientActive_t **)imp_cl)->keyCatchers ^= 0x10;
@@ -245,7 +245,7 @@ static void Con_ChatModeTeam_f(void)
     **(int **)imp_chat_team = 1;
     field = (field_t **)imp_chatField;
     Field_Clear(*field);
-    (*field)->widthInPixels = 0x21f;
+    (*field)->widthInPixels = 335;
     (*field)->charHeight = 10.0f;
     (*field)->fixedSize = 0;
     (*(clientActive_t **)imp_cl)->keyCatchers ^= 0x10;

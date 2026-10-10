@@ -412,6 +412,14 @@ void NET_OpenIP(void)
         }
 
         {
+            /* One socket receives every player's UDP traffic. Preserve short
+             * bursts during busy ticks instead of dropping them in the kernel. */
+            int bufferBytes = 2 * 1024 * 1024;
+            if (setsockopt(newsocket, SOL_SOCKET, SO_RCVBUF, &bufferBytes, sizeof(bufferBytes)) == -1)
+                Com_Printf("WARNING: UDP receive buffer: %s\n", strerror(errno));
+        }
+
+        {
             struct sockaddr_in address;
 
             memset(&address, 0, sizeof(address));

@@ -96,6 +96,7 @@ extern void NET_Sleep(int msec);
 extern int Com_EventLoop(void);
 extern void Cbuf_Execute(void);
 extern void SV_Frame(int msec);
+extern int SV_FrameWaitMilliseconds(void);
 extern void CL_SwitchToLocalClient(int localClientNum);
 extern void CL_RunOncePerClientFrame(int msec);
 extern void CL_Shutdown(void);
@@ -1580,7 +1581,12 @@ BM_NOINLINE void Com_Frame_Try_Block_Function(void)
 
     SetAnimCheck(com_animCheck->current.enabled);
 
-    if (com_maxfps->current.integer > 0 && !com_dedicated->current.integer) {
+    if (com_dedicated->current.integer && !com_fixedtime->current.integer
+        && com_timescale->current.value == 1.0f && com_codeTimeScale == 1.0f) {
+        /* select() wakes as soon as UDP arrives. Com_EventLoop still processes
+         * each packet immediately; idle polling need only reach the next tick. */
+        minMsec = SV_FrameWaitMilliseconds();
+    } else if (com_maxfps->current.integer > 0 && !com_dedicated->current.integer) {
         minMsec = 1000 / com_maxfps->current.integer;
         if (minMsec == 0)
             minMsec = 1;

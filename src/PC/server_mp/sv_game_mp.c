@@ -738,7 +738,7 @@ qboolean SV_DObjCreateSkelForBone(gentity_t *ent, int boneIndex)
 
     allocSize = DObjGetAllocSkelSize(obj);
     alignedSize = (allocSize + 15) & ~15;
-    Com_Printf("[ckpt] skel obj=%p allocSize=%d aligned=%d numBones~=%d memPos=%d\n",
+    if (getenv("DBGSPAM")) Com_Printf("[ckpt] skel obj=%p allocSize=%d aligned=%d numBones~=%d memPos=%d\n",
                obj, allocSize, alignedSize, (allocSize - 0x30) >> 5, sv->skelMemPos);
     buf = g_sv_skel_memory_start + sv->skelMemPos;
     sv->skelMemPos += alignedSize;

@@ -1,5 +1,64 @@
 #include "common_types.h"
+#include "cod2_sprint.h"
+#include <math.h>
 #include "imports.h"
+
+extern void *Hunk_AllocAlignInternal(int size, int align);
+static EffectTemplate *muzzleLightEffects[128];
+
+static EffectTemplate *CG_MuzzleLightsOnly(const EffectTemplate *original)
+{
+    if (!original)
+        return NULL;
+    EffectTemplate *effect = Hunk_AllocAlignInternal(sizeof(*effect), 4);
+    memset(effect, 0, sizeof(*effect));
+    effect->mEffectName = original->mEffectName;
+    for (int i = 0; i < original->mPrimitiveCount; ++i) {
+        const PrimitiveTemplate *source = original->mPrimitives[i];
+        if (!source || source->mType != PT_LIGHT)
+            continue;
+        PrimitiveTemplate *light = Hunk_AllocAlignInternal(sizeof(*light), 4);
+        memcpy(light, source, sizeof(*light));
+        /* The hidden-view variant has no particle parents. Its lights still
+         * bolt to the weapon's muzzle and use their original FX channels. */
+        light->mParentPrimIndex = -1;
+        effect->mPrimitives[effect->mPrimitiveCount++] = light;
+    }
+    return effect->mPrimitiveCount ? effect : NULL;
+}
+
+static EffectTemplate *CG_EnhanceMuzzleFlash(const EffectTemplate *original)
+{
+    if (!original)
+        return NULL;
+    EffectTemplate *effect = Hunk_AllocAlignInternal(sizeof(*effect), 4);
+    memcpy(effect, original, sizeof(*effect));
+    for (int i = 0; i < effect->mPrimitiveCount; ++i) {
+        const PrimitiveTemplate *source = original->mPrimitives[i];
+        if (!source || (source->mType != PT_PARTICLE &&
+                       source->mType != PT_ORIENTEDPARTICLE && source->mType != PT_TAIL) ||
+            source->mLife.mMax > 200)
+            continue;
+        /* Make the brief authored flash clearer; leave smoke, light radius,
+         * duration and particle counts intact. Variants share immutable media
+         * and curves and are reclaimed with the map's hunk. */
+        PrimitiveTemplate *flash = Hunk_AllocAlignInternal(sizeof(*flash), 4);
+        memcpy(flash, source, sizeof(*flash));
+        flash->mFxChannels[FXCHAN_SIZE].scaleRange.mMin *= 1.4f;
+        flash->mFxChannels[FXCHAN_SIZE].scaleRange.mMax *= 1.4f;
+        if (source->mNonUniformScale) {
+            flash->mFxChannels[FXCHAN_SIZE2].scaleRange.mMin *= 1.4f;
+            flash->mFxChannels[FXCHAN_SIZE2].scaleRange.mMax *= 1.4f;
+        }
+        flash->mFxChannels[FXCHAN_COLOR].scaleRange.mMin *= 1.35f;
+        flash->mFxChannels[FXCHAN_COLOR].scaleRange.mMax *= 1.35f;
+        flash->mFxChannels[FXCHAN_ALPHA].scaleRange.mMin *= 1.5f;
+        flash->mFxChannels[FXCHAN_ALPHA].scaleRange.mMax *= 1.5f;
+        flash->spawnFrustumCullRadius *= 1.4f;
+        effect->mPrimitives[i] = flash;
+    }
+    return effect;
+}
 #include "headers/PC/cgame_mp/cg_local.h"
 
 extern const dvar_t *cg_weaponCycleDelay;
@@ -637,6 +696,11 @@ void CG_FireWeapon(centity_t *cent, int event, int barrel)
     if (!ent->weapon)
         return;
 
+    if (getenv("PTRACE"))
+        fprintf(stderr, "[fire] time=%d entity=%d weapon=%d event=%d local=%d\n",
+                cg->time, ent->number, ent->weapon, event,
+                CG_IsLocalClientEntity_inl(cg, ent));
+
     if (ent->weapon > BG_GetNumWeapons())
         Com_Error(1, "\x15"
                      "CG_FireWeapon: ent->weapon > BG_GetNumWeapons()");
@@ -798,10 +862,12 @@ void CG_RegisterWeapon(int weaponNum)
         weapInfo->hADSOverlay = (MaterialHandle)CL_RegisterMaterialNoMip(weapDef->szOverlayMaterial, 7);
 
     if (weapDef->szViewFlashEffect[0])
-        weapInfo->viewFlashEffect = (struct EffectTemplate *)FX_RegisterEffect(weapDef->szViewFlashEffect);
+        weapInfo->viewFlashEffect = CG_EnhanceMuzzleFlash(FX_RegisterEffect(weapDef->szViewFlashEffect));
+    if ((unsigned int)weaponNum < 128)
+        muzzleLightEffects[weaponNum] = CG_MuzzleLightsOnly(weapInfo->viewFlashEffect);
 
     if (weapDef->szWorldFlashEffect[0])
-        weapInfo->worldFlashEffect = (struct EffectTemplate *)FX_RegisterEffect(weapDef->szWorldFlashEffect);
+        weapInfo->worldFlashEffect = CG_EnhanceMuzzleFlash(FX_RegisterEffect(weapDef->szWorldFlashEffect));
 
     weapInfo->missileSound = (snd_alias_list_t *)Com_FindSoundAlias(weapDef->szProjectileSound);
     weapInfo->pullbackSound = (snd_alias_list_t *)Com_FindSoundAlias(weapDef->szPullbackSound);
@@ -1228,7 +1294,7 @@ void CG_AddPlayerWeapon(GfxEntity *parent, playerState_t *ps, centity_t *cent, q
 
     cent->bMuzzleFlash = 0;
 
-    if (!bDrawGun)
+    if (!bDrawGun && (!bViewModel || cg->cubemapShot))
         return;
 
     {
@@ -1237,7 +1303,8 @@ void CG_AddPlayerWeapon(GfxEntity *parent, playerState_t *ps, centity_t *cent, q
         const vec_t *origin;
 
         if (bViewModel) {
-            fx = weapInfo->viewFlashEffect;
+            fx = bDrawGun ? weapInfo->viewFlashEffect :
+                ((unsigned int)weaponNum < 128 ? muzzleLightEffects[weaponNum] : NULL);
             origin = cg->viewModelOrigin;
             bolt[0] = CG_WeaponDObjHandle(weaponNum);
         } else {
@@ -1257,6 +1324,35 @@ void CG_AddPlayerWeapon(GfxEntity *parent, playerState_t *ps, centity_t *cent, q
     }
 }
 
+static float sprintViewBlend;
+static int sprintViewTime;
+
+void CG_ResetSprintView(void)
+{
+    sprintViewBlend = 0.0f;
+    sprintViewTime = 0;
+}
+
+static float CG_SprintViewBlend(const playerState_t *ps, int time)
+{
+    float target = (ps->pm_flags & PMF_SPRINT) ? 1.0f : 0.0f;
+    int elapsed = time - sprintViewTime;
+    if (!sprintViewTime || elapsed < 0 || elapsed > 250)
+        sprintViewBlend = 0.0f;
+    else if (elapsed > 0) {
+        float step = (float)elapsed / (target > sprintViewBlend ? 180.0f : 100.0f);
+        if (target > sprintViewBlend)
+            sprintViewBlend = fminf(target, sprintViewBlend + step);
+        else
+            sprintViewBlend = fmaxf(target, sprintViewBlend - step);
+    }
+    /* Restore the sight immediately when aiming/firing or using equipment. */
+    if ((ps->pm_flags & 0x40) || ps->fWeaponPosFrac > 0.0f || ps->weaponstate != 0)
+        sprintViewBlend = 0.0f;
+    sprintViewTime = time;
+    return sprintViewBlend;
+}
+
 void CG_AddViewWeapon(playerState_t *ps)
 {
     playerState_t *playerState;
@@ -1268,6 +1364,8 @@ void CG_AddViewWeapon(playerState_t *ps)
     int weaponIndex;
     qboolean drawGun;
     float zoom;
+    float sprintBlend;
+    float sprintCycle;
 
     playerState = ps;
 
@@ -1338,6 +1436,14 @@ void CG_AddViewWeapon(playerState_t *ps)
     }
     cg->playerEntity.fLastIdleFactor = ws.fLastIdleFactor;
 
+    /* Compose a lowered, swinging carry pose with the original hand/weapon
+     * animation. Body running clips already scale their playback to speed. */
+    sprintBlend = CG_SprintViewBlend(playerState, cg->time);
+    sprintCycle = (float)cg->time * 0.012f;
+    weaponAngles[0] += sprintBlend * (10.0f + 2.0f * sinf(sprintCycle));
+    weaponAngles[1] += sprintBlend * (-10.0f + 2.0f * cosf(sprintCycle));
+    weaponAngles[2] += sprintBlend * (12.0f + 3.0f * sinf(sprintCycle));
+
     AnglesToAxis(weaponAngles, weaponAxis);
     MatrixMultiply(weaponAxis, cg->refdef.viewaxis, finalAxis);
 
@@ -1348,6 +1454,9 @@ void CG_AddViewWeapon(playerState_t *ps)
     hand.origin[0] = cg->refdef.vieworg[0];
     hand.origin[1] = cg->refdef.vieworg[1];
     hand.origin[2] = cg->refdef.vieworg[2];
+    CG_Madd(hand.origin, cg->refdef.viewaxis[0], -1.0f * sprintBlend);
+    CG_Madd(hand.origin, cg->refdef.viewaxis[2],
+            sprintBlend * (-1.0f + 0.6f * cosf(2.0f * sprintCycle)));
 
     /* vGunOffset is angular recoil, already applied to weaponAngles. */
     CG_Madd(hand.origin, finalAxis[0], cg->swayOffset[0] + CG_DvarValue(imp_cg_gun_x));

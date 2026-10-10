@@ -153,6 +153,41 @@ static char **CG_EventNames(void)
 void CG_EntityEvent(centity_t *cent, int event);
 void CG_CheckEvents(centity_t *cent);
 
+#ifdef __EMSCRIPTEN__
+static qboolean deliveringObituary;
+static struct { int victim, attacker, weapon; } pendingObituaries[128];
+static int pendingObituaryCount;
+
+void CG_QueueObituary(int victim, int attacker, int weapon)
+{
+    if ((unsigned)victim >= 64 ||
+        !((unsigned)attacker < 64 || attacker == 1022) || weapon < 0 || weapon > 255)
+        return;
+    if (pendingObituaryCount == 128) {
+        memmove(pendingObituaries, pendingObituaries + 1, 127 * sizeof(pendingObituaries[0]));
+        pendingObituaryCount = 127;
+    }
+    pendingObituaries[pendingObituaryCount].victim = victim;
+    pendingObituaries[pendingObituaryCount].attacker = attacker;
+    pendingObituaries[pendingObituaryCount++].weapon = weapon;
+}
+
+void CG_FlushObituaries(void)
+{
+    int i;
+    for (i = 0; i < pendingObituaryCount; ++i) {
+        centity_t event = {0};
+        event.nextState.otherEntityNum = pendingObituaries[i].victim;
+        event.nextState.attackerEntityNum = pendingObituaries[i].attacker;
+        event.nextState.eventParm = pendingObituaries[i].weapon;
+        deliveringObituary = 1;
+        CG_EntityEvent(&event, 0xc6);
+        deliveringObituary = 0;
+    }
+    pendingObituaryCount = 0;
+}
+#endif
+
 static void PlayProneSound(int entNum, int isFirstPerson, int soundOffset)
 {
     int alias = *(int *)((char *)cgs + soundOffset);
@@ -1258,6 +1293,10 @@ void CG_EntityEvent(centity_t *cent, int event)
 
         case 0xc6:
         {
+#ifdef __EMSCRIPTEN__
+            /* Ignore snapshot/replay duplicates of the reliable message. */
+            if (!deliveringObituary) return;
+#endif
 
             attackerColor[0] = 1.0f;
             attackerColor[1] = 1.0f;
@@ -1437,7 +1476,11 @@ void CG_EntityEvent(centity_t *cent, int event)
                 }
             }
 
-            if (cg->inKillCam != 0)
+            if (cg->inKillCam != 0
+#ifdef __EMSCRIPTEN__
+                && !deliveringObituary
+#endif
+            )
                 return;
 
             CL_DeathMessagePrint(attackerName, attackerColor, targetName,

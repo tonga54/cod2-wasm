@@ -1,0 +1,22 @@
+# Keep the supervisor native ARM64; emulate only the legacy i386 engine.
+FROM debian:trixie-slim AS emulator
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends qemu-user \
+ && rm -rf /var/lib/apt/lists/*
+
+FROM ubuntu:22.04
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 \
+ && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p /game/main /profile
+COPY --from=emulator /usr/bin/qemu-i386 /usr/local/bin/qemu-i386
+COPY out/pi-runtime/ /opt/cod2-i386/
+COPY --chmod=755 downstream/server/pi-engine.sh /usr/local/bin/cod2_lnxded
+COPY --chmod=755 downstream/server/entrypoint.sh /usr/local/bin/start-cod2
+COPY downstream/server/rooms.py /usr/local/lib/cod2-rooms.py
+COPY server.cfg /config/server.cfg
+COPY site/wasm-game-data.json /config/browser-assets.json
+WORKDIR /game
+USER 1000:1000
+EXPOSE 28960/udp 8090/tcp
+ENTRYPOINT ["/usr/local/bin/start-cod2"]

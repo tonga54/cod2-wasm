@@ -10,14 +10,20 @@ const echo = dgram.createSocket('udp4');
 echo.on('message', (data, peer) => echo.send(data, peer.port, peer.address));
 echo.bind(0, '127.0.0.1'); await once(echo, 'listening');
 const udpPort = echo.address().port;
-let creates = 0;
+let creates = 0, deletes = 0;
 const manager = http.createServer(async (req, res) => {
   assert.equal(req.url, '/rooms');
   res.setHeader('Content-Type', 'application/json');
   if (req.method === 'POST') {
     let body=''; for await (const chunk of req) body += chunk;
-    assert.deepEqual(JSON.parse(body), {name:'Second room', map:creates === 0 ? 'mp_toujane' : 'mp_carentan'});
+    assert.deepEqual(JSON.parse(body), {name:'Second room', map:creates === 0 ? 'mp_toujane' : 'mp_carentan',
+      gametype:creates < 2 ? 'tdm' : ['dm','tdm','ctf','hq','sd'][creates-2]});
     ++creates; res.writeHead(201); res.end(JSON.stringify({id:1, port:udpPort+1}));
+  } else if (req.method === 'DELETE') {
+    let body=''; for await (const chunk of req) body += chunk;
+    const value=JSON.parse(body); assert.equal(value.id,0);
+    if(value.ownerToken !== 'a'.repeat(64)){res.writeHead(403);res.end(JSON.stringify({error:'Not owner'}));}
+    else {++deletes;res.end(JSON.stringify({deleted:0}));}
   } else res.end(JSON.stringify({rooms:[{id:0,port:udpPort},{id:1,port:udpPort+1}]}));
 });
 manager.listen(0,'127.0.0.1'); await once(manager,'listening');
@@ -55,6 +61,15 @@ try {
     response=await fetch(origin+'/servers',{method:'POST',headers:{Origin:origin},body:JSON.stringify({name:'Second room',map})});
     assert.equal(response.status,400); assert.equal(creates,2);
   }
+  for (const gametype of ['dm','tdm','ctf','hq','sd']) {
+    response=await fetch(origin+'/servers',{method:'POST',headers:{Origin:origin},body:JSON.stringify({name:'Second room',map:'mp_carentan',gametype})});
+    assert.equal(response.status,201);
+  }
+  assert.equal(creates,7);
+  for (const gametype of ['sw','ctf;quit','',null,{},1]) {
+    response=await fetch(origin+'/servers',{method:'POST',headers:{Origin:origin},body:JSON.stringify({name:'Second room',gametype})});
+    assert.equal(response.status,400); assert.equal(creates,7);
+  }
   const first=await open(0); await Promise.all(Array.from({length:63},()=>open(0)));
   response=await fetch(origin+'/servers');
   const occupied = (await response.json()).rooms;
@@ -66,7 +81,18 @@ try {
   await rejected(2,503); await rejected('8',404);
   const reply=once(first,'message'); first.send(Buffer.from('room-zero'));
   assert.equal((await reply)[0].toString(),'room-zero');
-  console.log('PASS: room listing/creation, same-origin writes, independent 64-slot limits, concurrent reservations, fixed destinations');
+  response=await fetch(origin+'/servers',{method:'DELETE',headers:{Origin:'http://unrelated.invalid'},body:JSON.stringify({id:0,ownerToken:'a'.repeat(64)})});
+  assert.equal(response.status,403); assert.equal(deletes,0);
+  response=await fetch(origin+'/servers',{method:'DELETE',headers:{Origin:origin},body:JSON.stringify({id:3,ownerToken:'a'.repeat(64)})});
+  assert.equal(response.status,400);
+  response=await fetch(origin+'/servers',{method:'DELETE',headers:{Origin:origin},body:JSON.stringify({id:0,ownerToken:'b'.repeat(64)})});
+  assert.equal(response.status,403); assert.equal(first.readyState,WebSocket.OPEN);
+  const closed=once(first,'close');
+  response=await fetch(origin+'/servers',{method:'DELETE',headers:{Origin:origin},body:JSON.stringify({id:0,ownerToken:'a'.repeat(64),command:'ignored'})});
+  assert.equal(response.status,200); assert.equal(deletes,1);
+  assert.equal((await closed)[0],1001);
+  assert.equal(clients[64].readyState,WebSocket.OPEN);
+  console.log('PASS: room listing/creation, same-origin writes, independent 64-slot limits, concurrent reservations, fixed destinations and owner deletion disconnecting only its room');
 } finally {
   clearTimeout(deadline); for(const client of clients) client.terminate();
   await gateway.close(); await new Promise(resolve=>manager.close(resolve)); echo.close();

@@ -727,7 +727,7 @@ qboolean UI_CheckExecKey(int key)
 
     menu = (menuDef_t *)Menu_GetFocused(uiInfo);
 
-    if (*(int *)imp_g_editingField)
+    if (Display_KeyBindPending() || *(int *)imp_g_editingField)
         return 1;
 
     if (key > 0x100)
@@ -1314,7 +1314,14 @@ void UI_Init(void)
     Sys_Milliseconds();
     UI_GetGameTypesList();
 
-    ui_netGameType = Dvar_RegisterInt("ui_netGametype", 0, 0, sharedUiInfo.numGameTypes - 1, 0x1001);
+    netGameTypeIdx = 0;
+    for (int gt = 0; gt < sharedUiInfo.numGameTypes; ++gt) {
+        if (!I_stricmp(sharedUiInfo.gameTypes[gt].gameType, "tdm")) {
+            netGameTypeIdx = gt;
+            break;
+        }
+    }
+    ui_netGameType = Dvar_RegisterInt("ui_netGametype", netGameTypeIdx, 0, sharedUiInfo.numGameTypes - 1, 0x1001);
 
     UI_LoadArenas();
 
@@ -2355,7 +2362,7 @@ qboolean UI_OwnerDrawHandleKey(int ownerDraw, int flags, float *special, int key
         }
         return 0;
 
-    case 0xf4:
+    case 0xf5:
         if (!UI_IsActionKey(key))
             return 0;
         {
@@ -2712,7 +2719,7 @@ void UI_OwnerDraw(float x, float y, float w, float h, int horzAlign, int vertAli
     case 245:
     {
         int gtIdx = (ui_netGameType)->current.integer;
-        if (gtIdx > sharedUiInfo.numGameTypes) {
+        if (gtIdx < 0 || gtIdx >= sharedUiInfo.numGameTypes) {
             Dvar_SetInt(ui_netGameType, 0);
             Dvar_SetString(ui_netGameTypeName, sharedUiInfo.gameTypes[0].gameType);
             gtIdx = (ui_netGameType)->current.integer;
@@ -3202,6 +3209,15 @@ static void UI_REGPARM1 UI_BuildServerStatus(int force)
 
 void UI_Refresh(void)
 {
+#ifdef __EMSCRIPTEN__
+    extern int Web_CanDeleteServer(const char *address);
+    char selectedAddress[64] = {0};
+    int selected = sharedUiInfo.serverStatus.currentServer;
+    if (selected >= 0 && selected < sharedUiInfo.serverStatus.numDisplayServers)
+        LAN_GetServerAddressString(ui_netSource->current.integer,
+            sharedUiInfo.serverStatus.displayServers[selected], selectedAddress, sizeof(selectedAddress));
+    Dvar_SetBoolByName("ui_canDeleteServer", Web_CanDeleteServer(selectedAddress));
+#endif
     int netSource;
     int needRebuild;
     static int refreshTraceCount;
@@ -3305,11 +3321,14 @@ void UI_RunMenuScript(const char **args)
 
     if (I_stricmp(name, "StartServer") == 0) {
 #ifdef __EMSCRIPTEN__
-        extern void Web_CreateServer(const char *name, const char *mapName);
+        extern void Web_CreateServer(const char *name, const char *mapName, const char *gameType);
         int mapIdx = (ui_currentNetMap)->current.integer;
-        if (mapIdx < 0 || mapIdx >= sharedUiInfo.mapCount)
+        int gameTypeIdx = (ui_netGameType)->current.integer;
+        if (mapIdx < 0 || mapIdx >= sharedUiInfo.mapCount ||
+            gameTypeIdx < 0 || gameTypeIdx >= sharedUiInfo.numGameTypes)
             return;
-        Web_CreateServer(Dvar_GetString("sv_hostname"), sharedUiInfo.mapList[mapIdx].mapLoadName);
+        Web_CreateServer(Dvar_GetString("sv_hostname"), sharedUiInfo.mapList[mapIdx].mapLoadName,
+                         sharedUiInfo.gameTypes[gameTypeIdx].gameType);
         return;
 #endif
         Dvar_SetBoolByName("cg_thirdPerson", 0);
@@ -3915,6 +3934,19 @@ void UI_RunMenuScript(const char **args)
         }
         return;
     }
+
+#ifdef __EMSCRIPTEN__
+    if (I_stricmp(name, "DeleteServer") == 0) {
+        extern void Web_DeleteServer(const char *address);
+        int selected = sharedUiInfo.serverStatus.currentServer;
+        if (selected < 0 || selected >= sharedUiInfo.serverStatus.numDisplayServers)
+            return;
+        LAN_GetServerAddressString(ui_netSource->current.integer,
+            sharedUiInfo.serverStatus.displayServers[selected], buff, sizeof(buff));
+        Web_DeleteServer(buff);
+        return;
+    }
+#endif
 
     if (I_stricmp(name, "Quit") == 0) {
         Cbuf_ExecuteText(0, "quit");
@@ -5000,7 +5032,14 @@ void UI_Init(void)
     Sys_Milliseconds();
     UI_GetGameTypesList();
 
-    ui_netGameType = Dvar_RegisterInt("ui_netGametype", 0, 0, sharedUiInfo.numGameTypes - 1, 0x1001);
+    netGameTypeIdx = 0;
+    for (int gt = 0; gt < sharedUiInfo.numGameTypes; ++gt) {
+        if (!I_stricmp(sharedUiInfo.gameTypes[gt].gameType, "tdm")) {
+            netGameTypeIdx = gt;
+            break;
+        }
+    }
+    ui_netGameType = Dvar_RegisterInt("ui_netGametype", netGameTypeIdx, 0, sharedUiInfo.numGameTypes - 1, 0x1001);
 
     UI_LoadArenas();
 

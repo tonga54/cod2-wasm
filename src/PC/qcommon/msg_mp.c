@@ -344,24 +344,29 @@ void MSG_BeginReading(msg_t *msg)
 
 static inline __attribute__((always_inline)) void MSG_WriteBits_core(msg_t *msg, int value, int bits)
 {
-    int i, bit;
+    int bit, take;
 
     if (__builtin_expect(msg->maxsize - msg->cursize <= 3, 0)) {
         msg->overflowed = 1;
         return;
     }
 
-    for (i = 0; i < bits; i++) {
+    while (bits > 0) {
         bit = msg->bit & 7;
         if (bit == 0) {
             msg->bit = msg->cursize * 8;
             msg->data[msg->cursize] = 0;
             msg->cursize++;
         }
-        if (value & 1)
-            msg->data[msg->bit >> 3] |= (1 << bit);
-        msg->bit++;
-        value >>= 1;
+        /* Bit fields share a byte, but byte/string writes can append elsewhere
+         * before that byte is full. Keep the original cursor rules and consume
+         * a whole remaining byte fragment instead of branching for every bit. */
+        take = 8 - bit;
+        if (take > bits) take = bits;
+        msg->data[msg->bit >> 3] |= ((unsigned int)value & ((1u << take) - 1u)) << bit;
+        msg->bit += take;
+        value >>= take;
+        bits -= take;
     }
 }
 
@@ -400,25 +405,7 @@ static inline __attribute__((always_inline)) void MSG_WriteBit1_core(msg_t *msg)
 
 void MSG_WriteBits(msg_t *msg, int value, int bits)
 {
-    int i, bit;
-
-    if (__builtin_expect(msg->maxsize - msg->cursize <= 3, 0)) {
-        msg->overflowed = 1;
-        return;
-    }
-
-    for (i = 0; i < bits; i++) {
-        bit = msg->bit & 7;
-        if (bit == 0) {
-            msg->bit = msg->cursize * 8;
-            msg->data[msg->cursize] = 0;
-            msg->cursize++;
-        }
-        if (value & 1)
-            msg->data[msg->bit >> 3] |= (1 << bit);
-        msg->bit++;
-        value >>= 1;
-    }
+    MSG_WriteBits_core(msg, value, bits);
 }
 
 void MSG_WriteBit0(msg_t *msg)
@@ -457,31 +444,30 @@ void MSG_WriteBit1(msg_t *msg)
 
 static inline __attribute__((always_inline)) int MSG_ReadBits_core(msg_t *msg, int bits)
 {
-    int value, i, bit, rem;
+    unsigned int value = 0;
+    int shift = 0;
 
-    if (__builtin_expect(bits > 0, 0)) {
-        value = 0;
-        bit = msg->bit;
-        i = 0;
-        do {
-            rem = bit & 7;
-            if (rem == 0) {
-                if (msg->readcount >= msg->cursize) {
-                    msg->overflowed = 1;
-                    return -1;
-                }
-                bit = msg->readcount * 8;
-                msg->bit = bit;
-                msg->readcount++;
+    while (bits > 0) {
+        int bit = msg->bit;
+        int rem = bit & 7;
+        int take;
+        if (rem == 0) {
+            if (msg->readcount >= msg->cursize) {
+                msg->overflowed = 1;
+                return -1;
             }
-            value |= ((msg->data[bit >> 3] >> rem) & 1) << i;
-            bit++;
+            bit = msg->readcount * 8;
             msg->bit = bit;
-            i++;
-        } while (i != bits);
-        return value;
+            msg->readcount++;
+        }
+        take = 8 - rem;
+        if (take > bits) take = bits;
+        value |= ((unsigned int)(msg->data[bit >> 3] >> rem) & ((1u << take) - 1u)) << shift;
+        msg->bit = bit + take;
+        shift += take;
+        bits -= take;
     }
-    return 0;
+    return (int)value;
 }
 
 int MSG_ReadBits(msg_t *msg, int bits)
@@ -516,11 +502,73 @@ int MSG_ReadBit(msg_t *msg)
 
 extern void Huff_offsetTransmit(void *huff, int ch, byte *fout, int *offset);
 extern void Huff_offsetReceive(void *node, int *ch, byte *fin, int *offset);
+static unsigned int msgHuffCodes[256];
+static byte msgHuffLengths[256];
+static qboolean msgHuffCodesReady;
+#define MSG_HUFF_DECODE_BITS 11
+static unsigned short msgHuffDecode[1 << MSG_HUFF_DECODE_BITS];
+static qboolean msgHuffDecodeReady;
+
+static void MSG_BuildHuffmanCodes(void)
+{
+    int i;
+    /* The seeded tree stays fixed. Derive the wire codes from the original
+     * encoder, including its LSB-first bit order, rather than duplicating it. */
+    for (i = 0; i < 256; ++i) {
+        byte encoded[32] = {0};
+        int bits = 0;
+        Huff_offsetTransmit(&msgHuff, i, encoded, &bits);
+        if (bits < 1 || bits > 24)
+            return;
+        msgHuffCodes[i] = (unsigned int)encoded[0]
+                       | ((unsigned int)encoded[1] << 8)
+                       | ((unsigned int)encoded[2] << 16);
+        msgHuffLengths[i] = (byte)bits;
+    }
+    msgHuffCodesReady = 1;
+
+    /* The current retail seed has codes of 2..11 bits. A 4 KiB prefix table
+     * replaces tree traversal on both client snapshots and server commands.
+     * Longer future codes or the unused NYT prefix keep the original decoder. */
+    msgHuffDecodeReady = 0;
+    memset(msgHuffDecode, 0, sizeof(msgHuffDecode));
+    for (i = 0; i < 256; ++i)
+        if (msgHuffLengths[i] > MSG_HUFF_DECODE_BITS) return;
+    for (i = 0; i < 256; ++i) {
+        unsigned int prefix;
+        unsigned int step = 1u << msgHuffLengths[i];
+        for (prefix = msgHuffCodes[i]; prefix < (1u << MSG_HUFF_DECODE_BITS); prefix += step)
+            msgHuffDecode[prefix] = (unsigned short)((msgHuffLengths[i] << 8) | i);
+    }
+    msgHuffDecodeReady = 1;
+}
+
 int MSG_WriteBitsCompress(byte *from, byte *to, int size)
 {
     int bit = 0;
     byte *p;
     byte *end;
+
+    if (msgHuffCodesReady) {
+        unsigned int pending = 0;
+        int pendingBits = 0;
+        byte *output = to;
+        int i;
+        for (i = 0; i < size; ++i) {
+            unsigned int symbol = from[i];
+            /* At most seven pending bits plus a 24-bit code fit in uint32. */
+            pending |= msgHuffCodes[symbol] << pendingBits;
+            pendingBits += msgHuffLengths[symbol];
+            while (pendingBits >= 8) {
+                *output++ = (byte)pending;
+                pending >>= 8;
+                pendingBits -= 8;
+            }
+        }
+        if (pendingBits)
+            *output++ = (byte)pending;
+        return (int)(output - to);
+    }
 
     if (__builtin_expect(size != 0, 0)) {
         p = from;
@@ -541,17 +589,39 @@ int MSG_ReadBitsCompress(byte *from, byte *to, int size)
     int bit = 0;
     byte *data = to;
 
-    if (__builtin_expect(bits > 0, 0)) {
+    if (msgHuffDecodeReady) {
+        const byte *input = from;
+        const byte *end = from + size;
+        unsigned int pending = 0;
+        int pendingBits = 0;
+        for (;;) {
+            unsigned short entry;
+            /* Refill two bytes together; at most ten bits remain beforehand.
+             * All lookup reads stay within the packet. The original tree
+             * decoder handles its partial final code and padding below. */
+            if (pendingBits < MSG_HUFF_DECODE_BITS) {
+                if (end - input < 2) break;
+                pending |= ((unsigned int)input[0] | ((unsigned int)input[1] << 8)) << pendingBits;
+                input += 2;
+                pendingBits += 16;
+            }
+            entry = msgHuffDecode[pending & ((1u << MSG_HUFF_DECODE_BITS) - 1u)];
+            if (!entry) break;
+            *data++ = (byte)entry;
+            pending >>= entry >> 8;
+            pendingBits -= entry >> 8;
+        }
+        bit = (int)(input - from) * 8 - pendingBits;
+    }
+
+    if (__builtin_expect(bits > bit, 0)) {
         do {
 
             Huff_offsetReceive((void *)msgHuff.decompressor.tree, &get, from, &bit);
             *data++ = (byte)get;
         } while (bits > bit);
-
-        return (int)(data - to);
     }
-
-    return 0;
+    return (int)(data - to);
 }
 
 static inline __attribute__((always_inline)) void MSG_WriteByte_core(msg_t *msg, int c)
@@ -875,6 +945,7 @@ void MSG_Init(msg_t *buf, byte *data, int length)
                 Huff_addRef(&msgHuff.decompressor, (byte)i);
             }
         }
+        MSG_BuildHuffmanCodes();
     }
 
     memset(buf, 0, sizeof(msg_t));

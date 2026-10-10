@@ -14,6 +14,7 @@ a=clock.index('            int timeDelta = cl->serverTimeDelta;')
 b=clock.index('\n        } else {',a)
 step='static void StepClock(void){clientActive_t *cl=CL_LOCAL;clientStatic_t *cls=CLS;'+clock[a:b]+'\nif(cl->newSnapshots)CL_AdjustTimeDelta();}\n'
 support=r'''
+#define __EMSCRIPTEN__ 1
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
@@ -52,6 +53,29 @@ int main(void){
    assert(abs(client.serverTimeDelta-(10000-latency-55))<150);
   }
  }
+ /* Both a paused server and queued, stale snapshots can trigger a clock
+  * rebase. Commands must stay monotonic and within the server's horizon. */
+ const int delays[]={120,650,1800};
+ for(int frame=8;frame<=50;frame+=7)for(int kind=0;kind<2;kind++)for(int d=0;d<3;d++){
+  memset(&client,0,sizeof(client));clsStorage.realtime=0;
+  client.snap.serverTime=10000;client.oldSnapServerTime=9950;
+  client.serverTimeDelta=9945;client.serverTime=client.oldServerTime=9945;
+  int lastArrival=0,serverClock=0,delay=delays[d];
+  for(int now=frame;now<=6000;now+=frame){
+   clsStorage.realtime=now;
+   int stalled=now>=1500&&now<1500+delay;
+   serverClock=now<1500?now:(stalled?1500:now-delay+(kind==0?(delay<250?delay:250):0));
+   if(!stalled&&now-lastArrival>=50){
+    client.oldSnapServerTime=client.snap.serverTime;
+    client.snap.serverTime=10000+serverClock;
+    client.newSnapshots=1;lastArrival=now;
+   }
+   int previous=client.serverTime;StepClock();
+   assert(client.serverTime>=previous);
+   assert(client.serverTime<=client.snap.serverTime+200);
+  }
+  assert(abs(client.serverTime-(10000+serverClock))<200);
+ }
  for(int frame=1;frame<=100;frame++){
   float angle[3]={0},velocity[3]={-80,30,-15};
   for(int t=0;t<1000;t+=frame)CG_IntegrateViewKick(angle,velocity,1600,frame*.001f);
@@ -63,15 +87,25 @@ int main(void){
  }
  float a[3]={0},v[3]={-80,30,-15};CG_IntegrateViewKick(a,v,1600,.025f);
  assert(a[0]<-.5f&&a[1]>.2f); /* Aim receives a real, finite camera kick. */
- puts("PASS: 42 three-minute network clock schedules, monotonic time and FPS-independent recoil/return");
+ puts("PASS: 42 three-minute clocks and 42 delayed-update recoveries stay monotonic within the server horizon; FPS-independent recoil/return");
 }
 '''
 with tempfile.TemporaryDirectory() as d:
  p=Path(d)
  code=support+function(clock,'CL_AdjustTimeDelta')+step+function(view,'CG_IntegrateViewKick')+checks
- for mutant in (False,True):
-  (p/'test.c').write_text(code.replace('cl->serverTime >= serverTime - 5','cl->serverTime < serverTime - 5') if mutant else code)
+ reset='''        if (cl->serverTime < cl->snap.serverTime)
+            cl->serverTime = cl->snap.serverTime;
+        cl->oldServerTime = cl->serverTime;'''
+ horizon='''            if (cl->serverTime > cl->snap.serverTime + 200)
+                cl->serverTime = cl->snap.serverTime + 200;'''
+ variants=[code,
+  code.replace('cl->serverTime >= serverTime - 5','cl->serverTime < serverTime - 5'),
+  code.replace(reset,'cl->serverTime = cl->oldServerTime = cl->snap.serverTime;'),
+  code.replace(horizon,'')]
+ assert all(v!=code for v in variants[1:])
+ for mutant,variant in enumerate(variants):
+  (p/'test.c').write_text(variant)
   subprocess.run(['cc','-O1','-fsanitize=address,undefined',str(p/'test.c'),'-lm','-o',str(p/'test')],check=True)
   r=subprocess.run([str(p/'test')],capture_output=True,text=True)
-  assert (r.returncode==0)!=mutant,r.stderr
+  assert (r.returncode==0)==(mutant==0),r.stderr
   if not mutant:print(r.stdout,end='')

@@ -1,4 +1,5 @@
 #include "common_types.h"
+#include "cod2_sprint.h"
 #include "imports.h"
 #include "bytematch.h"
 #include <math.h>
@@ -359,6 +360,9 @@ static float PM_CmdScale(const playerState_t *ps, const usercmd_t *cmd)
 
     scale = (float)ps->speed * (float)maxMove / (127.0f * total);
 
+    if (ps->pm_flags & PMF_SPRINT)
+        scale *= SPRINT_SPEED_SCALE;
+
     if ((ps->pm_flags & 0x1) || ps->leanf != 0.0f)
         scale *= 0.40f;
 
@@ -378,6 +382,24 @@ static float PM_CmdScale(const playerState_t *ps, const usercmd_t *cmd)
     }
 
     return scale;
+}
+
+static void PM_UpdateSprint(pmove_t *pm, pml_t *pml)
+{
+    playerState_t *ps = pm->ps;
+    /* Holding breath shares Shift; aiming takes precedence over sprinting.
+     * Recompute for every command on both sides of the network. */
+    ps->pm_flags &= ~PMF_SPRINT;
+    if (ps->pm_type != 0 || !pml->walking ||
+        ps->groundEntityNum == ENTITYNUM_NONE ||
+        !(pm->cmd.buttons & BUTTON_SPRINT) || pm->cmd.forwardmove <= 0 ||
+        (ps->pm_flags & (0x1 | 0x2 | PMF_MANTLE | PMF_LADDER | 0x40 | 0x800 | 0x10000)) ||
+        (ps->eFlags & 0x300) || ps->leanf != 0.0f ||
+        ps->fWeaponPosFrac > 0.0f || ps->weaponstate != 0 ||
+        (pm->cmd.buttons & (0x1 | 0x4 | 0x8 | 0x10 | 0x20 | 0x40 | 0x80 |
+                            0x4000 | 0x10000 | 0x20000)))
+        return;
+    ps->pm_flags |= PMF_SPRINT;
 }
 
 static void PM_DropTimers(playerState_t *ps, int msec)
@@ -423,11 +445,8 @@ static void PM_DropTimers(playerState_t *ps, int msec)
             ps->damageDuration = 0;
     }
 
-    if (ps->holdBreathTimer > 0) {
-        ps->holdBreathTimer -= msec;
-        if (ps->holdBreathTimer < 0)
-            ps->holdBreathTimer = 0;
-    }
+    /* PM_UpdateHoldBreath owns both breath usage and recovery. Decrementing
+     * here cancels its usage increment and allows an unlimited steady aim. */
 }
 
 void PM_UpdateLean(playerState_t *ps, float msec, usercmd_t *cmd, void (*capsuleTrace)())
@@ -866,6 +885,7 @@ static void PM_REGPARM2_ABI PM_CheckDuck(pmove_t *pm, pml_t *pml)
 {
     playerState_t *ps = pm->ps;
     int wasCrouched;
+    int oldViewHeightTarget = ps->viewHeightTarget;
     trace_t trace;
     vec3_t vEnd;
     vec3_t vPoint;
@@ -963,13 +983,11 @@ static void PM_REGPARM2_ABI PM_CheckDuck(pmove_t *pm, pml_t *pml)
             PM_playerTrace(pm, &trace, ps->origin, pm->mins, pm->maxs,
                            ps->origin, ps->clientNum, pm->tracemask & ~0x02000000);
             if (!trace.allsolid) {
-                BG_AnimScriptEvent(ps, 12, 0, 0);
                 ps->pm_flags = (ps->pm_flags & ~0x1) | 0x2;
             } else if (!(pm->cmd.buttons & 0x2000)) {
                 BG_AddPredictableEventToPlayerstate(142, 2, ps);
             }
         } else {
-            BG_AnimScriptEvent(ps, 13, 0, 0);
             ps->pm_flags |= 0x2;
         }
         goto compute_target;
@@ -981,7 +999,6 @@ static void PM_REGPARM2_ABI PM_CheckDuck(pmove_t *pm, pml_t *pml)
         PM_playerTrace(pm, &trace, ps->origin, pm->mins, pm->maxs,
                        ps->origin, ps->clientNum, pm->tracemask & ~0x02000000);
         if (!trace.allsolid) {
-            BG_AnimScriptEvent(ps, 0x10, 0, 0);
             ps->pm_flags &= ~0x3;
         } else {
             pm->maxs[2] = 50.0f;
@@ -1001,7 +1018,6 @@ static void PM_REGPARM2_ABI PM_CheckDuck(pmove_t *pm, pml_t *pml)
         PM_playerTrace(pm, &trace, ps->origin, pm->mins, pm->maxs,
                        ps->origin, ps->clientNum, pm->tracemask & ~0x02000000);
         if (!trace.allsolid) {
-            BG_AnimScriptEvent(ps, 14, 0, 0);
             ps->pm_flags &= ~0x2;
         } else if (!(pm->cmd.buttons & 0x2000)) {
             BG_AddPredictableEventToPlayerstate(141, 1, ps);
@@ -1033,6 +1049,16 @@ compute_target:
 
             ps->viewHeightTarget = (ps->pm_flags & 0x2) ? 40 : 60;
         }
+    }
+
+    /* Fire one transition at the actual stance boundary. The 60->11 and
+     * 11->60 paths stage through crouch, so the original prone transition
+     * clips play instead of being skipped or restarted by each usercmd. */
+    if (ps->viewHeightTarget != oldViewHeightTarget) {
+        int event = oldViewHeightTarget == 11 ? ANIM_ET_PRONE_TO_CROUCH :
+            ps->viewHeightTarget == 11 ? ANIM_ET_CROUCH_TO_PRONE :
+            ps->viewHeightTarget == 40 ? ANIM_ET_STAND_TO_CROUCH : ANIM_ET_CROUCH_TO_STAND;
+        BG_AnimScriptEvent(ps, event, 0, 0);
     }
 
     PM_ViewHeightAdjust(pm, pml);
@@ -1111,24 +1137,15 @@ static void PM_REGPARM2_ABI PM_SetMovementDir(pmove_t *pm, pml_t *pml)
 
     (void)pml;
 
-    if (fmove == 0 && smove == 0) {
-        ps->movementDir = 0;
-    } else if (smove == 0 && fmove > 0) {
-        ps->movementDir = 0;
-    } else if (smove < 0 && fmove > 0) {
-        ps->movementDir = 1;
-    } else if (smove < 0 && fmove == 0) {
-        ps->movementDir = 2;
-    } else if (smove < 0 && fmove < 0) {
-        ps->movementDir = 3;
-    } else if (smove == 0 && fmove < 0) {
-        ps->movementDir = 4;
-    } else if (smove > 0 && fmove < 0) {
-        ps->movementDir = 5;
-    } else if (smove > 0 && fmove == 0) {
-        ps->movementDir = 6;
-    } else {
-        ps->movementDir = 7;
+    /* angles2.y and lerpMoveDir carry signed degrees, not Quake's eight
+     * direction indices. Backward clips already face against their travel. */
+    if (fmove || smove) {
+        float yaw = atan2f((float)-smove, (float)fmove) * 57.29577951308232f;
+        if (fmove < 0)
+            yaw = AngleNormalize180Accurate(yaw + 180.0f);
+        else if (PM_AbsInt(smove) > PM_AbsInt(fmove))
+            yaw += smove < 0 ? -90.0f : 90.0f;
+        ps->movementDir = (int)yaw;
     }
 }
 
@@ -1158,6 +1175,17 @@ static void PM_WalkMove(pmove_t *pm, pml_t *pml)
     }
 
     PM_Friction(ps, pml);
+
+    /* Releasing movement plants the feet on ordinary ground. Shared
+     * prediction/server physics must stop together rather than let the old
+     * walking or sprint velocity coast through several neutral commands.
+     * Airborne motion, slippery surfaces and timed landing/knockback retain
+     * their momentum; Jump_Check above already owns a newly started jump. */
+    if (ps->pm_type == 0 && !pm->cmd.forwardmove && !pm->cmd.rightmove &&
+        pml->walking && !(pml->groundTrace.surfaceFlags & 2) &&
+        !(ps->pm_flags & (PMF_LADDER | PMF_JUMPING | 0x200 | 0x400))) {
+        ps->velocity[0] = ps->velocity[1] = ps->velocity[2] = 0.0f;
+    }
 
     scale = PM_CmdScale(ps, &pm->cmd);
 
@@ -1978,7 +2006,7 @@ void Pmove(pmove_t *pm)
             pm->mantleStarted = 0;
             ps->velocity[0] = ps->velocity[1] = ps->velocity[2] = 0.0f;
             ps->eFlags &= ~0x40;
-            ps->pm_flags &= ~PMF_LADDER;
+            ps->pm_flags &= ~(PMF_LADDER | PMF_SPRINT);
             pm->xyspeed = 0.0f;
             PM_ResetWeaponState(ps);
             ps->commandTime = pm->cmd.serverTime;
@@ -2021,6 +2049,7 @@ void Pmove(pmove_t *pm)
 
         PM_CheckDuck(pm, &pml);
         PM_UpdateAimDownSightFlag(pm, &pml);
+        ps->pm_flags &= ~PMF_SPRINT;
 
         if (ps->pm_type <= 5) {
             /* Mantling owns root motion until the ledge animation finishes.
@@ -2033,6 +2062,7 @@ void Pmove(pmove_t *pm)
             } else {
                 PM_GroundTrace(pm, &pml);
                 PM_CheckLadderMove(pm, &pml);
+                PM_UpdateSprint(pm, &pml);
 
                 if (ps->pm_flags & PMF_LADDER) {
                     PM_LadderMove(pm, &pml);
@@ -2046,14 +2076,17 @@ void Pmove(pmove_t *pm)
                 pm->xyspeed = PM_VectorLength2D(ps->velocity);
                 PM_Footsteps(pm, &pml);
             }
-            PM_Weapon(pm, &pml);
         } else {
             ps->groundEntityNum = ENTITYNUM_NONE;
             PM_NoclipMove(pm, &pml);
             PM_ResetWeaponState(ps);
         }
 
+        /* Advance the aim pose once per command step, before weapon logic
+         * uses it for firing. Calling it again in PM_Weapon doubles speed. */
         PM_UpdateAimDownSightLerp(pm, &pml);
+        if (ps->pm_type <= 5)
+            PM_Weapon(pm, &pml);
         PM_ViewHeightAdjust(pm, &pml);
 
         pm->xyspeed = PM_VectorLength2D(ps->velocity);

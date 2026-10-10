@@ -44,7 +44,7 @@ for (const type of [0x0DE1, 0x8513]) {
 console.log('PASS: 2D/cube targets select matching sampler types and coordinate dimensions');
 
 const lightingStart = source.indexOf('          var vsLightingDefs = "";');
-const lightingEnd = source.indexOf('          var vsSource =', lightingStart);
+const lightingEnd = source.indexOf('          // COD2_POINT_LIGHT_SHADER:', lightingStart);
 assert(lightingStart >= 0 && lightingEnd > lightingStart);
 const lighting = Function('GLEmulation', source.slice(lightingStart, lightingEnd) + '\nreturn {vsLightingDefs,vsLightingPass};');
 for (let mask = 0; mask < 256; mask++) {
@@ -58,6 +58,35 @@ for (let mask = 0; mask < 256; mask++) {
 }
 assert.equal(lighting({lightingEnabled:false}).vsLightingPass, '');
 console.log('PASS: all 256 light masks generate GPU lighting with normals and original vertex tint/alpha');
+
+// Execute the linked flush against a GPU that keeps prior draws in flight.
+// Rewriting the same storage would force a synchronization wait.
+const flushStart = source.indexOf('flush(numProvidedIndexes,');
+let flushEnd = source.indexOf('{', flushStart) + 1, flushDepth = 1;
+while (flushDepth) { flushDepth += (source[flushEnd] === '{') - (source[flushEnd] === '}'); flushEnd++; }
+assert(flushStart >= 0);
+const gpuHeap = new Uint16Array(1024);gpuHeap.set([0,1,2,2,3,0],8);
+let storage, uploadCount=0, allocationCount=0, drawCount=0;
+const flushGL = {ARRAY_BUFFER:0x8892,ELEMENT_ARRAY_BUFFER:0x8893,STREAM_DRAW:0x88e0,
+  UNSIGNED_SHORT:0x1403,currentArrayBufferBinding:1,currentElementArrayBufferBinding:0,
+  bindBuffer(){},bufferData(target,size,usage){
+    assert.equal(target,this.ELEMENT_ARRAY_BUFFER);assert.equal(usage,this.STREAM_DRAW);
+    assert.equal(size & (size-1),0);storage={size,inFlight:false};allocationCount++;
+  },bufferSubData(target,offset,values){
+    assert(!storage.inFlight,'upload must not overwrite storage still used by the GPU');
+    assert(offset+values.byteLength<=storage.size);assert.deepEqual([...values],[0,1,2,2,3,0]);uploadCount++;
+  },drawElements(mode,count,type,offset){assert.equal(count,6);assert.equal(offset,0);storage.inFlight=true;drawCount++;}
+};
+const flushImmediate={vertexCounter:16,stride:16,mode:4,
+  getRenderer:()=>({prepare(){},cleanup(){}})};
+const flushGPU={MAX_TEMP_BUFFER_SIZE:1024,buffers:[],getTempIndexBuffer:()=>1,
+  log2ceilLookup:size=>Math.ceil(Math.log2(size))};
+const flush=Function('GLImmediate','GLctx','GL','HEAPU16','assert',
+  'return function '+source.slice(flushStart,flushEnd))(flushImmediate,flushGL,flushGPU,gpuHeap,assert);
+for(let i=0;i<600;i++)flush(6,0,16);
+assert.equal(drawCount,600);assert.equal(uploadCount,600);assert.equal(allocationCount,600);
+flushImmediate.vertexCounter=0;flush(6,0,16);assert.equal(allocationCount,600);
+console.log('PASS: 600 indexed draws replace busy GPU storage before uploading, preserving index data and capacity');
 
 // Exercise the actual linked indexed-draw wrapper with sparse index ranges.
 const drawStart = source.indexOf('function _glDrawElements(');

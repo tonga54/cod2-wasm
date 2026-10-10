@@ -1,6 +1,7 @@
 #include "common_types.h"
 #include "imports.h"
 #include "bytematch.h"
+#include "headers/cod2_chat.h"
 #include "headers/PC/cgame_mp/cg_local.h"
 
 #include <string.h>
@@ -9,6 +10,8 @@
 extern const dvar_t *cg_chatHeight;
 extern const dvar_t *cg_chatTime;
 extern const dvar_t *cg_thirdPerson;
+extern FontHandle UI_GetFontHandle(int fontEnum, float scale);
+extern int UI_TextWidth(const char *text, int maxChars, FontHandle font, float scale);
 
 extern float floorf(float x);
 
@@ -151,95 +154,79 @@ void CG_ParseCodinfo(void)
 #if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
 static void __attribute_regparm__(1) CG_AddToTeamChat(const char *str)
 {
-    int chatHeight;
-    int row;
+    int chatHeight = cg_chatHeight->current.integer;
+    int lastcolor = '7';
+    int spaceColor = '7';
+    float width = 0.0f;
+    FontHandle font;
+    const char *p = str;
+    const char *spaceSource = NULL;
+    char *line;
     char *dst;
-    int len;
-    int lastcolor;
-    char *lastSpace;
-    const char *p;
+    char *lastSpace = NULL;
 
-    chatHeight = cg_chatHeight->current.integer;
-    if (chatHeight == 0 || cg_chatTime->current.integer <= 0) {
-        cgs->teamLastChatPos = 0;
-        cgs->teamChatPos = 0;
+    if (chatHeight <= 0 || cg_chatTime->current.integer <= 0) {
+        cgs->teamLastChatPos = cgs->teamChatPos = 0;
         return;
     }
+    if (chatHeight > COD2_CHAT_ROWS) chatHeight = COD2_CHAT_ROWS;
+    font = UI_GetFontHandle(0, COD2_CHAT_SCALE);
+    line = dst = cgs->teamChatMsgs[cgs->teamChatPos % COD2_CHAT_ROWS];
+    *dst = 0;
 
-    row = cgs->teamChatPos % chatHeight;
-    dst = cgs->teamChatMsgs[row];
-    *dst = '\0';
-
-    len = 0;
-    lastcolor = '7';
-    lastSpace = NULL;
-    p = str;
-
-    for (;;) {
-        const char *savedp;
-        char ch;
-
-        if (*p == '\0') {
-            break;
+    while (*p) {
+        int colorCode = p[0] == '^' && p[1] >= '0' && p[1] <= '9';
+        float nextWidth = width;
+        int bytes = colorCode ? 2 : 1;
+        /* Measure the complete candidate, retaining fractional glyph advances
+         * and color escapes instead of accumulating rounded character widths. */
+        if (!colorCode && dst - line + 1 < (int)sizeof(cgs->teamChatMsgs[0])) {
+            *dst = *p;
+            dst[1] = 0;
+            nextWidth = (float)UI_TextWidth(line, 0, font, COD2_CHAT_SCALE);
         }
-
-        if (len > 0x59) {
-            if (lastSpace != NULL) {
-                int backDist = (int)(dst - lastSpace);
-                p = p - backDist + 1;
+        if (*p == '\n' || nextWidth > COD2_CHAT_WIDTH ||
+            dst - line + bytes >= (int)sizeof(cgs->teamChatMsgs[0])) {
+            if (*p == '\n') {
+                ++p;
+            } else if (lastSpace) {
                 dst = lastSpace;
+                p = spaceSource + 1;
+                lastcolor = spaceColor;
             }
-
-            *dst = '\0';
-
-            row = cgs->teamChatPos % chatHeight;
-            cgs->teamChatMsgTimes[row] = cg->time;
-            cgs->teamChatPos++;
-
-            row = cgs->teamChatPos % chatHeight;
-            dst = cgs->teamChatMsgs[row];
+            *dst = 0;
+            cgs->teamChatMsgTimes[cgs->teamChatPos % COD2_CHAT_ROWS] = cg->time;
+            ++cgs->teamChatPos;
+            line = dst = cgs->teamChatMsgs[cgs->teamChatPos % COD2_CHAT_ROWS];
             *dst++ = '^';
             *dst++ = (char)lastcolor;
-
-            len = 0;
+            *dst = 0;
             lastSpace = NULL;
+            spaceSource = NULL;
+            width = 0.0f;
+            continue;
         }
-
-        savedp = p;
-        if (*p == '^') {
-            p++;
-            ch = savedp[1];
-            if (ch != '\0' && ch != '^' && ch > '/' && ch <= '9') {
-                *dst++ = '^';
-                lastcolor = (signed char)ch;
-                *dst++ = ch;
-                p = savedp + 2;
-                continue;
-            }
-
-            len++;
-            ch = *savedp;
-        } else {
-            p++;
-            len++;
-            ch = *savedp;
+        if (colorCode) {
+            lastcolor = p[1];
+            *dst++ = *p++;
+            *dst++ = *p++;
+            *dst = 0;
+            continue;
         }
-
-        if (ch == ' ') {
+        if (*p == ' ') {
             lastSpace = dst;
+            spaceSource = p;
+            spaceColor = lastcolor;
         }
-        *dst++ = ch;
+        *dst++ = *p++;
+        *dst = 0;
+        width = nextWidth;
     }
-
-    *dst = '\0';
-
-    row = cgs->teamChatPos % chatHeight;
-    cgs->teamChatMsgTimes[row] = cg->time;
-    cgs->teamChatPos++;
-
-    if (chatHeight < cgs->teamChatPos - cgs->teamLastChatPos) {
+    *dst = 0;
+    cgs->teamChatMsgTimes[cgs->teamChatPos % COD2_CHAT_ROWS] = cg->time;
+    ++cgs->teamChatPos;
+    if (chatHeight < cgs->teamChatPos - cgs->teamLastChatPos)
         cgs->teamLastChatPos = cgs->teamChatPos - chatHeight;
-    }
 }
 
 static void CG_OpenScriptMenu(void)
@@ -993,6 +980,19 @@ void CG_ServerCommand(void)
 
     cmd = CG_Argv(0);
     if (!cmd || !*cmd) {
+        return;
+    }
+
+    if (!strcmp(cmd, "cod2_obituary")) {
+#ifdef __EMSCRIPTEN__
+        extern void CG_QueueObituary(int victim, int attacker, int weapon);
+        if (Cmd_Argc() == 4) {
+            int victim = atoi(CG_Argv(1));
+            int attacker = atoi(CG_Argv(2));
+            int weapon = atoi(CG_Argv(3));
+            CG_QueueObituary(victim, attacker, weapon);
+        }
+#endif
         return;
     }
 

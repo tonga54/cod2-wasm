@@ -749,6 +749,19 @@ static void R_BeginRegistration_impl(vidConfig_t *vidConfigOut)
         {
             int d3dpp[14];
             int width = 640, height = 480;
+#ifdef __EMSCRIPTEN__
+            // Honor the browser's selected mode throughout window creation,
+            // projection, HUD and render-target allocation.
+            extern const dvar_t *r_mode;
+            static const int modes[][2] = {
+                {640,480}, {800,600}, {1024,768},
+                {1280,720}, {1600,900}, {1920,1080}
+            };
+            int mode = r_mode->current.integer;
+            if (mode >= 0 && mode < (int)(sizeof(modes) / sizeof(modes[0]))) {
+                width = modes[mode][0]; height = modes[mode][1];
+            }
+#endif
 
             memset(d3dpp, 0, sizeof(d3dpp));
             d3dpp[0] = width;
@@ -772,6 +785,12 @@ static void R_BeginRegistration_impl(vidConfig_t *vidConfigOut)
             vidConfig.aspectRatioWindow = (float)width / (float)height;
             vidConfig.aspectRatioPixel = (float)height * vidConfig.aspectRatioWindow / (float)width;
 
+#ifdef __EMSCRIPTEN__
+            extern float CDirect3DDevice_WebMaxAnisotropy(void);
+            dx.maxAnisotropy = (int)CDirect3DDevice_WebMaxAnisotropy();
+            // The browser DX7 bridge implements color plus lightmap sampling.
+            vidConfig.maxTextureMaps = 2;
+#endif
         }
 #endif
 

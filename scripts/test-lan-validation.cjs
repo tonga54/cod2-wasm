@@ -41,7 +41,7 @@ async function policy(crypto) {
   assert.equal(activeWorkers, 0);
   const corrupted = Buffer.from(bytes);
   corrupted[corrupted.length - 1] ^= 1;
-  await assert.rejects(lan.validate(new Blob([corrupted])), /SHA-256 incorrecto/);
+  await assert.rejects(lan.validate(new Blob([corrupted])), /SHA-256 mismatch/);
   assert.equal(activeWorkers, 0, 'worker ends after rejection');
   const secure = await policy({subtle:{}});
   assert.equal(secure.sha256, hash, 'HTTPS keeps the framework Web Crypto validator');

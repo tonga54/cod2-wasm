@@ -331,7 +331,13 @@ void BG_AnimUpdatePlayerStateConditions(pmove_t *pmove)
     BG_UpdateConditionValue_core(client, 7, (ps->eFlags & 0x40000) != 0, 1);
     BG_UpdateConditionValue_core(client, 2, (ps->eFlags & 0x300) != 0, 1);
     BG_UpdateConditionValue_core(client, 4, ps->fWeaponPosFrac > 0.0f, 1);
+    BG_UpdateConditionValue_core(client, 5, (ps->eFlags & 4) != 0, 1);
     BG_UpdateConditionValue_core(client, 6, (pmove->cmd.buttons & 1) != 0, 1);
+    /* The original script has separate left/right walk, run and crawl clips.
+     * Without this condition every lateral command selected a forward clip. */
+    BG_UpdateConditionValue_core(client, 8,
+        pmove->cmd.forwardmove >= 0 && -pmove->cmd.rightmove > pmove->cmd.forwardmove ? 1 :
+        pmove->cmd.forwardmove >= 0 && pmove->cmd.rightmove > pmove->cmd.forwardmove ? 2 : 0, 1);
 }
 
 static inline __attribute__((always_inline)) void BG_SmoothControllerAngles(vec3_t current, const vec3_t goal, float maxChange)
@@ -530,7 +536,7 @@ static animation_t *BG_GetAnimationForIndexChecked(int animIndex)
 static qboolean BG_AnimationHasMoveClass(int animIndex)
 {
     animation_t *anim = BG_GetAnimationForIndexChecked(animIndex);
-    return (anim->movetype & ((((long long)0x180) << 32) | 0xc4LL)) != 0;
+    return (anim->movetype & ((((long long)0x180) << 32) | 0x330c4LL)) != 0;
 }
 
 static qboolean BG_AnimationHasTurnClass(int animIndex)
@@ -626,27 +632,14 @@ static void __attribute_regparm__(3) BG_RunLerpFrameRate(clientInfo_t *ci, lerpF
 
         if (hadNoAnimation && bLegsAnim) {
             lf->animationTime = 0;
-        } else {
-            int maxBlendMsec;
-            float zero = 0.0f;
-
-            if (anim == NULL) {
-                maxBlendMsec = (hadNoAnimation || oldAnimation == NULL || oldAnimation->moveSpeed == zero) ? 170 : 250;
-            } else if (lf->animationTime <= 0) {
-                maxBlendMsec = (anim->moveSpeed == zero) ? ((hadNoAnimation || oldAnimation == NULL || oldAnimation->moveSpeed == zero) ? 170 : 250) : 120;
-            } else {
-                maxBlendMsec = -1;
-            }
-
-            if (maxBlendMsec >= 0) {
-                int elapsed = bgs->time - ci->stanceTransitionTime;
-                if (elapsed > maxBlendMsec) {
-                    elapsed = maxBlendMsec;
-                }
-                if (elapsed > lf->animationTime) {
-                    lf->animationTime = elapsed;
-                }
-            }
+        } else if (anim == NULL || lf->animationTime < 0) {
+            /* -1 means the script requests the default blend. Comparing that
+             * sentinel to a future stance deadline left it negative and made
+             * the skeleton jump immediately to the next pose. */
+            lf->animationTime = anim != NULL && anim->moveSpeed != 0.0f ? 120 :
+                oldAnimation != NULL && oldAnimation->moveSpeed != 0.0f ? 250 : 170;
+            if (bLegsAnim && bgs->time < ci->stanceTransitionTime && lf->animationTime < 200)
+                lf->animationTime = 200;
         }
 
         startTime = 0.0f;
@@ -929,7 +922,7 @@ void BG_PlayerAnimation(const struct DObj_s *pDObj, entityState_t *es, clientInf
         ci->legs.yawAngle = moveYaw;
     } else if ((bgs->animScriptData.animations[BG_AnimIndexNoToggle(es->legsAnim)].flags & 0x30) != 0) {
         ci->legs.yawing = 0;
-        BG_SwingAngles(&ci->legs.yawAngle, &ci->legs.yawing, 0.0f, playerYaw, 150.0f, swingSpeed);
+        BG_SwingAngles(&ci->legs.yawAngle, &ci->legs.yawing, 0.0f, moveYaw, 150.0f, swingSpeed);
     } else {
         BG_SwingAngles(&ci->legs.yawAngle, &ci->legs.yawing, legsSwingTolerance, legsYawDest, 150.0f, swingSpeed);
     }

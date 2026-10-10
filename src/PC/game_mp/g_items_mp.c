@@ -93,6 +93,10 @@ enum {
     GITEMS_CS_ITEMS = 8
 };
 
+/* Every new drop overwrites its slot, including reuse after pickup/map load.
+   Keep absolute deadlines outside the retail entity/network ABI. */
+static int droppedItemExpiry[1024];
+
 static int G_ItemIndexFromPointer(const gitem_t *item)
 {
     return (int)(item - (const gitem_t *)imp_bg_itemlist);
@@ -150,7 +154,15 @@ void G_SpawnItem(gentity_t *ent, const gitem_t *item);
 
 void DroppedItemClearOwner(gentity_t *pSelf)
 {
+    int expires = droppedItemExpiry[pSelf->s.number];
+    if (level.time >= expires) {
+        G_FreeEntity(pSelf);
+        return;
+    }
     (_ENT(pSelf)->s.clientNum) = GITEMS_ENTITYNUM_WORLD;
+    /* The first second prevents immediate pickup by the dropper. Keep the
+       item usable afterwards, then expire it twenty seconds after dropping. */
+    pSelf->nextthink = expires;
 }
 
 void G_GetItemClassname(const gitem_t *item, scr_string_t *out)
@@ -406,6 +418,7 @@ void G_RunCorpseMove(gentity_t *ent)
     vec3_t start;
     vec3_t normal;
     vec3_t axis[3];
+    vec3_t groundAngles;
     int mask;
     qboolean applyDelta;
 
@@ -461,11 +474,6 @@ void G_RunCorpseMove(gentity_t *ent)
     }
 
     SV_LinkEntity(ent);
-    G_RunThink(ent);
-
-    if (!ent->active) {
-        return;
-    }
 
     if (tr.fraction == 1.0f) {
         if (corpseInfo->falling) {
@@ -576,8 +584,8 @@ void G_RunCorpseMove(gentity_t *ent)
         AngleVectors(ent->r.currentAngles, axis[0], NULL, NULL);
         Vec3Cross(normal, axis[0], axis[1]);
         Vec3Cross(axis[1], normal, axis[0]);
-        AxisToAngles((const vec_t *)axis, rot);
-        G_SetAngle(ent, rot);
+        AxisToAngles((const vec_t *)axis, groundAngles);
+        G_SetAngle(ent, groundAngles);
     }
 
     SV_LinkEntity(ent);
@@ -589,6 +597,13 @@ void G_RunCorpse(gentity_t *ent)
     struct DObj_s *obj;
 
     G_RunCorpseMove(ent);
+
+    /* Movement can remove a body in a death volume. Corpse clones do not
+     * set the interaction flag 'active'; their lifecycle uses r.inuse.
+     * Run the scheduled think once, after movement and animation, so an
+     * expiring body cannot be accessed again in this frame. */
+    if (!ent->r.inuse)
+        return;
 
     corpseInfo = &g_scr_data.playerCorpseInfo[G_GetPlayerCorpseIndex(ent)];
     obj = Com_GetServerDObj(ent->s.number);
@@ -816,6 +831,7 @@ found_drop_slot:
     dropped->s.pos.trDelta[2] = velocity[2];
 
     dropped->nextthink = level.time + 1000;
+    droppedItemExpiry[dropped->s.number] = level.time + 20000;
     dropped->flags = 0x10;
 
     SV_LinkEntity(dropped);

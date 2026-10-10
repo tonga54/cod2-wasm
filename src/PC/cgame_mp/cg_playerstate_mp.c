@@ -15,6 +15,7 @@ extern void CL_SetADS(int ads);
 extern void CG_SetEquippedOffHand(int offHandIndex);
 extern void CG_HoldBreathInit(void);
 extern void CG_ResetLowHealthOverlay(void);
+extern void CG_ResetSprintView(void);
 extern void CG_MenuShowNotify(int menuToShow);
 extern void CG_EntityEvent(centity_t *cent, int event);
 
@@ -77,6 +78,7 @@ void CG_Respawn(void)
     extern void CG_ResetDeathView(void);
 
     CG_ResetDeathView();
+    CG_ResetSprintView();
 
     memset(cg->kickAVel, 0, sizeof(cg->kickAVel));
     memset(cg->kickAngles, 0, sizeof(cg->kickAngles));

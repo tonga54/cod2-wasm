@@ -661,7 +661,7 @@ void SV_Startup(void)
         Com_Error(0, "SV_Startup: unable to allocate svs.clients");
     }
 
-    isDedicated = *(int *)((byte *)(void *)imp_com_dedicated + 8);
+    isDedicated = (*(const dvar_t **)imp_com_dedicated)->current.integer;
     maxclients = *(dvar_t **)imp_sv_maxclients;
     numClients = maxclients->current.integer;
     if (isDedicated) {
@@ -746,7 +746,7 @@ void SV_ChangeMaxClients(void)
 
     Hunk_FreeTempMemory(oldClients);
 
-    isDedicated = *(int *)((byte *)(void *)imp_com_dedicated + 8);
+    isDedicated = (*(const dvar_t **)imp_com_dedicated)->current.integer;
     numClients = (*(dvar_t **)imp_sv_maxclients)->current.integer;
     svs = (serverStatic_t *)imp_svs;
     if (isDedicated) {
@@ -835,7 +835,7 @@ void SV_SpawnServer(const char *server)
 #endif
     }
 
-    isDedicated = *(int *)((byte *)(void *)imp_com_dedicated + 8);
+    isDedicated = (*(const dvar_t **)imp_com_dedicated)->current.integer;
     if (isDedicated) {
         FX_FreeSystem();
     }
@@ -960,7 +960,7 @@ void SV_SpawnServer(const char *server)
     }
     SV_InitGameProgs(savepersist);
 
-    isDedicated = *(int *)((byte *)(void *)imp_com_dedicated + 8);
+    isDedicated = (*(const dvar_t **)imp_com_dedicated)->current.integer;
     if (isDedicated) {
         FX_InitSystem(0);
         FX_CreateDefaultEffect();

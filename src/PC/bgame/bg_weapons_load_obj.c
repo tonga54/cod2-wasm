@@ -388,16 +388,17 @@ WeaponDef *BG_LoadWeaponDefInternal(const char *folder, const char *name)
         return weapDef;
     }
 
-    if (weapDef->iFireTime > 0) {
-        weapDef->fOOPosAnimLength[0] = 1.0f / (float)weapDef->iFireTime;
+    /* These reciprocals advance the ADS pose, not the firing/bolt cycle. */
+    if (weapDef->iAdsTransInTime > 0) {
+        weapDef->fOOPosAnimLength[0] = 1.0f / (float)weapDef->iAdsTransInTime;
     } else {
-        weapDef->fOOPosAnimLength[0] = 0x1.b4e81cp-9f;
+        weapDef->fOOPosAnimLength[0] = 1.0f / 300.0f;
     }
 
-    if (weapDef->iRechamberTime > 0) {
-        weapDef->fOOPosAnimLength[1] = 1.0f / (float)weapDef->iRechamberTime;
+    if (weapDef->iAdsTransOutTime > 0) {
+        weapDef->fOOPosAnimLength[1] = 1.0f / (float)weapDef->iAdsTransOutTime;
     } else {
-        weapDef->fOOPosAnimLength[1] = 0x1.0624dep-9f;
+        weapDef->fOOPosAnimLength[1] = 1.0f / 500.0f;
     }
 
     if (weapDef->destabilizationBaseTime <= 0.0f) {

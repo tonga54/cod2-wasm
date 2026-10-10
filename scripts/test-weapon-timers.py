@@ -26,15 +26,19 @@ support=r'''
 #define WEAPTYPE_GRENADE 2
 #define WEAPON_OFFHAND_INIT 12
 #define WEAPON_OFFHAND_FIRE 15
+#define WEAPON_OFFHAND_END 16
+#define WEAPON_FIRING 3
+#define PM_WEAPON_FLAG_TRIGGER_HELD 0x40000
 typedef int qboolean;
 typedef struct { int pm_time,pm_flags,legsTimer,torsoTimer,weaponTime,weaponDelay,grenadeTimeLeft,weaponRestrictKickTime,foliageSoundTime,damageTimer,damageDuration,holdBreathTimer,weapon,weaponstate,offHandIndex,weaponrechamber[4],ammo[128],ammoclip[128]; } playerState_t;
-typedef struct { int bBoltAction,iReloadStartAddTime,iReloadStartTime,iReloadTime,iReloadEmptyTime,iReloadAddTime,iRechamberBoltTime,iClipIndex,iAmmoIndex,iClipSize,iReloadStartAdd,iReloadAmmoAdd,weapType,bCookOffHold; } WeaponDef;
+typedef struct { int bBoltAction,bSemiAuto,iReloadStartAddTime,iReloadStartTime,iReloadTime,iReloadEmptyTime,iReloadAddTime,iRechamberBoltTime,iClipIndex,iAmmoIndex,iClipSize,iReloadStartAdd,iReloadAmmoAdd,weapType,offhandClass,bCookOffHold; } WeaponDef;
 typedef struct { playerState_t *ps;struct {int buttons,weapon;} cmd; } pmove_t;
 typedef struct { int msec; } pml_t;
 static WeaponDef weapon,grenade,*bg_weaponDefs[128],*bg_weapClips[128];
 static int events;
 static void PM_AddEvent(playerState_t *ps,int event) { events++; }
 '''
+body = '#define OFFHAND_CLASS_FRAG_GRENADE 1\n' + (root/'src/headers/cod2_grenade.h').read_text() + body
 checks=r'''
 int main(void){
  weapon=(WeaponDef){.iClipIndex=1,.iAmmoIndex=1,.iClipSize=32};

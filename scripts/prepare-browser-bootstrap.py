@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare private startup and Toujane/Carentan TDM assets."""
+"""Prepare private startup and Toujane/Carentan multiplayer assets."""
 from pathlib import Path
 import argparse
 import hashlib
@@ -17,6 +17,7 @@ parser.add_argument('--manifest', type=Path, default=root / 'site/wasm-game-data
 args = parser.parse_args()
 balance_profile = load_profile()
 maps = {"mp_toujane": "Toujane, Tunisia", "mp_carentan": "Carentan, France"}
+gametypes = ("dm", "tdm", "ctf", "hq", "sd")
 soldiertypes = ("british_africa", "german_africa", "american_normandy", "german_normandy")
 main = args.main_dir
 main.mkdir(parents=True, exist_ok=True)
@@ -39,6 +40,19 @@ for path in sorted((root / "data/main").glob("localized_english_*.iwd")):
             if name.startswith("localizedstrings/") and Path(name).stem in strings:
                 localized[name] = original.read(name)
 archives["localized_english_cod2_browser.iwd"] = localized
+
+# Keep the owner's archives intact. Shift shares sprint and scoped steady aim;
+# melee stays on V and its former quick-message action moves to H.
+default_cfg = archives["cod2_browser_bootstrap.iwd"]["default_mp.cfg"]
+assert default_cfg.count(b'bind SHIFT\t"+melee_breath"') == 1
+assert default_cfg.count(b'bind v\t"mp_QuickMessage"') == 1
+default_cfg = default_cfg.replace(b'bind SHIFT\t"+melee_breath"', b'bind SHIFT\t"+sprint"')
+default_cfg = default_cfg.replace(b'bind v\t"mp_QuickMessage"',
+                                  b'bind v\t"+melee"\r\nbind h "mp_QuickMessage"')
+assert default_cfg.count(b'bind c\t\t"gocrouch"') == 1
+default_cfg = default_cfg.replace(b'bind c\t\t"gocrouch"',
+                                  b'bind c\t\t"togglecrouch"')
+archives["cod2_browser_bootstrap.iwd"]["default_mp.cfg"] = default_cfg
 
 # Follow asset names from the original material/font blobs and DX7 text files.
 # Later IWDs override earlier ones, exactly as in the engine's search path.
@@ -83,8 +97,12 @@ try:
     # _menus.gsc builds these names from each map's factions and gametype.
     pending.extend("ui_mp/scriptmenus/" + menu + ".menu" for menu in (
         "team_britishgerman", "team_americangerman", "weapon_british",
-        "weapon_american", "weapon_german", "serverinfo_tdm"
+        "weapon_american", "weapon_german"
     ))
+    for gametype in gametypes:
+        pending.extend((f"maps/mp/gametypes/{gametype}.gsc",
+                        f"maps/mp/gametypes/{gametype}.txt",
+                        f"ui_mp/scriptmenus/serverinfo_{gametype}.menu"))
     pending.extend(name for name in asset_index if name.endswith(".csv")
                    and (name.count("/") == 1 and name.startswith("fx/")
                         or any(name.startswith(f"fx/maps/mp/{mapname}/") for mapname in maps)))
@@ -93,12 +111,11 @@ try:
         "fonts/bigdevfont", "fonts/smalldevfont", "fonts/bigfont",
         "fonts/smallfont", "fonts/normalfont", "fonts/boldfont",
         "fonts/extrabigfont", "lights/default", "lights/light_dynamic",
-        "materials/console", "maps/mp/gametypes/tdm.gsc",
+        "materials/console",
         # Loaded directly by GScr_LoadScripts, outside the GSC import graph.
         "codescripts/delete.gsc", "codescripts/struct.gsc",
         # Entity keys drive gametype filtering, including overlapping MG42s.
         "radiant/keys.txt",
-        "maps/mp/gametypes/tdm.txt",
         "ui_mp/menus.txt", "ui_mp/hud.txt", "ui_mp/ingame.txt"
     ))
     # Follow both maps' real material/entity dependencies, plus their
@@ -132,6 +149,40 @@ try:
         path, original_name = asset_index[name]
         data = originals[path].read(original_name)
         data = apply_weapon_balance(name, data, balance_profile)
+        if name == "default_mp.cfg":
+            data = default_cfg
+        if name == "ui/options_shoot.menu":
+            assert data.count(b'"@MENU_MELEE_STEADY"') == 1
+            assert data.count(b'"+melee_breath"') == 1
+            data = data.replace(b'"@MENU_MELEE_STEADY"', b'"Sprint / Hold Breath"')
+            data = data.replace(b'"+melee_breath"', b'"+sprint"')
+        if name == "ui_mp/joinserver.menu":
+            # Add an owner-only action to the retail server browser layout.
+            marker = b'\n//\tBACK AND NEXT BUTTONS'
+            button = b'''
+        itemDef {
+            name deleteOwnServer
+            text "Delete my server"
+            type ITEM_TYPE_BUTTON
+            textfont UI_FONT_NORMAL
+            textscale .24
+            textstyle UI_BUTTON_TEXT_STYLE
+            style UI_BUTTON_STYLE
+            rect 30 380 170 20
+            textalignx 4
+            textaligny 15
+            forecolor 1 .6 .6 1
+            backcolor UI_BUTTON_BACK_COLOR
+            visible 1
+            dvarTest "ui_canDeleteServer"
+            enableDvar { "1" }
+            action { play "mouse_click"; uiScript DeleteServer; }
+        }
+'''
+            normalized = data.replace(b'\r\n', b'\n')
+            if normalized.count(marker) != 1:
+                raise ValueError("Unexpected server browser menu")
+            data = normalized.replace(marker, button + marker)
         if name == "maps/mp/gametypes/tdm.gsc":
             # The browser TDM death view uses the server's exact deadline.
             # Leave the owner's retail archive intact and patch the private
@@ -146,9 +197,8 @@ try:
             data = data.replace(old, old + b'\n\tself setClientCvar("cg_respawnDeadline", 0);')
         if name == "ui_mp/menus.txt":
             # Preserve the menu files; restrict their manifest to multiplayer
-            # settings and TDM. The owner archives remain untouched.
-            excluded = {"single_player", "settings_dm", "settings_ctf",
-                        "settings_hq", "settings_sd", "settings_sw",
+            # settings and the five retail modes. Owner archives stay intact.
+            excluded = {"single_player", "settings_sw",
                         "options_voice", "auto_update", "pb_popmenus",
                         "mods"}
             data = b"\n".join(line for line in data.splitlines()
@@ -255,7 +305,7 @@ try:
     archives["cod2_browser_audio.iwd"] = collect_sound_assets(root, asset_index, originals, renderer, maps)
     for mapname, longname in maps.items():
         archives["cod2_browser_bootstrap.iwd"][f"mp/{mapname[3:]}.arena"] = (
-            f'{{ map "{mapname}" longname "{longname}" gametype "tdm" }}\n'.encode()
+            f'{{ map "{mapname}" longname "{longname}" gametype "{" ".join(gametypes)}" }}\n'.encode()
         )
 finally:
     for original in originals.values():

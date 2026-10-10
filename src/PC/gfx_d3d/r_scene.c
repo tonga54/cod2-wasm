@@ -736,6 +736,11 @@ void R_RenderScene(const refdef_t *refdef)
     CG_AddMarks();
     FX_DrawScheduledEffects();
 
+#ifdef __EMSCRIPTEN__
+    extern void WebPointLights_SetScene(const GfxLight *, int);
+    WebPointLights_SetScene(scene.dlights, scene.dlightCount);
+#endif
+
     drawSurfStart = (int)(intptr_t)scene.drawSurfs;
     drawSurfCount = scene.drawSurfCount;
     qsortDrawSurfs((GfxDrawSurf *)(intptr_t)drawSurfStart, drawSurfCount);

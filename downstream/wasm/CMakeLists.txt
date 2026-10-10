@@ -41,6 +41,7 @@ list(APPEND COD2_CLIENT_SOURCES
   "${COD2_ROOT}/build/native_gen/import_pointers_native.c"
   "${CMAKE_CURRENT_LIST_DIR}/web_main.c"
   "${CMAKE_CURRENT_LIST_DIR}/web_gl_compat.c"
+  "${CMAKE_CURRENT_LIST_DIR}/web_point_lights.c"
   "${CMAKE_CURRENT_LIST_DIR}/web_jpeg_compat.c")
 
 add_library(cod2_client_objects OBJECT ${COD2_CLIENT_SOURCES})
@@ -91,7 +92,7 @@ target_link_options(cod2_client PRIVATE
   "SHELL:-s EXPORT_NAME=createCod2Client"
   "SHELL:-s INVOKE_RUN=0"
   "SHELL:-s EXPORTED_RUNTIME_METHODS=FS,callMain"
-  "SHELL:-s EXPORTED_FUNCTIONS=_main,_free,_web_client_state,_web_client_connected,_web_capture_lost"
+  "SHELL:-s EXPORTED_FUNCTIONS=_main,_free,_web_client_state,_web_client_connected,_web_capture_lost,_web_chat_char"
   "SHELL:-s EXIT_RUNTIME=0"
   "SHELL:-s ASSERTIONS=1"
   "SHELL:-s ENVIRONMENT=web"

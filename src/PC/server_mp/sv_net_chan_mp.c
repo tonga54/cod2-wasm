@@ -32,6 +32,7 @@ extern byte *net_profile_dvar;
 
 extern Bool Netchan_TransmitNextFragment(netchan_t *chan);
 extern Bool Netchan_Transmit(netchan_t *chan, int length, byte *data);
+extern qboolean Sys_IsLANAddress(netadr_t adr);
 extern void NetProf_PrepProfiling(netProfileInfo_t *prof);
 extern void NetProf_AddPacket(netProfileStream_t *stream, int iLength, qboolean bFragment);
 extern void NetProf_UpdateStatistics(netProfileStream_t *stream);
@@ -89,9 +90,22 @@ void SV_Netchan_Decode(client_t *client, byte *data, int size)
     }
 }
 
+static Bool SV_Netchan_SendFragments(netchan_t *chan, int budget)
+{
+    do {
+        if (!Netchan_TransmitNextFragment(chan))
+            return 0;
+    } while (--budget > 0 && chan->unsentFragments);
+    return 1;
+}
+
 Bool SV_Netchan_TransmitNextFragment(netchan_t *chan)
 {
-    return Netchan_TransmitNextFragment(chan);
+    /* Browser gateways are on the local network. Complete a bounded batch
+     * instead of making every 1300-byte fragment wait another game tick.
+     * Public UDP clients retain the original one-fragment rate pacing. */
+    int budget = Sys_IsLANAddress(chan->remoteAddress) ? 8 : 1;
+    return SV_Netchan_SendFragments(chan, budget);
 }
 
 Bool SV_Netchan_Transmit(client_t *client, int length, byte *data)
@@ -133,7 +147,12 @@ Bool SV_Netchan_Transmit(client_t *client, int length, byte *data)
     }
 
     netchan = (netchan_t *)(cl + CLIENT_NETCHAN_OFF);
-    return Netchan_Transmit(netchan, length, data);
+    {
+        Bool sent = Netchan_Transmit(netchan, length, data);
+        if (sent && netchan->unsentFragments && Sys_IsLANAddress(netchan->remoteAddress))
+            return SV_Netchan_SendFragments(netchan, 7);
+        return sent;
+    }
 }
 
 void SV_Netchan_AddOOBProfilePacket(int iLength)

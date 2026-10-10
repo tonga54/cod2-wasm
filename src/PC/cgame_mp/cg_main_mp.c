@@ -934,9 +934,11 @@ static inline __attribute__((always_inline)) void CG_RegisterDvars(void)
     cg_hudDamageIconOffset = Dvar_RegisterFloat("cg_hudDamageIconOffset", 128.0f, 0.0f, 512.0f, 0x1001);
     cg_hudDamageIconTime = Dvar_RegisterInt("cg_hudDamageIconTime", 0x7d0, 0, 0x7fffffff, 0x1001);
     cg_hudDamageIconInScope = Dvar_RegisterBool_mac("cg_hudDamageIconInScope", 0, 0x1080);
-    cg_hudGrenadeIconMaxRange = Dvar_RegisterFloat("cg_hudGrenadeIconMaxRange", 250.0f, 0.0f, 1000.0f, 0x1080);
-    cg_hudGrenadeIconMaxHeight = Dvar_RegisterFloat("cg_hudGrenadeIconMaxHeight", 104.0f, 0.0f, 1000.0f, 0x1080);
-    cg_hudGrenadeIconInScope = Dvar_RegisterBool_mac("cg_hudGrenadeIconInScope", 0, 0x1080);
+    /* Cover the full frag blast sphere, including incoming grenades above
+     * the player and scoped aim. The warning also checks each weapon's radius. */
+    cg_hudGrenadeIconMaxRange = Dvar_RegisterFloat("cg_hudGrenadeIconMaxRange", 256.0f, 0.0f, 1000.0f, 0x1080);
+    cg_hudGrenadeIconMaxHeight = Dvar_RegisterFloat("cg_hudGrenadeIconMaxHeight", 256.0f, 0.0f, 1000.0f, 0x1080);
+    cg_hudGrenadeIconInScope = Dvar_RegisterBool_mac("cg_hudGrenadeIconInScope", 1, 0x1080);
     cg_hudGrenadeIconOffset = Dvar_RegisterFloat("cg_hudGrenadeIconOffset", 50.0f, 0.0f, 512.0f, 0x1001);
     cg_hudGrenadeIconHeight = Dvar_RegisterFloat("cg_hudGrenadeIconHeight", 25.0f, 0.0f, 512.0f, 0x1001);
     cg_hudGrenadeIconWidth = Dvar_RegisterFloat("cg_hudGrenadeIconWidth", 25.0f, 0.0f, 512.0f, 0x1001);
@@ -987,8 +989,8 @@ static inline __attribute__((always_inline)) void CG_RegisterDvars(void)
     cg_thirdPersonRange = Dvar_RegisterFloat("cg_thirdPersonRange", 120.0f, 0.0f, 1024.0f, 0x1080);
     cg_thirdPersonAngle = Dvar_RegisterFloat("cg_thirdPersonAngle", 0.0f, -180.0f, 360.0f, 0x1080);
     cg_thirdPerson = Dvar_RegisterBool_mac("cg_thirdPerson", 0, 0x1080);
-    cg_chatTime = Dvar_RegisterInt("cg_chatTime", 0x2ee0, 0, 0xea60, 0x1001);
-    cg_chatHeight = Dvar_RegisterInt("cg_chatHeight", 8, 0, 8, 0x1001);
+    cg_chatTime = Dvar_RegisterInt("cg_chatTime", 8000, 0, 0xea60, 0x1001);
+    cg_chatHeight = Dvar_RegisterInt("cg_chatHeight", 5, 0, 8, 0x1001);
     cg_predictItems = Dvar_RegisterBool_mac("cg_predictItems", 1, 0x1003);
     cg_noTaunt = Dvar_RegisterBool_mac("cg_noTaunt", 0, 0x1001);
     cg_voiceSpriteTime = Dvar_RegisterInt("cg_voiceSpriteTime", 0x1770, 0, 0xea60, 0x1001);

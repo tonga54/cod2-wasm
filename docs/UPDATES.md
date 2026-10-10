@@ -1,97 +1,82 @@
-# Actualizar el juego
+# Updating the game
 
-El repo público es [tonga54/cod2-wasm](https://github.com/tonga54/cod2-wasm).
-La rama que se comprueba es `master`. Un push a otra rama no anuncia una
-actualización del juego.
+The public repository is [tonga54/cod2-wasm](https://github.com/tonga54/cod2-wasm).
+Update checks follow `master`. Pushing another branch does not announce a game
+update.
 
-## Para quienes juegan en el navegador
+## Browser players
 
-El juego comprueba la versión del anfitrión cada minuto mientras la pestaña está
-visible. Si el anfitrión instaló una versión nueva, aparece **Recargar** en el
-menú principal. El aviso espera hasta salir de la partida, incluso si abrís el
-menú de pausa o la consola. Nunca recarga solo y podés elegir **Más tarde**.
+The game checks the host version once a minute while the tab is visible. After
+the host installs a new build, **Reload** appears in the main menu, once the
+player has left the match. Opening pause or the console does not trigger it.
+The page never reloads automatically; players can choose **Later**.
 
-Si hay cambios en GitHub que el anfitrión todavía no instaló, aparece un aviso
-para actualizar el servidor con un enlace a esta guía. Recargar la página en ese
-caso no instala los cambios del repo.
+If GitHub has changes the host has not installed, a separate notice links to
+this guide. Reloading a browser does not install server code.
 
-## Para quien tiene una copia local con Docker
+## Standard Docker hosts
 
-Desde la carpeta del repo:
+From the repository directory:
 
 ```sh
 python3 scripts/update-local.py
 ```
 
-Comprueba GitHub sin modificar tus archivos. Código de salida: `0` actualizado,
-`1` hay actualización, `2` no se pudo comprobar o el historial requiere revisión.
-El chequeo descarga referencias de Git; no instala código ni reinicia Docker.
+This fetches Git references and checks for changes without installing or
+restarting Docker. Exit codes are `0` for current, `1` for an available update,
+and `2` when the check failed or the history needs review.
 
-Para tomar lo último y reconstruir un servidor vacío:
+To install and rebuild an empty host:
 
 ```sh
 python3 scripts/update-local.py --apply
 ```
 
-El comando acepta solamente `origin` apuntando a este repo, rama `master`,
-una copia sin cambios locales y una actualización por avance directo de Git
-(`--ff-only`). No hace reset, stash ni merges de historiales propios. Comprueba
-que no haya jugadores antes de modificar y antes de reiniciar. Conserva
-`data/main/`, regenera el paquete privado para la versión nueva, compila cliente,
-servidor y gateway, y ejecuta `docker compose up -d`.
+The installer requires `origin` to point to this repository, branch `master`,
+a clean working tree, and a fast-forward update. It does not reset, stash or
+merge local history. It checks for active players before changing files and
+before restarting. It preserves `data/main/`, regenerates the private subset,
+builds the browser/native server/gateway, then runs `docker compose up -d`.
 
-La compilación puede demorar. Si falla, los contenedores existentes no se
-reinician; corregí el error y repetí `--apply`, que también permite reconstruir
-cuando el código ya está actualizado. Guardá una copia de tus datos originales.
+A failed build does not restart existing containers. Fix the failure and retry;
+`--apply` can rebuild an already current checkout. Keep a backup of your original
+files. Requirements and the pinned framework are listed in the [README](../README.md).
 
-Requiere Git, Python 3.9+, Node.js y Docker con Compose. El framework debe estar
-en la carpeta hermana `wasm-game-framework`, o en `COD2_WASM_FRAMEWORK_DIR`:
+## Raspberry Pi hosts
 
-```sh
-git clone https://github.com/theodorecharles/wasm-game-framework.git ../wasm-game-framework
-```
+Use the [Pi deployment procedure](RASPBERRY_PI.md) from the machine that builds
+the game. It transfers the prepared ARM64 web/gateway images, the private subset
+and the x86 engine runtime, then builds the small ARM64 supervisor/QEMU image.
+The Pi uses `compose.pi.yaml` alongside the standard Compose file. The standard
+`update-local.py --apply` procedure does not build this Pi runtime.
 
-La compilación fija el framework a la versión 0.9.2. Emscripten se usa desde
-Docker si no está instalado localmente. Se necesitan los IWD originales de
-CoD2 1.3 en `data/main/`, incluidos los `localized_english_*.iwd`, y el arte
-original preparado en `data/browser/web/`. `build-docker.sh` puede extraer el
-icono de `COD2_ORIGINAL_ZIP` y el logo de `data/main/iw_09.iwd`.
+## Asset delivery and caching
 
-## Cómo llegan los archivos a los jugadores
-
-El anfitrión prepara los originales una vez, con:
+Prepare the owner's files on the build machine:
 
 ```sh
 python3 scripts/prepare-browser-bootstrap.py
 ```
 
-El paquete privado actual de Toujane ocupa unos **165.6 MB**. Cada jugador lo
-descarga por HTTP/HTTPS desde el mismo servidor al entrar y lo conserva en
-IndexedDB. El manifiesto verifica tamaño y SHA-256, y una versión de assets nueva
-invalida la caché anterior. La caché pertenece a cada navegador y URL: cambiar
-de dominio de túnel puede requerir descargarlo otra vez.
+The current Carentan/Toujane subset is approximately **275.6 MB**. Each browser
+downloads it from the host over HTTP/HTTPS and stores it in IndexedDB. The
+manifest verifies archive sizes and SHA-256 hashes; a new asset version
+invalidates the old cache. Storage belongs to each browser and origin, so
+moving from a Mac URL to a Pi URL requires a fresh initial download.
 
-No hace falta pasar un ZIP a cada jugador para entrar al servidor que ya está
-preparado. Quien quiera levantar un servidor propio debe importar los IWD de
-su instalación legítima en `data/main/`; no vienen con el clone ni se publican
-en el repo, las imágenes o Releases.
+Players can join an already prepared host without individually importing a ZIP.
+A person setting up another host must supply their original CoD2 IWD files in
+`data/main/`. These files are not supplied by a Git clone, public image or Release.
+Original assets remain private, read-only mounts; the repository contains their
+public manifest hashes rather than the archives.
 
-Los mapas, modelos, texturas, sonidos y ejecutables originales son contenido
-de Activision. Publicar el código no concede derechos sobre esos archivos.
-Una descarga pública de esos archivos requiere los permisos de redistribución
-aplicables; no asumimos que poseer una copia autorice compartirla con terceros.
-Ver los [términos de software de Activision](https://www.activision.com/legal/software-terms-of-use).
-Esta guía describe el mecanismo técnico, no concede una licencia del juego.
+## Version checks
 
-## Comprobaciones de versión
+`/build-info.json` identifies the source revision, dirty status and build-content
+ID. `GET /version` reports the installed build and the GitHub comparison. The
+gateway shares results across players and checks GitHub at most once every five
+minutes per revision, without requiring a token. Network/rate-limit failures
+report `unknown`. Ahead/divergent histories are not announced as normal updates.
 
-`/build-info.json` identifica la revisión y el contenido de la compilación.
-`GET /version` devuelve la versión instalada y el estado de comparación con
-GitHub. El gateway consulta GitHub como máximo una vez cada cinco minutos por
-revisión, comparte la respuesta entre jugadores y no necesita un token. Una
-falla de red o límite de GitHub se informa como `unknown`; no anuncia falsamente
-que la copia esté actualizada. Historiales adelantados o divergentes no se
-anuncian como una actualización normal.
-
-El aviso aparece después de instalar por primera vez una versión que incluya
-esta función. Las copias anteriores necesitan actualizarse manualmente una vez.
+Older deployments without this feature need one manual update before browser
+notices become available.

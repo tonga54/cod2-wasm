@@ -631,6 +631,20 @@ edge_trace_tests: {
 }
 }
 
+static void CM_BorderCornerNormal(trace_t *trace, float x, float y, float nx, float ny)
+{
+    float lengthSq = x * x + y * y;
+    if (lengthSq > 0.000001f) {
+        float inverseLength = 1.0f / sqrtf(lengthSq);
+        trace->normal[0] = x * inverseLength;
+        trace->normal[1] = y * inverseLength;
+    } else {
+        trace->normal[0] = nx;
+        trace->normal[1] = ny;
+    }
+    trace->normal[2] = 0.0f;
+}
+
 static void CM_MESH_REGPARM3_ABI CM_TraceThroughAabbTree_r(const traceWork_t *tw, const CollisionAabbTree *aabbTree, trace_t *trace)
 {
     int i;
@@ -770,7 +784,7 @@ static void CM_MESH_REGPARM3_ABI CM_TraceThroughAabbTree_r(const traceWork_t *tw
                             float bNormX_times_start = bNormX * border[i].start;
                             float cY = tw->extents.start[1] - (bNormY_times_zBase - bNormX_times_start);
 
-                            float cross2d = dirX * cY + dirY * cX;
+                            float cross2d = dirX * cX + dirY * cY;
                             if (cross2d >= 0.0f)
                                 continue;
 
@@ -785,9 +799,7 @@ static void CM_MESH_REGPARM3_ABI CM_TraceThroughAabbTree_r(const traceWork_t *tw
                                     continue;
 
                                 trace->fraction = 0;
-                                trace->normal[0] = bNormX;
-                                trace->normal[1] = bNormY;
-                                trace->normal[2] = 0.0f;
+                                CM_BorderCornerNormal(trace, cX, cY, bNormX, bNormY);
 
                                 if (tw->radius * tw->radius > distSq2d)
                                     trace->startsolid = 1;
@@ -795,7 +807,7 @@ static void CM_MESH_REGPARM3_ABI CM_TraceThroughAabbTree_r(const traceWork_t *tw
                             }
 
                             {
-                                float a = tw->deltaLenSq;
+                                float a = dirX * dirX + dirY * dirY;
                                 float b2 = cross2d * cross2d - a * discrim2d;
                                 if (0.0f > b2)
                                     continue;
@@ -807,17 +819,14 @@ static void CM_MESH_REGPARM3_ABI CM_TraceThroughAabbTree_r(const traceWork_t *tw
                                     continue;
 
                                 float hitZ2 = dirZ * t_hit + startZ;
-                                float zSloped = border[i].length;
-
-                                float zAtHit = border[i].length * border[i].zSlope + border[i].zBase;
+                                float zAtHit = border[i].zBase;
                                 float zDiff2 = hitZ2 - zAtHit;
                                 if (fabsf(zDiff2) > tw->offsetZ)
                                     continue;
 
                                 trace->fraction = t_hit;
-                                trace->normal[0] = bNormX;
-                                trace->normal[1] = bNormY;
-                                trace->normal[2] = 0.0f;
+                                CM_BorderCornerNormal(trace, cX + dirX * t_hit,
+                                                     cY + dirY * t_hit, bNormX, bNormY);
                             }
                             continue;
                         }
@@ -833,7 +842,7 @@ static void CM_MESH_REGPARM3_ABI CM_TraceThroughAabbTree_r(const traceWork_t *tw
                             float bNormX_times_start = bNormX * cornerX_coeff;
                             float cY = tw->extents.start[1] - (bNormY_times_zBase - bNormX_times_start);
 
-                            float cross2d = dirX * cY + dirY * cX;
+                            float cross2d = dirX * cX + dirY * cY;
                             if (cross2d >= 0.0f)
                                 continue;
 
@@ -841,15 +850,13 @@ static void CM_MESH_REGPARM3_ABI CM_TraceThroughAabbTree_r(const traceWork_t *tw
                             float radiusSq = radius * radius;
                             float discrim2d = distSq2d - radiusSq;
                             if (0.0f >= discrim2d) {
-                                float zAtBorder = lateral * border[i].zSlope + border[i].zBase;
+                                float zAtBorder = border[i].length * border[i].zSlope + border[i].zBase;
                                 float zDiff = startZ - zAtBorder;
                                 if (fabsf(zDiff) > tw->offsetZ)
                                     continue;
 
                                 trace->fraction = 0;
-                                trace->normal[0] = bNormX;
-                                trace->normal[1] = bNormY;
-                                trace->normal[2] = 0.0f;
+                                CM_BorderCornerNormal(trace, cX, cY, bNormX, bNormY);
 
                                 if (tw->radius * tw->radius > distSq2d)
                                     trace->startsolid = 1;
@@ -857,7 +864,7 @@ static void CM_MESH_REGPARM3_ABI CM_TraceThroughAabbTree_r(const traceWork_t *tw
                             }
 
                             {
-                                float a = tw->deltaLenSq;
+                                float a = dirX * dirX + dirY * dirY;
                                 float b2 = cross2d * cross2d - a * discrim2d;
                                 if (0.0f > b2)
                                     continue;
@@ -875,9 +882,8 @@ static void CM_MESH_REGPARM3_ABI CM_TraceThroughAabbTree_r(const traceWork_t *tw
                                     continue;
 
                                 trace->fraction = t_hit;
-                                trace->normal[0] = bNormX;
-                                trace->normal[1] = bNormY;
-                                trace->normal[2] = 0.0f;
+                                CM_BorderCornerNormal(trace, cX + dirX * t_hit,
+                                                     cY + dirY * t_hit, bNormX, bNormY);
                             }
                             continue;
                         }
@@ -893,7 +899,9 @@ static void CM_MESH_REGPARM3_ABI CM_TraceThroughAabbTree_r(const traceWork_t *tw
                             if (fabsf(zDiff) > tw->offsetZ)
                                 continue;
 
-                            trace->fraction = enterFrac;
+                            trace->fraction = frac_clamped;
+                            if (tw->radius > borderDist)
+                                trace->startsolid = 1;
                             trace->normal[0] = bNormX;
                             trace->normal[1] = bNormY;
                             trace->normal[2] = 0.0f;

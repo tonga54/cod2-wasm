@@ -2,6 +2,7 @@
 #include "imports.h"
 #include "bytematch.h"
 #include "cod2_feature_config.h"
+#include "cod2_sprint.h"
 #include <math.h>
 
 #if COD2_FEATURE_GAMEPAD
@@ -69,6 +70,7 @@ void CL_WritePacketDbg(const char *fmt, int serverId)
 extern void UI_MouseEvent(int dx, int dy);
 extern void UI_MouseEventAbsolute(int x, int y);
 static kbutton_t playersKb[1][28];
+static kbutton_t sprintButton;
 __attribute__((used, packed, aligned(4)))
 UInt32 kb[8] = {
     (UInt32)playersKb,
@@ -119,6 +121,8 @@ void IN_Attack_Down(void);
 void IN_Attack_Up(void);
 void IN_Breath_Down(void);
 void IN_Breath_Up(void);
+void IN_Sprint_Down(void);
+void IN_Sprint_Up(void);
 void IN_MeleeBreath_Down(void);
 void IN_MeleeBreath_Up(void);
 void IN_Frag_Down(void);
@@ -199,6 +203,8 @@ static const inputCommandDef_t s_inputCommands[] = {
     { "-moveright", IN_MoverightUp },
     { "+speed", IN_SpeedDown },
     { "-speed", IN_SpeedUp },
+    { "+sprint", IN_Sprint_Down },
+    { "-sprint", IN_Sprint_Up },
     { "+attack", IN_Attack_Down },
     { "-attack", IN_Attack_Up },
     { "+melee", IN_Melee_Down },
@@ -547,6 +553,18 @@ void IN_Breath_Up(void)
     IN_KeyUp(&kb[15]);
 }
 
+void IN_Sprint_Down(void)
+{
+    IN_KeyDown(&sprintButton);
+    IN_Breath_Down();
+}
+
+void IN_Sprint_Up(void)
+{
+    IN_KeyUp(&sprintButton);
+    IN_Breath_Up();
+}
+
 void IN_MeleeBreath_Down(void)
 {
     IN_KeyDown(&kb[19]);
@@ -824,7 +842,18 @@ void CL_MouseEventAbsolute(const int x, const int y, const int dx_in, const int 
         ptr->mouseDx[index] += dx;
         ptr->mouseDy[index] += dy;
     } else {
+#ifdef __EMSCRIPTEN__
+        // SDL reports render pixels. UI cursors use the full 640x480 virtual
+        // canvas (alignment 4), including widescreen and high-resolution modes.
+        int uiX = x, uiY = y;
+        if (cls.vidConfig.width > 0)
+            uiX = (int)((long long)x * 640 / cls.vidConfig.width);
+        if (cls.vidConfig.height > 0)
+            uiY = (int)((long long)y * 480 / cls.vidConfig.height);
+        UI_MouseEventAbsolute(uiX, uiY);
+#else
         UI_MouseEventAbsolute(x, y);
+#endif
     }
 }
 
@@ -1020,6 +1049,9 @@ write_footer:
 
 void CL_InitInput(void)
 {
+    memset(&sprintButton, 0, sizeof(sprintButton));
+    Cmd_AddCommand("+sprint", IN_Sprint_Down);
+    Cmd_AddCommand("-sprint", IN_Sprint_Up);
     Cmd_AddCommand("centerview", IN_CenterView);
     Cmd_AddCommand("+moveup", IN_UpDown);
     Cmd_AddCommand("-moveup", IN_UpUp);
@@ -1104,6 +1136,9 @@ void CL_InitInput(void)
 
 void CL_ShutdownInput(void)
 {
+    Cmd_RemoveCommand("+sprint");
+    Cmd_RemoveCommand("-sprint");
+    memset(&sprintButton, 0, sizeof(sprintButton));
     Cmd_RemoveCommand("centerview");
     Cmd_RemoveCommand("+moveup");
     Cmd_RemoveCommand("-moveup");
@@ -1184,6 +1219,9 @@ void CL_CmdButtons(usercmd_t *cmd)
     clientActive_t **clp = (clientActive_t **)imp_cl;
     byte *kbBase = (byte *)kb;
 
+    if (CL_ConsumeButtonPress(&sprintButton))
+        cmd->buttons |= BUTTON_SPRINT;
+
 #define KB_AT(offset) ((kbutton_t *)(kbBase + (offset)))
 #define CONSUME(offset, bit)                         \
     do {                                             \
@@ -1213,7 +1251,10 @@ void CL_CmdButtons(usercmd_t *cmd)
         cmd->buttons |= 0x40000;
     }
 
-    if ((int)((*clp)->snap.ps.pm_type - 2) <= 2 && CL_ConsumeButtonPress(KB_AT(0xf0))) {
+    /* The stand key is also the spectator's vertical movement key. Normal
+     * players raise their stance in IN_GoStandDown; only kb[10] may request
+     * a jump. A signed range check admitted PM_NORMAL here as -2. */
+    if ((unsigned int)((*clp)->snap.ps.pm_type - 2) <= 2 && CL_ConsumeButtonPress(KB_AT(0xf0))) {
         cmd->buttons |= 0x400;
     }
 
@@ -1489,7 +1530,6 @@ void CL_SendCmdInternal(void)
     clientConnection_t *clc;
     clientActive_t *cl;
     outPacket_t *outPacket;
-    const int *serverAddrWords;
     int connectElapsed;
 
     clc = *(clientConnection_t **)imp_clc;
@@ -1514,18 +1554,49 @@ void CL_SendCmdInternal(void)
             goto not_ready;
     }
 
-    serverAddrWords = (const int *)&clc->serverAddress;
-    if (clc->serverAddress.type == NA_LOOPBACK || Sys_IsLANAddress(clc->serverAddress)) {
+    /* Browser room addresses are virtual LAN endpoints transported over
+     * WebSocket. Pace them even on a high-refresh display; every sampled
+     * command remains in the ring and is included in the next packet. */
+    if (clc->serverAddress.type == NA_LOOPBACK
+#ifndef __EMSCRIPTEN__
+        || Sys_IsLANAddress(clc->serverAddress)
+#endif
+    ) {
         CL_WritePacket();
         return;
     }
 
     cl = *(clientActive_t **)imp_cl;
+#ifdef __EMSCRIPTEN__
+    {
+        static int pacedConnectTime = -1;
+        static int previousPacketCheck = -1;
+        static double nextPacketTime;
+        int now = cls.realtime;
+        double interval = 1000.0 / (double)cl_maxpackets->current.integer;
+        if (pacedConnectTime != clc->connectTime || now < previousPacketCheck ||
+            now - previousPacketCheck > 1000) {
+            pacedConnectTime = clc->connectTime;
+            nextPacketTime = (double)now;
+        }
+        previousPacketCheck = now;
+        if ((double)now >= nextPacketTime) {
+            /* Preserve fractional timing across display frames (e.g. 144 Hz).
+             * After a stalled frame, send the retained commands once. */
+            nextPacketTime += interval;
+            if (nextPacketTime <= (double)now)
+                nextPacketTime = (double)now + interval;
+            CL_WritePacket();
+            return;
+        }
+    }
+#else
     outPacket = &cl->outPackets[(clc->netchan.outgoingSequence - 1) & 31];
     if (cls.realtime - outPacket->p_realtime >= 1000 / cl_maxpackets->current.integer) {
         CL_WritePacket();
         return;
     }
+#endif
 
 not_ready:
     if (cl_showSend->current.enabled) {

@@ -1,5 +1,6 @@
 #include "common_types.h"
 #include "imports.h"
+#include "cod2_grenade.h"
 extern level_locals_t level;
 extern scr_const_t scr_const;
 
@@ -31,7 +32,15 @@ enum {
     GMISSILE_EF_GRENADE_BOUNCE = 0x1000000,
     GMISSILE_FL_GUIDED = 0x10000,
     GMISSILE_FL_TURRET = 0x20000,
+    GMISSILE_FL_HELD = 0x40000,
 };
+
+typedef struct {
+    gentity_t *missile;
+    int missileUseCount;
+    int playerSpawnCount;
+} heldGrenade_t;
+static heldGrenade_t heldGrenades[64];
 
 void G_ExplodeMissile(gentity_t *ent);
 gentity_t *fire_grenade(gentity_t *self, vec_t *start, vec_t *dir, int grenadeWPID, int time);
@@ -50,10 +59,10 @@ extern int DirToByte(vec_t *dir);
 extern unsigned char G_AddEvent(gentity_t *ent, int event, int eventParm);
 extern int SV_PointContents(vec_t *point, int passEntityNum, int contentMask);
 extern void SV_LinkEntity(gentity_t *ent);
-extern qboolean G_RadiusDamage(vec_t *origin, gentity_t *ent, gentity_t *attacker, float radius, float outerDamage, float innerDamage, gentity_t *inflictor, int splashMod);
+extern qboolean G_RadiusDamage(const vec_t *origin, gentity_t *ent, gentity_t *attacker, float innerDamage, float outerDamage, float radius, gentity_t *ignore, int splashMod);
 extern void Server_SwitchToValidFxScheduler(void);
-extern int FX_RegisterEffect(const char *name);
-extern float FX_GetEffectLength(int handle);
+extern EffectTemplate *FX_RegisterEffect(const char *name);
+extern float FX_GetEffectLength(EffectTemplate *handle);
 extern gentity_t *G_Spawn(void);
 extern void Scr_SetString(scr_string_t *dst, unsigned int str);
 extern void vectoangles(vec_t *dir, vec_t *angles);
@@ -74,6 +83,7 @@ extern void G_Damage(gentity_t *target, gentity_t *inflictor, gentity_t *attacke
 extern void G_CheckHitTriggerDamage(gentity_t *attacker, vec_t *start, vec_t *end, int damage, int mod);
 extern void G_GrenadeTouchTriggerDamage(gentity_t *ent, vec_t *oldOrigin, vec_t *origin, int radius, int mod);
 extern void SnapVectorTowards(vec_t *v, vec_t *to);
+extern void G_GetPlayerViewOrigin(gentity_t *ent, vec_t *origin);
 
 static inline void VectorCopy(const vec_t *src, vec_t *dst)
 {
@@ -146,6 +156,190 @@ static inline void LerpPosition(const vec_t *start, const vec_t *end, float frac
     out[2] = start[2] + (end[2] - start[2]) * fraction;
 }
 
+void G_ResetHeldGrenades(void)
+{
+    memset(heldGrenades, 0, sizeof(heldGrenades));
+}
+
+static gentity_t *G_GetHeldGrenade(gentity_t *player)
+{
+    int clientNum = player->s.number;
+    heldGrenade_t *held;
+    gentity_t *missile;
+    if ((unsigned)clientNum >= 64 || !player->client)
+        return NULL;
+    held = &heldGrenades[clientNum];
+    missile = held->missile;
+    if (!missile)
+        return NULL;
+    if (!missile->r.inuse || missile->useCount != held->missileUseCount ||
+        missile->s.eType != 4 || !(missile->flags & GMISSILE_FL_HELD) ||
+        missile->s.otherEntityNum != clientNum ||
+        player->client->ps.stats[5] != held->playerSpawnCount) {
+        held->missile = NULL;
+        return NULL;
+    }
+    return missile;
+}
+
+static void G_HoldGrenade(gentity_t *player, gentity_t *missile)
+{
+    heldGrenade_t *held = &heldGrenades[player->s.number];
+    held->missile = missile;
+    held->missileUseCount = missile->useCount;
+    held->playerSpawnCount = player->client->ps.stats[5];
+    missile->flags |= GMISSILE_FL_HELD;
+    missile->s.otherEntityNum = player->s.number;
+    missile->r.ownerNum = player->s.number;
+    missile->parent = COD2_GEntityHandle(player);
+    missile->r.svFlags |= 1; /* The viewmodel already draws the held grenade. */
+    G_GetPlayerViewOrigin(player, missile->r.currentOrigin);
+    G_SetOrigin(missile, missile->r.currentOrigin);
+    SV_LinkEntity(missile);
+}
+
+static qboolean G_CanPickUpGrenade(const gentity_t *player)
+{
+    const playerState_t *ps = &player->client->ps;
+    return player->health > 0 && ps->pm_type == 0 && ps->weaponstate == 0 &&
+        !(ps->eFlags & 0x300) && !(ps->pm_flags & (0x10 | 0x4 | 0x1000 | 0x8000));
+}
+
+static gentity_t *G_FindNearbyGrenade(gentity_t *player)
+{
+    gentity_t *nearest = NULL;
+    float nearestDistSq = GRENADE_THROWBACK_RANGE * GRENADE_THROWBACK_RANGE;
+    vec3_t eye;
+    vec3_t reach;
+    int count = level.num_entities < 1022 ? level.num_entities : 1022;
+    int i;
+    G_GetPlayerViewOrigin(player, eye);
+    VectorCopy(player->client->ps.origin, reach);
+    reach[2] += player->client->ps.viewHeightCurrent * 0.5f;
+    for (i = 64; i < count; i++) {
+        gentity_t *missile = &g_entities[i];
+        vec3_t delta;
+        float distSq;
+        trace_t trace;
+        if (!missile->r.inuse || missile->s.eType != 4 || missile->handler != 7 ||
+            !(missile->s.eFlags & GMISSILE_EF_GRENADE_BOUNCE) ||
+            (missile->flags & GMISSILE_FL_HELD) || missile->nextthink <= LEVEL_TIME)
+            continue;
+        if (BG_GetWeaponDef(missile->s.weapon)->offhandClass != OFFHAND_CLASS_FRAG_GRENADE)
+            continue;
+        VectorSubtract(missile->r.currentOrigin, reach, delta);
+        distSq = DotProduct(delta, delta);
+        if (distSq > nearestDistSq)
+            continue;
+        /* Never claim a live grenade through a wall or a closed door. */
+        G_TraceCapsule(&trace, eye, (vec_t *)vec3_origin_ptr, (vec_t *)vec3_origin_ptr,
+                       missile->r.currentOrigin, player->s.number, 0x811);
+        if (trace.startsolid || (trace.fraction < 1.0f && trace.entityNum != missile->s.number))
+            continue;
+        nearest = missile;
+        nearestDistSq = distSq;
+    }
+    return nearest;
+}
+
+void G_UpdateGrenadeHint(gentity_t *player)
+{
+    gentity_t *missile;
+    if (!G_CanPickUpGrenade(player))
+        return;
+    missile = G_FindNearbyGrenade(player);
+    if (missile) {
+        player->client->ps.cursorHint = GRENADE_THROWBACK_HINT;
+        player->client->ps.cursorHintString = -1;
+        player->client->ps.cursorHintEntIndex = 1023;
+    }
+}
+
+void G_GrenadeCookOff(gentity_t *player)
+{
+    playerState_t *ps = &player->client->ps;
+    gentity_t *missile = G_GetHeldGrenade(player);
+    vec3_t origin;
+    vec3_t zero = {0, 0, 0};
+    if (!ps->offHandIndex)
+        return;
+    /* The wall-clock expiry also runs if no usercmd arrives. Consume the
+     * inventory grenade here only when Pmove has not already consumed it. */
+    if ((ps->pm_flags & 0x10) && !(ps->pm_flags & PMF_GRENADE_THROWBACK)) {
+        int clip = BG_GetWeaponDef(ps->offHandIndex)->iClipIndex;
+        if (ps->ammoclip[clip] > 0)
+            ps->ammoclip[clip]--;
+    }
+    G_GetPlayerViewOrigin(player, origin);
+    ps->grenadeTimeLeft = 0;
+    if (!missile)
+        missile = fire_grenade(player, origin, zero, ps->offHandIndex, 0);
+    heldGrenades[player->s.number].missile = NULL;
+    missile->flags &= ~GMISSILE_FL_HELD;
+    missile->r.svFlags &= ~1;
+    G_SetOrigin(missile, origin);
+    missile->nextthink = 0;
+    ps->pm_flags &= ~(0x810 | PMF_GRENADE_THROWBACK);
+    ps->weaponstate = 16; /* WEAPON_OFFHAND_END */
+    ps->weaponTime = ps->weaponDelay = 0;
+    G_ExplodeMissile(missile);
+}
+
+void G_BeginGrenadeInput(gentity_t *player, const usercmd_t *cmd)
+{
+    playerState_t *ps = &player->client->ps;
+    gentity_t *missile = G_GetHeldGrenade(player);
+    int pendingMsec = cmd->serverTime - ps->commandTime;
+    if (pendingMsec < 0) pendingMsec = 0;
+    if (pendingMsec > 1000) pendingMsec = 1000; /* Pmove's command horizon. */
+    if (!missile && (cmd->buttons & 0x10000) &&
+        !(player->client->sess.oldcmd.buttons & 0x10000) && G_CanPickUpGrenade(player)) {
+        missile = G_FindNearbyGrenade(player);
+        /* A stale hint must not block ordinary inventory grenades forever. */
+        if (ps->cursorHint == GRENADE_THROWBACK_HINT)
+            ps->cursorHint = 0;
+        if (missile) {
+            G_HoldGrenade(player, missile);
+            ps->offHandIndex = missile->s.weapon;
+            ps->pm_flags = (ps->pm_flags & ~0x40) | 0x10 | PMF_GRENADE_THROWBACK;
+            ps->weaponstate = 14; /* Already armed: WEAPON_OFFHAND_HOLD. */
+            ps->weaponTime = ps->weaponDelay = 0;
+            ps->weapAnim = ((ps->weapAnim & 0x200) ^ 0x200) | 0x13;
+        }
+    }
+    if (missile) {
+        int remaining = missile->nextthink - LEVEL_TIME;
+        if (remaining <= 0) {
+            G_GrenadeCookOff(player);
+        } else {
+            /* Pmove will consume pendingMsec; repeated/batched commands may
+             * never extend the authoritative, wall-clock explosion deadline. */
+            ps->grenadeTimeLeft = remaining + pendingMsec;
+        }
+    }
+}
+
+void G_EndGrenadeInput(gentity_t *player)
+{
+    playerState_t *ps = &player->client->ps;
+    gentity_t *missile;
+    vec3_t origin;
+    vec3_t zero = {0, 0, 0};
+    if ((unsigned)player->s.number >= 64 || player->health <= 0 ||
+        !(ps->pm_flags & 0x10) || !ps->offHandIndex || ps->grenadeTimeLeft <= 0 ||
+        !(ps->weaponstate == 14 || (ps->weaponstate == 15 && ps->weaponDelay > 0)) ||
+        !BG_GrenadeCanCook(BG_GetWeaponDef(ps->offHandIndex)))
+        return;
+    missile = G_GetHeldGrenade(player);
+    if (!missile) {
+        int remaining = ps->grenadeTimeLeft;
+        G_GetPlayerViewOrigin(player, origin);
+        missile = fire_grenade(player, origin, zero, ps->offHandIndex, remaining);
+        ps->grenadeTimeLeft = remaining;
+        G_HoldGrenade(player, missile);
+    }
+}
+
 void G_ExplodeMissile(gentity_t *ent)
 {
     WeaponDef *weapDef;
@@ -198,9 +392,9 @@ void G_ExplodeMissile(gentity_t *ent)
 
         (_ENT(ent)->s.eFlags) |= 0x10000;
         Server_SwitchToValidFxScheduler();
-        int fxHandle = FX_RegisterEffect(weapDef->szProjExplosionEffect);
+        EffectTemplate *fxHandle = FX_RegisterEffect(weapDef->szProjExplosionEffect);
         (_ENT(ent)->s.time) = LEVEL_TIME;
-        float fxLength = FX_GetEffectLength(fxHandle);
+        float fxLength = fxHandle ? FX_GetEffectLength(fxHandle) : 0;
         (_ENT(ent)->s.time2) = LEVEL_TIME + (int)(fxLength + 1.0f);
     } else {
 
@@ -210,9 +404,9 @@ void G_ExplodeMissile(gentity_t *ent)
     if (weapDef->iExplosionRadius > 0) {
         int splashMod = HANDLER_SPLASHMOD((_ENT(ent)->handler));
         G_RadiusDamage((_ENT(ent)->r.currentOrigin), ent, COD2_GEntityFromHandle(_ENT(ent)->parent),
-                       (float)weapDef->iExplosionRadius,
-                       (float)weapDef->iExplosionOuterDamage,
                        (float)weapDef->iExplosionInnerDamage,
+                       (float)weapDef->iExplosionOuterDamage,
+                       (float)weapDef->iExplosionRadius,
                        ent, splashMod);
     }
 
@@ -226,19 +420,20 @@ gentity_t *fire_grenade(gentity_t *self, vec_t *start, vec_t *dir, int grenadeWP
     gclient_t *cl;
     vec3_t angles;
 
-    bolt = G_Spawn();
+    bolt = G_GetHeldGrenade(self);
+    if (bolt) {
+        /* Throw the very same missile. Picking up, holding, bouncing and
+         * throwing it again all retain its original nextthink deadline. */
+        heldGrenades[self->s.number].missile = NULL;
+        bolt->flags &= ~GMISSILE_FL_HELD;
+    } else {
+        bolt = G_Spawn();
+        cl = self->client;
+        bolt->nextthink = LEVEL_TIME + (cl && cl->ps.grenadeTimeLeft > 0 ?
+                                       cl->ps.grenadeTimeLeft : time);
+    }
 
     cl = (_ENT(self)->client);
-
-    if (cl && ((gclient_t *)cl)->ps.grenadeTimeLeft != 0) {
-
-        (_ENT(bolt)->nextthink) = LEVEL_TIME + ((gclient_t *)cl)->ps.grenadeTimeLeft;
-        ((gclient_t *)cl)->ps.grenadeTimeLeft = 0;
-        cl = (_ENT(self)->client);
-    } else {
-
-        (_ENT(bolt)->nextthink) = LEVEL_TIME + time;
-    }
 
     if (cl) {
         ((gclient_t *)cl)->ps.grenadeTimeLeft = 0;
@@ -247,6 +442,8 @@ gentity_t *fire_grenade(gentity_t *self, vec_t *start, vec_t *dir, int grenadeWP
     (_ENT(bolt)->handler) = 7;
 
     (_ENT(bolt)->s.eType) = 4;
+    bolt->s.otherEntityNum = 1023;
+    bolt->s.groundEntityNum = 1023;
 
     (_ENT(bolt)->r.svFlags) = 8;
 
@@ -524,6 +721,31 @@ void G_RunMissile(gentity_t *ent)
     int hitClient;
     WeaponDef *weapDef;
 
+    if (ent->flags & GMISSILE_FL_HELD) {
+        int clientNum = ent->s.otherEntityNum;
+        gentity_t *holder = (unsigned)clientNum < 64 ? &g_entities[clientNum] : NULL;
+        if (holder && holder->r.inuse && holder->client && holder->health > 0 &&
+            holder->client->sess.connected == 2 && G_GetHeldGrenade(holder) == ent &&
+            (holder->client->ps.pm_flags & 0x10)) {
+            G_GetPlayerViewOrigin(holder, origin);
+            G_SetOrigin(ent, origin);
+            SV_LinkEntity(ent);
+            if (ent->nextthink <= LEVEL_TIME)
+                G_GrenadeCookOff(holder);
+            return;
+        }
+        /* Death/disconnect drops the live grenade; the fuse keeps burning. */
+        if ((unsigned)clientNum < 64 && heldGrenades[clientNum].missile == ent)
+            heldGrenades[clientNum].missile = NULL;
+        ent->flags &= ~GMISSILE_FL_HELD;
+        ent->r.svFlags &= ~1;
+        ent->s.otherEntityNum = 1023;
+        ent->s.pos.trType = 5;
+        ent->s.pos.trTime = LEVEL_TIME;
+        VectorCopy(ent->r.currentOrigin, ent->s.pos.trBase);
+        VectorClear(ent->s.pos.trDelta);
+    }
+
     if ((&_ENT(ent)->s.pos)->trType == 0 && (_ENT(ent)->s.groundEntityNum) != 0x3FE) {
 
         VectorCopy((_ENT(ent)->r.currentOrigin), origin);
@@ -761,7 +983,7 @@ after_trace:
          * below the map instead of reflecting off the collision plane. */
         if ((_ENT(other)->takedamage) || ((_ENT(ent)->s.eFlags) & GMISSILE_EF_GRENADE_BOUNCE)) {
 
-            if (!(_ENT(other)->takedamage)) {
+            if (((_ENT(ent)->s.eFlags) & GMISSILE_EF_GRENADE_BOUNCE) || !(_ENT(other)->takedamage)) {
 
                 gclient_t *otherClient = (_ENT(other)->client);
                 if (otherClient) {
@@ -860,9 +1082,9 @@ after_trace:
             if (hitWeapDef->iExplosionRadius > 0) {
                 int splashMod = HANDLER_SPLASHMOD((_ENT(ent)->handler));
                 G_RadiusDamage(endpos, ent, COD2_GEntityFromHandle(_ENT(ent)->parent),
-                               (float)hitWeapDef->iExplosionRadius,
-                               (float)hitWeapDef->iExplosionOuterDamage,
                                (float)hitWeapDef->iExplosionInnerDamage,
+                               (float)hitWeapDef->iExplosionOuterDamage,
+                               (float)hitWeapDef->iExplosionRadius,
                                ent, splashMod);
             }
 

@@ -170,7 +170,7 @@ __attribute__((constructor)) static void init_rune_locale(void)
 }
 
 extern void *sDisplayList[3];   /* matches the real def (void*[3]); was [12] (x86 4-byte slots) */
-extern int sInWindowMode;
+extern unsigned char sInWindowMode;
 
 struct DisplayMode {
     unsigned int width;
@@ -577,6 +577,11 @@ ContextRef MacDisplay_CreateScreenContext(int inDepthSize, int inUseStencil,
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+    // Browser MSAA smooths silhouette/fence edges without altering textures.
+    extern int Dvar_GetInt(const char *name);
+    int samples = Dvar_GetInt("r_aaSamples");
+    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, samples > 1);
+    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, samples > 1 ? samples : 0);
 #    else
 
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);

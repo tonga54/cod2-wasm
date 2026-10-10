@@ -1053,6 +1053,15 @@ void SV_SendServerCommand(client_t *cl, svscmd_type type, const char *fmt, ...)
     ZN10LargeLocalD1Ev(&message_large_local);
 }
 
+int SV_FrameWaitMilliseconds(void)
+{
+    int remaining;
+    if (!sv_fps || !(*(const dvar_t **)imp_com_sv_running)->current.enabled)
+        return 50;
+    remaining = 1000 / sv_fps->current.integer - sv.timeResidual;
+    return remaining > 0 ? remaining : 1;
+}
+
 void SV_Frame(int msec)
 {
     int frameMsec;

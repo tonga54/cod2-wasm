@@ -1,4 +1,7 @@
 #include "common_types.h"
+#include "headers/cod2_chat.h"
+#include "cod2_grenade.h"
+#include "cod2_sprint.h"
 #include "imports.h"
 #include "bytematch.h"
 #include "headers/PC/cgame_mp/cg_local.h"
@@ -27,6 +30,22 @@ extern const dvar_t *cg_drawSoundOverlay;
 extern const dvar_t *cg_drawTurretCrosshair;
 extern const dvar_t *cg_hudChatPosition;
 extern const dvar_t *cg_hudCompassSize;
+extern const dvar_t *cg_hudDamageIconWidth;
+extern const dvar_t *cg_hudDamageIconHeight;
+extern const dvar_t *cg_hudDamageIconOffset;
+extern const dvar_t *cg_hudDamageIconInScope;
+extern const dvar_t *cg_hudGrenadeIconMaxRange;
+extern const dvar_t *cg_hudGrenadeIconMaxHeight;
+extern const dvar_t *cg_hudGrenadeIconInScope;
+extern const dvar_t *cg_hudGrenadeIconOffset;
+extern const dvar_t *cg_hudGrenadeIconHeight;
+extern const dvar_t *cg_hudGrenadeIconWidth;
+extern const dvar_t *cg_hudGrenadePointerHeight;
+extern const dvar_t *cg_hudGrenadePointerWidth;
+extern const dvar_t *cg_hudGrenadePointerPivot;
+extern const dvar_t *cg_hudGrenadePointerPulseFreq;
+extern const dvar_t *cg_hudGrenadePointerPulseMax;
+extern const dvar_t *cg_hudGrenadePointerPulseMin;
 extern const dvar_t *cg_hudSayPosition;
 extern const dvar_t *cg_minicon;
 extern const dvar_t *cg_nopredict;
@@ -98,6 +117,7 @@ extern void CG_TraceCapsule(trace_t *result, const vec_t *start, const vec_t *mi
 extern int BG_GetViewmodelWeaponIndex(void *ps);
 extern void *BG_GetWeaponDef(int weapIndex);
 extern int BG_GetNumWeapons(void);
+extern void CG_RegisterWeapon(int weaponNum);
 extern void CL_DrawStretchPic(float x, float y, float w, float h, int horzAlign, int vertAlign, float s1, float t1, float s2, float t2, const vec_t *color, MaterialHandle material);
 extern void CL_DrawStretchPicPhysical(float x, float y, float w, float h, float s1, float t1, float s2, float t2, const vec_t *color, MaterialHandle material);
 extern void CalcScreenPlacement(float *x, float *y, float *w, float *h, int horzAlign, int vertAlign);
@@ -501,6 +521,12 @@ unsigned int CG_DrawCrosshairNames(void)
         return 0;
     }
 
+    localClientInfo = &cg->bgs.clientinfo[cg->snap->ps.clientNum];
+    /* Active teammates already have a label above their model. */
+    if ((localClientInfo->team == 1 || localClientInfo->team == 2) &&
+        cg->predictedPlayerState.pm_type <= 1)
+        return 0;
+
     start[0] = cg->refdef.vieworg[0];
     start[1] = cg->refdef.vieworg[1];
     start[2] = cg->refdef.vieworg[2];
@@ -520,7 +546,7 @@ unsigned int CG_DrawCrosshairNames(void)
     }
 
     targetClientNum = cg->crosshairClientNum;
-    if (targetClientNum < 0 || targetClientNum > 64) {
+    if (targetClientNum < 0 || targetClientNum >= 64) {
         return 0;
     }
 
@@ -1003,15 +1029,232 @@ void CG_DrawTurretCrossHair(void)
 {
     const dvar_t *drawTurretCrosshair;
     vec4_t color = { 1.0f, 1.0f, 1.0f, 0.75f };
+    centity_t *turret;
+    int weaponIndex;
 
     drawTurretCrosshair = cg_drawTurretCrosshair;
     if (drawTurretCrosshair && !drawTurretCrosshair->current.enabled)
         return;
 
-    if (!cgs)
+    if (!cg || !cgs || !cg->predictedPlayerState.viewlocked ||
+        (unsigned)cg->predictedPlayerState.viewlocked_entNum >= 1024)
         return;
 
-    UI_DrawHandlePic(316.0f, 236.0f, 8.0f, 8.0f, 0, 0, color, cgs->media.whiteMaterial);
+    turret = &cg_entities[cg->predictedPlayerState.viewlocked_entNum];
+    if (!turret->nextValid || turret->nextState.eType != 9)
+        return;
+    weaponIndex = turret->nextState.weapon;
+    if (weaponIndex > 0 && weaponIndex <= BG_GetNumWeapons()) {
+        WeaponDef *weapon = BG_GetWeaponDef(weaponIndex);
+        weaponInfo_t *info;
+        CG_RegisterWeapon(weaponIndex);
+        info = &(*(weaponInfo_t **)imp_cg_weapons)[weaponIndex];
+        if (info->hReticleCenter && weapon->iReticleCenterSize > 0) {
+            float size = (float)weapon->iReticleCenterSize;
+            UI_DrawHandlePic(320.0f - size * .5f, 240.0f - size * .5f,
+                             size, size, 0, 0, color, info->hReticleCenter);
+        }
+    }
+    {
+        int state = turret->nextState.time2;
+        int percent = state & 255;
+        vec4_t heatColor = {1.0f, state & 0x100 ? 0.15f : 0.65f, 0.1f, 0.9f};
+        vec4_t background = {0.0f, 0.0f, 0.0f, 0.65f};
+        if (percent > 100) percent = 100;
+        UI_DrawHandlePic(280, 268, 80, 5, 0, 0, background, cgs->media.whiteMaterial);
+        UI_DrawHandlePic(280, 268, percent * 0.8f, 5, 0, 0, heatColor, cgs->media.whiteMaterial);
+        if (state & 0x100) {
+            FontHandle font = UI_GetFontHandle(0, 0.25f);
+            const char *text = "Cooling down...";
+            UI_DrawText(text, 0x7fffffff, font, 320 - UI_TextWidth(text, 0, font, .25f) * .5f,
+                        287, 0, 0, .25f, heatColor, 3);
+        }
+    }
+}
+
+static void CG_DrawDamageIndicators(void)
+{
+    int i;
+    WeaponDef *weapon = BG_GetWeaponDef(cg->predictedPlayerState.weapon);
+    if (!cgs->media.damageMaterial ||
+        (weapon && weapon->overlayReticle && cg->predictedPlayerState.fWeaponPosFrac == 1.0f &&
+         cg_hudDamageIconInScope && !cg_hudDamageIconInScope->current.enabled))
+        return;
+    for (i = 0; i < 8; ++i) {
+        viewDamage_t *hit = &cg->viewDamage[i];
+        int age = cg->time - hit->time;
+        float width, height, offset, angle, radians;
+        vec4_t color = {1, 1, 1, 1};
+        if (!hit->time || hit->duration <= 0 || age < 0 || age >= hit->duration)
+            continue;
+        width = cg_hudDamageIconWidth ? cg_hudDamageIconWidth->current.value : 128;
+        height = cg_hudDamageIconHeight ? cg_hudDamageIconHeight->current.value : 64;
+        offset = cg_hudDamageIconOffset ? cg_hudDamageIconOffset->current.value : 128;
+        /* The server encodes the projectile's travel direction, which points
+         * away from its source. Show the side the shot came from. */
+        angle = hit->yaw + 180.0f - cg->refdefViewAngles[1];
+        radians = angle * 0.01745329252f;
+        color[3] = 1.0f - (float)age / hit->duration;
+        CG_DrawRotatedPic(-sinf(radians) * offset - width * .5f,
+                         -cosf(radians) * offset - height * .5f,
+                         width, height, 7, 7, -angle, color, cgs->media.damageMaterial);
+    }
+}
+
+static qboolean CG_GrenadeThreatDistance(const centity_t *cent, float *distanceSq)
+{
+    const entityState_t *state = &cent->nextState;
+    const WeaponDef *weapon;
+    float range, dx, dy, dz;
+
+    if (!cent->nextValid || state->eType != 4 || (state->eFlags & 0x20) ||
+        state->time > cg->time || state->weapon <= 0 || state->weapon > BG_GetNumWeapons())
+        return 0;
+    weapon = BG_GetWeaponDef(state->weapon);
+    if (!weapon || weapon->weapType != WEAPTYPE_GRENADE ||
+        weapon->offhandClass != OFFHAND_CLASS_FRAG_GRENADE || weapon->iExplosionRadius <= 0)
+        return 0;
+
+    range = (float)weapon->iExplosionRadius;
+    if (range > cg_hudGrenadeIconMaxRange->current.value)
+        range = cg_hudGrenadeIconMaxRange->current.value;
+    if (range <= 0.0f)
+        return 0;
+    dx = cent->lerpOrigin[0] - cg->predictedPlayerState.origin[0];
+    dy = cent->lerpOrigin[1] - cg->predictedPlayerState.origin[1];
+    dz = cent->lerpOrigin[2] - cg->predictedPlayerState.origin[2];
+    if (fabsf(dz) > cg_hudGrenadeIconMaxHeight->current.value)
+        return 0;
+    *distanceSq = dx * dx + dy * dy + dz * dz;
+    /* Splash uses the player's origin and a strict 3D radius. A grenade on
+     * another floor must not warn after leaving that sphere. No visibility
+     * trace is needed: nearby explosives remain a warning around cover. */
+    return *distanceSq < range * range;
+}
+
+static void CG_DrawGrenadeIndicators(void)
+{
+    enum { MAX_WARNINGS = 4 };
+    struct { const centity_t *cent; float distanceSq; } threats[MAX_WARNINGS];
+    const snapshot_t *snap = cg->nextSnap ? cg->nextSnap : cg->snap;
+    const playerState_t *ps = &cg->predictedPlayerState;
+    const WeaponDef *viewWeapon;
+    int count = 0, entities, i;
+    float width, height, pointerWidth, pointerHeight, pulse;
+    vec4_t iconColor = {1.0f, 1.0f, 1.0f, 1.0f};
+    vec4_t pointerColor = {1.0f, 0.2f, 0.1f, 1.0f};
+
+    if (!snap || !cg_entities || ps->pm_type > 1 || ps->stats[0] <= 0 ||
+        cg->renderingThirdPerson || CG_AreHudMenusHidden() ||
+        !cgs->media.grenadeIcon || !cgs->media.grenadePointer)
+        return;
+    viewWeapon = ps->weapon > 0 && ps->weapon <= BG_GetNumWeapons() ?
+        BG_GetWeaponDef(ps->weapon) : NULL;
+    if (viewWeapon && viewWeapon->overlayReticle && ps->fWeaponPosFrac == 1.0f &&
+        !cg_hudGrenadeIconInScope->current.enabled)
+        return;
+
+    /* Read only the bounded snapshot list. Keep the four closest threats,
+     * without allocations, world traces or additional multiplayer traffic. */
+    entities = snap->numEntities;
+    if (entities > (int)(sizeof(snap->entities) / sizeof(snap->entities[0])))
+        entities = sizeof(snap->entities) / sizeof(snap->entities[0]);
+    for (i = 0; i < entities; ++i) {
+        int number = snap->entities[i].number;
+        const centity_t *cent;
+        float distanceSq;
+        int slot;
+        if (snap->entities[i].eType != 4 || (unsigned)number >= 1022)
+            continue;
+        cent = &cg_entities[number];
+        if (!CG_GrenadeThreatDistance(cent, &distanceSq) ||
+            (count == MAX_WARNINGS && distanceSq >= threats[MAX_WARNINGS - 1].distanceSq))
+            continue;
+        slot = count < MAX_WARNINGS ? count++ : MAX_WARNINGS - 1;
+        while (slot > 0 && distanceSq < threats[slot - 1].distanceSq) {
+            threats[slot] = threats[slot - 1];
+            --slot;
+        }
+        threats[slot].cent = cent;
+        threats[slot].distanceSq = distanceSq;
+    }
+    if (!count)
+        return;
+
+    width = cg_hudGrenadeIconWidth->current.value;
+    height = cg_hudGrenadeIconHeight->current.value;
+    pointerWidth = cg_hudGrenadePointerWidth->current.value;
+    pointerHeight = cg_hudGrenadePointerHeight->current.value;
+    pulse = 0.5f + 0.5f * sinf(cg->time * 0.006283185307f *
+                              cg_hudGrenadePointerPulseFreq->current.value);
+    pointerColor[3] = cg_hudGrenadePointerPulseMin->current.value + pulse *
+        (cg_hudGrenadePointerPulseMax->current.value - cg_hudGrenadePointerPulseMin->current.value);
+    if (pointerColor[3] < 0.0f) pointerColor[3] = 0.0f;
+    if (pointerColor[3] > 1.0f) pointerColor[3] = 1.0f;
+
+    for (i = 0; i < count; ++i) {
+        vec3_t delta;
+        float angle, radians, s, c, x, y, pivotX, pivotY;
+        delta[0] = threats[i].cent->lerpOrigin[0] - ps->origin[0];
+        delta[1] = threats[i].cent->lerpOrigin[1] - ps->origin[1];
+        delta[2] = 0.0f;
+        angle = vectoyaw(delta) - cg->refdefViewAngles[1];
+        radians = angle * 0.01745329252f;
+        s = sinf(radians);
+        c = cosf(radians);
+        x = -s * cg_hudGrenadeIconOffset->current.value;
+        y = -c * cg_hudGrenadeIconOffset->current.value;
+        UI_DrawHandlePic(x - width * 0.5f, y - height * 0.5f,
+                         width, height, 7, 7, iconColor, cgs->media.grenadeIcon);
+        /* Rotate the original triangle around its configured icon pivot,
+         * leaving the grenade silhouette upright and the crosshair clear. */
+        pivotX = pointerWidth * 0.5f - cg_hudGrenadePointerPivot->current.vector[0];
+        pivotY = pointerHeight * 0.5f - cg_hudGrenadePointerPivot->current.vector[1];
+        CG_DrawRotatedPic(x + c * pivotX + s * pivotY - pointerWidth * 0.5f,
+                         y - s * pivotX + c * pivotY - pointerHeight * 0.5f,
+                         pointerWidth, pointerHeight, 7, 7, -angle,
+                         pointerColor, cgs->media.grenadePointer);
+    }
+}
+
+static void CG_DrawFriendlyNames(void)
+{
+    int i, team = cg->bgs.clientinfo[cg->predictedPlayerState.clientNum].team;
+    float tanX = (float)tan(cg->refdef.fov_x * 0.00872664626f);
+    float tanY = (float)tan(cg->refdef.fov_y * 0.00872664626f);
+    FontHandle font = UI_GetFontHandle(0, .23f);
+    vec4_t color = {.55f, 1.0f, .55f, 1.0f};
+    if ((team != 1 && team != 2) || tanX <= 0 || tanY <= 0) return;
+    for (i = 0; i < 64; ++i) {
+        centity_t *cent = &cg_entities[i];
+        clientInfo_t *ci;
+        vec3_t delta;
+        float depth = 0, side = 0, up = 0, x, y;
+        float halfWidth = GetVirtualWidthFromRealWidth(cg->refdef.width) * .5f;
+        float halfHeight = GetVirtualHeightFromRealHeight(cg->refdef.height) * .5f;
+        int axis;
+        if (!cent->nextValid || cent->nextState.eType != 1 ||
+            (unsigned)cent->nextState.clientNum >= 64 ||
+            cent->nextState.clientNum == cg->predictedPlayerState.clientNum) continue;
+        ci = &cg->bgs.clientinfo[cent->nextState.clientNum];
+        if (!ci->infoValid || ci->team != team || !ci->name[0]) continue;
+        for (axis = 0; axis < 3; ++axis) {
+            delta[axis] = cent->lerpOrigin[axis] - cg->refdef.vieworg[axis];
+        }
+        /* Player stance flags: standing, crouching and prone head heights. */
+        delta[2] += cent->nextState.eFlags & 8 ? 24 : cent->nextState.eFlags & 4 ? 48 : 76;
+        for (axis = 0; axis < 3; ++axis) {
+            depth += delta[axis] * cg->refdef.viewaxis[0][axis];
+            side += delta[axis] * cg->refdef.viewaxis[1][axis];
+            up += delta[axis] * cg->refdef.viewaxis[2][axis];
+        }
+        if (depth <= 1) continue;
+        x = -halfWidth * side / (depth * tanX);
+        y = -halfHeight * up / (depth * tanY);
+        if (fabsf(x) > halfWidth || fabsf(y) > halfHeight) continue;
+        UI_DrawText(ci->name, 32, font, x - UI_TextWidth(ci->name, 32, font, .23f) * .5f,
+                    y, 7, 7, .23f, color, 3);
+    }
 }
 
 static unsigned int CG_DrawSpectatorMessage(void)
@@ -1090,79 +1333,49 @@ void CG_DrawActive(void)
 
 unsigned int CG_DrawChatMessages(void)
 {
+    int chatHeight = cg_chatHeight->current.integer;
+    int chatTime = cg_chatTime->current.integer;
+    int i, count, lineHeight, textHeight, panelWidth = 0;
+    float hudChatX = cg_hudChatPosition->current.vector[0];
+    float hudChatY = cg_hudChatPosition->current.vector[1];
     FontHandle font;
-    const char *msg;
-    vec4_t color;
-    float alphaPercent;
-    float backgroundAlpha;
-    float y;
-    float timeRemaining;
-    int chatHeight;
-    int hudChatX;
-    int hudChatY;
-    int chatTime;
-    int index;
-    int i;
-    int textWidth;
+    vec4_t color = {0.0f, 0.0f, 0.0f, 0.3f};
 
-    chatHeight = cg_chatHeight->current.integer;
-    if (!chatHeight) {
-        return 0;
-    }
-
-    hudChatX = (int)cg_hudChatPosition->current.vector[0];
-    hudChatY = (int)cg_hudChatPosition->current.vector[1];
-    if (cgs->teamLastChatPos == cgs->teamChatPos) {
-        return 0;
-    }
-
-    index = cgs->teamLastChatPos % chatHeight;
-    chatTime = cg_chatTime->current.integer;
-    if (cg->time - cgs->teamChatMsgTimes[index] > chatTime) {
+    if (chatHeight <= 0 || chatTime <= 0) return 0;
+    if (chatHeight > COD2_CHAT_ROWS) chatHeight = COD2_CHAT_ROWS;
+    if (cgs->teamLastChatPos < cgs->teamChatPos - chatHeight)
+        cgs->teamLastChatPos = cgs->teamChatPos - chatHeight;
+    /* A resumed frame can expire several messages at once. */
+    while (cgs->teamLastChatPos < cgs->teamChatPos &&
+           cg->time - cgs->teamChatMsgTimes[cgs->teamLastChatPos % COD2_CHAT_ROWS] >= chatTime)
         ++cgs->teamLastChatPos;
+    count = cgs->teamChatPos - cgs->teamLastChatPos;
+    if (count <= 0) return 0;
+
+    font = UI_GetFontHandle(0, COD2_CHAT_SCALE);
+    textHeight = UI_TextHeight(font, COD2_CHAT_SCALE);
+    lineHeight = textHeight + 4;
+    if (lineHeight < 12) lineHeight = 12;
+    for (i = cgs->teamLastChatPos; i < cgs->teamChatPos; ++i) {
+        int width = UI_TextWidth(cgs->teamChatMsgs[i % COD2_CHAT_ROWS], 0, font, COD2_CHAT_SCALE);
+        if (width > panelWidth) panelWidth = width;
     }
-
-    font = UI_GetFontHandle(0, 1.0f / 3.0f);
-    for (i = cgs->teamChatPos - 1; i >= cgs->teamLastChatPos; --i) {
-        index = i % chatHeight;
-        timeRemaining = (float)chatTime - (float)(cg->time - cgs->teamChatMsgTimes[index]);
-        if (timeRemaining > 200.0f) {
-            alphaPercent = 1.0f;
-            backgroundAlpha = 0.60000002f;
-        } else {
-            alphaPercent = timeRemaining / 200.0f;
-            if (alphaPercent <= 0.0f) {
-                continue;
-            }
-
-            backgroundAlpha = alphaPercent * 0.60000002f;
-        }
-
-        msg = cgs->teamChatMsgs[index];
-        if (msg[0] == '^' && msg[1] && msg[1] != '^' && msg[1] >= '0' && msg[1] <= '9') {
-            CL_LookupColor((unsigned char)msg[1], color);
-        } else {
-            color[0] = 1.0f;
-            color[1] = 1.0f;
-            color[2] = 1.0f;
-        }
-
-        color[0] *= 0.25f;
-        color[1] *= 0.25f;
-        color[2] *= 0.25f;
-        color[3] = backgroundAlpha;
-
-        y = (float)(hudChatY - (cgs->teamChatPos - i) * 10);
-        textWidth = UI_TextWidth(msg, 0, font, 1.0f / 3.0f);
-        UI_DrawHandlePic(0.0f, y, (float)(textWidth + 24), 10.0f, 1, 1, color, cgs->media.whiteMaterial);
-
-        color[0] = 1.0f;
-        color[1] = 1.0f;
-        color[2] = 1.0f;
-        color[3] = alphaPercent;
-        UI_DrawText(msg, 0x7fffffff, font, (float)hudChatX, y + 9.0f, 1, 1, 1.0f / 3.0f, color, 3);
+    if (panelWidth > (int)COD2_CHAT_WIDTH) panelWidth = (int)COD2_CHAT_WIDTH;
+    i = (cgs->teamChatPos - 1) % COD2_CHAT_ROWS;
+    if (chatTime - (cg->time - cgs->teamChatMsgTimes[i]) < 200)
+        color[3] *= (float)(chatTime - (cg->time - cgs->teamChatMsgTimes[i])) / 200.0f;
+    UI_DrawHandlePic(hudChatX - 3.0f, hudChatY - count * lineHeight - 2.0f,
+                     (float)panelWidth + 6.0f, (float)(count * lineHeight) + 4.0f,
+                     1, 1, color, cgs->media.whiteMaterial);
+    color[0] = color[1] = color[2] = 1.0f;
+    for (i = cgs->teamLastChatPos; i < cgs->teamChatPos; ++i) {
+        int index = i % COD2_CHAT_ROWS;
+        int remaining = chatTime - (cg->time - cgs->teamChatMsgTimes[index]);
+        float y = hudChatY - (cgs->teamChatPos - i) * lineHeight;
+        color[3] = remaining < 200 ? (float)remaining / 200.0f : 1.0f;
+        UI_DrawText(cgs->teamChatMsgs[index], 0x7fffffff, font, hudChatX, y + textHeight,
+                    1, 1, COD2_CHAT_SCALE, color, 3);
     }
-
     return 0;
 }
 
@@ -1362,7 +1575,7 @@ unsigned int CG_DrawCrosshair(void)
     int pmFlags;
     int weaponstate;
 
-    if (cg->renderingThirdPerson)
+    if (cg->renderingThirdPerson || (ps->pm_flags & PMF_SPRINT))
         return 0;
 
     drawHudMenus = !CG_AreHudMenusHidden();
@@ -1469,7 +1682,7 @@ unsigned int CG_DrawCrosshair(void)
         float half;
         if (weapDef->weapType == WEAPTYPE_GRENADE) {
             int grenadeTime = ps->grenadeTimeLeft;
-            if (grenadeTime != 0 && weapDef->bCookOffHold)
+            if (grenadeTime != 0 && BG_GrenadeCanCook(weapDef))
                 centerSize += (float)(grenadeTime % 1000) / 100.0f;
         }
         drawSize = centerSize * transScale;
@@ -1586,8 +1799,8 @@ unsigned int CG_Draw2D(void)
                 progress = 0.0f;
             vec4_t shade = { 0.0f, 0.0f, 0.0f, progress };
             const char *message = remaining > 0
-                ? va("Reapareces en %d...", (remaining + 999) / 1000)
-                : "Reapareciendo...";
+                ? va("Respawning in %d...", (remaining + 999) / 1000)
+                : "Respawning...";
             FontHandle font = UI_GetFontHandle(0, 0.4f);
             UI_FillRectPhysical(0.0f, 0.0f, screenWidth, screenHeight, shade);
             UI_DrawText(message, 0x7fffffff, font,
@@ -1658,6 +1871,11 @@ unsigned int CG_Draw2D(void)
         if (drawHudMenus) {
             if (cg->nextSnap->ps.pm_type <= 5)
                 CG_DrawCrosshairNames();
+            if (pm_type <= 1) {
+                CG_DrawFriendlyNames();
+                CG_DrawDamageIndicators();
+                CG_DrawGrenadeIndicators();
+            }
             CG_DrawChatMessages();
         }
         CG_CheckTimedMenus();
@@ -1816,8 +2034,8 @@ unsigned int CG_Draw2D(void)
 
     if (cg->centerPrintTime != 0) {
         int totalMsec = (int)(1000.0f * cg_centertime->current.value);
-        CG_FadeColor(cg->centerPrintTime, totalMsec, 100);
-        if (totalMsec == 0) {
+        float *centerColor = CG_FadeColor(cg->centerPrintTime, totalMsec, 100);
+        if (totalMsec <= 0 || !centerColor) {
             cg->centerPrintTime = 0;
             cg->centerPrintPriority = 0;
         } else {
@@ -1851,7 +2069,7 @@ unsigned int CG_Draw2D(void)
                 lineFont = UI_GetFontHandle(0, scale);
                 width = UI_TextWidth(line, 0, lineFont, scale);
                 UI_DrawText(line, 0x7fffffff, lineFont, (float)width * -0.5f, y, 7, 3, scale,
-                            (const vec_t *)CG_FadeColor(cg->centerPrintTime, totalMsec, 100), 3);
+                            centerColor, 3);
                 y += lineStep;
 
                 while (*start && *start != '\n')

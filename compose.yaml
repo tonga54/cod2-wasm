@@ -17,7 +17,7 @@ services:
       dockerfile: downstream/server/Dockerfile
     image: local/cod2-native-server:dev
     platform: linux/amd64
-    cpus: 2.0
+    cpus: 3.0
     mem_limit: 1g
     read_only: true
     tmpfs:
@@ -35,7 +35,7 @@ services:
     build:
       context: downstream/gateway
     image: local/cod2-gateway:dev
-    cpus: 0.5
+    cpus: 2.0
     mem_limit: 96m
     read_only: true
     volumes:

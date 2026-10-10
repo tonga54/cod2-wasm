@@ -174,6 +174,11 @@ static const char *s_displayModeNames[] = {
     "640x480",
     "800x600",
     "1024x768",
+#ifdef __EMSCRIPTEN__
+    "1280x720",
+    "1600x900",
+    "1920x1080",
+#endif
     0,
 };
 static const char *s_displayRefreshNames[] = {

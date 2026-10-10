@@ -17,6 +17,7 @@ parser.add_argument('--main-dir', type=Path, default=root / 'data/browser/main')
 parser.add_argument('--manifest', type=Path, default=root / 'site/wasm-game-data.json')
 args = parser.parse_args()
 maps = {"mp_toujane": "Toujane, Tunisia", "mp_carentan": "Carentan, France"}
+gametypes = ("dm", "tdm", "ctf", "hq", "sd")
 balance_profile = load_profile()
 policy = json.loads(args.manifest.read_text())["variants"]["cod2-mp"]
 originals = [zipfile.ZipFile(p) for p in sorted((root / "data/main").glob("*.iwd"))]
@@ -36,11 +37,22 @@ try:
                 if name.endswith('.arena'):
                     mapname = 'mp_' + Path(name).stem
                     assert mapname in maps, name
-                    assert data == f'{{ map "{mapname}" longname "{maps[mapname]}" gametype "tdm" }}\n'.encode()
+                    assert data == f'{{ map "{mapname}" longname "{maps[mapname]}" gametype "{" ".join(gametypes)}" }}\n'.encode()
                     continue
                 source, original_name = index[name]
                 original = source.read(original_name)
-                if name.startswith("weapons/mp/"):
+                if name == "default_mp.cfg":
+                    expected = original.replace(b'bind SHIFT\t"+melee_breath"', b'bind SHIFT\t"+sprint"')
+                    expected = expected.replace(b'bind v\t"mp_QuickMessage"',
+                                                b'bind v\t"+melee"\r\nbind h "mp_QuickMessage"')
+                    expected = expected.replace(b'bind c\t\t"gocrouch"',
+                                                b'bind c\t\t"togglecrouch"')
+                    assert data == expected, name
+                elif name == "ui/options_shoot.menu":
+                    expected = original.replace(b'"@MENU_MELEE_STEADY"', b'"Sprint / Hold Breath"')
+                    expected = expected.replace(b'"+melee_breath"', b'"+sprint"')
+                    assert data == expected, name
+                elif name.startswith("weapons/mp/"):
                     assert data == apply_weapon_balance(name, original, balance_profile), name
                 elif name == "maps/mp/gametypes/tdm.gsc":
                     # Existing reviewed death/spawn UI deadline adaptation.
@@ -49,6 +61,17 @@ try:
                     expected = original.replace(b"delay = 2;", b'delay = 3;\n\tself setClientCvar("cg_respawnDeadline", getTime() + 3000);')
                     expected = expected.replace(b'self.sessionstate = "playing";', b'self.sessionstate = "playing";\n\tself setClientCvar("cg_respawnDeadline", 0);')
                     assert data == expected, name
+                elif name == "ui_mp/joinserver.menu":
+                    # Strip the reviewed owner action and compare every original byte.
+                    normalized = original.replace(b'\r\n', b'\n')
+                    start = data.index(b'\n        itemDef {\n            name deleteOwnServer')
+                    end = data.index(b'\n//\tBACK AND NEXT BUTTONS', start)
+                    button = data[start:end]
+                    assert b'text "Delete my server"' in button
+                    assert b'dvarTest "ui_canDeleteServer"' in button
+                    assert b'enableDvar { "1" }' in button
+                    assert b'uiScript DeleteServer;' in button
+                    assert data[:start] + data[end:] == normalized, name
                 elif name == "ui_mp/menus.txt":
                     original_lines = set(original.splitlines())
                     assert all(line in original_lines for line in data.splitlines()), name
@@ -67,7 +90,12 @@ try:
     assert sorted(n for n in entries if n.endswith('.arena')) == ['mp/carentan.arena', 'mp/toujane.arena']
     modes = [n for n in entries if n.startswith("maps/mp/gametypes/")
              and n.endswith(".gsc") and not Path(n).name.startswith("_")]
-    assert modes == ["maps/mp/gametypes/tdm.gsc"], modes
+    assert sorted(modes) == sorted(f"maps/mp/gametypes/{mode}.gsc" for mode in gametypes), modes
+    for mode in gametypes:
+        for dependency in (f"maps/mp/gametypes/{mode}.txt",
+                           f"ui_mp/scriptmenus/serverinfo_{mode}.menu",
+                           f"ui_mp/settings_{mode}.menu"):
+            assert dependency in entries, "Missing game mode dependency: " + dependency
     aliases = {}
     for name, data in entries.items():
         if name.startswith("soundaliases/") and name.endswith(".csv"):
@@ -115,7 +143,7 @@ try:
         for position in range(offset, offset + length, 72):
             material = bsp[position:position + 64].split(b"\0", 1)[0].decode().lower()
             assert "materials/" + material in entries, "Missing BSP material: " + material
-    print(f"PASS: {len(entries)} private entries, {total} bytes, retail bytes/reviewed overrides, Toujane/Carentan, TDM only, both BSPs and factions")
+    print(f"PASS: {len(entries)} private entries, {total} bytes, retail bytes/reviewed overrides, Toujane/Carentan, five retail modes, both BSPs and factions")
 finally:
     for archive in originals:
         archive.close()

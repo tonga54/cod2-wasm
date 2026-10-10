@@ -1033,6 +1033,11 @@ void GScr_Obituary(void)
     else
         pEnt->s.eventParm = iWeaponNum;
 
+    /* Obituaries must survive snapshot loss and visibility changes. The web
+     * client uses this reliable broadcast; retail clients keep the event. */
+    SV_GameSendServerCommand(-1, 1, va("cod2_obituary %d %d %d",
+        pEnt->s.otherEntityNum, pEnt->s.attackerEntityNum, pEnt->s.eventParm));
+
     return;
 }
 

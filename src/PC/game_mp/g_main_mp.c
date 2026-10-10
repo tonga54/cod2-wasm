@@ -25,6 +25,7 @@ extern void turret_think_init();
 extern void turret_use();
 extern void use_trigger_use();
 extern entityHandler_t entityHandlers[20];
+extern void G_ResetHeldGrenades(void);
 
 #define SCR_CONST() ((const scr_const_t *)imp_scr_const)
 
@@ -549,6 +550,7 @@ void G_InitGame(int levelTime, int randomSeed, qboolean restart, qboolean savepe
     Swap_Init();
 
     memset(&level, 0, sizeof(level));
+    G_ResetHeldGrenades();
     level.initializing = 1;
     level.time = levelTime;
     level.startTime = levelTime;
@@ -823,6 +825,7 @@ void G_InitGame(int levelTime, int randomSeed, qboolean restart, qboolean savepe
     Swap_Init();
 
     memset(&level, 0, sizeof(level));
+    G_ResetHeldGrenades();
     level.initializing = 1;
     level.time = levelTime;
     level.startTime = levelTime;
@@ -1139,7 +1142,8 @@ static void __attribute_regparm__(1) G_RunFrameForEntity(gentity_t *ent)
         }
     }
 
-    if (ent->s.eFlags == GMAIN_EFLAGS_UNKNOWN && level.time > ent->s.time2) {
+    if ((ent->s.eFlags & GMAIN_EFLAGS_UNKNOWN) && ent->s.eType == GMAIN_ET_GENERAL &&
+        level.time > ent->s.time2) {
         G_FreeEntity(ent);
         return;
     }

@@ -85,7 +85,6 @@ extern const dvar_t *g_debugDamage;
 
 extern int g_sNextDmgTableId;
 extern void *imp_bgs;
-extern int g_phys_world;
 
 static void G_HitLocStrcpy(byte *pMember, const char *pszKeyValue)
 {
@@ -428,7 +427,8 @@ qboolean G_RadiusDamage(const vec_t *origin, gentity_t *inflictor, gentity_t *at
     int hitClient;
     gentity_t *ent;
     float radiusTweak;
-    void *tr_buf[7];
+    trace_t trace;
+    const vec3_t zero = { 0.0f, 0.0f, 0.0f };
 
     if (attacker == NULL) {
         hitClient = 0;
@@ -520,12 +520,11 @@ qboolean G_RadiusDamage(const vec_t *origin, gentity_t *inflictor, gentity_t *at
             dest[1] = (ent->r.absmin[1] + ent->r.absmax[1]) * 0.5f;
             dest[2] = (ent->r.absmin[2] + ent->r.absmax[2]) * 0.5f;
 
-            {
-                byte *pw = *(byte **)&g_phys_world;
-                G_TraceCapsule(tr_buf, origin, (const vec_t *)pw, (const vec_t *)pw, dest, 0x3ff, 0x811);
-            }
+            /* Splash visibility uses a point trace. g_phys_world is a world
+             * handle, not a vector of trace extents (and may be zero). */
+            G_TraceCapsule(&trace, origin, zero, zero, dest, 0x3ff, 0x811);
 
-            if (*(float *)tr_buf >= 1.0f) {
+            if (trace.fraction >= 1.0f) {
                 continue;
             }
 
@@ -626,7 +625,7 @@ void player_die(gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int 
         launchspot[2] = self->r.currentOrigin[2] + 40.0f;
 
         fire_grenade(self, launchspot, launchvel,
-                     cl->ps.grenadeTimeLeft, cl->ps.offHandIndex);
+                     cl->ps.offHandIndex, cl->ps.grenadeTimeLeft);
         cl = self->client;
     }
 

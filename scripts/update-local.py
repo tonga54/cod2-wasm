@@ -56,52 +56,52 @@ def ensure_idle():
         if health.get('gateway') != 'ready' or not isinstance(health.get('clients'), int):
             raise ValueError('invalid health response')
     except Exception as error:
-        raise RuntimeError('No se pudo comprobar si hay jugadores. Revisá el servidor antes de actualizar.') from error
+        raise RuntimeError('Unable to check for active players. Check the server before updating.') from error
     if health['clients']:
-        raise RuntimeError('Hay personas conectadas. Volvé a actualizar cuando la partida esté vacía.')
+        raise RuntimeError('Players are connected. Try updating again when the server is empty.')
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--apply', action='store_true', help='Actualizar, compilar y reiniciar un host vacío')
+    parser.add_argument('--apply', action='store_true', help='Update, build and restart an empty host')
     args = parser.parse_args()
     branch, dirty = source_status()
     if args.apply:
         if branch != 'master':
-            raise RuntimeError('La actualización automática requiere la rama master.')
+            raise RuntimeError('Automatic updates require the master branch.')
         if dirty:
-            raise RuntimeError('Hay cambios locales. Guardalos o confirmalos antes de actualizar; no se sobrescribió nada.')
+            raise RuntimeError('Local changes found. Save or commit them before updating; nothing was overwritten.')
         framework = Path(os.environ.get('COD2_WASM_FRAMEWORK_DIR', ROOT.parent / 'wasm-game-framework'))
         if not (framework / '.git').exists():
-            raise RuntimeError('Falta wasm-game-framework. Consultá docs/UPDATES.md para preparar el checkout.')
+            raise RuntimeError('wasm-game-framework is missing. See docs/UPDATES.md to prepare the checkout.')
         if not (ROOT / 'data/main/iw_00.iwd').is_file():
-            raise RuntimeError('Faltan los archivos originales en data/main/. Consultá docs/UPDATES.md.')
+            raise RuntimeError('The original files are missing from data/main/. See docs/UPDATES.md.')
         ensure_idle()
     # A failed/forced/non-fast-forward fetch never changes the working tree.
     run('git', 'fetch', '--no-tags', 'origin', f'refs/heads/master:{REMOTE}')
     status, count = comparison()
     if status in ('local-ahead', 'diverged'):
-        raise RuntimeError('Tu historial tiene commits propios. Revisá la actualización manualmente; no se hizo merge ni reset.')
+        raise RuntimeError('Your history contains local commits. Review the update manually; no merge or reset was performed.')
     if status == 'available':
-        print(f'Hay una versión nueva: {count} commit(s) en origin/master.', flush=True)
+        print(f'A new version is available: {count} commit(s) in origin/master.', flush=True)
         if dirty:
-            print('Tu copia tiene cambios locales; guardalos antes de actualizar.', flush=True)
+            print('Your checkout has local changes; save them before updating.', flush=True)
         if not args.apply:
-            print('Para instalarla: python3 scripts/update-local.py --apply', flush=True)
+            print('To install it: python3 scripts/update-local.py --apply', flush=True)
             return 1
     else:
-        print('El código local está actualizado.', flush=True)
+        print('The local code is up to date.', flush=True)
     if args.apply:
         # Check again after network access and before changing source/assets.
         if source_status() != ('master', False):
-            raise RuntimeError('La copia cambió durante la comprobación. No se actualizó.')
+            raise RuntimeError('The checkout changed during the check. No update was applied.')
         ensure_idle()
         run('git', 'merge', '--ff-only', REMOTE)
         run(sys.executable, 'scripts/prepare-browser-bootstrap.py')
         run('bash', 'scripts/build-docker.sh')
         ensure_idle()
         run('docker', 'compose', 'up', '-d')
-        print('Servidor actualizado. Los navegadores avisarán cuando puedan recargar.', flush=True)
+        print('Server updated. Browsers will notify players when they can reload.', flush=True)
     return 0
 
 
@@ -109,5 +109,5 @@ if __name__ == '__main__':
     try:
         sys.exit(main())
     except (RuntimeError, subprocess.CalledProcessError, OSError, ValueError) as error:
-        print(f'No se pudo actualizar: {error}', file=sys.stderr)
+        print(f'Unable to update: {error}', file=sys.stderr)
         sys.exit(2)

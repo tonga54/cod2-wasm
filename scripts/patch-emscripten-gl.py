@@ -123,6 +123,105 @@ LIGHT_COLOR_REPLACEMENT = '''            // COD2_LIT_VERTEX_COLOR: DX7 uses COLO
             vsLightingPass += "  v_color *= a_color;";
             vsLightingPass += "  v_color = clamp(v_color, 0.0, 1.0);";'''
 
+INDEX_BIND_ORIGINAL = '''        var indexBuffer = GL.getTempIndexBuffer(numProvidedIndexes << 1);
+        GLctx.bindBuffer(GLctx.ELEMENT_ARRAY_BUFFER, indexBuffer);'''
+INDEX_BIND_REPLACEMENT = '''        var indexBuffer = GL.getTempIndexBuffer(numProvidedIndexes << 1);
+        GLctx.bindBuffer(GLctx.ELEMENT_ARRAY_BUFFER, indexBuffer);
+        // COD2_STREAM_INDEX_STORAGE: the SDK reuses one IBO per size, even
+        // while earlier draws still use it. Orphan its storage before writing
+        // to avoid a CPU wait for the GPU. Keep the SDK's power-of-two capacity.
+        GLctx.bufferData(GLctx.ELEMENT_ARRAY_BUFFER,
+          1 << GL.log2ceilLookup(numProvidedIndexes << 1), GLctx.STREAM_DRAW);'''
+
+
+POINT_DEFS_ORIGINAL = '          var vsSource = ['
+POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once, including frames without flashes.
+          // Uniform count zero skips lighting; firing never creates a shader variant.
+          var pointLights = this.usedTexUnitList.indexOf(0) !== -1 &&
+            GLImmediate.TexEnvJIT.getTexUnitType(0) == 0x0DE1;
+          var pointNormal = pointLights && GLEmulation.lightingEnabled;
+          var pointVarying = pointLights ? "varying highp vec3 v_cod2Eye;" : "";
+          if (pointNormal) pointVarying += "varying mediump vec3 v_cod2Normal;";
+          var pointDefs = pointLights ? pointVarying +
+            "uniform int u_cod2LightCount; uniform highp vec4 u_cod2LightEye[4]; uniform vec4 u_cod2LightColor[4];" : "";
+          var pointPass = "";
+          if (pointLights) {
+            var pointUV = GLImmediate.useTextureMatrix ? "(u_textureMatrix0 * v_texCoord0).xy" : "v_texCoord0.xy";
+            pointPass = "if (u_cod2LightCount > 0) {\n" +
+              (pointNormal ? "highp vec3 n = v_cod2Normal;\n" :
+                "highp vec3 n = cross(dFdx(v_cod2Eye), dFdy(v_cod2Eye));\n") +
+              "n *= inversesqrt(max(dot(n,n), 0.00000001));\nvec3 lightSum = vec3(0.0);\n";
+            for (var light = 0; light < 4; ++light) {
+              pointPass += "if (u_cod2LightCount > " + light + ") {\n" +
+                "highp vec3 delta = u_cod2LightEye[" + light + "].xyz - v_cod2Eye;\n" +
+                "highp float distance2 = dot(delta,delta);\n" +
+                "float attenuation = max(1.0 - distance2 * u_cod2LightEye[" + light + "].w, 0.0);\n" +
+                "float incidence = abs(dot(n,delta)) * inversesqrt(max(distance2, 0.0001));\n" +
+                "lightSum += u_cod2LightColor[" + light + "].rgb * attenuation * attenuation * incidence;\n}\n";
+            }
+            pointPass += "gl_FragColor.rgb += texture2D(u_texUnit0, " + pointUV + ").rgb * lightSum;\n}\n";
+          }
+          var vsSource = ['''
+POINT_VERTEX_ORIGINAL = 'vsPointSizeDefs, vsClipPlaneDefs, vsLightingDefs, "void main()"'
+POINT_VERTEX_REPLACEMENT = 'vsPointSizeDefs, vsClipPlaneDefs, vsLightingDefs, pointVarying, "void main()"'
+POINT_POSITION_ORIGINAL = '"  gl_Position = u_projection * ecPosition;", "  v_color = a_color;"'
+POINT_POSITION_REPLACEMENT = '"  gl_Position = u_projection * ecPosition;", (pointLights ? "v_cod2Eye = ecPosition.xyz;" : ""), (pointNormal ? "v_cod2Normal = u_normalMatrix * a_normal;" : ""), "  v_color = a_color;"'
+POINT_FRAGMENT_ORIGINAL = 'fogHeaderIfNeeded, fsClipPlaneDefs, fsAlphaTestDefs, "void main()"'
+POINT_FRAGMENT_REPLACEMENT = 'fogHeaderIfNeeded, fsClipPlaneDefs, fsAlphaTestDefs, pointDefs, "void main()"'
+POINT_PASS_ORIGINAL = 'fsClipPlanePass, fsTexEnvPass, fogPass, fsAlphaTestPass'
+POINT_PASS_REPLACEMENT = 'fsClipPlanePass, fsTexEnvPass, pointPass, fogPass, fsAlphaTestPass'
+POINT_UNIFORMS_ORIGINAL = '        this.normalMatrixLocation = GLctx.getUniformLocation(this.program, "u_normalMatrix");'
+POINT_UNIFORMS_REPLACEMENT = r'''        this.normalMatrixLocation = GLctx.getUniformLocation(this.program, "u_normalMatrix");
+        this.cod2LightCountLocation = GLctx.getUniformLocation(this.program, "u_cod2LightCount");
+        this.cod2LightEyeLocation = GLctx.getUniformLocation(this.program, "u_cod2LightEye[0]");
+        this.cod2LightColorLocation = GLctx.getUniformLocation(this.program, "u_cod2LightColor[0]");
+        this.cod2LightCount = -1;
+        this.cod2LightRevision = -1;'''
+POINT_UPLOAD_ORIGINAL = '        if (GLImmediate.mode == GLctx.POINTS) {\n          if (this.pointSizeLocation) {'
+POINT_UPLOAD_REPLACEMENT = r'''        // COD2_POINT_LIGHT_UNIFORMS: cache per program; no allocation per draw.
+        if (this.cod2LightCountLocation !== null) {
+          var lights = Module.cod2PointLights;
+          var count = lights ? lights.drawCount : 0;
+          if (this.cod2LightCount !== count) {
+            GLctx.uniform1i(this.cod2LightCountLocation, count);
+            this.cod2LightCount = count;
+          }
+          if (count && this.cod2LightRevision !== lights.eyeRevision) {
+            GLctx.uniform4fv(this.cod2LightEyeLocation, lights.eye);
+            GLctx.uniform4fv(this.cod2LightColorLocation, lights.color);
+            this.cod2LightRevision = lights.eyeRevision;
+          }
+        }
+        if (GLImmediate.mode == GLctx.POINTS) {
+          if (this.pointSizeLocation) {'''
+
+SHADER_CHECK_ORIGINAL = '          GLctx.linkProgram(this.program);'
+SHADER_CHECK_REPLACEMENT = r'''          GLctx.linkProgram(this.program);
+          // COD2_SHADER_DIAGNOSTICS: fail visibly instead of drawing a black frame.
+          if (!GLctx.getProgramParameter(this.program, GLctx.LINK_STATUS)) {
+            throw new Error("Fixed-function shader failed: " + GLctx.getProgramInfoLog(this.program) +
+              "\nVertex: " + GLctx.getShaderInfoLog(this.vertexShader) +
+              "\nFragment: " + GLctx.getShaderInfoLog(this.fragmentShader));
+          }'''
+
+POINT_GLSL_ORIGINAL = '          this.vertexShader = GLctx.createShader(GLctx.VERTEX_SHADER);'
+POINT_GLSL_REPLACEMENT = r'''          // WebGL2 implements derivatives in GLSL ES 3.00, not its ES 1.00
+          // compatibility shaders. Keep the generated texture/fog/alpha logic.
+          function cod2Glsl300(source, vertex) {
+            source = source.replace(/\battribute\b/g, "in");
+            source = source.replace(/\bvarying (?!(?:lowp|mediump|highp)\b)/g,
+              vertex ? "out mediump " : "in mediump ");
+            source = source.replace(/\bvarying\b/g, vertex ? "out" : "in");
+            source = source.replace(/\btexture(?:2D|Cube)\b/g, "texture");
+            if (!vertex) source = "out highp vec4 cod2FragColor;\n" + source.replace(/\bgl_FragColor\b/g, "cod2FragColor");
+            return "#version 300 es\n" + source;
+          }
+          this.vertexShader = GLctx.createShader(GLctx.VERTEX_SHADER);'''
+POINT_VS_UPLOAD_ORIGINAL = '          GLctx.shaderSource(this.vertexShader, vsSource);'
+POINT_VS_UPLOAD_REPLACEMENT = '          GLctx.shaderSource(this.vertexShader, pointLights ? cod2Glsl300(vsSource, true) : vsSource);'
+POINT_FS_UPLOAD_ORIGINAL = '          GLctx.shaderSource(this.fragmentShader, fsSource);'
+POINT_FS_UPLOAD_REPLACEMENT = '          GLctx.shaderSource(this.fragmentShader, pointLights ? cod2Glsl300(fsSource, false) : fsSource);'
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -132,14 +231,26 @@ def main():
     for original, replacement in ((ORIGINAL, REPLACEMENT), (DRAW_ORIGINAL, DRAW_REPLACEMENT),
                                   (CUBE_SAMPLE_ORIGINAL, CUBE_SAMPLE_REPLACEMENT),
                                   (CUBE_UNIFORM_ORIGINAL, CUBE_UNIFORM_REPLACEMENT),
-                                  (LIGHT_COLOR_ORIGINAL, LIGHT_COLOR_REPLACEMENT)):
+                                  (LIGHT_COLOR_ORIGINAL, LIGHT_COLOR_REPLACEMENT),
+                                  (INDEX_BIND_ORIGINAL, INDEX_BIND_REPLACEMENT),
+                                  (POINT_DEFS_ORIGINAL, POINT_DEFS_REPLACEMENT),
+                                  (POINT_VERTEX_ORIGINAL, POINT_VERTEX_REPLACEMENT),
+                                  (POINT_POSITION_ORIGINAL, POINT_POSITION_REPLACEMENT),
+                                  (POINT_FRAGMENT_ORIGINAL, POINT_FRAGMENT_REPLACEMENT),
+                                  (POINT_PASS_ORIGINAL, POINT_PASS_REPLACEMENT),
+                                  (POINT_UNIFORMS_ORIGINAL, POINT_UNIFORMS_REPLACEMENT),
+                                  (POINT_UPLOAD_ORIGINAL, POINT_UPLOAD_REPLACEMENT),
+                                  (SHADER_CHECK_ORIGINAL, SHADER_CHECK_REPLACEMENT),
+                                  (POINT_GLSL_ORIGINAL, POINT_GLSL_REPLACEMENT),
+                                  (POINT_VS_UPLOAD_ORIGINAL, POINT_VS_UPLOAD_REPLACEMENT),
+                                  (POINT_FS_UPLOAD_ORIGINAL, POINT_FS_UPLOAD_REPLACEMENT)):
         if source.count(replacement) == 1:
             continue
         if source.count(original) != 1:
             raise SystemExit("Unexpected Emscripten GL generator; refusing to patch")
         source = source.replace(original, replacement, 1)
     path.write_text(source)
-    print("Fixed Emscripten GL texture calls, cube samplers, model colors and indexed client-array ranges")
+    print("Fixed Emscripten GL texture calls, cube samplers, model colors, point lights and indexed client-array ranges")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,12 @@
 #include "common_types.h"
 #include "imports.h"
 #include "bytematch.h"
+#include "cod2_grenade.h"
+
+/* Unused bit inside the existing 27-bit replicated pm_flags field. The latch
+ * must be part of player state so prediction replays the same trigger history
+ * as the server. Presses during recovery are consumed rather than queued. */
+#define PM_WEAPON_FLAG_TRIGGER_HELD 0x00040000
 
 extern int bg_iNumWeapons;
 extern WeaponDef *bg_weaponDefs[128];
@@ -1269,8 +1275,8 @@ static void __attribute_regparm__(1) PM_BeginWeaponReload(playerState_t *ps)
     if (!weapDef->bClipOnly)
         BG_AnimScriptEvent(ps, 0xa, 0, 1);
 
-    PM_AddEvent(ps, 0x95);
-
+    /* ADS interpolation lowers the weapon during reload. Preserve the input
+       request so held/toggled aim resumes when the animation permits it. */
     if (weapDef->bSegmentedReload && weapDef->iReloadStartTime) {
         if (ps->pm_type <= 5)
             ps->weapAnim = ((ps->weapAnim & 0x200) ^ 0x200) | 0xd;
@@ -1359,7 +1365,7 @@ void PM_UpdateAimDownSightLerp(pmove_t *pm, pml_t *pml)
 
 void PM_ResetWeaponState(playerState_t *ps)
 {
-    ps->pm_flags &= ~0x810;
+    ps->pm_flags &= ~(0x810 | PM_WEAPON_FLAG_TRIGGER_HELD);
 
     if ((unsigned int)(ps->weaponstate - 0x11) <= 5) {
         ps->fWeaponPosFrac = 0.0f;
@@ -1619,14 +1625,19 @@ static qboolean PM_UpdateOffhandCook(pmove_t *pm, pml_t *pml)
         return 0;
 
     weapDef = bg_weaponDefs[ps->offHandIndex];
-    if (weapDef->weapType != WEAPTYPE_GRENADE || ps->grenadeTimeLeft <= 0 || !weapDef->bCookOffHold)
+    if (!BG_GrenadeCanCook(weapDef) || ps->grenadeTimeLeft <= 0)
         return 0;
 
     ps->grenadeTimeLeft -= pml->msec;
     if (ps->grenadeTimeLeft > 0)
         return 0;
 
-    ps->ammoclip[weapDef->iClipIndex]--;
+    if (!(ps->pm_flags & PMF_GRENADE_THROWBACK) && ps->ammoclip[weapDef->iClipIndex] > 0)
+        ps->ammoclip[weapDef->iClipIndex]--;
+    ps->grenadeTimeLeft = 0;
+    ps->weaponstate = WEAPON_OFFHAND_END;
+    ps->weaponTime = ps->weaponDelay = 0;
+    ps->pm_flags &= ~(0x810 | PMF_GRENADE_THROWBACK);
     PM_AddEvent(ps, 0xc5);
     return 1;
 }
@@ -1644,18 +1655,8 @@ static qboolean PM_UpdateWeaponTimers(pmove_t *pm, pml_t *pml)
 
     if (ps->weaponTime > 0) {
         ps->weaponTime -= pml->msec;
-        if (ps->weaponTime <= 0) {
-            int weapon = ps->weapon;
-            WeaponDef *weapDef = weapon ? bg_weaponDefs[weapon] : 0;
-
-            if (weapDef && (unsigned int)(ps->weaponstate - WEAPON_OFFHAND_INIT) <= (WEAPON_OFFHAND_FIRE - WEAPON_OFFHAND_INIT) &&
-                weapDef->bBoltAction && (pm->cmd.buttons & PM_WEAPON_BUTTON_ATTACK) &&
-                pm->cmd.weapon == weapon && ps->ammoclip[weapDef->iClipIndex] > 0) {
-                ps->weaponTime = 1;
-            } else {
-                ps->weaponTime = 0;
-            }
-        }
+        if (ps->weaponTime <= 0)
+            ps->weaponTime = 0;
     }
 
     if (ps->weaponDelay > 0) {
@@ -1794,6 +1795,11 @@ static qboolean PM_TryStartOffhand(pmove_t *pm)
     offhandClass = PM_OffhandClassForButtons(pm->cmd.buttons);
     if (!offhandClass)
         return 0;
+
+    /* The server claims the nearby live missile before running Pmove. Until
+     * that snapshot arrives, don't predict pulling a new inventory grenade. */
+    if (offhandClass == OFFHAND_CLASS_FRAG_GRENADE && ps->cursorHint == GRENADE_THROWBACK_HINT)
+        return 1;
 
     offhandIndex = BG_GetFirstAvailableOffhand(ps, offhandClass);
     if (!offhandIndex) {
@@ -2143,7 +2149,7 @@ static qboolean PM_TryStartGrenadeFire(playerState_t *ps, WeaponDef *weapDef, qb
     return 1;
 }
 
-static qboolean PM_TryFireWeapon(pmove_t *pm, qboolean delayedAction)
+static qboolean PM_TryFireWeapon(pmove_t *pm, qboolean delayedAction, qboolean triggerPressed)
 {
     playerState_t *ps = pm->ps;
     WeaponDef *weapDef;
@@ -2159,6 +2165,15 @@ static qboolean PM_TryFireWeapon(pmove_t *pm, qboolean delayedAction)
 
     weapDef = bg_weaponDefs[ps->weapon];
     clipIndex = weapDef->iClipIndex;
+
+    /* A new shot always waits for recovery, even if another caller reaches
+     * this helper before the state-machine timer gate. Delayed actions finish
+     * an already started shot and must retain their original timing. */
+    if (!delayedAction && (ps->weaponTime || ps->weaponDelay))
+        return 0;
+
+    if (weapDef->bSemiAuto && !delayedAction && !triggerPressed)
+        return 0;
 
     if (ps->weaponstate == WEAPON_RECHAMBERING && ps->weaponTime)
         return 0;
@@ -2247,13 +2262,15 @@ static void PM_RunReloadState(playerState_t *ps, qboolean delayedAction)
 
 static void PM_ReleaseOffhand(playerState_t *ps, WeaponDef *weapDef)
 {
-    if (ps->ammoclip[weapDef->iClipIndex] <= 0)
+    qboolean throwback = (ps->pm_flags & PMF_GRENADE_THROWBACK) != 0;
+    if (!throwback && ps->ammoclip[weapDef->iClipIndex] <= 0)
         return;
     BG_AddPredictableEventToPlayerstate(0xa6, ps->offHandIndex, ps);
-    if (!(ps->eFlags & 0x300))
+    if (!throwback && !(ps->eFlags & 0x300))
         ps->ammoclip[weapDef->iClipIndex]--;
-    if (!ps->ammoclip[weapDef->iClipIndex])
+    if (!throwback && !ps->ammoclip[weapDef->iClipIndex])
         PM_AddEvent(ps, 0x94);
+    ps->pm_flags &= ~PMF_GRENADE_THROWBACK;
 }
 
 static void PM_RunOffhandState(pmove_t *pm, qboolean delayedAction)
@@ -2281,7 +2298,8 @@ static void PM_RunOffhandState(pmove_t *pm, qboolean delayedAction)
         }
         break;
     case WEAPON_OFFHAND_HOLD:
-        if ((pm->cmd.buttons & (PM_WEAPON_BUTTON_ATTACK | PM_WEAPON_BUTTON_FRAG | PM_WEAPON_BUTTON_SMOKE)) &&
+        if ((pm->cmd.buttons & ((ps->pm_flags & PMF_GRENADE_THROWBACK) ? PM_WEAPON_BUTTON_FRAG :
+             (PM_WEAPON_BUTTON_ATTACK | PM_WEAPON_BUTTON_FRAG | PM_WEAPON_BUTTON_SMOKE))) &&
             ps->grenadeTimeLeft > 0)
             break;
 
@@ -2356,6 +2374,16 @@ void PM_Weapon(pmove_t *pm, pml_t *pml)
 {
     playerState_t *ps = pm->ps;
     qboolean delayedAction;
+    qboolean triggerPressed = (pm->cmd.buttons & PM_WEAPON_BUTTON_ATTACK) &&
+                              !(ps->pm_flags & PM_WEAPON_FLAG_TRIGGER_HELD);
+
+    /* Track every press, including blocked input during fire/reload/raise.
+     * Updating only when a shot starts buffers early presses until recovery
+     * ends. Replicated state also keeps command subdivision and replay stable. */
+    if (pm->cmd.buttons & PM_WEAPON_BUTTON_ATTACK)
+        ps->pm_flags |= PM_WEAPON_FLAG_TRIGGER_HELD;
+    else
+        ps->pm_flags &= ~PM_WEAPON_FLAG_TRIGGER_HELD;
 
     if (ps->pm_flags & 0x1000)
         return;
@@ -2368,7 +2396,6 @@ void PM_Weapon(pmove_t *pm, pml_t *pml)
     if (ps->eFlags & 0x300)
         return;
 
-    PM_UpdateAimDownSightLerp(pm, pml);
     PM_UpdateHoldBreath(pm, pml);
 
     if (PM_UpdateOffhandCook(pm, pml))
@@ -2401,7 +2428,7 @@ void PM_Weapon(pmove_t *pm, pml_t *pml)
 
     switch (ps->weaponstate) {
     case WEAPON_READY:
-        PM_TryFireWeapon(pm, delayedAction);
+        PM_TryFireWeapon(pm, delayedAction, triggerPressed);
         break;
     case WEAPON_RAISING:
         if (!ps->weaponTime)
@@ -2413,13 +2440,23 @@ void PM_Weapon(pmove_t *pm, pml_t *pml)
         break;
     case WEAPON_FIRING:
         if (delayedAction)
-            PM_TryFireWeapon(pm, delayedAction);
-        else if (!ps->weaponTime)
+            PM_TryFireWeapon(pm, delayedAction, triggerPressed);
+        else if (!ps->weaponTime) {
             PM_FinishFire(ps);
+            /* An automatic gun can start its next shot on the command that
+             * expires fireTime. Waiting for another READY command makes its
+             * cadence depend on the player's frame/input rate. Semi-auto
+             * guns additionally require a fresh, unbuffered trigger press. */
+            if (ps->weaponstate == WEAPON_READY)
+                PM_TryFireWeapon(pm, 0, triggerPressed);
+        }
         break;
     case WEAPON_RECHAMBERING:
-        if (delayedAction || (!ps->weaponTime && !ps->weaponDelay))
+        if (delayedAction || (!ps->weaponTime && !ps->weaponDelay)) {
             PM_FinishRechamber(ps);
+            if (ps->weaponstate == WEAPON_READY)
+                PM_TryFireWeapon(pm, 0, triggerPressed);
+        }
         break;
     case WEAPON_RELOADING:
     case WEAPON_RELOADING_INTERUPT:

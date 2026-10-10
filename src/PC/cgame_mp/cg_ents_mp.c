@@ -3,6 +3,8 @@
 #include "bytematch.h"
 #include "headers/PC/cgame_mp/cg_local.h"
 #include <string.h>
+#include <stdlib.h>
+#include <math.h>
 extern scr_const_t scr_const;
 
 extern void DObjUpdateClientInfo(struct DObj_s *obj, float timescale);
@@ -318,6 +320,126 @@ void CG_AddCEntityToScene(const GfxEntity *ent, const struct DObj_s *obj, const 
     }
 }
 
+static int CG_PlayerTrajectorySampleTime(const trajectory_t *tr, int snapshotTime)
+{
+    int endTime = tr->trTime + tr->trDuration;
+    if (snapshotTime < tr->trTime)
+        return tr->trTime;
+    return snapshotTime > endTime ? endTime : snapshotTime;
+}
+
+static float CG_PlayerMotionBlend(float a, float b, float va, float vb, float seconds, float f)
+{
+    float distance = b - a;
+    float ta = va * seconds;
+    float tb = vb * seconds;
+    float f2 = f * f;
+    float f3 = f2 * f;
+
+    /* Monotone Hermite tangents retain velocity at ordinary sample boundaries
+     * without overshooting a wall, stop or direction change between samples. */
+    if (distance == 0.0f)
+        return a;
+    if (ta * distance <= 0.0f) ta = 0.0f;
+    if (tb * distance <= 0.0f) tb = 0.0f;
+    if (fabsf(ta) > fabsf(distance) * 3.0f) ta = distance * 3.0f;
+    if (fabsf(tb) > fabsf(distance) * 3.0f) tb = distance * 3.0f;
+    return (2.0f * f3 - 3.0f * f2 + 1.0f) * a
+         + (f3 - 2.0f * f2 + f) * ta
+         + (-2.0f * f3 + 3.0f * f2) * b
+         + (f3 - f2) * tb;
+}
+
+static qboolean CG_InterpolateRemotePlayerPosition(centity_t *cent, const float *current, const float *next)
+{
+    const trajectory_t *a = &cent->currentState.pos;
+    const trajectory_t *b = &cent->nextState.pos;
+    int t0, t1, i;
+    float f;
+
+    if (cent->currentState.eType != 1 || cent->nextState.eType != 1 ||
+        cent->currentState.number != cent->nextState.number || (unsigned)cent->nextState.number >= 64 ||
+        cent->nextState.number == cg->nextSnap->ps.clientNum ||
+        ((cent->currentState.eFlags | cent->nextState.eFlags) & 0x20300) ||
+        ((cent->currentState.eFlags ^ cent->nextState.eFlags) & 2) ||
+        a->trType != TR_LINEAR_STOP || b->trType != TR_LINEAR_STOP ||
+        a->trDuration <= 0 || b->trDuration <= 0 ||
+        a->trTime > cg->snap->serverTime || b->trTime > cg->nextSnap->serverTime)
+        return 0;
+
+    /* A stopped trajectory's endpoint is stamped commandTime + duration,
+     * often earlier than its containing snapshot. Using snapshot times for
+     * those endpoints turns uneven command arrivals into uneven running speed. */
+    t0 = CG_PlayerTrajectorySampleTime(a, cg->snap->serverTime);
+    t1 = CG_PlayerTrajectorySampleTime(b, cg->nextSnap->serverTime);
+    if (t1 < t0)
+        return 0;
+    if (cg->time >= t1) {
+        int ahead = cg->time - t1;
+        /* Bridge at most one server interval after the trajectory endpoint;
+         * never coast indefinitely on stale velocity. The authoritative server
+         * movement and hitboxes, local prediction and the clock stay intact. */
+        if (ahead > 50) ahead = 50;
+        for (i = 0; i < 3; ++i)
+            cent->lerpOrigin[i] = next[i] + b->trDelta[i] * ((float)ahead * 0.001f);
+        return 1;
+    }
+    if (t1 == t0 || cg->time <= t0) {
+        memcpy(cent->lerpOrigin, current, sizeof(vec3_t));
+        return 1;
+    }
+    f = (float)(cg->time - t0) / (float)(t1 - t0);
+    for (i = 0; i < 3; ++i)
+        cent->lerpOrigin[i] = CG_PlayerMotionBlend(current[i], next[i],
+            a->trDelta[i], b->trDelta[i], (float)(t1 - t0) * 0.001f, f);
+    return 1;
+}
+
+static void CG_TraceRemoteMotion(const centity_t *cent)
+{
+    typedef struct { int lastTime, startTime, frames, moving, held; vec3_t origin; float maxStep; } motionTrace_t;
+    static motionTrace_t traces[64];
+    static int enabled = -1;
+    motionTrace_t *trace;
+    float step2 = 0.0f, speed2 = 0.0f;
+    int i;
+    if (enabled < 0) enabled = getenv("PTRACE") != NULL;
+    if (!enabled || cent->nextState.eType != 1 || (unsigned)cent->nextState.number >= 64 ||
+        cent->nextState.number == cg->nextSnap->ps.clientNum)
+        return;
+    trace = &traces[cent->nextState.number];
+    if (!trace->lastTime || cg->time < trace->lastTime || cg->time - trace->lastTime > 250 ||
+        ((cent->currentState.eFlags ^ cent->nextState.eFlags) & 2)) {
+        memset(trace, 0, sizeof(*trace));
+        trace->startTime = cg->time;
+    } else if (cg->time == trace->lastTime) {
+        return;
+    } else {
+        for (i = 0; i < 3; ++i) {
+            float d = cent->lerpOrigin[i] - trace->origin[i];
+            step2 += d * d;
+            speed2 += cent->nextState.pos.trDelta[i] * cent->nextState.pos.trDelta[i];
+        }
+        ++trace->frames;
+        if (speed2 > 100.0f) {
+            ++trace->moving;
+            if (step2 < 0.000001f) ++trace->held;
+        }
+        if (step2 > trace->maxStep * trace->maxStep) trace->maxStep = sqrtf(step2);
+        if (cg->time - trace->startTime >= 1000) {
+            Com_Printf("[remote-motion] time=%d entity=%d snapshots=%d/%d commands=%d/%d frames=%d moving=%d held=%d maxStep=%.3f\n",
+                cg->time, cent->nextState.number, cg->snap->serverTime, cg->nextSnap->serverTime,
+                cent->currentState.pos.trTime, cent->nextState.pos.trTime,
+                trace->frames, trace->moving, trace->held, trace->maxStep);
+            trace->startTime = cg->time;
+            trace->frames = trace->moving = trace->held = 0;
+            trace->maxStep = 0.0f;
+        }
+    }
+    trace->lastTime = cg->time;
+    memcpy(trace->origin, cent->lerpOrigin, sizeof(vec3_t));
+}
+
 static void CG_InterpolateEntityPosition(centity_t *cent)
 {
     clientInfo_t *ci;
@@ -327,9 +449,12 @@ static void CG_InterpolateEntityPosition(centity_t *cent)
 
     BG_EvaluateTrajectory(&cent->currentState.pos, cg->snap->serverTime, current);
     BG_EvaluateTrajectory(&cent->nextState.pos, cg->nextSnap->serverTime, next);
-    cent->lerpOrigin[0] = current[0] + (next[0] - current[0]) * f;
-    cent->lerpOrigin[1] = current[1] + (next[1] - current[1]) * f;
-    cent->lerpOrigin[2] = current[2] + (next[2] - current[2]) * f;
+    if (!CG_InterpolateRemotePlayerPosition(cent, current, next)) {
+        cent->lerpOrigin[0] = current[0] + (next[0] - current[0]) * f;
+        cent->lerpOrigin[1] = current[1] + (next[1] - current[1]) * f;
+        cent->lerpOrigin[2] = current[2] + (next[2] - current[2]) * f;
+    }
+    CG_TraceRemoteMotion(cent);
 
     BG_EvaluateTrajectory(&cent->currentState.apos, cg->snap->serverTime, current);
     BG_EvaluateTrajectory(&cent->nextState.apos, cg->nextSnap->serverTime, next);

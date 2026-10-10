@@ -1,4 +1,38 @@
 /* Original game artwork on the black startup screen. */
+#cod2-fullscreen-controls {
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top));
+  right: max(12px, env(safe-area-inset-right));
+  z-index: 10001;
+  color: #f0eee6;
+  font: 13px/1.4 system-ui, sans-serif;
+}
+#cod2-fullscreen-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 1px solid #9d8b63;
+  border-radius: 3px;
+  background: #171815ed;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+#cod2-fullscreen-toggle:hover { background: #3b392b; }
+#cod2-fullscreen-toggle:focus-visible { outline: 2px solid #d7c59a; outline-offset: 3px; }
+#cod2-fullscreen-toggle:disabled { cursor: wait; opacity: 0.65; }
+#cod2-fullscreen-toggle kbd { color: #d7c59a; font: 11px/1.4 system-ui, sans-serif; }
+#cod2-fullscreen-status {
+  max-width: 240px;
+  margin: 6px 0 0;
+  padding: 8px;
+  border: 1px solid #9d8b63;
+  background: #171815;
+}
+#cod2-fullscreen-status[hidden] { display: none; }
+
 .wasm-game-framework #loading.cod2-startup {
   background: #000 !important;
   color: #d4d4d0;

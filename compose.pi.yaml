@@ -1,0 +1,15 @@
+# Overlay for a 64-bit Raspberry Pi. Use together with compose.yaml.
+services:
+  cod2-web:
+    image: local/cod2-wasm:pi
+    platform: linux/arm64
+  cod2-gateway:
+    image: local/cod2-gateway:pi
+    platform: linux/arm64
+  cod2-server:
+    build:
+      context: .
+      dockerfile: downstream/server/Dockerfile.pi
+    image: local/cod2-pi-server:dev
+    platform: linux/arm64
+    restart: unless-stopped

@@ -96,6 +96,7 @@ static int yyparse_get_next_buffer(int offset)
     struct yy_buffer_state *b = (struct yy_buffer_state *)yy_current_buffer;
     int num_to_read;
     int n_kept;
+    int eob_act = 1;
 
     if (b->yy_buffer_status == 0) {
         yy_n_chars = b->yy_n_chars;
@@ -158,13 +159,16 @@ static int yyparse_get_next_buffer(int offset)
             return 0;
         }
         b->yy_buffer_status = 2;
+        // Finish the retained token once before reporting EOF. Refilling it
+        // forever hangs on a final comment or identifier without a newline.
+        eob_act = 2;
     }
 
     yy_n_chars += n_kept;
     b->yy_ch_buf[yy_n_chars] = '\0';
     b->yy_ch_buf[yy_n_chars + 1] = '\0';
     yytext = b->yy_ch_buf;
-    return 1;
+    return eob_act;
 }
 
 static int yyparse_yylex(char *string_buf)

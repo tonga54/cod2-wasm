@@ -1,11 +1,12 @@
 #!/usr/bin/python3
-"""Small, internal-only supervisor for Toujane/Carentan TDM rooms."""
+"""Small, internal-only supervisor for Toujane/Carentan multiplayer rooms."""
 import concurrent.futures
 import http.server
 import json
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import signal
 import socket
@@ -17,7 +18,8 @@ MAX_ROOMS = 3
 BASE_PORT = 28960
 IDLE_SECONDS = 300
 SUPPORTED_MAPS = ('mp_toujane', 'mp_carentan')
-DEFAULT_NAME = 'Toujane - Carentan | TDM'
+SUPPORTED_GAMETYPES = ('dm', 'tdm', 'ctf', 'hq', 'sd')
+DEFAULT_NAME = 'Toujane - Carentan'
 rooms = {}
 lock = threading.Lock()
 stopping = threading.Event()
@@ -39,39 +41,46 @@ def info_for(room):
         info = data[len(prefix):].split(b'\x00', 1)[0].decode('latin1').strip()
         fields = info.split('\\')
         values = dict(zip(fields[1::2], fields[2::2]))
-        if values.get('mapname') not in SUPPORTED_MAPS or values.get('gametype') != 'tdm':
+        if values.get('mapname') not in SUPPORTED_MAPS or values.get('gametype') not in SUPPORTED_GAMETYPES:
             return None
         return {'id': room['id'], 'port': room['port'], 'info': info,
+                'instance': room.get('instance', ''),
                 'ping': max(1, round((time.monotonic() - started) * 1000)),
                 'players': int(values.get('clients', '0'))}
     except (OSError, ValueError):
         return None
 
 
-def start_room(room_id, name, mapname='mp_toujane'):
+def start_room(room_id, name, mapname='mp_toujane', gametype='tdm'):
     if mapname not in SUPPORTED_MAPS:
         raise ValueError('Unsupported map')
+    if gametype not in SUPPORTED_GAMETYPES:
+        raise ValueError('Unsupported game mode')
     profile = Path('/profile') / f'room-{room_id}'
     raw = profile / 'raw'
     raw.mkdir(parents=True, exist_ok=True)
     shutil.copyfile('/config/server.cfg', raw / 'server.cfg')
     # Start the rotation after the selected map so it changes at round end.
     remaining = SUPPORTED_MAPS[SUPPORTED_MAPS.index(mapname) + 1:]
-    rotation = 'gametype tdm ' + ' '.join('map ' + item for item in remaining) if remaining else ''
+    rotation = f'gametype {gametype} ' + ' '.join('map ' + item for item in remaining) if remaining else ''
+    full_rotation = f'gametype {gametype} ' + ' '.join('map ' + item for item in SUPPORTED_MAPS)
     with (raw / 'server.cfg').open('a') as config:
-        config.write(f'\nset sv_mapRotationCurrent "{rotation}"\n')
+        config.write(f'\nset g_gametype "{gametype}"\n'
+                     f'set sv_mapRotation "{full_rotation}"\n'
+                     f'set sv_mapRotationCurrent "{rotation}"\n')
     # Names are one console argument. No arbitrary commands, paths,
     # launch options, UDP destinations or shell interpretation are accepted.
     name = re.sub(r'[^A-Za-z0-9 _|.-]', '', name).strip()[:32] or DEFAULT_NAME
     args = ['/usr/local/bin/cod2_lnxded', '+set', 'dedicated', '1',
             '+set', 'fs_basepath', '/game', '+set', 'fs_homepath', str(profile),
             '+set', 'net_ip', '0.0.0.0', '+set', 'net_port', str(BASE_PORT + room_id),
-            '+set', 'sv_maxclients', '64', '+set', 'g_gametype', 'tdm',
-            '+exec', 'server.cfg', '+set', 'sv_hostname', f'"{name}"',
+            '+set', 'sv_maxclients', '64', '+exec', 'server.cfg',
+            '+set', 'g_gametype', gametype, '+set', 'sv_hostname', f'"{name}"',
             '+map', mapname]
     child = subprocess.Popen(args, stdin=subprocess.DEVNULL, start_new_session=True)
     room = {'id': room_id, 'port': BASE_PORT + room_id, 'process': child,
-            'last_used': time.monotonic()}
+            'last_used': time.monotonic(), 'instance': secrets.token_hex(16),
+            'ownerToken': secrets.token_hex(32)}
     rooms[room_id] = room
     return room
 
@@ -124,35 +133,61 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not isinstance(name, str):
                 raise ValueError()
         except (ValueError, TypeError, AttributeError):
-            return self.reply(400, {'error': 'Nombre de partida inválido.'})
+            return self.reply(400, {'error': 'Invalid server name.'})
         mapname = body.get('map', 'mp_toujane')
         if not isinstance(mapname, str) or mapname not in SUPPORTED_MAPS:
-            return self.reply(400, {'error': 'Elegí Toujane o Carentan.'})
+            return self.reply(400, {'error': 'Choose Toujane or Carentan.'})
+        gametype = body.get('gametype', 'tdm')
+        if not isinstance(gametype, str) or gametype not in SUPPORTED_GAMETYPES:
+            return self.reply(400, {'error': 'Choose a supported game mode.'})
         with lock:
             if stopping.is_set():
-                return self.reply(503, {'error': 'El servidor se está cerrando.'})
-            available = [i for i in range(1, MAX_ROOMS)
+                return self.reply(503, {'error': 'The host is shutting down.'})
+            available = [i for i in range(MAX_ROOMS)
                          if i not in rooms or rooms[i]['process'].poll() is not None]
             if not available:
-                return self.reply(409, {'error': 'Ya hay tres partidas. Entrá a una existente.'})
-            room = start_room(available[0], name, mapname)
+                return self.reply(409, {'error': 'Three servers are already running. Join an existing server.'})
+            room = start_room(available[0], name, mapname, gametype)
         for _ in range(40):
             info = info_for(room)
             if info:
-                return self.reply(201, info)
+                return self.reply(201, {**info, 'ownerToken': room['ownerToken']})
             if room['process'].poll() is not None:
                 break
             if stopping.wait(0.25):
                 break
         with lock:
             stop_room(room)
-        self.reply(503, {'error': 'El servidor no pudo iniciar la partida.'})
+        self.reply(503, {'error': 'Unable to start the server.'})
+
+    def do_DELETE(self):
+        if self.path != '/rooms':
+            return self.reply(404, {'error': 'Not found'})
+        try:
+            length = int(self.headers.get('Content-Length', '0'))
+            if not 0 < length <= 1024:
+                raise ValueError()
+            body = json.loads(self.rfile.read(length))
+            room_id, token = body.get('id'), body.get('ownerToken')
+            if type(room_id) is not int or not 0 <= room_id < MAX_ROOMS or not isinstance(token, str):
+                raise ValueError()
+        except (ValueError, TypeError, AttributeError):
+            return self.reply(400, {'error': 'Invalid server.'})
+        with lock:
+            room = rooms.get(room_id)
+            if not room:
+                return self.reply(404, {'error': 'This server no longer exists.'})
+            if not re.fullmatch(r'[0-9a-f]{64}', token) or not secrets.compare_digest(token, room['ownerToken']):
+                return self.reply(403, {'error': 'Only the creator can delete this server.'})
+            stop_room(room)
+            del rooms[room_id]
+        self.reply(200, {'deleted': room_id})
 
 
 def cleanup():
     while not stopping.wait(15):
         with lock:
-            current = [room for key, room in rooms.items() if key != 0]
+            current = list(rooms.values())
         for room in current:
             info = info_for(room)
             if info and info['players']:
@@ -167,7 +202,6 @@ def cleanup():
 def main():
     import resource
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-    start_room(0, DEFAULT_NAME)
     server = http.server.ThreadingHTTPServer(('0.0.0.0', 8090), Handler)
     server.daemon_threads = True
     threading.Thread(target=cleanup, daemon=True).start()

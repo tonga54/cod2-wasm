@@ -360,6 +360,11 @@ Bool PrimitiveTemplate_ParseModels(const PrimitiveTemplate *_this, GPValue *grp)
     struct XModel *model;
     TMediaElement media;
 
+    /* Dedicated servers parse effect lifetimes, but have no renderer/model
+     * registration callbacks. Smoke's burnt grenade model is client media. */
+    if (!g_rendererExists)
+        return 1;
+
     if (GPValue_IsList(grp)) {
         for (p = GPV_LIST(grp); p; p = GPV_NEXT(p)) {
             str = GPV_STRING(p);

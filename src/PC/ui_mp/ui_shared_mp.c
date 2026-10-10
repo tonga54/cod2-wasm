@@ -2788,6 +2788,7 @@ void Item_TextField_Paint(displayContextDef_t *dc, itemDef_t *item)
     int maxChars;
     int cursorPos;
     int cursorChar;
+    qboolean editing = g_editingField && g_editItem == item;
     float x;
     const char *traceParent = UI_TraceScriptItemParentName(item);
     int traceTextField = 0;
@@ -2830,7 +2831,8 @@ void Item_TextField_Paint(displayContextDef_t *dc, itemDef_t *item)
         textLen++;
     }
 
-    paintOffset = editPtr->paintOffset;
+    /* Scroll only the field being edited. On blur show the name's beginning. */
+    paintOffset = editing ? editPtr->paintOffset : 0;
     if (paintOffset < 0) {
         paintOffset = 0;
     } else if (paintOffset > textLen) {
@@ -2876,7 +2878,7 @@ void Item_TextField_Paint(displayContextDef_t *dc, itemDef_t *item)
                        (void *)font,
                        newColor[0], newColor[1], newColor[2], newColor[3]);
 
-    if (g_editingField && (item->window.staticFlags & 6) == 6) {
+    if (editing) {
         cursorChar = Key_GetOverstrikeMode() == 1 ? '_' : '|';
         cursorPos = item->cursorPos[0] - paintOffset;
         if (cursorPos < -1) {
@@ -3054,9 +3056,11 @@ void Item_Bind_Paint(displayContextDef_t *dc, itemDef_t *item)
     int i;
 
     editFieldDef_t *editPtr = Item_GetEditFieldDef(item);
-    if (!editPtr || !editPtr->maxPaintChars)
+    if (!editPtr)
         return;
-    maxChars = editPtr->maxPaintChars;
+    /* Retail binding rows omit maxPaintChars. Zero means unlimited text,
+     * rather than an invisible key label. */
+    maxChars = editPtr->maxPaintChars > 0 ? editPtr->maxPaintChars : 0x100;
 
     bindName = item->dvar;
     if (!bindName || !bindName[0])
@@ -3574,7 +3578,7 @@ int Item_ListBox_OverLB(itemDef_t *item, float x, float y)
     int horzAlign = (((rectDef_t*)(it))->horzAlign);
     int vertAlign = (((rectDef_t*)(it))->vertAlign);
 
-    UI_FeederCount((*(int *)&((itemDef_t *)it)->special));
+    UI_FeederCount(((itemDef_t *)it)->special);
     if (!Item_GetListBoxDef(item))
         return 0;
 
@@ -3722,7 +3726,7 @@ qboolean Item_ListBox_HandleKey(displayContextDef_t *dc, itemDef_t *item, int ke
     if (!listPtr)
         return 0;
 
-    count = UI_FeederCount((*(int *)&((itemDef_t *)it)->special));
+    count = UI_FeederCount(((itemDef_t *)it)->special);
 
     {
         float compareX, compareY;
@@ -3893,7 +3897,7 @@ qboolean Item_ListBox_HandleKey(displayContextDef_t *dc, itemDef_t *item, int ke
 
             {
                 int oldCursorPos = (((listBoxDef_s*)(listPtr))->cursorPos[0]);
-                if (oldCursorPos < UI_FeederCount((*(int *)&((itemDef_t *)it)->special)))
+                if (oldCursorPos < UI_FeederCount(((itemDef_t *)it)->special))
                     Item_SetCursorPos(item, (((listBoxDef_s*)(listPtr))->cursorPos[0]));
             }
             goto do_feeder_selection;
@@ -4893,18 +4897,19 @@ void Menu_HandleKey(displayContextDef_t *dc, menuDef_t *menu, int key, qboolean 
 
     if (g_editingField) {
         if (down) {
-            if (!Item_TextField_HandleKey(dc, g_editItem, key)) {
+            if (key >= 0xc8 && key <= 0xca) {
+                /* Commit the field, then route this same click to its target.
+                   Otherwise changing settings requires a second click. */
                 g_editingField = 0;
                 g_editItem = NULL;
+                Display_MouseMove(dc, NULL, dc->cursorx, dc->cursory);
             } else {
-
-                if (key >= 0xc8 && key <= 0xca) {
+                if (!Item_TextField_HandleKey(dc, g_editItem, key)) {
                     g_editingField = 0;
                     g_editItem = NULL;
-                    Display_MouseMove(dc, NULL, ((displayContextDef_t *)d)->cursorx, (((displayContextDef_s*)(d))->cursory));
                 }
+                return;
             }
-            goto done;
         }
     }
 
@@ -5075,7 +5080,6 @@ void Menu_HandleKey(displayContextDef_t *dc, menuDef_t *menu, int key, qboolean 
         return;
     }
 
-done:
     return;
 }
 
@@ -5600,7 +5604,7 @@ void Menus_HandleOOBClick(displayContextDef_t *dc, menuDef_t *menu, int key, qbo
 {
     byte *d = (byte *)dc;
     byte *m = (byte *)menu;
-    int i, j, k;
+    int i, j;
 
     if (!menu)
         return;
@@ -5660,7 +5664,9 @@ void Menus_HandleOOBClick(displayContextDef_t *dc, menuDef_t *menu, int key, qbo
                 continue;
 
             int itemType = (((itemDef_s*)(item))->type);
-            if (itemType != 0 && (*(int *)&((itemDef_t *)item)->text)) {
+            /* Text buttons use their painted text; controls with labels use
+               the full item rectangle, including the editable/value area. */
+            if (itemType == 0 && ((itemDef_t *)item)->text) {
 
                 int textBuf[6];
                 memset(textBuf, 0, 24);
@@ -5711,7 +5717,7 @@ count_visible:;
             visCount++;
     }
 
-    if (visCount > 0) {
+    if (visCount == 0) {
         UI_Pause(0);
 
         openCount = (((displayContextDef_s*)(d))->openMenuCount);
@@ -5743,8 +5749,6 @@ count_visible:;
                     CIN_StopCinematic(-((itemDef_t *)item)->window.ownerDraw);
             }
         }
-    } else {
-        UI_Pause(0);
     }
 }
 
@@ -5811,14 +5815,14 @@ bind_t g_bindings[56] = {
     { (char *)&str_002ac054, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff },
     { (char *)&str_002ac060, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff },
     { (char *)&str_002ac06c, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff },
-    { (char *)&str_002ac074, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff },
+    { (char *)&str_002ac074, 0x68, 0xffffffff, 0xffffffff, 0xffffffff },
     { (char *)&str_002ac084, 0x31, 0xffffffff, 0xffffffff, 0xffffffff },
     { (char *)&str_002ac098, 0x32, 0xffffffff, 0xffffffff, 0xffffffff },
     { (char *)&str_002ac0ac, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff },
     { (char *)&str_002ac0b8, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff },
-    { (char *)&str_002ac0cc, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff },
+    { (char *)&str_002ac0cc, 0x76, 0xffffffff, 0xffffffff, 0xffffffff },
     { (char *)&str_002ac0d4, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff },
-    { (char *)&str_002ac0e0, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff },
+    { "+sprint", 0xa0, 0xffffffff, 0xffffffff, 0xffffffff },
     { (char *)&str_002ac0f0, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff },
     { (char *)&str_002ac0f8, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff },
     { (char *)&str_002ac100, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff },

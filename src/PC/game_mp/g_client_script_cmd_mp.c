@@ -722,6 +722,12 @@ void BodyEnd(gentity_t *ent)
     ent->s.eFlags &= 0xfff7ffff;
     ent->r.contents = 0x4000000;
     ent->r.svFlags = 0;
+
+    /* Animation completion and corpse removal are separate deadlines.
+     * Keep the final pose after the owner respawns; the eight clone slots
+     * still bound the number of bodies during a busy match. */
+    ent->nextthink = ent->corpse.deathAnimStartTime + 8000;
+    ent->handler = 19; /* G_FreeEntity */
 }
 
 void PlayerCmd_SetClientDvar(scr_entref_t entref)

@@ -21,7 +21,7 @@ support=r'''
 typedef int qboolean;typedef unsigned char byte;
 #define WEAPTYPE_GRENADE 2
 typedef struct {int weapon,offHandIndex,weaponstate,weaponTime,weaponDelay,weaponRestrictKickTime,pm_flags,grenadeTimeLeft,eFlags,ammoclip[128],eventSequence,events[4],eventParms[4],stats[1];} playerState_t;
-typedef struct {int iFireTime,iFireDelay,iFuseTime,quickRaiseTime,iHoldFireTime,iClipIndex,weapType,bCookOffHold,bBoltAction;} WeaponDef;
+typedef struct {int iFireTime,iFireDelay,iFuseTime,quickRaiseTime,iHoldFireTime,iClipIndex,weapType,offhandClass,bCookOffHold,bBoltAction,bSemiAuto;} WeaponDef;
 typedef struct {playerState_t *ps;struct {int buttons,weapon;} cmd;} pmove_t;
 typedef struct {int msec;} pml_t;
 typedef struct {playerState_t ps;int lastServerTime;} gclient_t;
@@ -44,9 +44,11 @@ static void FireWeaponMelee(gentity_t *e){melees++;}
 static void G_UseOffHand(gentity_t *e){throws++;throwTime=now;throwFuse=e->client->ps.grenadeTimeLeft;}
 static void Scr_Notify(gentity_t *e,int s,int n){notifications++;}
 static void G_Damage(gentity_t*a,void*b,void*c,void*d,void*e,int f,int g,int h,int i,int j){}
+static void G_GrenadeCookOff(gentity_t *e){deaths++;}
 static void player_die(gentity_t*a,gentity_t*b,gentity_t*c,int d,int e,int f,void*g,int h,int i){deaths++;}
 '''
 body=''.join(function(weapons,n) for n in ['PM_UpdateOffhandCook','PM_UpdateWeaponTimers','PM_StartOffhandPrepare','PM_ReleaseOffhand','PM_RunOffhandState'])+function(active,'ClientEvents')
+body = '#define OFFHAND_CLASS_FRAG_GRENADE 1\n' + (root/'src/headers/cod2_grenade.h').read_text() + body
 checks=r'''
 static void tick(gentity_t *ent,pmove_t *pm,int step){
  pml_t pml={.msec=step};playerState_t *ps=pm->ps;int old=ps->eventSequence;now+=step;

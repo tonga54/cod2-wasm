@@ -37,6 +37,7 @@ static void CG_PriorityCenterPrint(const char *msg,float y,int prio){snprintf(ce
 static void CL_DeathMessagePrint(const char *a,const vec_t *ac,const char *v,const vec_t *vc,const char *i,float w,float h,const vec_t *ic,int flip){
  snprintf(killedBy,sizeof(killedBy),"%s",a);snprintf(killed,sizeof(killed),"%s",v);snprintf(icon,sizeof(icon),"%s",i);printed++;
 }
+static int deliveringObituary;
 static void obituary(entityState_t *es) {
  float attackerColor[4],victimColor[4],iconColor[4],iconWidth;
  int target,attacker,iconHorzFlip;char targetName[34],attackerName[34];const char *iconShader;
@@ -46,6 +47,9 @@ checks=r'''
 }
 static void reset(void){teamCount=printed=0;center[0]=0;}
 int main(void){
+#ifdef __EMSCRIPTEN__
+ deliveringObituary=1;
+#endif
  for(int n=0;n<64;n++){clientInfo_t *ci=&cg->bgs.clientinfo[n];ci->infoValid=1;ci->team=1+n%2;ci->oldteam=3;snprintf(ci->name,32,"Player %d",n);}
  for(int v=0;v<64;v++)for(int a=0;a<64;a++){
   reset();cg->clientNum=v;entityState_t es={v,a,1};obituary(&es);
@@ -58,7 +62,7 @@ int main(void){
  reset();entityState_t es={63,62,0x80|9};cg->clientNum=0;obituary(&es);
  assert(printed==1 && !strcmp(icon,"killiconheadshot"));
  reset();es.attackerEntityNum=1022;obituary(&es);assert(printed==1 && !killedBy[0]);
- reset();es.attackerEntityNum=62;cg->inKillCam=1;obituary(&es);assert(!printed && !center[0]);cg->inKillCam=0;
+ reset();es.attackerEntityNum=62;cg->inKillCam=1;obituary(&es);assert(printed==deliveringObituary && !center[0]);cg->inKillCam=0;
  reset();cg->bgs.clientinfo[63].infoValid=0;obituary(&es);assert(!printed);
  return 0;
 }
@@ -70,4 +74,7 @@ with tempfile.TemporaryDirectory(prefix='cod2-obituary-') as directory:
   subprocess.run(['cc','-std=c99','-O1','-g','-fsanitize=address,undefined',str(p/'test.c'),'-o',str(p/'test')],check=True)
   result=subprocess.run([str(p/'test')],capture_output=True)
   assert (result.returncode==0)==(index==0),result.stderr.decode()
-print('PASS: 4096 killer/victim combinations, correct names and teams, headshots/world deaths and no replay duplicate; both offset mutants fail')
+  if index == 0:
+   subprocess.run(['cc','-D__EMSCRIPTEN__','-std=c99','-O1','-g','-fsanitize=address,undefined',str(p/'test.c'),'-o',str(p/'test-web')],check=True)
+   subprocess.run([str(p/'test-web')],check=True)
+print('PASS: native and reliable browser feed; 4096 killer/victim combinations, correct names and teams, headshots/world deaths and no replay duplicate; both offset mutants fail')

@@ -18,9 +18,22 @@ EMSCRIPTEN_KEEPALIVE void web_capture_lost(void) {
 /* State comes from the real engine, so a successful download/link cannot be
  * reported to the launcher as a running match. */
 EMSCRIPTEN_KEEPALIVE int web_client_state(void) {
-    if (clientConnections[0].state == CA_ACTIVE && CL_GetKeyCatchers() == 0) return 2;
+    if (clientConnections[0].state == CA_ACTIVE) {
+        int catchers = CL_GetKeyCatchers();
+        if (catchers == 0) return 2;
+        /* Chat edits the in-game field and never needs a desktop pointer. */
+        if (catchers == 0x10) return 3;
+    }
     if (cls.rendererStarted && cls.uiStarted) return 1;
     return 0;
+}
+
+EMSCRIPTEN_KEEPALIVE void web_chat_char(int character) {
+    /* The shell prevents these printable keys while the mouse stays captured,
+     * which also cancels SDL's browser keypress event. Forward them once. */
+    if (clientConnections[0].state == CA_ACTIVE && CL_GetKeyCatchers() == 0x10 &&
+        (character == ' ' || character == '/'))
+        Sys_QueEvent(0, SE_CHAR, character, 0, 0, NULL);
 }
 
 /* Menus/chat can be open during a match. Update notices wait until disconnect. */

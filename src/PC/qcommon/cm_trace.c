@@ -198,9 +198,12 @@ static void CM_TraceBrushPlane(const traceWork_t *tw, const vec_t *normal, float
     float denominator;
     float fraction;
 
-    support = CM_AbsFloat(normal[0]) * CM_AbsFloat(tw->size[0]) +
-              CM_AbsFloat(normal[1]) * CM_AbsFloat(tw->size[1]) +
-              CM_AbsFloat(normal[2]) * CM_AbsFloat(tw->size[2]);
+    /* Map brushes and triangle meshes must sweep the same upright capsule.
+     * Expanding by AABB half sizes adds square shoulders on diagonal walls
+     * and slopes, making a clear corner overlap the player's box. BSP plane
+     * normals are unit length; the sphere radius plus the projected vertical
+     * segment is the capsule's support distance. */
+    support = tw->radius + CM_AbsFloat(normal[2]) * tw->offsetZ;
     expandedDist = dist + support;
 
     startDist = CM_DotProduct(tw->extents.start, normal) - expandedDist;

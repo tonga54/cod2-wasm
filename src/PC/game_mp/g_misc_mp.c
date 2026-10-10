@@ -48,6 +48,7 @@ extern void G_GetPlayerViewDirection(const gentity_t *ent, vec_t *forward, vec_t
 extern void G_TraceCapsule(trace_t *results, const vec_t *start, const vec_t *mins, const vec_t *maxs, const vec_t *end, int passEntityNum, int contentmask);
 extern void Weapon_RocketLauncher_Fire(gentity_t *ent, float spread, weaponParms *wp);
 extern void Bullet_Fire(gentity_t *attacker, float spread, weaponParms *wp, gentity_t *weaponEnt, int gametime);
+extern float randomf(void);
 extern const char *SL_ConvertToString(unsigned int stringValue);
 extern float vectosignedyaw(const vec3_t vec);
 extern void VectorAngleMultiply(vec3_t vec, float angle);
@@ -96,10 +97,38 @@ enum {
     GMISC_PMOVE_HANDLER_SERVER = 0x1,
     GMISC_DEFAULT_VIEWHEIGHT = 60,
     GMISC_ANIM_TOGGLEBIT = 0x200,
-    GMISC_EV_FIRE_WEAPON_MG42 = 0xaf
+    GMISC_EV_FIRE_WEAPON_MG42 = 0xaf,
+    /* Eight units per firing millisecond: 5s firing, 8s full cooling. */
+    GMISC_TURRET_HEAT_MAX = 40000,
+    GMISC_TURRET_SHOT_HEAT_SCALE = 8,
+    GMISC_TURRET_COOLING_PER_MS = 5
 };
 
 static const vec3_t g_misc_vec3_origin = { 0.0f, 0.0f, 0.0f };
+
+/* Keep heat separate from the retail turretInfo ABI. It belongs to the gun,
+ * so changing users cannot bypass its cooling period. time2 is replicated. */
+typedef struct { int heat, lastTime; qboolean overheated; } turretHeat_t;
+static turretHeat_t turretHeat[32];
+
+static turretHeat_t *turret_UpdateHeat(gentity_t *self, qboolean firing)
+{
+    int index = self->pTurretInfo - turretInfo;
+    turretHeat_t *heat = &turretHeat[index];
+    int elapsed = level.time - heat->lastTime;
+    if (elapsed < 0) elapsed = 0;
+    if (elapsed > 8000) elapsed = 8000;
+    if (!firing || heat->overheated) {
+        heat->heat -= elapsed * GMISC_TURRET_COOLING_PER_MS;
+        if (heat->heat <= 0) {
+            heat->heat = 0;
+            heat->overheated = 0;
+        }
+    }
+    heat->lastTime = level.time;
+    self->s.time2 = heat->heat * 100 / GMISC_TURRET_HEAT_MAX | (heat->overheated ? 0x100 : 0);
+    return heat;
+}
 
 #define SCR_CONST() ((const scr_const_t *)imp_scr_const)
 
@@ -213,6 +242,7 @@ void SP_corona(gentity_t *ent)
 void G_InitTurrets(void)
 {
     int i;
+    memset(turretHeat, 0, sizeof(turretHeat));
     for (i = 0; i < 32; i++)
         turretInfo[i].inuse = 0;
 }
@@ -362,6 +392,8 @@ static qboolean turret_behind(gentity_t *self, gentity_t *other)
 
 void turret_think(gentity_t *self)
 {
+    gentity_t *heatOwner = &((gentity_t *)imp_g_entities)[self->r.ownerNum];
+    turret_UpdateHeat(self, heatOwner->client && (heatOwner->client->buttons & GMISC_BUTTON_ATTACK));
     self->nextthink = level.time + 50;
 
     if (self->tagInfo) {
@@ -666,6 +698,8 @@ void G_SpawnTurret(gentity_t *self, const char *weaponinfoname)
     }
 
     memset(info, 0, sizeof(*info));
+    memset(&turretHeat[i], 0, sizeof(turretHeat[i]));
+    turretHeat[i].lastTime = level.time;
     self->pTurretInfo = info;
     info->inuse = 1;
 
@@ -1025,12 +1059,36 @@ static void Fire_Lead(gentity_t *ent, gentity_t *activator)
     G_AddEvent(ent, GMISC_EV_FIRE_WEAPON_MG42, activator->s.number);
 }
 
+static void turret_ApplyRecoil(gentity_t *self, gentity_t *other)
+{
+    turretInfo_s *info = self->pTurretInfo;
+    playerState_t *ps = &other->client->ps;
+    float heat = (float)turretHeat[info - turretInfo].heat / GMISC_TURRET_HEAT_MAX;
+    float pitchKick = 0.28f + randomf() * 0.12f + heat * 0.12f;
+    float yawKick = (randomf() * 2.0f - 1.0f) * 0.18f;
+    vec3_t angles;
+
+    /* Move authoritative aim after the shot, not just the camera effect.
+     * delta_angles preserves the kick across commands and lets mouse input
+     * compensate. A sustained burst climbs further as the gun heats up. */
+    angles[0] = self->r.currentAngles[0] + GMisc_Clamp(
+        AngleSubtract(ps->viewangles[0], self->r.currentAngles[0]) - pitchKick,
+        info->arcmin[0], info->arcmax[0]);
+    angles[1] = self->r.currentAngles[1] + GMisc_Clamp(
+        AngleSubtract(ps->viewangles[1], self->r.currentAngles[1]) + yawKick,
+        info->arcmin[1], info->arcmax[1]);
+    angles[2] = ps->viewangles[2];
+    SetClientViewAngle(other, angles);
+    turret_clientaim(self, other);
+}
+
 static void turret_shoot_internal(gentity_t *self, gentity_t *other)
 {
     self->pTurretInfo->fireSndDelay = 3 * BG_GetWeaponDef(self->s.weapon)->iFireTime;
 
     if (other->client) {
         Fire_Lead(self, other);
+        turret_ApplyRecoil(self, other);
         other->client->ps.viewlocked = GMISC_PLAYERVIEWLOCK_WEAPONJITTER;
     }
 }
@@ -1039,6 +1097,7 @@ static void turret_track(gentity_t *self, gentity_t *other)
 {
     turretInfo_s *info;
     WeaponDef *weapDef;
+    turretHeat_t *heat = turret_UpdateHeat(self, other->client->buttons & GMISC_BUTTON_ATTACK);
 
     info = self->pTurretInfo;
 
@@ -1056,13 +1115,19 @@ static void turret_track(gentity_t *self, gentity_t *other)
     }
 
     info->fireTime = 0;
-    if (!(other->client->buttons & GMISC_BUTTON_ATTACK)) {
+    if (!(other->client->buttons & GMISC_BUTTON_ATTACK) || heat->overheated) {
         return;
     }
 
     info->fireTime = weapDef->iFireTime;
     turret_shoot_internal(self, other);
     self->s.eFlags |= GMISC_EF_FIRING;
+    heat->heat += weapDef->iFireTime * GMISC_TURRET_SHOT_HEAT_SCALE;
+    if (heat->heat >= GMISC_TURRET_HEAT_MAX) {
+        heat->heat = GMISC_TURRET_HEAT_MAX;
+        heat->overheated = 1;
+    }
+    self->s.time2 = heat->heat * 100 / GMISC_TURRET_HEAT_MAX | (heat->overheated ? 0x100 : 0);
 }
 
 void turret_think_client(gentity_t *self)

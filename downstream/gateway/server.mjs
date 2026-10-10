@@ -8,7 +8,8 @@ import { createUpdateChecker, readBuildInfo } from './updates.mjs';
 export function createGateway({ webHost = 'cod2-web', webPort = 8088,
   udpHost = 'cod2-server', udpPort = 28960, maxClients = 64,
   iconPath = '/game-ui/cod2.ico', startupPath = '/game-ui/cod2-startup.png',
-  roomsEnabled = false, managerPort = 8090, updateChecker } = {}) {
+  roomsEnabled = false, managerPort = 8090, updateChecker,
+  udpSocketFactory = () => dgram.createSocket('udp4') } = {}) {
   const reservations = new Map();
   const checkUpdates = updateChecker || createUpdateChecker({
     readBuild: () => readBuildInfo(webHost, webPort)
@@ -24,7 +25,7 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
       const encoded = body === undefined ? null : Buffer.from(JSON.stringify(body));
       const upstream = http.request({ hostname: udpHost, port: managerPort, path: '/rooms', method,
         headers: encoded ? { 'Content-Type': 'application/json', 'Content-Length': encoded.length } : {},
-        timeout: method === 'POST' ? 30000 : 2000 }, reply => {
+        timeout: method === 'POST' ? 30000 : method === 'DELETE' ? 6000 : 2000 }, reply => {
         const chunks = []; let bytes = 0;
         reply.on('data', chunk => {
           bytes += chunk.length;
@@ -56,15 +57,15 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
       return;
     }
     if (roomsEnabled && request.url === '/servers') {
-      if (!['GET', 'POST'].includes(request.method)) {
+      if (!['GET', 'POST', 'DELETE'].includes(request.method)) {
         json(response, 405, { error: 'Unsupported method' }); return;
       }
-      if (request.method === 'POST' && !sameOrigin(request)) {
+      if (request.method !== 'GET' && !sameOrigin(request)) {
         json(response, 403, { error: 'Invalid origin' }); return;
       }
       (async () => {
         let body;
-        if (request.method === 'POST') {
+        if (request.method !== 'GET') {
           const chunks = []; let bytes = 0;
           for await (const chunk of request) {
             bytes += chunk.length;
@@ -73,16 +74,32 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
           }
           try { body = JSON.parse(Buffer.concat(chunks)); }
           catch { json(response, 400, {error:'Invalid JSON'}); return; }
-          if (!body || typeof body.name !== 'string' || body.name.length > 128) {
-            json(response, 400, {error:'Nombre de partida inválido.'}); return;
+          if (request.method === 'DELETE') {
+            if (!body || !Number.isInteger(body.id) || body.id < 0 || body.id > 2 ||
+                typeof body.ownerToken !== 'string' || !/^[0-9a-f]{64}$/.test(body.ownerToken)) {
+              json(response, 400, {error:'Invalid server.'}); return;
+            }
+            body = {id:body.id, ownerToken:body.ownerToken};
+          } else {
+            if (!body || typeof body.name !== 'string' || body.name.length > 128) {
+              json(response, 400, {error:'Invalid server name.'}); return;
+            }
+            const map = body.map ?? 'mp_toujane';
+            if (!['mp_toujane', 'mp_carentan'].includes(map)) {
+              json(response, 400, {error:'Choose Toujane or Carentan.'}); return;
+            }
+            const gametype = body.gametype === undefined ? 'tdm' : body.gametype;
+            if (!['dm', 'tdm', 'ctf', 'hq', 'sd'].includes(gametype)) {
+              json(response, 400, {error:'Choose a supported game mode.'}); return;
+            }
+            body = {name:body.name, map, gametype};
           }
-          const map = body.map ?? 'mp_toujane';
-          if (!['mp_toujane', 'mp_carentan'].includes(map)) {
-            json(response, 400, {error:'Elegí Toujane o Carentan.'}); return;
-          }
-          body = {name:body.name, map};
         }
         const result = await manager(request.method, body);
+        if (request.method === 'DELETE' && result.status === 200) {
+          for (const client of wss.clients)
+            if (client.roomId === body.id) client.close(1001, 'The creator deleted the server.');
+        }
         if (request.method === 'GET' && Array.isArray(result.value.rooms)) {
           for (const room of result.value.rooms) {
             room.connections = [...wss.clients].filter(ws => ws.roomId === room.id).length +
@@ -91,7 +108,7 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
           }
         }
         json(response, result.status, result.value);
-      })().catch(() => json(response, 503, {error:'El servidor de partidas no está disponible.'}));
+      })().catch(() => json(response, 503, {error:'The server manager is unavailable.'}));
       return;
     }
     const artwork = request.url === '/game-data/files/cod2-icon/original.ico'
@@ -161,13 +178,21 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
     }
   });
   wss.on('connection', (ws, destination) => {
-    const udp = dgram.createSocket('udp4');
+    const udp = udpSocketFactory();
     let udpReady = false;
     let closed = false;
     let alive = true;
+    let pending = [];
+    let pendingBytes = 0;
+    // One send callback per peer avoids allocating a closure for every command.
+    const sentToUdp = error => {
+      if (error && ws.readyState === WebSocket.OPEN) ws.close(1011, 'UDP send failed');
+    };
     const closeUdp = () => {
       if (closed) return;
       closed = true;
+      pending.length = 0;
+      pendingBytes = 0;
       try { udp.close(); } catch {}
     };
     ws.on('error', closeUdp);
@@ -175,9 +200,17 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
     ws.on('pong', () => { alive = true; });
     ws.on('message', (data, binary) => {
       if (!binary || !data.length) { ws.close(1003, 'Binary datagrams required'); return; }
-      if (udpReady && !closed) udp.send(data, error => {
-        if (error && ws.readyState === WebSocket.OPEN) ws.close(1011, 'UDP send failed');
-      });
+      if (closed) return;
+      if (udpReady) udp.send(data, sentToUdp);
+      else {
+        // WebSocket open can precede UDP DNS/connect readiness. Preserve the
+        // initial challenge and fragment order rather than forcing a retry.
+        if (pending.length >= 16 || pendingBytes + data.length > 65536) {
+          ws.close(1009, 'Connection startup queue full'); return;
+        }
+        pending.push(data);
+        pendingBytes += data.length;
+      }
     });
     udp.on('message', data => {
       if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount < 262144)
@@ -190,7 +223,11 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
     });
     // Fixed destination: browsers cannot choose arbitrary UDP hosts or ports.
     udp.connect(destination, udpHost, () => {
+      if (closed || ws.readyState !== WebSocket.OPEN) return;
       udpReady = true;
+      for (const packet of pending) udp.send(packet, sentToUdp);
+      pending = [];
+      pendingBytes = 0;
       console.log('[gateway] client UDP port', udp.address().port);
     });
     const heartbeat = setInterval(() => {

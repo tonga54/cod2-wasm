@@ -8,3 +8,4 @@
 !downstream/
 !downstream/server/
 !downstream/server/entrypoint.sh
+!downstream/server/rooms.py

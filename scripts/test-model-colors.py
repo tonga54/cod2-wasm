@@ -21,6 +21,7 @@ def function(source, name):
 static_color = cache[cache.index('                        float oneOver255 ='):cache.index('\n                    }', cache.index('                        float oneOver255 ='))]
 functions = ''.join(function(device, name) for name in (
     'CDirect3DDevice_ColorByteOrder', 'CDirect3DDevice_ConvertColorArray',
+    'CDirect3DDevice_InterleavedColors',
     'CDirect3DDevice_SetMaterial', 'CDirect3DDevice_SetLight',
     'CDirect3DDevice_LightEnable', 'CDirect3DDevice_GetLightEnable',
     'CDirect3DDevice_ApplyModelLights'))
@@ -87,8 +88,20 @@ int main(void){
   for(int n=0;n<257;n++){byte *v=vertices+n*stride+12;v[0]=n%256;v[1]=17;v[2]=93;v[3]=201;}
   const byte *out=CDirect3DDevice_ConvertColorArray(vertices,stride,12,257,order);
   if(order==COLOR_BYTES_RGBA)assert(!out);else for(int n=0;n<257;n++)assert(out[n*4]==17&&out[n*4+1]==93&&out[n*4+2]==201&&out[n*4+3]==n%256);
+  const byte *interleaved=CDirect3DDevice_InterleavedColors(vertices,stride,12,257,order);
+  if(order==COLOR_BYTES_RGBA)assert(!interleaved);else for(int n=0;n<257;n++)for(int c=0;c<stride;c++){
+   byte expected=c>=12&&c<16?out[n*4+c-12]:vertices[n*stride+c];
+   assert(interleaved[n*stride+c]==expected);
+  }
+  for(int n=0;n<257;n++)assert(vertices[n*stride+12]==n%256); // Conversion never changes the source cache.
  }
  assert(CDirect3DDevice_ColorByteOrder(64,4)==COLOR_BYTES_BGRA);
+ byte ui[64*512];memset(ui,17,sizeof(ui));
+ for(int n=0;n<512;n++){byte *color=ui+n*64+28;color[0]=1;color[1]=2;color[2]=3;color[3]=n%256;}
+ const byte *uiConverted=CDirect3DDevice_InterleavedColors(ui,64,28,512,COLOR_BYTES_BGRA);
+ for(int n=0;n<512;n++){const byte *c=uiConverted+n*64+28;assert(c[0]==3&&c[1]==2&&c[2]==1&&c[3]==n%256);}
+ assert(!CDirect3DDevice_InterleavedColors(ui,64,63,512,COLOR_BYTES_BGRA));
+ assert(!CDirect3DDevice_InterleavedColors(ui,64,28,0,COLOR_BYTES_BGRA));
  for(int a=0;a<256;a++)for(int n=0;n<32;n++){
   byte original[4]={(n*17)%256,(n*93)%256,(n*201)%256,a},bgra[4],argb[4];
   float r=.25f+(n%5)*.5f,g=.15f+(n%3)*.5f,b=.05f+(n%7)*.5f;

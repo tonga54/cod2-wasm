@@ -13,7 +13,36 @@ typedef struct {
     UINT32 lengthBytes;
     byte *data;
     DWORD usage;
+#ifdef __EMSCRIPTEN__
+    unsigned webBuffer;
+    int webDirty;
+#endif
 } CDirect3DVertexBufferClean;
+
+#ifdef __EMSCRIPTEN__
+extern void glGenBuffers(int count, unsigned *buffers);
+extern void glDeleteBuffers(int count, const unsigned *buffers);
+extern void glBindBuffer(unsigned target, unsigned buffer);
+extern void glBufferData(unsigned target, ptrdiff_t size, const void *data, unsigned usage);
+
+unsigned CDirect3DVertexBuffer_BindStaticWeb(const CDirect3DVertexBuffer *_this)
+{
+    CDirect3DVertexBufferClean *vb = (CDirect3DVertexBufferClean *)_this;
+    /* Dynamic tessellation, animated models and HUD keep the client-array path. */
+    if ((vb->usage & 0x200) || !vb->data || !vb->lengthBytes) return 0;
+    if (!vb->webBuffer) {
+        glGenBuffers(1, &vb->webBuffer);
+        vb->webDirty = 1;
+    }
+    if (!vb->webBuffer) return 0;
+    glBindBuffer(0x8892, vb->webBuffer);
+    if (vb->webDirty) {
+        glBufferData(0x8892, vb->lengthBytes, vb->data, 0x88E4);
+        vb->webDirty = 0;
+    }
+    return vb->webBuffer;
+}
+#endif
 
 ULONG CDirect3DVertexBuffer_AddRef(const CDirect3DVertexBuffer *_this);
 void ZN21CDirect3DVertexBufferD0Ev(void *_this);
@@ -56,6 +85,9 @@ HRESULT CDirect3DVertexBuffer_Lock(const CDirect3DVertexBuffer *_this, UINT Offs
 
 HRESULT CDirect3DVertexBuffer_Unlock(const CDirect3DVertexBuffer *_this)
 {
+#ifdef __EMSCRIPTEN__
+    ((CDirect3DVertexBufferClean *)_this)->webDirty = 1;
+#endif
     (void)_this;
     return 0;
 }
@@ -76,6 +108,10 @@ void ZN21CDirect3DVertexBufferD1Ev(void *_this)
 {
     CDirect3DVertexBufferClean *vb = (CDirect3DVertexBufferClean *)_this;
     vb->vtable = vtbl_CDirect3DVertexBuffer;
+#ifdef __EMSCRIPTEN__
+    if (vb->webBuffer) glDeleteBuffers(1, &vb->webBuffer);
+    vb->webBuffer = 0;
+#endif
     free(vb->data);
     vb->data = NULL;
 }
@@ -100,6 +136,10 @@ void CDirect3DVertexBuffer_CDirect3DVertexBuffer(const CDirect3DVertexBuffer *_t
     vb->lengthBytes = Length;
     vb->data = (byte *)calloc(1, Length);
     vb->usage = Usage;
+#ifdef __EMSCRIPTEN__
+    vb->webBuffer = 0;
+    vb->webDirty = 1;
+#endif
 }
 
 HRESULT CDirect3DVertexBuffer_GetDevice(const CDirect3DVertexBuffer *_this, IDirect3DDevice9 **ppDevice)

@@ -727,7 +727,7 @@ state_ready:
         Com_Printf("%s%s\n", name, text);
 
     for (j = 0; j < level.numConnectedClients; ++j)
-        G_SayTo(ent, &g_entities[j], mode, color, name, text);
+        G_SayTo(ent, &g_entities[level.sortedClients[j]], mode, color, name, text);
 }
 
 void Cmd_GameCommand_f(gentity_t *ent)

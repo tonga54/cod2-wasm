@@ -1,3 +1,12 @@
+/* Linux directory cookies and inode numbers can exceed 32 bits, including
+ * the parent entry of a Docker bind mount. readdir/stat must not stop early
+ * with EOVERFLOW in the 32-bit dedicated server. Engine pointers stay 32-bit. */
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#ifndef _FILE_OFFSET_BITS
+#define _FILE_OFFSET_BITS 64
+#endif
+#endif
+
 #include "common_types.h"
 #include "imports.h"
 

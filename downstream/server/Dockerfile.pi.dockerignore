@@ -1,0 +1,13 @@
+*
+!downstream/
+!downstream/server/
+!downstream/server/Dockerfile.pi
+!downstream/server/pi-engine.sh
+!downstream/server/entrypoint.sh
+!downstream/server/rooms.py
+!out/
+!out/pi-runtime/
+!out/pi-runtime/**
+!server.cfg
+!site/
+!site/wasm-game-data.json

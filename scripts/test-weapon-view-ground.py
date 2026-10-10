@@ -35,7 +35,10 @@ typedef float vec_t; typedef float vec3_t[3]; typedef int qboolean;
 static void AxisCopy(vec3_t *in,vec3_t *out) {memcpy(out,in,9*sizeof(float));}
 '''
 viewtypes = r'''
-typedef struct {int pm_type,eFlags,commandTime,weapon;float fWeaponPosFrac;} playerState_t;
+#define PMF_SPRINT 0x02000000
+typedef struct {int pm_type,pm_flags,eFlags,commandTime,weapon,weaponstate;float fWeaponPosFrac;} playerState_t;
+static float sprintViewBlend;
+static int sprintViewTime;
 typedef struct {playerState_t *ps;float xyspeed,frametime;vec3_t vLastMoveAng;float fLastIdleFactor;
     int time,damageTime;float v_dmg_pitch,v_dmg_roll;vec3_t vGunOffset,vGunSpeed,swayAngles;int *weapIdleTime;} weaponState_t;
 typedef struct {int renderFxFlags;vec3_t axis[3],origin;} GfxEntity;
@@ -70,7 +73,7 @@ static void BG_CalculateWeaponAngles(weaponState_t *ws,vec_t *angles) {
 }
 '''
 viewbody = ''.join(function('src/PC/cgame_mp/cg_weapons.c', name) for name in [
-    'CG_Madd','CG_ResetViewWeaponOffsets','CG_AddViewWeapon'])
+    'CG_Madd','CG_ResetViewWeaponOffsets','CG_ResetSprintView','CG_SprintViewBlend','CG_AddViewWeapon'])
 viewchecks = r'''
 int main(void) {
     playerState_t ps={.weapon=1,.fWeaponPosFrac=1};cg->frametime=16;cg->time=10000;

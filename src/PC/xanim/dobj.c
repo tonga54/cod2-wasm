@@ -683,7 +683,7 @@ void DObjGetHierarchyBits(DObj *obj, int boneIndex, int *partBits)
 
     modelIndex = DObjGetModelStartIndexes(obj, boneIndex, startIndexes);
 
-    Com_Printf("[ckpt] hier-enter obj=%p numModels=%d numBones=%d mp[0]=%d mp[1]=%d matOff[0]=%d\n",
+    if (getenv("DBGSPAM")) Com_Printf("[ckpt] hier-enter obj=%p numModels=%d numBones=%d mp[0]=%d mp[1]=%d matOff[0]=%d\n",
                (void *)obj, obj->numModels, obj->numBones, obj->modelParents[0], obj->modelParents[1], obj->matOffset[0]);
     int dbgN = 0;
     for (;;) {
@@ -691,7 +691,7 @@ void DObjGetHierarchyBits(DObj *obj, int boneIndex, int *partBits)
         XModelParts *modelParts = (XModelParts *)model->parts;
         int localBoneIndex = boneIndex - startIndexes[modelIndex];
 
-        if (dbgN < 40) { dbgN++; Com_Printf("[ckpt] hier boneIndex=%d modelIndex=%d localBI=%d numRoot=%d start=%d\n",
+        if (getenv("DBGSPAM") && dbgN < 40) { dbgN++; Com_Printf("[ckpt] hier boneIndex=%d modelIndex=%d localBI=%d numRoot=%d start=%d\n",
                                             boneIndex, modelIndex, localBoneIndex, modelParts ? modelParts->numRootBones : -1, startIndexes[modelIndex]); }
 
         DObjSetPartBit(partBits, boneIndex);

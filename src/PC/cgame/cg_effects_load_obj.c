@@ -39,6 +39,41 @@ static const char *g_TypeName[11] = {
     "rocket_explode"
 };
 
+static EffectTemplate *CG_EnlargeGrenadeExplosion(const EffectTemplate *original)
+{
+    EffectTemplate *effect;
+    int i;
+
+    if (!original)
+        return NULL;
+    effect = Hunk_AllocAlignInternal(sizeof(*effect), 4);
+    memcpy(effect, original, sizeof(*effect));
+    for (i = 0; i < effect->mPrimitiveCount; ++i) {
+        const PrimitiveTemplate *source = original->mPrimitives[i];
+        PrimitiveTemplate *particle;
+        if (!source || (source->mType != PT_PARTICLE &&
+                       source->mType != PT_ORIENTEDPARTICLE && source->mType != PT_CLOUD))
+            continue;
+        /* A grenade-only variant keeps shared impact templates untouched.
+         * Reuse the original curves/media, counts and lifetimes; enlarge
+         * their visible fire, dust and smoke without extra particles. */
+        particle = Hunk_AllocAlignInternal(sizeof(*particle), 4);
+        memcpy(particle, source, sizeof(*particle));
+        particle->mFxChannels[FXCHAN_SIZE].scaleRange.mMin *= 1.35f;
+        particle->mFxChannels[FXCHAN_SIZE].scaleRange.mMax *= 1.35f;
+        if (source->mType == PT_CLOUD) {
+            particle->mFxChannels[FXCHAN_LENGTH].scaleRange.mMin *= 1.35f;
+            particle->mFxChannels[FXCHAN_LENGTH].scaleRange.mMax *= 1.35f;
+        } else if (source->mNonUniformScale) {
+            particle->mFxChannels[FXCHAN_SIZE2].scaleRange.mMin *= 1.35f;
+            particle->mFxChannels[FXCHAN_SIZE2].scaleRange.mMax *= 1.35f;
+        }
+        particle->spawnFrustumCullRadius *= 1.35f;
+        effect->mPrimitives[i] = particle;
+    }
+    return effect;
+}
+
 static int compare_impact_files(const int *pe0, const int *pe1)
 {
     return stricmp((const char *)(*pe0), (const char *)(*pe1));
@@ -167,6 +202,9 @@ FxImpactTable *CG_RegisterImpactEffects(const char *mapname)
     int typeIdx;
     int iBadCount = 0;
     int offset = 0;
+    const EffectTemplate *grenadeOriginals[23];
+    EffectTemplate *grenadeVariants[23];
+    int grenadeVariantCount = 0;
 
     for (typeIdx = 0; typeIdx < 11; typeIdx++) {
         FxImpactEntry *entries = (FxImpactEntry *)((byte *)fx->table + offset);
@@ -184,7 +222,20 @@ FxImpactTable *CG_RegisterImpactEffects(const char *mapname)
             } else if (*effectFile == '\0') {
                 ((int *)entries)[surfIdx] = 0;
             } else {
-                ((int *)entries)[surfIdx] = (int)FX_RegisterEffect(effectFile);
+                EffectTemplate *effect = FX_RegisterEffect(effectFile);
+                if (typeIdx == 9 && effect) {
+                    int variant;
+                    for (variant = 0; variant < grenadeVariantCount; ++variant)
+                        if (grenadeOriginals[variant] == effect)
+                            break;
+                    if (variant == grenadeVariantCount) {
+                        grenadeOriginals[variant] = effect;
+                        grenadeVariants[variant] = CG_EnlargeGrenadeExplosion(effect);
+                        ++grenadeVariantCount;
+                    }
+                    effect = grenadeVariants[variant];
+                }
+                ((int *)entries)[surfIdx] = (int)effect;
             }
         }
 

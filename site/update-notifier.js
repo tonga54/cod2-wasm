@@ -13,13 +13,13 @@
     const action = document.createElement('button');
     action.type = 'button';
     const help = document.createElement('a');
-    help.textContent = 'Cómo actualizar';
+    help.textContent = 'How to update';
     help.href = guide;
     help.target = '_blank';
     help.rel = 'noopener noreferrer';
     const later = document.createElement('button');
     later.type = 'button';
-    later.textContent = 'Más tarde';
+    later.textContent = 'Later';
     later.addEventListener('click', () => { dismissed = noticeKey(); render(); });
     action.addEventListener('click', () => {
       // A match may have started after the notice was drawn.
@@ -46,10 +46,10 @@
       if (hidden || drawnKey === key) return;
       drawnKey = key;
       const reload = loadedBuild !== latest.current.buildId;
-      message.textContent = reload ? 'El juego se actualizó. Recargá para usar la nueva versión.' :
-        'Hay una versión nueva del juego. El anfitrión puede actualizar el servidor.';
+      message.textContent = reload ? 'The game has been updated. Reload to use the new version.' :
+        'A new game version is available. The host can update the server.';
       action.hidden = !reload;
-      action.textContent = 'Recargar';
+      action.textContent = 'Reload';
       help.hidden = reload;
     }
     // The framework samples engine state after interactions, not continuously.

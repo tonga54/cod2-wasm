@@ -37,7 +37,7 @@ vm.runInContext(fs.readFileSync('site/update-notifier.js', 'utf8'), sandbox);
   assert.equal(panel.hidden, true, 'never display during a match/loading');
   notify = true; draw();
   assert.equal(panel.hidden, false);
-  assert.match(message.textContent, /anfitrión/);
+  assert.match(message.textContent, /host/);
   assert.equal(action.hidden, true, 'a push is not a deployed build');
   assert.equal(help.hidden, false);
   assert.equal(panel.hidden, false, 'menu transition is observed without keyboard/pointer interaction');
