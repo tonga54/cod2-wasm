@@ -342,5 +342,6 @@ that room's config across map rotation. No third-party bot package, waypoint
 download or separate Docker service is needed. Bots alone do not prevent the
 normal five-minute room cleanup.
 
-See [Bots](../README.md#bots) for difficulty settings and the current combat-AI
-limitations in objective modes.
+See [Bots](../README.md#bots) for difficulty settings, behavior in all five game
+modes and navigation limitations. The same native server AI runs on the Pi;
+objective interactions use the original capture, plant and defuse rules.

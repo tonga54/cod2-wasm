@@ -2528,6 +2528,9 @@ void Scr_SetAngles(gentity_t *ent, int offset)
     (void)offset;
     Scr_GetVector(0, angles);
     G_SetAngle(ent, angles);
+    if (ent->r.linked) {
+        SV_LinkEntity(ent);
+    }
 }
 
 void Scr_SetHealth(gentity_t *ent, int offset)

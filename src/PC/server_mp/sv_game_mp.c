@@ -510,7 +510,7 @@ qboolean SV_EntityContact(const vec_t *mins, const vec_t *maxs, const gentity_t 
             center[1] = (mins[1] + maxs[1]) * 0.5f;
             radius = maxs[0] - center[0] + gEnt->r.maxs[0];
             distSq = Vec2DistanceSq((float *)gEnt->r.currentOrigin, center);
-            return distSq > radius * radius;
+            return distSq <= radius * radius;
         }
         return 0;
     }

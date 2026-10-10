@@ -101,8 +101,6 @@ static void trigger_use_shared(gentity_t *ent)
 
     SV_SetBrushModel(ent);
 
-    SV_LinkEntity(ent);
-
     ent->trigger.singleUserEntIndex = 0x3ff;
 
     (_ENT(ent)->s.pos.trType) = 0;
@@ -135,6 +133,11 @@ static void trigger_use_shared(gentity_t *ent)
     }
 
     (_ENT(ent)->s.scale) = 0xff;
+
+    // Register the final use contents/flags. In particular, the S&D defuse
+    // trigger starts outside the world: linking before setting svFlags left
+    // it unlinked, so later script origin changes never moved its use bounds.
+    SV_LinkEntity(ent);
 
     if (G_SpawnString("hintstring", "", &cursorhint)) {
 

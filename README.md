@@ -51,11 +51,27 @@ shoot, reload and respawn under the mode's rules. Walls, other players and
 smoke block target visibility. Health, ammunition, recoil and weapon cadence
 use the same gameplay rules as human players.
 
-This first version provides **combat AI**, most useful in DM/TDM. The bots can
-join all five modes and obey round/respawn rules; coordinated flag strategies,
-HQ tactics and bomb planting/defusing are not implemented. Navigation is built
-from map collision and spawn locations, with bounded work per server frame;
-complex routes can still need improvements.
+| Game Type | Bot objectives |
+| --- | --- |
+| Deathmatch | Patrol and fight other players, including other bots. |
+| Team Deathmatch | Patrol in small groups, support teammates and engage enemies. |
+| Capture the Flag | Attack the enemy flag, return it home, recover dropped friendly flags, intercept enemy carriers, escort friendly carriers and guard the base. |
+| Headquarters | Approach the announced radio, capture or neutralize it, then defend it under the original respawn rules. |
+| Search and Destroy | Split between bomb sites, select a planter or defuser and have teammates cover them; defend sites and planted bombs. |
+
+Planting and defusing use ordinary held-use input and the original timers;
+bots do not award themselves objectives or bypass round rules. A bot already
+interacting, or a human interacting nearby, keeps that role while teammates
+cover. Difficulty also controls sight angle, bursts and how often objectives
+are reconsidered. Normal and Hard bots seek nearby cover when wounded or
+reloading. Lost enemies are remembered only at their last visible position.
+
+Navigation is built from map collision, spawn locations and announced
+objectives, with bounded work per server frame and shared spatial lookups.
+This is first-party multiplayer AI, not the retail campaign AI. Complex routes
+and tactical coordination can still need improvements.
+See [Bot behavior and validation](docs/BOT_AI.md) for the implementation and
+the distinction between autonomous matches and controlled interaction tests.
 
 Bots occupy ordinary player slots: eight bots leave 56 human slots. They do not
 keep a room alive after its last human leaves; the usual five-minute idle
@@ -68,8 +84,9 @@ For a custom room creator, POST `/servers` with `botCount` (integer 0–16) and
 These are intentional changes, rather than features claimed to be part of
 retail CoD2:
 
-- **Configurable combat bots:** first-party server AI with per-room quantity and
-  difficulty settings, normal weapon rules and collision-based navigation.
+- **Configurable multiplayer bots:** first-party server AI with per-room quantity
+  and difficulty settings, objectives for all five modes, cover, normal weapon
+  rules and collision-based navigation.
 - **Sprint:** Shift + W increases movement speed, lowers and swings the weapon,
   and uses the running body animation. Sprint currently has no stamina limit.
   Melee moves to V; scoped Hold Breath continues to use Shift.

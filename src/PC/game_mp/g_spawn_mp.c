@@ -74,6 +74,9 @@ extern qboolean G_ParseSpawnVars(SpawnVar *spawnVar);
 extern gentity_t *G_Spawn(void);
 extern unsigned char G_SetOrigin(gentity_t *ent, const vec_t *origin);
 extern unsigned char G_SetAngle(gentity_t *ent, const vec_t *angle);
+extern void Scr_SetOrigin(gentity_t *ent, int offset);
+extern void Scr_SetAngles(gentity_t *ent, int offset);
+extern void Scr_SetHealth(gentity_t *ent, int offset);
 extern void Scr_AddExecThread(scr_func_t handle, unsigned int paramcount);
 extern unsigned int Scr_GetObject(unsigned int index);
 extern void Scr_SetStructField(unsigned int structId, unsigned int index);
@@ -92,15 +95,15 @@ extern const dvar_t *g_motd;
    reproduces the exact x86 numbers and is correct on x64. */
 static const ent_field_t fields[11] = {
     { "classname", (int)offsetof(struct gentity_s, classname), F_STRING, NULL },
-    { "origin", (int)offsetof(struct gentity_s, r.currentOrigin), F_VECTOR, NULL },
+    { "origin", (int)offsetof(struct gentity_s, r.currentOrigin), F_VECTOR, (ScriptCallbackEnt)Scr_SetOrigin },
     { "model", (int)offsetof(struct gentity_s, model), F_MODEL, NULL },
     { "spawnflags", (int)offsetof(struct gentity_s, spawnflags), F_INT, NULL },
     { "target", (int)offsetof(struct gentity_s, target), F_STRING, NULL },
     { "targetname", (int)offsetof(struct gentity_s, targetname), F_STRING, NULL },
     { "count", (int)offsetof(struct gentity_s, count), F_INT, NULL },
-    { "health", (int)offsetof(struct gentity_s, health), F_INT, NULL },
+    { "health", (int)offsetof(struct gentity_s, health), F_INT, (ScriptCallbackEnt)Scr_SetHealth },
     { "dmg", (int)offsetof(struct gentity_s, damage), F_INT, NULL },
-    { "angles", (int)offsetof(struct gentity_s, r.currentAngles), F_VECTOR, NULL },
+    { "angles", (int)offsetof(struct gentity_s, r.currentAngles), F_VECTOR, (ScriptCallbackEnt)Scr_SetAngles },
     { NULL, 0, F_INT, NULL }
 };
 

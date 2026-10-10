@@ -373,14 +373,17 @@ static Bool __attribute_regparm__(2)
         }
 
         for (i = 0; i < 3; ++i) {
-            if (constValue2[i].value.type == 5) {
-                vec[i] = constValue2[i].value.u.floatValue;
-            } else if (constValue2[i].value.type == 6) {
-                vec[i] = (float)constValue2[i].value.u.intValue;
+            /* The parser stores expression lists right-to-left. Runtime
+             * vectors push z,y,x and Scr_CastVector reads x,y,z from the top;
+             * constant folding must produce that same source-axis order. */
+            if (constValue2[2-i].value.type == 5) {
+                vec[i] = constValue2[2-i].value.u.floatValue;
+            } else if (constValue2[2-i].value.type == 6) {
+                vec[i] = (float)constValue2[2-i].value.u.intValue;
             } else {
-                CompileError(constValue2[i].sourcePos.sourcePosValue,
+                CompileError(constValue2[2-i].sourcePos.sourcePosValue,
                              "type %s is not a float",
-                             ((const char *const *)imp_var_typename)[constValue2[i].value.type]);
+                             ((const char *const *)imp_var_typename)[constValue2[2-i].value.type]);
             }
         }
 
@@ -2796,7 +2799,9 @@ static Bool __attribute_regparm__(3)
                 first = SCRCP->value_count;
 
                 for (i = 0; i < 3; ++i) {
-                    VariableCompileValue *value = &SCRCG->value_start[first + i];
+                    /* Expression-list storage is z,y,x, matching the runtime
+                     * stack. The folded literal must be emitted as x,y,z. */
+                    VariableCompileValue *value = &SCRCG->value_start[first + 2 - i];
 
                     if (value->value.type == 5) {
                         vec[i] = value->value.u.floatValue;

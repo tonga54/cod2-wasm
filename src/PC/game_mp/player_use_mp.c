@@ -44,6 +44,28 @@ void Player_UpdateLookAtEntity(gentity_t *ent);
 
 #define SCR_CONST() ((const scr_const_t *)((byte *)&scr_const))
 
+static qboolean Player_IsUsableEntity(const gentity_t *ent)
+{
+    return ent->s.eType == 3 || ent->s.eType == 9 ||
+        ent->classname == SCR_CONST()->trigger_use ||
+        ent->classname == SCR_CONST()->trigger_use_touch;
+}
+
+static qboolean Player_GetUseTriggerHint(const gentity_t *trigger, const gentity_t *player,
+                                        int *type, int *string)
+{
+    if (trigger->team && trigger->team != player->client->sess.cs.team)
+        return 0;
+    if (trigger->trigger.singleUserEntIndex != 0x3ff &&
+        trigger->trigger.singleUserEntIndex != player->client->ps.clientNum)
+        return 0;
+    // These are the fields written by trigger_use_shared, setCursorHint and
+    // setHintString. animMovetype belongs to player animation, not use hints.
+    *type = trigger->s.dmgFlags;
+    *string = trigger->s.scale == 0xff ? -1 : trigger->s.scale;
+    return 1;
+}
+
 void Player_UpdateActivate(gentity_t *ent)
 {
     gclient_t *client;
@@ -257,13 +279,12 @@ static int BM_REGPARM(0) Player_GetUseList(gentity_t *ent, useList_t *useList)
         if (hitEnt == ent)
             continue;
 
-        /* Items and mounted weapons are usable entities in their own right;
-         * only script triggers need the use-trigger svFlag. Turrets have
-         * svFlags == 0, so filtering them here hid both their hint and use. */
-        if (hitEnt->s.eType != 3 && hitEnt->s.eType != 9) {
-            if (!((((gentity_t *)(hitEnt))->r.svFlags) & 0x20))
-                continue;
-        }
+        /* The area query already selects use contents. Radius svFlag 0x20 is
+         * a collision-shape flag, not a use flag: brush bomb triggers have
+         * svFlags == 1. Check the actual trigger classes so they retain their
+         * original cursor hint/use path alongside items and mounted guns. */
+        if (!Player_IsUsableEntity(hitEnt))
+            continue;
 
         if ((((gentity_t *)(hitEnt))->classname) == SCR_CONST()->trigger_use_touch) {
 
@@ -373,7 +394,6 @@ void Player_UpdateCursorHints(gentity_t *ent)
     int hintType;
     int hintString;
     int weaponIndex;
-    int team;
     WeaponDef *weapDef;
 
     ps = &ent->client->ps;
@@ -464,45 +484,8 @@ void Player_UpdateCursorHints(gentity_t *ent)
                 hintString = -1;
             } else {
 
-                if ((((gentity_t *)(traceEnt))->team) == 0) {
-
-                    if ((((gentity_t *)(traceEnt))->trigger.singleUserEntIndex) == 0x3FF) {
-
-                    } else {
-
-                        if ((((gentity_t *)(traceEnt))->trigger.singleUserEntIndex) != ent->client->ps.clientNum)
-                            continue;
-                    }
-
-                    hintType = (((gentity_t *)(traceEnt))->s.animMovetype);
-                    if (hintType == 0) {
-                        hintString = -1;
-                    } else {
-                        hintString = (((gentity_t *)(traceEnt))->s.dmgFlags);
-                        if (hintString == 0xFF)
-                            hintString = -1;
-                    }
-                } else {
-
-                    team = (((gentity_t *)(traceEnt))->team);
-                    if (team != (((gclient_t *)(ent->client))->sess.cs.team)) {
-
-                        if ((((gentity_t *)(traceEnt))->trigger.singleUserEntIndex) != 0x3FF &&
-                            (((gentity_t *)(traceEnt))->trigger.singleUserEntIndex) != ent->client->ps.clientNum)
-                            continue;
-
-                        hintType = (((gentity_t *)(traceEnt))->s.animMovetype);
-                        if (hintType == 0) {
-                            hintString = -1;
-                        } else {
-                            hintString = (((gentity_t *)(traceEnt))->s.dmgFlags);
-                            if (hintString == 0xFF)
-                                hintString = -1;
-                        }
-                    } else {
-                        continue;
-                    }
-                }
+                if (!Player_GetUseTriggerHint(traceEnt, ent, &hintType, &hintString))
+                    continue;
             }
         } else {
             continue;

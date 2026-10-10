@@ -50,6 +50,8 @@ qboolean SV_BotIsTestClient(int clientNum);
 void SV_BotResetClient(int clientNum);
 void SV_BotResetNavigation(void);
 qboolean SV_BotEnableAI(int clientNum, int difficulty);
+qboolean SV_BotSetGoal(int clientNum, const vec_t *origin, float radius, int behavior, int entityNum);
+qboolean SV_BotClearGoal(int clientNum);
 qboolean SV_BotStop(int clientNum);
 qboolean SV_BotSetMovement(int clientNum, int forward, int right);
 qboolean SV_BotSetAngles(int clientNum, const vec_t *angles);

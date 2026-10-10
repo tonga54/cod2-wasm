@@ -1020,6 +1020,33 @@ static void PlayerCmd_BotAI(scr_entref_t entref)
     Scr_AddBool(SV_BotEnableAI(entref.entnum, difficulty));
 }
 
+static void PlayerCmd_BotGoal(scr_entref_t entref)
+{
+    extern qboolean SV_BotSetGoal(int, const vec_t *, float, int, int);
+    vec3_t origin;
+    float radius;
+    int behavior, entityNum;
+    if (!PlayerCmd_BotParamCount(4, "USAGE: self botGoal(<origin>, <radius 8..512>, <behavior 0..3>, <entity number or -1>)\n") ||
+        !PlayerCmd_GetBotEntity(entref)) return;
+    Scr_GetVector(0, origin);
+    radius = Scr_GetFloat(1);
+    behavior = Scr_GetInt(2);
+    entityNum = Scr_GetInt(3);
+    if (!SV_BotSetGoal(entref.entnum, origin, radius, behavior, entityNum)) {
+        Scr_Error("Invalid bot objective parameters");
+        return;
+    }
+    Scr_AddBool(1);
+}
+
+static void PlayerCmd_BotClearGoal(scr_entref_t entref)
+{
+    extern qboolean SV_BotClearGoal(int);
+    if (!PlayerCmd_BotParamCount(0, "USAGE: self botClearGoal()\n") ||
+        !PlayerCmd_GetBotEntity(entref)) return;
+    Scr_AddBool(SV_BotClearGoal(entref.entnum));
+}
+
 static void PlayerCmd_BotStop(scr_entref_t entref)
 {
     if (!PlayerCmd_BotParamCount(0, "USAGE: self botStop()\n") ||
@@ -1668,6 +1695,8 @@ static const BuiltinMethodDef player_methods[] __attribute__((used)) = {
     { "isbot", (BuiltinMethod)PlayerCmd_BotIsBot, 0 },
     { "botstop", (BuiltinMethod)PlayerCmd_BotStop, 0 },
     { "botai", (BuiltinMethod)PlayerCmd_BotAI, 0 },
+    { "botgoal", (BuiltinMethod)PlayerCmd_BotGoal, 0 },
+    { "botcleargoal", (BuiltinMethod)PlayerCmd_BotClearGoal, 0 },
     { "botmovement", (BuiltinMethod)PlayerCmd_BotMovement, 0 },
     { "botangles", (BuiltinMethod)PlayerCmd_BotAngles, 0 },
     { "botweapon", (BuiltinMethod)PlayerCmd_BotWeapon, 0 },

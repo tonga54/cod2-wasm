@@ -11,6 +11,7 @@ import csv
 import io
 from weapon_balance import apply_weapon_balance, load_profile
 from browser_bot_menu import apply_bot_menu
+from browser_objective_assets import objective_asset_roots
 
 root = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
@@ -99,6 +100,8 @@ try:
                            f"ui_mp/scriptmenus/serverinfo_{mode}.menu",
                            f"ui_mp/settings_{mode}.menu"):
             assert dependency in entries, "Missing game mode dependency: " + dependency
+    for name in objective_asset_roots(index):
+        assert name in entries, "Missing dynamic objective resource: " + name
     aliases = {}
     for name, data in entries.items():
         if name.startswith("soundaliases/") and name.endswith(".csv"):

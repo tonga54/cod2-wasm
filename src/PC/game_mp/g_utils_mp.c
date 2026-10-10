@@ -664,7 +664,7 @@ unsigned char G_SetFixedLink(gentity_t *ent, int eAngles)
 unsigned char G_CalcTagAxis(gentity_t *ent, qboolean bAnglesOnly)
 {
     vec3_t parentAxis[4];
-    vec3_t axis[3];
+    vec3_t axis[4];
     tagInfo_t *tagInfo;
     vec3_t invParentAxis[4];
 
@@ -681,11 +681,14 @@ unsigned char G_CalcTagAxis(gentity_t *ent, qboolean bAnglesOnly)
         MatrixTranspose((vec_t *)parentAxis, (vec_t *)invParentAxis);
         MatrixMultiply((vec_t *)axis, (vec_t *)invParentAxis, ((vec_t *)(tagInfo)->axis));
     } else {
-        vec3_t origin;
         MatrixInverseOrthogonal43((vec_t *)parentAxis, (vec_t *)invParentAxis);
-        VectorCopy((_ENT(ent)->r.currentOrigin), origin);
+        // MatrixMultiply43 reads four rows, including the world translation.
+        // A three-row rotation plus a separate local origin read past axis and
+        // moved linked players away from the bomb during plant/defuse holds.
+        VectorCopy((_ENT(ent)->r.currentOrigin), axis[3]);
         MatrixMultiply43((vec_t *)axis, (vec_t *)invParentAxis, ((vec_t *)(tagInfo)->axis));
     }
+    return 1;
 }
 
 unsigned char G_EntUnlink(gentity_t *ent)

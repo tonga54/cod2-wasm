@@ -9,6 +9,7 @@ import struct
 import zipfile
 from browser_sound_assets import collect_sound_assets
 from browser_bot_menu import apply_bot_menu
+from browser_objective_assets import objective_asset_roots
 from weapon_balance import apply_weapon_balance, load_profile
 
 root = Path(__file__).resolve().parent.parent
@@ -94,6 +95,9 @@ try:
     graphics_source = (root / "src/PC/cgame_mp/cg_registergraphics_new.c").read_text()
     pending.extend(re.findall(r'"(fx/[^\"]+\.efx)"', graphics_source))
     pending.extend(("shock/default.shock", "shock/hold_breath.shock"))
+    # Flag factions and HQ radio variants are built by string concatenation;
+    # literal-token scanning cannot discover their original render resources.
+    pending.extend(objective_asset_roots(asset_index))
     pending.append("info/mp_lochit_dmgtable")
     # _menus.gsc builds these names from each map's factions and gametype.
     pending.extend("ui_mp/scriptmenus/" + menu + ".menu" for menu in (
