@@ -20,18 +20,21 @@ typedef int qboolean; typedef unsigned char byte; typedef float vec_t; typedef f
 #define TEAM_FREE 0
 #define TEAM_AXIS 1
 #define TEAM_ALLIES 2
-typedef struct { float fraction; vec3_t normal; unsigned short entityNum; int startsolid,allsolid; } trace_t;
-typedef struct { vec3_t origin,viewangles,velocity; float viewHeightCurrent; int pm_type,weapon,weaponTime,pm_flags,groundEntityNum,cursorHintEntIndex,ammoclip[128],ammo[128];char weaponslots[8]; } playerState_t;
+#define WEAPCLASS_SMG 2
+#define WEAPCLASS_MG 1
+typedef struct { float fraction; vec3_t normal; unsigned short entityNum; int startsolid,allsolid,surfaceFlags; } trace_t;
+typedef struct { vec3_t origin,viewangles,velocity; float viewHeightCurrent,fWeaponPosFrac; int pm_type,weapon,weaponTime,pm_flags,groundEntityNum,cursorHintEntIndex,ammoclip[128],ammo[128];char weaponslots[8]; } playerState_t;
 typedef struct { playerState_t ps; vec3_t damage_from; int damage_fromWorld; struct {int connected,sessionState; struct {int team;}cs;}sess;} gclient_t;
 typedef struct {gclient_t *client; int health; unsigned classname; struct {int inuse;vec3_t currentOrigin,absmin,absmax;}r;} gentity_t;
 typedef struct { int maxclients,num_entities; } level_locals_t;
-typedef struct {int iClipIndex,iAmmoIndex,bSemiAuto;} WeaponDef;
+typedef struct {const char *szInternalName; int iClipIndex,iAmmoIndex,bSemiAuto,overlayReticle,weapClass;} WeaponDef;
 typedef struct {int buttons,hasWeapon,hasAngles,weapon; signed char forwardmove,rightmove; vec3_t angles;} cod2BotCommandState_t;
 static struct {int time;}svs;
 static cod2BotCommandState_t s_botCmdState[64];
 level_locals_t level={3,3}; gentity_t g_entities[64];
-static gclient_t clients[64]; static WeaponDef weapon={0,0,0},secondary={1,1,0};
-static int traceCount, wall, smoke, friendly,stairs;
+static gclient_t clients[64]; static WeaponDef weapon={"test",0,0,0,0,0},secondary={"secondary",1,1,0,0,0};
+static int traceCount, wall, wallDoor, smoke, friendly,stairs,ladderWorld,navClock;
+int Sys_Milliseconds(void){return navClock?navClock++:0;}
 static int Dvar_GetInt(const char *name){(void)name;return 0;}
 static playerState_t *SV_GameClientNum(int num){return &clients[num].ps;}
 static int SV_BotIsTestClient(int num){return num>=0&&num<16;}
@@ -45,14 +48,17 @@ qboolean SV_EntityContact(const vec_t *mins,const vec_t *maxs,const gentity_t *e
 }
 void G_TraceCapsule(trace_t *t,const vec_t *a,const vec_t *mi,const vec_t *ma,const vec_t *b,int pass,int mask){
  (void)mi;(void)ma;(void)pass;(void)mask;traceCount++;t->fraction=1;t->normal[2]=1;
- float floor=stairs?floorf(b[0]/16.0f)*12.0f:0;
+ float floor=stairs?floorf(b[0]/16.0f)*12.0f:ladderWorld&&b[0]>=32?152:0;
+ if(ladderWorld&&mask==0x10000&&a[0]<32&&b[0]>=32&&a[2]<140){
+  t->fraction=.8f;t->surfaceFlags=8;t->normal[0]=-1;t->normal[2]=0;return;
+ }
  if(b[2]<floor&&a[2]>floor)t->fraction=(a[2]-floor)/(a[2]-b[2]);
- if(wall&&a[0]<256&&b[0]>=256){t->fraction=.5f;t->entityNum=1022;}
+ if(wall&&a[0]<256&&b[0]>=256&&(!wallDoor||b[1]<96)){t->fraction=.5f;t->entityNum=1022;}
  if(friendly&&mask==0x02802831){t->fraction=.3f;t->entityNum=1;}
 }
 void G_LocationalTrace(trace_t *t,const vec_t *a,const vec_t *b,int pass,int mask,unsigned char *priority){
  (void)pass;(void)mask;(void)priority;traceCount++;t->fraction=1;
- if(wall&&a[0]<256&&b[0]>=256){t->fraction=.5f;t->entityNum=1022;}
+ if(wall&&a[0]<256&&b[0]>=256&&(!wallDoor||b[1]<96)){t->fraction=.5f;t->entityNum=1022;}
 }
 '''
 checks = r'''
@@ -76,7 +82,7 @@ int main(void){
  stairs=1;assert(Bot_CanMove(0,(float[3]){8,0,1},0,127,0));stairs=0;
  wall=1;assert(!Bot_CanMove(0,(float[3]){250,0,1},0,127,0));wall=0;
  SV_BotResetNavigation();s_botNavSeeded=1;Bot_NavAdd(zero);
- for(i=0;i<100;i++){svs.time=i*50;traceCount=0;Bot_NavFrame();assert(traceCount<=BOT_NAV_EDGES_PER_FRAME*9);}
+ for(i=0;i<100;i++){svs.time=i*50;traceCount=0;Bot_NavFrame();assert(traceCount<=BOT_NAV_EDGES_PER_FRAME*15);}
  assert(s_botNavCount>100&&s_botNavCount<=BOT_NAV_MAX);
  while(s_botNavCount<BOT_NAV_MAX) {zero[0]+=64;Bot_NavAdd(zero);}
  assert(Bot_NavAdd((float[3]){999999,0,1})==-1&&s_botNavCount==BOT_NAV_MAX);
@@ -133,7 +139,7 @@ int main(void){
  memcpy(s_botAI[0].lastOrigin,clients[0].ps.origin,sizeof(vec3_t));
  s_botCmdState[0].forwardmove=s_botCmdState[0].rightmove=0;
  Bot_Think(0,&s_botAI[0],&clients[0].ps);
- assert(s_botAI[0].avoidUntil==2600 && s_botAI[0].avoidSide!=0);
+ assert(s_botAI[0].avoidUntil==2400 && s_botAI[0].avoidSide!=0);
  // Objective priority and original input interaction: the bot stops inside
  // the capture radius, holds only the selected use hint, and expires its goal.
  SV_BotResetNavigation();svs.time=3000;SV_BotEnableAI(0,1);
@@ -160,8 +166,120 @@ int main(void){
  assert(SV_BotClearGoal(0)&&!s_botAI[0].objectiveUntil);
  clients[1].sess.cs.team=TEAM_ALLIES;friendly=1;
  assert(Bot_FriendlyInAim(0,&s_botAI[0],&clients[0].ps));friendly=0;
+
+ // Cached routes must keep making forward progress between grid centers;
+ // the old nearest-cell recentering sent bots backwards on every replan.
+ SV_BotResetNavigation();s_botNavSeeded=1;s_botNavFrame=0;
+ for(i=0;i<8;i++) {
+  int n=Bot_NavAdd((float[3]){i*32,0,1});
+  if(i){s_botNav[n-1].edge[0]=n;s_botNav[n].edge[4]=n-1;}
+ }
+ svs.time=0;SV_BotEnableAI(0,1);clients[0].ps.origin[0]=17;
+ assert(SV_BotSetGoal(0,(float[3]){224,0,1},12,0,-1));
+ Bot_FindPath(&s_botAI[0],&clients[0].ps);
+ assert(s_botAI[0].waypoint>=0 && s_botNav[s_botAI[0].waypoint].origin[0]>17);
+ for(i=1;i<=6;i++) {
+  clients[0].ps.origin[0]=17+i*30;
+  Bot_AdvanceRoute(&s_botAI[0],&clients[0].ps);
+  if(s_botAI[0].waypoint>=0) assert(s_botNav[s_botAI[0].waypoint].origin[0]>clients[0].ps.origin[0]-18);
+ }
+ // A blocked edge must choose another route rather than repeat its loop.
+ SV_BotResetNavigation();
+ Bot_NavAdd((float[3]){0,0,1});Bot_NavAdd((float[3]){32,0,1});
+ Bot_NavAdd((float[3]){32,32,1});Bot_NavAdd((float[3]){64,0,1});
+ s_botNav[0].edge[0]=1;s_botNav[0].edge[1]=2;
+ s_botNav[1].edge[0]=3;s_botNav[2].edge[7]=3;
+ clients[0].ps.origin[0]=clients[0].ps.origin[1]=0;
+ svs.time=200;SV_BotEnableAI(0,1);SV_BotSetGoal(0,(float[3]){64,0,1},12,0,-1);
+ s_botAI[0].random=8;Bot_FindPath(&s_botAI[0],&clients[0].ps);
+ assert(s_botAI[0].route[0]==1);Bot_BlockRoute(&s_botAI[0]);
+ assert(Bot_EdgeBlocked(&s_botAI[0],0,1));
+ Bot_FindPath(&s_botAI[0],&clients[0].ps);assert(s_botAI[0].route[0]==2);
+ svs.time+=8001;assert(!Bot_EdgeBlocked(&s_botAI[0],0,1));
+
+ // A remote isolated spawn may scout a route before the global frontier reaches
+ // it. It must not wait motionless for complete arena navigation.
+ SV_BotResetNavigation();Bot_NavAdd((float[3]){0,0,1});
+ clients[0].ps.origin[0]=clients[0].ps.origin[1]=0;svs.time+=1000;
+ SV_BotEnableAI(0,1);SV_BotSetGoal(0,(float[3]){224,0,1},12,0,-1);
+ Bot_FindPath(&s_botAI[0],&clients[0].ps);
+ assert(s_botAI[0].routeCount>0&&s_botNav[s_botAI[0].waypoint].origin[0]>0);
+
+ // A local branch must go away from its objective to find a doorway around
+ // a wall. Refusing every temporary detour trapped bots in small components.
+ SV_BotResetNavigation();Bot_NavAdd((float[3]){224,0,1});
+ wall=wallDoor=1;Bot_NavScout(0,(float[3]){384,0,1});wall=wallDoor=0;
+ assert(Bot_NavFind((float[3]){256,96,1})>=0);
+ clients[0].ps.origin[0]=224;clients[0].ps.origin[1]=0;
+ SV_BotEnableAI(0,1);SV_BotSetGoal(0,(float[3]){384,0,1},12,0,-1);
+ Bot_FindPath(&s_botAI[0],&clients[0].ps);assert(s_botAI[0].routeCount>0);
+ // The priority queue must preserve every node and expand central geometry first.
+ SV_BotResetNavigation();s_botNavBounded=1;
+ s_botNavMin[0]=s_botNavMin[1]=-512;s_botNavMax[0]=s_botNavMax[1]=512;
+ Bot_NavAdd((float[3]){256,0,1});Bot_NavAdd((float[3]){64,0,1});Bot_NavAdd((float[3]){0,0,1});
+ assert(Bot_NavPop()==2&&Bot_NavPop()==1&&Bot_NavPop()==0&&Bot_NavPop()==-1);
+ // Guard/support slots occupy separate reachable places around the objective.
+ SV_BotResetNavigation();
+ for(int x=-5;x<=5;x++)for(int y=-5;y<=5;y++)Bot_NavAdd((float[3]){x*32,y*32,1});
+ svs.time=10000;SV_BotEnableAI(0,1);SV_BotEnableAI(1,1);
+ SV_BotSetGoal(0,(float[3]){0,0,1},160,1,-1);SV_BotSetGoal(1,(float[3]){0,0,1},160,1,-1);
+ Bot_GuardPoint(0,&s_botAI[0],&clients[0].ps);Bot_GuardPoint(1,&s_botAI[1],&clients[1].ps);
+ assert(Bot_DistanceSq(s_botAI[0].guardPoint,s_botAI[1].guardPoint)>64*64);
+ // Brief loss of sight while a player jumps does not restart reaction time.
+ clients[1].sess.cs.team=TEAM_AXIS;clients[1].ps.origin[0]=400;clients[1].ps.origin[1]=0;
+ clients[2].sess.sessionState=SESS_STATE_DEAD;
+ SV_BotEnableAI(0,2);Bot_Think(0,&s_botAI[0],&clients[0].ps);
+ int acquired=s_botAI[0].acquiredAt;
+ wall=1;svs.time+=200;Bot_Think(0,&s_botAI[0],&clients[0].ps);assert(s_botAI[0].target==-1);
+ wall=0;svs.time+=200;Bot_Think(0,&s_botAI[0],&clients[0].ps);
+ assert(s_botAI[0].target==1&&s_botAI[0].acquiredAt==acquired);
+ // Hard tracking follows vertical velocity, still requiring visibility; a
+ // scoped shot must wait for the actual original ADS transition to finish.
+ clients[1].ps.origin[2]=65;clients[1].ps.velocity[2]=220;
+ weapon.overlayReticle=1;weapon.bSemiAuto=0;clients[0].ps.fWeaponPosFrac=0;
+ svs.time+=1000;s_botNavSeeded=1;s_botNavFrame=svs.time;
+ s_botAI[0].aim[0]=-10;s_botAI[0].aim[1]=0;s_botAI[0].pitchError=s_botAI[0].yawError=0;
+ s_botAI[0].nextError=svs.time+2000;
+ SV_BotRunAI(0,&clients[0].ps);
+ assert(s_botCmdState[0].buttons&0x1000);assert(!(s_botCmdState[0].buttons&1));
+ assert(s_botAI[0].aim[0]<-5);
+ clients[0].ps.fWeaponPosFrac=1;svs.time+=50;s_botNavFrame=svs.time;
+ SV_BotRunAI(0,&clients[0].ps);assert(s_botCmdState[0].buttons&1);
+ weapon.overlayReticle=0;clients[1].ps.origin[2]=1;clients[1].ps.velocity[2]=0;
+ // A ranged fight must include forward approach, not permanent orbiting.
+ clients[1].ps.origin[0]=1200;clients[0].ps.origin[0]=0;svs.time+=1000;
+ SV_BotEnableAI(0,1);SV_BotRunAI(0,&clients[0].ps);
+ assert(s_botCmdState[0].forwardmove>0);
+
+ // Detect original ladder material and route both ways. Commands must climb
+ // and descend through normal pmove, with no synthetic origin/velocity writes.
+ SV_BotResetNavigation();ladderWorld=1;
+ int bottom=Bot_NavAdd((float[3]){0,0,1});Bot_NavLadder(bottom,0);
+ int top=s_botNav[bottom].edge[BOT_NAV_DIRECTIONS];
+ assert(top>=0&&s_botNav[top].origin[2]==153&&s_botNav[top].edge[BOT_NAV_DIRECTIONS]==bottom);
+ clients[0].ps.origin[0]=clients[0].ps.origin[1]=0;clients[0].ps.origin[2]=1;
+ clients[1].sess.sessionState=SESS_STATE_DEAD;svs.time=20000;SV_BotEnableAI(0,1);
+ SV_BotSetGoal(0,s_botNav[top].origin,12,0,-1);Bot_FindPath(&s_botAI[0],&clients[0].ps);
+ s_botNavSeeded=1;s_botNavFrame=svs.time;SV_BotRunAI(0,&clients[0].ps);
+ assert(s_botCmdState[0].forwardmove==127&&!(s_botCmdState[0].buttons&1));
+ clients[0].ps.origin[2]=90;
+ Bot_FindPath(&s_botAI[0],&clients[0].ps);
+ assert(s_botAI[0].waypoint==top&&s_botAI[0].routeCount>0);
+ memcpy(clients[0].ps.origin,s_botNav[top].origin,sizeof(vec3_t));
+ svs.time+=200;SV_BotSetGoal(0,s_botNav[bottom].origin,12,0,-1);
+ Bot_FindPath(&s_botAI[0],&clients[0].ps);clients[0].ps.pm_flags=0x20;
+ s_botNavFrame=svs.time;SV_BotRunAI(0,&clients[0].ps);
+ assert(s_botCmdState[0].forwardmove<0&&!(s_botCmdState[0].buttons&1));
+ clients[0].ps.pm_flags=0;ladderWorld=0;
+ // The warm-up budget must yield to a slow host before exhausting all edges.
+ SV_BotResetNavigation();s_botNavSeeded=1;Bot_NavAdd((float[3]){0,0,1});
+ svs.time+=50;navClock=1;traceCount=0;Bot_NavFrame();navClock=0;
+ assert(s_botNavWorkEdges<=32);
+ // No navigation growth across the authored playable envelope.
+ s_botNavBounded=1;s_botNavMin[0]=s_botNavMin[1]=-160;s_botNavMax[0]=s_botNavMax[1]=160;
+ assert(Bot_NavAdd((float[3]){192,0,1})==-1);
  SV_BotResetAIClient(0);assert(!s_botAI[0].enabled);
- puts("PASS: bounded/hash navigation, enemy teams, fair perception/memory, difficulty, friendly-fire avoidance, objective priority/expiry, original use holds, reload/cadence, death/reset");
+ puts("PASS: bounded/hash navigation, enemy teams, fair perception/memory, difficulty, route progress/recovery, guard spacing, ladders/time budget, jump tracking/scoped ADS, weapon-range pursuit, friendly-fire avoidance, objective priority/expiry, original use holds, reload/cadence, death/reset");
  return 0;
 }
 '''

@@ -52,21 +52,41 @@ joinGame(difficulty)
        self.pers["bot_faction"] != faction)
     {
         faction = game[self.pers["team"]];
-        slot = (self getEntityNumber()) % 3;
+        // Allocate within each team: entity parity otherwise gives a whole
+        // team the same weapon. One scoped rifle per four bots, with original
+        // faction restrictions still enforced by the weapon callback.
+        rank = 0;
+        players = getEntArray("player", "classname");
+        for(i = 0; i < players.size; i++)
+            if(players[i] isBot() && isDefined(players[i].pers["team"]) &&
+               players[i].pers["team"] == self.pers["team"] &&
+               (players[i] getEntityNumber()) < (self getEntityNumber())) rank++;
+        slot = rank % 4;
+        if(!isDefined(faction)) faction = game["allies"];
         choices[0] = "mp40_mp";
-        choices[1] = "mp44_mp";
-        choices[2] = "kar98k_mp";
+        choices[1] = "kar98k_mp";
+        choices[2] = "mp44_mp";
+        choices[3] = "kar98k_sniper_mp";
         if(faction == "american")
         {
             choices[0] = "thompson_mp";
-            choices[1] = "bar_mp";
-            choices[2] = "m1garand_mp";
+            choices[1] = "m1garand_mp";
+            choices[2] = "bar_mp";
+            choices[3] = "springfield_mp";
         }
         if(faction == "british")
         {
             choices[0] = "sten_mp";
-            choices[1] = "bren_mp";
-            choices[2] = "enfield_mp";
+            choices[1] = "enfield_mp";
+            choices[2] = "bren_mp";
+            choices[3] = "enfield_scope_mp";
+        }
+        if(faction == "russian")
+        {
+            choices[0] = "ppsh_mp";
+            choices[1] = "mosin_nagant_mp";
+            choices[2] = "pps42_mp";
+            choices[3] = "mosin_nagant_sniper_mp";
         }
         weapon = choices[slot];
         self [[level.weapon]](weapon);
@@ -345,19 +365,8 @@ sdObjective()
 
 tdmObjective()
 {
-    leader = undefined;
-    if(self.bot_rank % 3 != 0)
-    {
-        group = int(self.bot_rank / 3);
-        for(i = 0; i < level.bot_players.size; i++)
-        {
-            player = level.bot_players[i];
-            if(player isBot() && isAlive(player) && player.sessionstate == "playing" &&
-               isDefined(player.bot_rank) && player.bot_rank == group * 3 &&
-               player.pers["team"] == self.pers["team"])
-                leader = player;
-        }
-    }
-    if(isDefined(leader)) self setObjective(leader.origin, 160, 0, undefined, "support_teammate");
-    else self botClearGoal();
+    // Independent patrols give the team several lanes of attack. Combat and
+    // last-seen enemy pursuit run natively; followers previously parked in a
+    // pack around one wandering leader instead of searching the arena.
+    self botClearGoal();
 }
