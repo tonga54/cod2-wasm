@@ -269,17 +269,20 @@ static int Bot_AcquireTarget(int clientNum, botAIState_t *ai, playerState_t *ps)
 
 static int Bot_NearestNode(const vec_t *origin, qboolean requireClear)
 {
-    int nearest[4] = {-1,-1,-1,-1}, i, j, k;
-    float distances[4] = {1e20f,1e20f,1e20f,1e20f};
+    // More candidates let a narrow corridor reach past closer nodes behind a wall.
+    enum { candidates = 12 };
+    int nearest[candidates], i, j, k;
+    float distances[candidates];
+    for (i = 0; i < candidates; ++i) { nearest[i] = -1; distances[i] = 1e20f; }
     for (i=0; i<s_botNavCount; ++i) {
         float d = Bot_DistanceSq(origin, s_botNav[i].origin);
         if (fabsf(origin[2]-s_botNav[i].origin[2]) > 48) continue;
-        for (j=0; j<4; ++j) if (d<distances[j]) {
-            for(k=3;k>j;--k) { nearest[k]=nearest[k-1]; distances[k]=distances[k-1]; }
+        for (j=0; j<candidates; ++j) if (d<distances[j]) {
+            for(k=candidates-1;k>j;--k) { nearest[k]=nearest[k-1]; distances[k]=distances[k-1]; }
             nearest[j]=i; distances[j]=d; break;
         }
     }
-    for(i=0;i<4;++i)
+    for(i=0;i<candidates;++i)
         if(nearest[i]>=0 && (!requireClear || (distances[i]<192*192 &&
             Bot_Clear(origin,s_botNav[nearest[i]].origin,1023,BOT_WORLD_MASK)))) return nearest[i];
     return -1;
