@@ -155,6 +155,12 @@ byte *MT_InitForceAlloc(void)
 {
     TOTAL_ALLOC = 0;
     TOTAL_ALLOC_BUCKETS = 0;
+    /* Rebuild the free lists around retained strings. Existing free nodes must
+     * not participate in this pass or buddies can merge across live strings. */
+    for (int i = 0; i <= MEMORY_NODE_BITS; i++)
+        MEMTREE_GLOB->head[i] = 0;
+    for (int i = 0; i < MEMORY_NODE_COUNT; i++)
+        mt_size[i] = 0;
     return Z_VirtualAllocInternal(0x2000);
 }
 

@@ -359,6 +359,8 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int n
     Com_Printf("Working directory: %s\n", cwd);
 
 #ifdef __EMSCRIPTEN__
+    extern void WebBackground_Init(void);
+    WebBackground_Init();
     emscripten_set_main_loop(Sys_WebFrame, 0, 1);
     return 0;
 #else

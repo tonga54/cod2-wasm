@@ -4,6 +4,9 @@
 #include "cod2_feature_config.h"
 #include <stdarg.h>
 #include <ctype.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 extern char cl_cdkey[52];
 extern char cl_cdkeychecksum[12];
@@ -1688,6 +1691,11 @@ BM_NOINLINE void Com_Frame_Try_Block_Function(void)
     CL_SwitchToLocalClient(0);
     CL_Frame(maxMsec);
     CL_SwitchToLocalClient(0);
+#ifdef __EMSCRIPTEN__
+    /* Hidden-tab frames maintain the connection without rendering a scene. */
+    if (EM_ASM_INT({ return document.hidden; }))
+        return;
+#endif
     SCR_UpdateScreenInternal();
     SCR_RunCinematic();
 

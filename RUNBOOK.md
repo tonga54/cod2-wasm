@@ -83,10 +83,24 @@ changing rotations. Evidence: `out/gameplay-running-pose.txt` and
 `out/gameplay-running-2.png`. This establishes the rigid-pose repair; overall
 animation fidelity still needs broader playtesting.
 
-Recreating the isolated server while those clients were connected, then using
-the native reconnect command, produced a client script compile error. Reloading
-the browser and joining again worked. Deploy only with rooms empty; the browser
-update notice reloads the page rather than invoking native reconnect.
+Hidden browser tabs maintain networking through normal `Com_Frame` calls,
+limited to four per second and driven by incoming WebSocket packets. A one-second
+timer covers a quiet transport and connection handshakes; packets still drive
+frames if Chrome throttles that timer. These frames skip scene rendering, and
+blur/visibility changes release held keys. Server timeouts remain unchanged.
+
+Native reconnect also rebuilds script strings safely after a disconnect: the
+buddy allocator clears its old free-list metadata before retaining permanent
+strings, and hash heads bypass the recycled collision bucket. This repairs the
+previous `duplicate animation` / `script compile error` on reconnect.
+An accepted connection response starts a fresh receive timeout, so joining after
+several minutes does not time out before the first sequenced packet arrives.
+`scripts/test-web-background.cjs` exercises six minutes of incoming packets with
+no timer callbacks. `scripts/test-web-background-frame.py` verifies that active
+clients keep sending without the render path, while visible/native clients send
+once per frame. `scripts/test-script-string-restart.py --verify-mutants`
+checks 100 restarts under ASan/UBSan and rejects both original defects.
+Deploy only with rooms empty; the browser update notice reloads the page.
 
 ## LAN access during testing
 

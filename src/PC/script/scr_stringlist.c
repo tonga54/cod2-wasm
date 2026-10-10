@@ -947,7 +947,7 @@ void SL_Init(void)
                             SG_W0(0) = (unsigned short)hash3;
                         } else {
 
-                            unsigned short new_w03 = (unsigned short)((esi3_chain & 0x3fff) | 0x8000);
+                            unsigned short new_w03 = (unsigned short)((ecx3_hash[0] & 0x3fff) | 0x8000);
                             SG_W0(hash3) = new_w03;
                             edi3[1] = ecx3_hash[1];
                             SG_RESTART = (void *)edi3;

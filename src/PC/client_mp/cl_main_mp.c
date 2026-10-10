@@ -4,6 +4,9 @@
 #include "cod2_feature_config.h"
 #include "pb_public.h"
 #include "www_download.h"
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 extern const dvar_t *Dvar_RegisterBool(const char *dvarName, unsigned char value, unsigned short flags);
 extern int I_strnicmp(const char *s0, const char *s1, size_t n);
@@ -102,6 +105,7 @@ extern void CL_SetADS(int);
 extern void CL_SetCGameTime(void);
 extern qboolean CG_IsConsoleCommandName(const char *cmd);
 extern void CL_SendCmd(void);
+extern void CL_SendCmdInternal(void);
 extern void CL_WritePacket(void);
 extern void CL_UpdateColor(void);
 extern void CL_InitCGame(void);
@@ -492,7 +496,9 @@ extern int Cmd_Argc(void);
 extern char *Cmd_Argv(int arg);
 extern void I_strncpyz(char *dest, const char *src, int destsize);
 extern void I_strncat(char *dest, int maxlen, const char *src);
+#ifndef __EMSCRIPTEN__
 extern int putenv(const char *string);
+#endif
 extern char *getenv(const char *name);
 void CL_Setenv_f(void)
 {
@@ -2146,7 +2152,9 @@ Bool CL_ConnectionlessPacket(netadr_t from, msg_t *msg, int time)
         Netchan_Setup(NS_CLIENT1, &conn->netchan, from, *(int *)imp_g_qport);
         conn->state = CA_CONNECTED;
         conn->lastPacketSentTime = cls.realtime;
-        conn->lastPacketTime = -9999;
+        /* The accepted handshake starts a fresh receive timeout, including
+         * reconnects after the browser has been running for several minutes. */
+        conn->lastPacketTime = cls.realtime;
         result = 1;
         goto finish;
     }
@@ -2472,6 +2480,12 @@ Luserinfo:
 Ltail:
     CL_SetCGameTime();
     CL_SendCmd();
+#ifdef __EMSCRIPTEN__
+    /* Active clients normally send from CG_DrawActiveFrame/CL_Input. Hidden
+     * frames skip that render path but still need commands and acknowledgements. */
+    if (clc_p->state == CA_ACTIVE && EM_ASM_INT({ return document.hidden; }))
+        CL_SendCmdInternal();
+#endif
 }
 
 void CL_Vid_Restart_f(void)

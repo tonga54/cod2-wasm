@@ -96,7 +96,7 @@ target_link_options(cod2_client PRIVATE
   "SHELL:-s EXPORT_NAME=createCod2Client"
   "SHELL:-s INVOKE_RUN=0"
   "SHELL:-s EXPORTED_RUNTIME_METHODS=FS,callMain"
-  "SHELL:-s EXPORTED_FUNCTIONS=_main,_free,_web_client_state,_web_client_connected,_web_capture_lost,_web_chat_char"
+  "SHELL:-s EXPORTED_FUNCTIONS=_main,_free,_web_client_state,_web_client_connected,_web_capture_lost,_web_chat_char,_web_background_frame,_web_input_lost"
   "SHELL:-s EXIT_RUNTIME=0"
   "SHELL:-s ASSERTIONS=1"
   "SHELL:-s ENVIRONMENT=web"

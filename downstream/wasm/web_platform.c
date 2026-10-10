@@ -4,6 +4,8 @@
 extern clientStatic_t cls;
 extern clientConnection_t clientConnections[1];
 extern int CL_GetKeyCatchers(void);
+extern void Com_Frame(void);
+extern void Key_ClearStates(void);
 extern void Sys_QueEvent(int time, sysEventType_t type, int value, int value2,
                          int ptrLength, void *ptr);
 
@@ -40,6 +42,38 @@ EMSCRIPTEN_KEEPALIVE void web_chat_char(int character) {
 EMSCRIPTEN_KEEPALIVE int web_client_connected(void) {
     return clientConnections[0].state >= CA_CONNECTING;
 }
+
+EMSCRIPTEN_KEEPALIVE void web_background_frame(void) {
+    /* Use the normal frame error guard, including disconnect cleanup. */
+    Com_Frame();
+}
+
+EMSCRIPTEN_KEEPALIVE void web_input_lost(void) {
+    Key_ClearStates();
+}
+
+EM_JS(void, WebBackground_Init, (void), {
+    let lastFrame = -Infinity;
+    Module.cod2BackgroundPump = () => {
+        if (!document.hidden || !Module._web_client_connected()) return;
+        const now = performance.now();
+        if (now - lastFrame < 250) return;
+        lastFrame = now;
+        Module._web_background_frame();
+    };
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            Module._web_input_lost();
+            Module.cod2BackgroundPump();
+        } else {
+            lastFrame = -Infinity;
+        }
+    });
+    window.addEventListener('blur', () => Module._web_input_lost());
+    /* Incoming packets also drive frames: Chrome can throttle hidden timers
+     * to once a minute. This timer covers handshakes and a silent transport. */
+    setInterval(() => Module.cod2BackgroundPump(), 1000);
+});
 
 /* Desktop splash windows and OS idle timers do not exist in the browser.
  * Loading progress is reported by the web launcher instead. */

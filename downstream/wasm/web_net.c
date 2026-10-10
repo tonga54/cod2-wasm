@@ -37,6 +37,7 @@ EM_JS(void, WebNet_Open, (int room), {
         }
         state.packets.push(packet);
         state.bytes += packet.length;
+        Module.cod2BackgroundPump?.();
     };
     socket.onerror = () => err('[web-net] gateway connection failed');
     socket.onclose = async event => {
