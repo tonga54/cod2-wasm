@@ -91,6 +91,10 @@ retail CoD2:
 - **Sprint:** Shift + W increases movement speed, lowers and swings the weapon,
   and uses the running body animation. Sprint currently has no stamina limit.
   Melee moves to V; scoped Hold Breath continues to use Shift.
+- **Melee damage:** butt strikes deal at most 50 damage without random bonuses
+  or bullet hit-location multipliers. Two hits kill a player with 100 health;
+  an injured player can still die from one. Weaker melee weapons retain their
+  original damage. This server rule leaves the retail weapon assets intact.
 - **Mounted MG42 overheating:** five seconds of continuous fire fills the heat
   bar, followed by eight seconds of cooling. Heat belongs to the gun and is
   synchronized with its user. Mounted aim also kicks upward and sideways, with

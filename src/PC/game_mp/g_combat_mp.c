@@ -330,7 +330,9 @@ void G_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
         }
 
         fDamage = (float)damage;
-        fDamage *= G_GetHitLocDamageMult(weapon, hitLoc);
+        /* MOD_MELEE uses its own damage, independent of bullet hit locations. */
+        if (mod != 7)
+            fDamage *= G_GetHitLocDamageMult(weapon, hitLoc);
         iDamage = (int)fDamage;
 
         if (iDamage <= 0) {
