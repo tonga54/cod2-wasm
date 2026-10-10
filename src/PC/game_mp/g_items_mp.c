@@ -581,6 +581,9 @@ void G_RunCorpseMove(gentity_t *ent)
         normal[1] = tr.normal[1];
         normal[2] = tr.normal[2];
 
+        axis[2][0] = normal[0];
+        axis[2][1] = normal[1];
+        axis[2][2] = normal[2];
         AngleVectors(ent->r.currentAngles, axis[0], NULL, NULL);
         Vec3Cross(normal, axis[0], axis[1]);
         Vec3Cross(axis[1], normal, axis[0]);

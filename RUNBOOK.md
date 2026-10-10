@@ -3082,3 +3082,35 @@ warnings/errors. The 600-frame window measured 120.0 FPS, frame p95 10.0 ms,
 maximum 10.3 ms, mean main-thread time 2.867 ms and zero frames above 33 ms,
 with the same 1280×720 canvas and anti-aliasing. This is another scene sample,
 not a low-end hardware qualification.
+
+
+## Continuous multiplayer death falls — October 10, 2026
+
+The client corpse reset checked the prone stance bit (`8`) instead of the active
+death-animation bit (`0x80000`). Standing/crouching bodies could keep a recycled
+slot's finished animation tree. Active corpses now copy the owner's current pose
+in every stance, and force the first death transition even when the owner already
+selected the same clip. A newly selected active death clip starts at time zero;
+subsequent frames advance normally. Completed bodies still keep the final pose.
+Ground alignment now initializes the up axis from the collision normal.
+
+Sanitizer regressions cover 1,536 recycled client bodies across all three stances,
+both animation toggle bits, 120 advancing death frames, completed prone bodies,
+and existing settling/cleanup cases. They reject the wrong clone flag, missing
+transition and missing death restart. Two isolated browser players produced real
+lethal M1 Garand shots on Carentan and Toujane; captured intermediate frames show
+the reaction and collapse before the final floor pose. Browser error logs are
+empty. Evidence is in `out/death-fall-*.png`, timing JSON and the Carentan GIF.
+
+The final build uses an isolated checkout containing only this correction and its
+regressions, because another chat was concurrently modifying bots and assets.
+Original asset hashes are preserved. This restores authored death animations and
+existing corpse gravity/collision; it does not add a joint-based ragdoll solver.
+
+Native and WASM compilation and the full static/package suite passed. The final
+isolated images were retested with two clients and a lethal M1 Garand shot on
+Carentan, then deployed to the empty local stack. `out/death-fall-deployed.json`
+verifies the served build, native SHA, exact images, gateway preservation and all
+four unchanged asset hashes. Recovery tags are `:before-death-fall`; final package
+and native binary are preserved in `out/death-fall-release/`. Reload existing
+browser clients to load the updated animation code.

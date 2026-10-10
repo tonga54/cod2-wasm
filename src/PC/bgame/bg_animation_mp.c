@@ -689,6 +689,10 @@ static void __attribute_regparm__(3) BG_RunLerpFrameRate(clientInfo_t *ci, lerpF
 
             if ((es->eFlags & 0x80000) != 0) {
                 XAnimSetCompleteGoalWeight(pAnimTree, animNum, 1.0f, BG_LerpAnimBlendSeconds(lf), 1.0f, 0, anim->noteType, 0);
+                /* Corpse slots and cloned trees can contain this clip's last
+                 * frame from an earlier death. Start each new fall at frame 0;
+                 * subsequent frames stay on the unchanged-animation path. */
+                XAnimSetTime(pAnimTree, animNum, 0.0f);
                 goto after_set_goal;
             }
 

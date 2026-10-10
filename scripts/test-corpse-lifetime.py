@@ -62,7 +62,10 @@ static float Vec3Normalize(float *v) {float n=sqrtf(v[0]*v[0]+v[1]*v[1]+v[2]*v[2
 static void Vec3Cross(const float *a,const float *b,float *c) {
  c[0]=a[1]*b[2]-a[2]*b[1];c[1]=a[2]*b[0]-a[0]*b[2];c[2]=a[0]*b[1]-a[1]*b[0];
 }
-static void AxisToAngles(const float *axis,float *angles) {angles[0]=0;angles[1]=0;angles[2]=0;}
+static void AxisToAngles(const float *axis,float *angles) {
+ assert(axis[6]==0 && axis[7]==0 && axis[8]==1);
+ angles[0]=0;angles[1]=0;angles[2]=0;
+}
 static void G_SetAngle(gentity_t *e,const float *a) {assert(e->r.inuse);memcpy(e->r.currentAngles,a,sizeof(vec3_t));}
 static struct DObj_s *Com_GetServerDObj(int n) {assert(n>=64&&n<72&&bodies[n-64].r.inuse);return &objects[n-64];}
 static void BG_UpdatePlayerDObj(struct DObj_s *o,entityState_t *s,clientInfo_t *c,int n) {assert(bodies[s->number-64].r.inuse);}

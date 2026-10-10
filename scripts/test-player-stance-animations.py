@@ -197,11 +197,13 @@ static int BG_AnimIndexNoToggle(int n) {return n&~0x200;}
 #define Com_Error(...) abort()
 static float cleared,goal;
 static float weights[4];
+static float clipTimes[4];
+static int timeSets;
 static int XAnimIsLooped(void *tree,int n) {return n==1 || n==2;}
 static int XAnimIsPrimitive(void *tree,int n) {return 1;}
 static int XAnimGetLengthMsec(void *tree,int n) {return 1000;}
 static float XAnimGetTime(void *tree,int n) {return .5f;}
-static void XAnimSetTime(void *tree,int n,float t) {}
+static void XAnimSetTime(void *tree,int n,float t) {clipTimes[n]=t;timeSets++;}
 static void XAnimClearGoalWeight(void *tree,int n,float t) {cleared=t;}
 static void XAnimSetCompleteGoalWeight(void *tree,int n,float w,float t,float r,int name,int type,int restart) {goal=t;}
 static void XAnimSetCompleteGoalWeightKnobAll(void *tree,int n,int root,float w,float t,float r,int name,int restart) {}
@@ -247,6 +249,25 @@ int main(void) {
     }
     a[3].initialLerp=-1;clientInfo_t fresh={0};BG_RunLerpFrameRate(&fresh,&fresh.legs,3,&es);
     assert(fresh.legs.animationTime==0);
+    /* Reusing the same death clip must show its intermediate fall frames.
+     * Run the real transition path for both toggle bits and every stance. */
+    a[3].flags=0x40;
+    for(int stance=0;stance<3;stance++) for(int toggle=0;toggle<2;toggle++) {
+        int deathAnim=3 | (toggle?0x200:0);
+        clientInfo_t ci={0};ci.legs.animationNumber=deathAnim^0x200;ci.legs.animation=&a[3];
+        clipTimes[3]=1;weights[3]=1;es.eFlags=0x80000 | (stance==2?8:stance==1?4:0);
+        int before=timeSets;BG_RunLerpFrameRate(&ci,&ci.legs,deathAnim,&es);
+        assert(clipTimes[3]==0 && timeSets==before+1);
+        for(int frame=1;frame<=20;frame++) {
+            clipTimes[3]=frame*.05f;
+            BG_RunLerpFrameRate(&ci,&ci.legs,deathAnim,&es);
+            assert(fabsf(clipTimes[3]-frame*.05f)<.00001f && timeSets==before+1);
+            assert(ci.legs.animSpeedScale==1);
+        }
+    }
+    /* Bodies first seen after the death has ended still use the final pose. */
+    clientInfo_t finished={0};es.eFlags=0;clipTimes[3]=0;
+    BG_RunLerpFrameRate(&finished,&finished.legs,3,&es);assert(clipTimes[3]==1);
     return 0;
 }
 '''
@@ -254,7 +275,8 @@ anim_source = anim_support + anim_body + anim_checks
 check(anim_source, (anim_source.replace('lf->animationTime = anim != NULL && anim->moveSpeed != 0.0f ? 120 :',
                                         'lf->animationTime = -1; (void)(anim != NULL && anim->moveSpeed != 0.0f ? 120 :')
                             .replace('oldAnimation != NULL && oldAnimation->moveSpeed != 0.0f ? 250 : 170;',
-                                     'oldAnimation != NULL && oldAnimation->moveSpeed != 0.0f ? 250 : 170);'),))
+                                     'oldAnimation != NULL && oldAnimation->moveSpeed != 0.0f ? 250 : 170);'),
+                    anim_source.replace('XAnimSetTime(pAnimTree, animNum, 0.0f);', '')))
 
 prepare = (root / 'scripts/prepare-browser-bootstrap.py').read_text()
 start = prepare.index('default_cfg = archives[')
@@ -266,4 +288,4 @@ exec(prepare[start:end], {'archives': archives})
 cfg = archives['cod2_browser_bootstrap.iwd']['default_mp.cfg']
 assert b'bind c\t\t"togglecrouch"' in cfg
 assert b'bind SPACE\t"+gostand"' in cfg
-print('PASS: crouch toggle, 16 posture/mode routes, separate stand/jump presses, staged prone clips, blocked ceilings, eight movement directions, strafe clips and positive/default/explicit blends; four mutants fail')
+print('PASS: posture inputs/transitions, movement directions and blends, six recycled death clips with 20 continuous fall frames each and completed death poses; five mutants fail')

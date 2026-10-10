@@ -135,7 +135,9 @@ static void CG_ResetCorpseEntity(centity_t *cent)
     clientInfo_t *source;
     clientInfo_t *corpse;
     void *tree;
-    int clone = cent->nextState.eFlags & 8;
+    /* BodyEnd clears this flag once the death animation finishes. Bit 8 is
+     * the player's prone stance, not a request to copy the live pose. */
+    int clone = cent->nextState.eFlags & 0x80000;
     int i;
 
     if ((unsigned)corpseIndex >= 8 || (unsigned)clientNum >= 64)
@@ -156,6 +158,10 @@ static void CG_ResetCorpseEntity(centity_t *cent)
     }
     if (clone) {
         XAnimCloneAnimTree(source->pXAnimTree, tree);
+        /* The owner's tree may already have evaluated the death clip. Make
+         * the first corpse frame enter the new-animation path even then. */
+        if (corpse->legs.animationNumber == cent->nextState.legsAnim)
+            corpse->legs.animationNumber ^= 0x200;
         cent->previousEventSequence = 0;
     } else {
         cent->previousEventSequence = cent->nextState.eventSequence;
