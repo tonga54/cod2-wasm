@@ -5,6 +5,7 @@
 extern int stricmp(const char *s1, const char *s2);
 extern void CM_LoadMapFromBsp(const char *name, int flag);
 extern void CM_LoadStaticModels(void);
+extern void CM_ClearWorldTraceCache(void);
 extern void *Hunk_AllocInternal(int size);
 extern void Com_Error(int level, const char *fmt, ...);
 extern void Com_Memset(void *dest, int val, int count);
@@ -59,6 +60,7 @@ void CM_LoadMap(const char *name, int *checksum)
         }
     }
 
+    CM_ClearWorldTraceCache();
     CM_LoadMapFromBsp(name, 1);
     CM_LoadStaticModels();
 
@@ -87,6 +89,7 @@ void CM_LoadMap(const char *name, int *checksum)
 
 void CM_Shutdown(void)
 {
+    CM_ClearWorldTraceCache();
     Com_Memset(&cm, 0, 0x110);
 }
 

@@ -24,6 +24,7 @@ support = r"""
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <pthread.h>
 typedef float vec_t,vec3_t[3];typedef int qboolean;
 typedef unsigned char byte;typedef int clipHandle_t;
 #define __attribute_regparm__(n)
@@ -42,19 +43,21 @@ typedef struct {int brushContents,terrainContents,leafBrushNode,firstCollAabbInd
 typedef struct {cLeaf_t leaf;} cmodel_t;typedef struct {int unused;} CollisionAabbTree;
 static struct {int numBrushes,leafbrushNodesCount,numLeafs,aabbTreeCount;cbrush_t *brushes;
  cLeafBrushNode_t *leafbrushNodes;cLeaf_t *leafs;CollisionAabbTree *aabbTrees;} cm;
-static unsigned long planeTests,brushTests;
+static __thread unsigned long planeTests,brushTests,worldTraces;
+static int leafRepeat=1024;
 static void CM_InitTraceThreadInfo(traceWork_t *tw) {}
 static void CM_SetTraceMaterial(trace_t *t,int material,int contents) {if(material>=0)t->material=material;t->contents=contents;}
 static cmodel_t *CM_ModelForHandle(int model) {return NULL;}
 static cbrush_t *CM_BoxBrush(void) {return cm.brushes;}
 static void CM_TraceThroughAabbTree(const traceWork_t *tw,CollisionAabbTree *tree,trace_t *t) {assert(0);}
 static int CM_BoxLeafnums(const vec_t *lo,const vec_t *hi,int *list,int count,int *last) {
- assert(count==1024);for(int i=0;i<1024;i++)list[i]=0;return 1024;
+ assert(count==1024);for(int i=0;i<leafRepeat;i++)list[i]=0;return leafRepeat;
 }
 """
 code = ''.join(function(box, n) for n in ('CM_CalcTraceEntents', 'CM_TraceBox'))
+code += trace[trace.index('#define CM_WORLD_TRACE_CACHE_SIZE'):trace.index('static float CM_DotProduct')]
 code += ''.join(function(trace, n) for n in ('CM_DotProduct', 'CM_AbsFloat',
-    'CM_MinFloat', 'CM_InitTraceWork', 'CM_TraceMayHitBounds'))
+    'CM_MinFloat', 'CM_InitTraceWork', 'CM_TraceMayHitBounds', 'CM_ClearTraceResult'))
 plane = function(trace, 'CM_TraceBrushPlane').replace('    float support;', '    planeTests++;\n    float support;')
 brush = function(trace, 'CM_TraceThroughBrush').replace('    int axis;', '    brushTests++;\n    int axis;')
 reference = brush.replace('CM_TraceThroughBrush(', 'CM_TraceThroughBrush_reference(')
@@ -62,7 +65,8 @@ reference = reference.replace('''    if (!CM_TraceMayHitBounds(tw, brush->mins, 
         return;''', '')
 assert reference != brush
 world = ''.join(function(trace, n) for n in ('CM_TraceLeafBrushNode_r',
-    'CM_TraceLeafBrushes', 'CM_TraceLeafTerrain', 'CM_TraceLeaf', 'CM_Trace'))
+    'CM_TraceLeafBrushes', 'CM_TraceLeafTerrain', 'CM_TraceLeaf', 'CM_Trace', 'CM_BoxTrace'))
+world = world.replace('    traceWork_t tw;', '    worldTraces++;\n    traceWork_t tw;')
 checks = r"""
 static uint32_t seed=123456;
 static float rnd(float scale) {seed=seed*1664525u+1013904223u;return (seed>>8)*(1.f/16777216.f)*scale;}
@@ -70,6 +74,12 @@ static void equal(trace_t a,trace_t b) {
  assert(a.fraction==b.fraction && a.startsolid==b.startsolid && a.allsolid==b.allsolid);
  assert(a.contents==b.contents && a.material==b.material);
  for(int i=0;i<3;i++)assert(a.normal[i]==b.normal[i]);
+}
+static void *cacheThread(void *unused) {
+ vec3_t a={-10,0,0},b={11000,0,0},zero={0};trace_t result;
+ for(int n=0;n<1000;n++)CM_BoxTrace(&result,a,b,zero,zero,0,1);
+ assert(worldTraces==1);assert(result.fraction<1);
+ return NULL;
 }
 int main(void) {
  cplane_t face; cbrushside_t side={.plane=&face,.materialNum=13};
@@ -133,13 +143,54 @@ int main(void) {
   }
   fast=(trace_t){.fraction=1};CM_Trace(&fast,a,b,zero,zero,0,2);assert(fast.fraction==1&&!fast.startsolid);
  }
+ /* Exact-key world caching must preserve all fields, start/end directions,
+  * capsule dimensions, contents masks, overlaps, and cache-slot collisions. */
+ leafRepeat=1;
+ for(int n=0;n<10000;n++) {
+  vec3_t a={rnd(12000)-500,rnd(400)-200,rnd(400)-200};
+  vec3_t b={rnd(12000)-500,rnd(400)-200,rnd(400)-200};
+  vec3_t mins={-15,-15,-15},maxs={15,15,55};
+  if(n%3==0)memset(mins,0,sizeof(mins)),memset(maxs,0,sizeof(maxs));
+  if(n%7==0)memcpy(b,a,sizeof(b));
+  int mask=n%5==0?2:1;ref=(trace_t){.fraction=1};
+  CM_Trace(&ref,a,b,mins,maxs,0,mask);
+  for(int repeat=0;repeat<4;repeat++) {
+   CM_BoxTrace(&fast,a,b,mins,maxs,0,mask);equal(ref,fast);
+  }
+ }
+ vec3_t a={-10,0,0},b={11000,0,0};trace_t cached;
+ CM_ClearWorldTraceCache();unsigned long calls=worldTraces;
+ for(int n=0;n<1000;n++)CM_BoxTrace(&cached,a,b,zero,zero,0,1);
+ assert(worldTraces==calls+1);
+ /* A one-bit coordinate difference and signed zero are distinct keys. */
+ vec3_t adjacent;memcpy(adjacent,a,sizeof(adjacent));
+ adjacent[0]=nextafterf(adjacent[0],0.f);calls=worldTraces;
+ CM_BoxTrace(&fast,adjacent,b,zero,zero,0,1);assert(worldTraces==calls+1);
+ adjacent[0]=a[0];adjacent[1]=-0.f;calls=worldTraces;
+ CM_BoxTrace(&fast,adjacent,b,zero,zero,0,1);assert(worldTraces==calls+1);
+ /* Caller edits never poison cached results; moving entities use a temporary
+  * box and cannot reuse a stale world result. */
+ cached.normal[0]=123;CM_BoxTrace(&cached,a,b,zero,zero,0,1);assert(cached.normal[0]!=123);
+ calls=worldTraces;
+ for(int n=0;n<2;n++)CM_BoxTrace(&fast,a,b,zero,zero,CM_TEMP_BOX_MODEL,1);
+ assert(worldTraces==calls+2);
+ /* A map reload can reuse the same addresses and coordinates. */
+ shared[0].mins[0]=200;shared[0].maxs[0]=220;
+ CM_ClearWorldTraceCache();CM_BoxTrace(&fast,a,b,zero,zero,0,1);
+ assert(fast.fraction!=cached.fraction);
+ shared[0].mins[0]=0;shared[0].maxs[0]=20;CM_ClearWorldTraceCache();
+ for(int round=0;round<2;round++) {
+  pthread_t threads[8];for(int n=0;n<8;n++)assert(!pthread_create(&threads[n],NULL,cacheThread,NULL));
+  for(int n=0;n<8;n++)assert(!pthread_join(threads[n],NULL));CM_ClearWorldTraceCache();
+ }
  printf("PASS: 100000 exhaustive/accelerated sweep comparisons; city planes %lu -> %lu with identical hit\n",oldPlanes,newPlanes);
  puts("PASS: 1024 shared BSP leaves, recursive shared nodes, independent traces, overlaps and masks");
+ puts("PASS: 40000 cached/uncached exact-hit comparisons, 1000-to-1 repeated sweeps, dynamic box exclusion, map invalidation and independent thread caches");
 }
 """
 with tempfile.TemporaryDirectory(prefix='cod2-trace-pruning-') as directory:
     d = Path(directory)
     (d / 'test.c').write_text(support + code + plane + brush + reference + world + checks)
     subprocess.run(['cc', '-std=c99', '-O1', '-g', '-fsanitize=address,undefined',
-                    str(d / 'test.c'), '-o', str(d / 'test'), '-lm'], check=True)
+                    str(d / 'test.c'), '-o', str(d / 'test'), '-lm', '-pthread'], check=True)
     subprocess.run([str(d / 'test')], check=True)

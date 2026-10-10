@@ -84,6 +84,10 @@ target_link_options(cod2_client PRIVATE
   "SHELL:-s MIN_WEBGL_VERSION=2"
   "SHELL:-s MAX_WEBGL_VERSION=2"
   "SHELL:-s LEGACY_GL_EMULATION=1"
+  # This renderer submits only fixed-function draws in the browser. Keep their
+  # prescribed attribute bindings/program between draws instead of restoring
+  # programmable-pipeline state that the engine never uses.
+  "SHELL:-s GL_FFP_ONLY=1"
   "SHELL:-s GL_UNSAFE_OPTS=0"
   "SHELL:-s ALLOW_MEMORY_GROWTH=1"
   "SHELL:-s INITIAL_MEMORY=536870912"

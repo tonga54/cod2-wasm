@@ -2893,3 +2893,53 @@ Carentan sample made 300 UDP getinfo queries over 15 s with zero lost, mean
 made 300 queries over 15 s with zero lost, mean 2.619 ms, p95 4.180 ms and max
 25.647 ms, using 27.46% of one core. These are host responsiveness observations,
 not full network latency measurements or a large-player capacity claim.
+
+## Exact repeated collision work and GL state — October 10, 2026
+
+The server and browser now keep a bounded 256-entry cache of complete immutable
+world trace results. Keys contain the exact bits of all start/end coordinates,
+box extents and contents masks; even signed zero and a one-bit coordinate change
+produce distinct keys. Native threads have independent tables, and a map-load/
+shutdown epoch invalidates every table. Moving entities, temporary box models
+and transformed/partial traces still run their solvers. A miss uses the existing
+collision code and contact margins. The world brush bitmap also clears only
+the bytes needed by the loaded map.
+
+The map loader emits the same flat leaf/brush order directly instead of scoring
+quadratic split candidates whose result it unconditionally discarded. Alternated
+Pi startup samples did not establish a startup speed improvement (approximately
+4.4–4.6 s for Carentan and 3.7–4.2 s for Toujane); no faster-load claim is made.
+
+The browser enables the pinned Emscripten `GL_FFP_ONLY` path. This avoids
+programmable-pipeline cleanup between fixed-function draws while retaining
+the prescribed position/color/normal/texture attribute bindings. Unsafe GL
+optimizations remain disabled. Resolution, assets, filtering, shaders, point
+lights, fog, geometry, effects and simulation/network cadence are unchanged.
+
+Validation includes 100,000 exhaustive/accelerated sweep comparisons, 40,000
+cached/uncached comparisons, repeated traces reduced from 1,000 solver calls to
+one, map/address reuse, exact-key differences, temporary models and independent
+native thread caches. Collision-loading tests cover leaf order/pointers,
+contents, empty and maximum-sized leaves and short overflow. ASan/UBSan checks,
+4,608 wall/corner movement schedules, linked GL/point-light/attribute tests and
+the full static regression suite pass.
+
+Pi QA used a separate stack with the Release i386 engine under QEMU and native
+ARM64 web/gateway/supervisor. Both original maps accepted normal browser joins,
+movement and automatic fire; Carentan also exercised smoke and two opposing
+clients. During the 15 s two-client activity sample, 300 direct UDP getinfo
+queries had zero loss, mean 0.381 ms, p95 0.486 ms and maximum 2.333 ms. Server
+container CPU used 20.65% of one core, without throttling. A standing single
+Carentan client used 8.61% of one core, compared with 25.19% in the earlier
+baseline sample; spawn/view differed, so this is observational, not a controlled
+speedup ratio. These response samples run inside the Pi, not across the LAN.
+The Toujane movement/fire/grenade sample used 15.26% of one core, with 300
+queries, zero loss, mean 0.325 ms, p95 0.392 ms and maximum 0.592 ms, also without
+throttling.
+
+Single-client browser samples on the development Mac measured 119.2 FPS in
+Carentan (frame p95 10.1 ms) and 120.0 FPS in Toujane (p95 10.0 ms), with no frames
+over 33 ms in either 600-frame window and anti-aliasing enabled at 1280×720.
+Running both rendering clients on the same Mac increased client CPU contention;
+these measurements do not guarantee that cadence on every device, view or load.
+QA rooms and containers were removed before updating the main Pi services.

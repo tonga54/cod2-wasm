@@ -55,6 +55,63 @@ extern void MatrixTransposeTransformVector(const vec_t *in, const vec_t *matrix,
 static cbrush_t cm_fallbackBoxBrush;
 static cmodel_t cm_fallbackBoxModel;
 
+/* Only immutable world geometry is memoized. Dynamic entities, temporary box
+ * models and transformed/partial traces still run their complete solvers. */
+#define CM_WORLD_TRACE_CACHE_SIZE 256
+typedef struct {
+    unsigned int bits[13];
+} cmWorldTraceKey_t;
+typedef struct {
+    cmWorldTraceKey_t key;
+    trace_t result;
+    int returnValue;
+    int valid;
+} cmWorldTraceEntry_t;
+
+static unsigned int cm_worldTraceGeneration = 1;
+#ifdef __EMSCRIPTEN__
+/* The current browser build has one engine thread. */
+static cmWorldTraceEntry_t cm_worldTraceCache[CM_WORLD_TRACE_CACHE_SIZE];
+static unsigned int cm_worldTraceCacheGeneration;
+#else
+static __thread cmWorldTraceEntry_t cm_worldTraceCache[CM_WORLD_TRACE_CACHE_SIZE];
+static __thread unsigned int cm_worldTraceCacheGeneration;
+#endif
+
+void CM_ClearWorldTraceCache(void)
+{
+    if (++cm_worldTraceGeneration == 0)
+        ++cm_worldTraceGeneration;
+}
+
+static cmWorldTraceEntry_t *CM_WorldTraceCacheEntry(cmWorldTraceKey_t *key,
+    const vec_t *start, const vec_t *end, const vec_t *mins, const vec_t *maxs,
+    int brushmask)
+{
+    unsigned int hash = 2166136261u;
+    int i;
+
+    if (cm_worldTraceCacheGeneration != cm_worldTraceGeneration) {
+        memset(cm_worldTraceCache, 0, sizeof(cm_worldTraceCache));
+        cm_worldTraceCacheGeneration = cm_worldTraceGeneration;
+    }
+    /* Preserve exact float bits, including signed zero: there is no spatial
+     * rounding, quantization or tolerance in cache matching. */
+    memcpy(key->bits, start, sizeof(vec3_t));
+    memcpy(key->bits + 3, end, sizeof(vec3_t));
+    memcpy(key->bits + 6, mins, sizeof(vec3_t));
+    memcpy(key->bits + 9, maxs, sizeof(vec3_t));
+    key->bits[12] = (unsigned int)brushmask;
+    for (i = 0; i < 13; i++)
+        hash = (hash ^ key->bits[i]) * 16777619u;
+    /* Integer-valued float coordinates share low mantissa bits. Fold the
+     * upper bits into the slot so different replayed commands do not thrash. */
+    hash ^= hash >> 16;
+    hash *= 2246822519u;
+    hash ^= hash >> 13;
+    return &cm_worldTraceCache[hash & (CM_WORLD_TRACE_CACHE_SIZE - 1)];
+}
+
 static float CM_DotProduct(const vec_t *a, const vec_t *b)
 {
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -451,7 +508,8 @@ static int __attribute_regparm__(3) CM_Trace(trace_t *results, const vec_t *star
         int leafCount;
         int i;
 
-        memset(brushSeen, 0, sizeof(brushSeen));
+        int brushCount = cm.numBrushes > 65536 ? 65536 : cm.numBrushes;
+        memset(brushSeen, 0, brushCount > 0 ? (brushCount + 7) / 8 : 0);
         leafCount = CM_BoxLeafnums(tw.bounds[0], tw.bounds[1], leafs, 1024, &lastLeaf);
         for (i = 0; i < leafCount; i++) {
             int leafIndex = leafs[i];
@@ -512,6 +570,20 @@ int CM_BoxTrace(trace_t *results, const vec_t *start, const vec_t *end,
                 const vec_t *mins, const vec_t *maxs, clipHandle_t model, int brushmask)
 {
     CM_ClearTraceResult(results);
+    if (model == 0) {
+        cmWorldTraceKey_t key;
+        cmWorldTraceEntry_t *entry = CM_WorldTraceCacheEntry(&key,
+            start, end, mins, maxs, brushmask);
+        if (entry->valid && memcmp(&entry->key, &key, sizeof(key)) == 0) {
+            *results = entry->result;
+            return entry->returnValue;
+        }
+        entry->returnValue = CM_Trace(results, start, end, mins, maxs, model, brushmask);
+        entry->key = key;
+        entry->result = *results;
+        entry->valid = 1;
+        return entry->returnValue;
+    }
     return CM_Trace(results, start, end, mins, maxs, model, brushmask);
 }
 

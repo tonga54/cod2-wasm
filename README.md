@@ -207,7 +207,10 @@ anti-aliasing and 4× anisotropic filtering where supported. Rendering follows
 the display cadence, including 120 Hz. Performance changes cache static vertex
 buffers, texture/sampler/render state, shader uniforms and animation work;
 they do not reduce texture quality or remove map geometry/effects. Up to four
-FX point lights are combined into existing opaque geometry passes.
+FX point lights are combined into existing opaque geometry passes. The browser
+uses Emscripten's fixed-function-only GL path to avoid restoring an unused
+programmable pipeline between draws; shader attributes, lighting and texture
+filtering remain intact.
 
 The authoritative simulation runs at the original **20 Hz**, with up to **60
 input packets/s** and a 25 KB/s client rate. Remote motion interpolation uses
@@ -222,6 +225,11 @@ reduce work and avoid needless waits while preserving packet fields and
 simulation rules. Collision traces reject geometry outside the actual segment
 or beyond the nearest hit and avoid testing shared BSP brushes repeatedly;
 the same collision geometry, contact margins and hit results are retained.
+An exact-bit, bounded cache also reuses identical immutable-world sweeps in
+the server and client. It resets on map changes, has independent native thread
+storage, and excludes moving entities and temporary/transformed models. Replayed
+prediction commands and repeated sightline checks can reuse their complete
+results without rounding positions or skipping entity collisions.
 
 The optional **`?perfDebug=1`** overlay reports actual submitted frames and
 frame-time percentiles. Building/smoke tests in Carentan and sustained MG fire

@@ -126,3 +126,36 @@ draw(4, 3, gl.UNSIGNED_SHORT, 0);
 assert.equal(prepared, 3, 'GPU vertex buffers do not require client restriding');
 assert.equal(flushed, 3);
 console.log('PASS: indexed client draws copy the referenced vertex range, including sparse indices and vertex zero');
+
+// In the fixed-function-only build, static GPU attributes are configured by
+// the pointer calls, while CPU arrays are still deferred until restriding.
+// Losing either route silently drops world geometry, colors or lightmap UVs.
+function linkedFunction(name) {
+  const begin = source.indexOf(`function ${name}(`);
+  assert(begin >= 0, name);
+  let end = source.indexOf('{', begin) + 1, depth = 1;
+  while (depth) { depth += (source[end] === '{') - (source[end] === '}'); end++; }
+  return source.slice(begin, end);
+}
+const attributes = [], deferred = [];
+const fixedGL = {currentArrayBufferBinding: 1,
+  vertexAttribPointer(...args) { attributes.push(args); }};
+const fixedImmediate = {VERTEX:0,NORMAL:1,COLOR:2,TEXTURE0:3,clientActiveTexture:0,
+  setClientAttribute(...args) { deferred.push(args); }};
+const pointers = Object.fromEntries(['Vertex','Normal','Color','TexCoord'].map(name => {
+  const fn = `_gl${name}Pointer`;
+  return [name, Function('GLImmediate','GLctx', `return ${linkedFunction(fn)}`)(fixedImmediate,fixedGL)];
+}));
+pointers.Vertex(3,0x1406,32,64);
+pointers.Color(4,0x1401,32,76);
+pointers.TexCoord(2,0x1406,32,80);
+fixedImmediate.clientActiveTexture = 1;
+pointers.TexCoord(2,0x1406,32,88);
+pointers.Normal(0x1406,36,128);
+assert.deepEqual(attributes, [[0,3,0x1406,false,32,64],[2,4,0x1401,true,32,76],
+  [3,2,0x1406,false,32,80],[4,2,0x1406,false,32,88],[1,3,0x1406,true,36,128]]);
+fixedGL.currentArrayBufferBinding = 0;
+pointers.Vertex(3,0x1406,24,4096);pointers.Color(4,0x1401,24,4108);
+pointers.TexCoord(2,0x1406,24,4112);pointers.Normal(0x1406,36,8192);
+assert.equal(attributes.length,5);assert.equal(deferred.length,9);
+console.log('PASS: fixed-function GPU world/model attributes retain position, normalized colors/normals and both UV sets; dynamic CPU arrays remain deferred');
