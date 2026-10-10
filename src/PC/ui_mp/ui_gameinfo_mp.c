@@ -152,7 +152,9 @@ void UI_LoadArenas(void)
 
         mapName = Info_ValueForKey(ui_arenaInfos[n], "map");
 #ifdef __EMSCRIPTEN__
-        if (I_stricmp(mapName, "mp_toujane") != 0 && I_stricmp(mapName, "mp_carentan") != 0)
+        if (I_stricmp(mapName, "mp_toujane") != 0 &&
+            I_stricmp(mapName, "mp_carentan") != 0 &&
+            I_stricmp(mapName, "mp_dawnville") != 0)
             continue;
 #endif
         mapName = String_Alloc(mapName);

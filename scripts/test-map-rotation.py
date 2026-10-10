@@ -29,7 +29,7 @@ command = [
     '+set', 'dedicated', '1', '+set', 'fs_basepath', '/game',
     '+set', 'fs_homepath', '/profile', '+set', 'sv_maxclients', '2',
     '+exec', 'server.cfg', '+set', 'sv_mapRotationCurrent',
-    'gametype tdm map mp_carentan', '+map', 'mp_toujane',
+    'gametype tdm map mp_carentan map mp_dawnville', '+map', 'mp_toujane',
 ]
 child = subprocess.Popen(command, stdin=slave, stdout=slave, stderr=slave)
 os.close(slave)
@@ -86,7 +86,7 @@ try:
     for round_number in range(1, args.rounds + 1):
         os.write(master, b'map_rotate\n')
         wait_for_baseline()
-        expected = 'mp_carentan' if round_number % 2 else 'mp_toujane'
+        expected = ('mp_toujane', 'mp_carentan', 'mp_dawnville')[round_number % 3]
         check_map(expected)
         print(f'PASS: map rotation {round_number}/{args.rounds}: {expected}, TDM, 100 points / 15 minutes', flush=True)
     result = subprocess.run(['docker', 'stats', '--no-stream', '--format',

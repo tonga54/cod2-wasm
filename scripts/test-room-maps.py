@@ -36,9 +36,10 @@ with tempfile.TemporaryDirectory(prefix='cod2-room-maps-') as directory:
             assert 'set scr_allies ""' in config and 'set scr_axis ""' in config
             assert 'set scr_tdm_scorelimit "100"' in config
             assert 'set scr_tdm_timelimit "15"' in config
-            expected = f'gametype {gametype} map mp_carentan' if mapname == 'mp_toujane' else ''
+            remaining = rooms.SUPPORTED_MAPS[rooms.SUPPORTED_MAPS.index(mapname) + 1:]
+            expected = f'gametype {gametype} ' + ' '.join('map ' + item for item in remaining) if remaining else ''
             assert f'set g_gametype "{gametype}"' in config
-            assert f'set sv_mapRotation "gametype {gametype} map mp_toujane map mp_carentan"' in config
+            assert f'set sv_mapRotation "gametype {gametype} map mp_toujane map mp_carentan map mp_dawnville"' in config
             assert f'set sv_mapRotationCurrent "{expected}"' in config
         created = rooms.start_room(0, 'Bots', 'mp_carentan', 'tdm', 8, 'hard')
         assert created['botCount'] == 8 and created['botDifficulty'] == 'hard'
@@ -47,7 +48,7 @@ with tempfile.TemporaryDirectory(prefix='cod2-room-maps-') as directory:
         assert 'set scr_bot_difficulty "2"' in config
         assert (profile / 'room-0/raw/maps/mp/browser_bots.gsc').read_text() == (root / 'downstream/server/browser_bots.gsc').read_text()
         before = launch.call_count
-        for mapname in ('mp_dawnville', 'mp_carentan;quit', ''):
+        for mapname in ('mp_burgundy', 'mp_carentan;quit', ''):
             try:
                 rooms.start_room(2, 'Test', mapname)
             except ValueError:
@@ -85,7 +86,7 @@ process.poll.return_value = None
 room = {'id': 0, 'port': 28960, 'process': process, 'ownerToken': 'a'*64, 'instance': 'b'*32}
 with patch.object(rooms.socket, 'socket', return_value=udp):
     for mapname, gametype in ([(m, g) for m in rooms.SUPPORTED_MAPS for g in rooms.SUPPORTED_GAMETYPES] +
-                              [('mp_dawnville', 'tdm'), ('mp_carentan', 'sw')]):
+                              [('mp_burgundy', 'tdm'), ('mp_carentan', 'sw')]):
         udp.recv.return_value = b'\xff\xff\xff\xffinfoResponse\n' + (
             f'\\mapname\\{mapname}\\gametype\\{gametype}\\clients\\3').encode()
         info = rooms.info_for(room)
@@ -116,7 +117,8 @@ try:
             return status
 
         for body, expected in (({'name': 'Legacy'}, 'mp_toujane'),
-                               ({'name': 'Carentan', 'map': 'mp_carentan'}, 'mp_carentan')):
+                               ({'name': 'Carentan', 'map': 'mp_carentan'}, 'mp_carentan'),
+                               ({'name': 'Dawnville', 'map': 'mp_dawnville'}, 'mp_dawnville')):
             assert post(body) == 201
             assert start.call_args.args == (0, body['name'], expected, 'tdm', 0, 'normal')
         for gametype in rooms.SUPPORTED_GAMETYPES:
@@ -126,7 +128,7 @@ try:
             assert post({'name': 'Bots', 'botCount': 8, 'botDifficulty': difficulty}) == 201
             assert start.call_args.args == (0, 'Bots', 'mp_toujane', 'tdm', 8, difficulty)
         before = start.call_count
-        for mapname in ('mp_dawnville', 'mp_carentan;quit', [], None, 1):
+        for mapname in ('mp_burgundy', 'mp_carentan;quit', [], None, 1):
             assert post({'name': 'Invalid', 'map': mapname}) == 400
         for gametype in ('sw', 'ctf;quit', '', [], None, 1):
             assert post({'name':'Invalid', 'gametype':gametype}) == 400
@@ -206,4 +208,4 @@ with patch.object(rooms.stopping, 'wait', side_effect=[False, True]), \
     assert sorted(call.args[0]['id'] for call in stop.call_args_list) == [0, 2]
     assert set(rooms.rooms) == {1}
 rooms.rooms.clear()
-print('PASS: empty startup, three user slots, idle cleanup, both maps/five modes, rotation, discovery and HTTP allowlist')
+print('PASS: empty startup, three user slots, idle cleanup, three maps/five modes, rotation, discovery and HTTP allowlist')

@@ -1,6 +1,6 @@
 # Call of Duty 2 browser runbook
 
-Status: **Toujane/Carentan browser port with five multiplayer modes under active development. Chrome and
+Status: **Toujane/Carentan/Dawnville browser port with five multiplayer modes under active development. Chrome and
 the internal browser have verified movement, aiming, damage, death, respawn and
 synchronized scores, including the normal room. This is two-client coverage,
 not a 64-player load or long-duration stability result.**
@@ -219,7 +219,8 @@ Both corrected targets build; browser movement validation is pending.
 The client runs locally in each browser as WebAssembly and WebGL 2. Docker
 serves the web package and will run the native dedicated server and a
 WebSocket/UDP gateway. The supported maps are Toujane, Tunisia
-(`mp_toujane`) and Carentan, France (`mp_carentan`), with Deathmatch,
+(`mp_toujane`), Carentan, France (`mp_carentan`) and Dawnville, France
+(`mp_dawnville`), with Deathmatch,
 Team Deathmatch, Capture the Flag, Headquarters and Search and Destroy,
 and up to 64 human players per LAN server.
 The minimum gameplay acceptance check still uses two independent browsers.
@@ -3153,3 +3154,25 @@ and restricted follow. It also roundtrips the new flag through production
 packet bit I/O at all eight offsets and rejects flag overlap, truncated wire
 state and dropped archived sprint. Existing movement/view tests include the
 shared sprint header so they exercise the actual flag value.
+
+## Dawnville enabled (2026-10-10)
+
+Dawnville, France (`mp_dawnville`) is available in Start New Server and in
+map/type-map votes, alongside Toujane and Carentan. The gateway, room
+supervisor and discovery probe accept the new map. Rooms rotate through
+Toujane, Carentan and Dawnville, preserving their selected game mode and
+starting with the maps after the user's initial selection.
+
+The private package includes Dawnville's original BSP, map/FX scripts and
+script imports, materials, models, loading/menu artwork and sound aliases.
+It uses the original American/German Normandy factions and supports the same
+five retail modes. Original IWDs remain intact; the regenerated private
+archives contain 4,747 entries totaling 307,502,482 bytes, with new sizes and
+hashes in `site/wasm-game-data.json` so clients fetch the expanded package.
+
+Room tests exercise all three maps across all five modes, selected-map
+rotation, discovery and HTTP validation. UI creation and vote tests cover
+all three indices. The isolated native rotation check now cycles through
+Dawnville as well as Toujane and Carentan. Deployment must use the web,
+gateway and native-server images built for this change, together with the
+regenerated private archives.

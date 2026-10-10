@@ -85,8 +85,8 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
               json(response, 400, {error:'Invalid server name.'}); return;
             }
             const map = body.map ?? 'mp_toujane';
-            if (!['mp_toujane', 'mp_carentan'].includes(map)) {
-              json(response, 400, {error:'Choose Toujane or Carentan.'}); return;
+            if (!['mp_toujane', 'mp_carentan', 'mp_dawnville'].includes(map)) {
+              json(response, 400, {error:'Choose Toujane, Carentan or Dawnville.'}); return;
             }
             const gametype = body.gametype === undefined ? 'tdm' : body.gametype;
             if (!['dm', 'tdm', 'ctf', 'hq', 'sd'].includes(gametype)) {

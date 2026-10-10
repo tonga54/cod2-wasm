@@ -18,7 +18,8 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--main-dir', type=Path, default=root / 'data/browser/main')
 parser.add_argument('--manifest', type=Path, default=root / 'site/wasm-game-data.json')
 args = parser.parse_args()
-maps = {"mp_toujane": "Toujane, Tunisia", "mp_carentan": "Carentan, France"}
+maps = {"mp_toujane": "Toujane, Tunisia", "mp_carentan": "Carentan, France",
+        "mp_dawnville": "Dawnville, France"}
 gametypes = ("dm", "tdm", "ctf", "hq", "sd")
 balance_profile = load_profile()
 policy = json.loads(args.manifest.read_text())["variants"]["cod2-mp"]
@@ -91,7 +92,8 @@ try:
                     assert data == original, "Modified original resource: " + name
     assert sorted(n for n in entries if n.endswith(".d3dbsp")) == sorted(
         f"maps/mp/{mapname}.d3dbsp" for mapname in maps)
-    assert sorted(n for n in entries if n.endswith('.arena')) == ['mp/carentan.arena', 'mp/toujane.arena']
+    assert sorted(n for n in entries if n.endswith('.arena')) == sorted(
+        f'mp/{mapname[3:]}.arena' for mapname in maps)
     modes = [n for n in entries if n.startswith("maps/mp/gametypes/")
              and n.endswith(".gsc") and not Path(n).name.startswith("_")]
     assert sorted(modes) == sorted(f"maps/mp/gametypes/{mode}.gsc" for mode in gametypes), modes
@@ -149,7 +151,7 @@ try:
         for position in range(offset, offset + length, 72):
             material = bsp[position:position + 64].split(b"\0", 1)[0].decode().lower()
             assert "materials/" + material in entries, "Missing BSP material: " + material
-    print(f"PASS: {len(entries)} private entries, {total} bytes, retail bytes/reviewed overrides, Toujane/Carentan, five retail modes, both BSPs and factions")
+    print(f"PASS: {len(entries)} private entries, {total} bytes, retail bytes/reviewed overrides, Toujane/Carentan/Dawnville, five retail modes, all three BSPs and factions")
 finally:
     for archive in originals:
         archive.close()

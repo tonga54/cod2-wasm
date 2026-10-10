@@ -14,12 +14,13 @@ Raspberry Pi 5; larger matches and lower-end client hardware need broader testin
 | Map | Allies | Axis |
 | --- | --- | --- |
 | Carentan, France (`mp_carentan`) | American | German Normandy |
+| Dawnville, France (`mp_dawnville`) | American | German Normandy |
 | Toujane, Tunisia (`mp_toujane`) | British | Afrika Korps |
 
-Both maps support the original **Deathmatch, Team Deathmatch, Capture the Flag,
+All three maps support the original **Deathmatch, Team Deathmatch, Capture the Flag,
 Headquarters, and Search and Destroy** modes. Select a map and Game Type in
 **Start New Server**. Click Game Type to cycle forward; right-click to go back.
-Rooms rotate between the two maps while keeping their selected mode. TDM uses
+Rooms rotate through Toujane, Carentan and Dawnville while keeping their selected mode. TDM uses
 100 team points or 15 minutes; the other modes use their original scripts and
 settings.
 
@@ -336,7 +337,7 @@ node downstream/gateway/benchmark.mjs --docker
 The full build runs the static suite. Native code checks exercise real C paths,
 including sanitizer-backed tests. A successful build alone does not establish
 playable multiplayer; normal two-client browser checks cover combat, scopes,
-reloads, room creation and both maps. Detailed measurements, deployment evidence
+reloads, room creation and the supported maps. Detailed measurements, deployment evidence
 and remaining limitations are recorded in [RUNBOOK.md](RUNBOOK.md).
 
 ## Updates
