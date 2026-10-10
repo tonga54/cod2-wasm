@@ -242,12 +242,13 @@ EMSCRIPTEN_KEEPALIVE void web_created_room(int room, const char *error) {
     Cbuf_ExecuteText(2, va("connect 127.0.0.%d:28960\n", room + 1));
 }
 
-EM_JS(void, Web_CreateServer, (const char *name, const char *mapName, const char *gameType), {
+EM_JS(void, Web_CreateServer, (const char *name, const char *mapName, const char *gameType, int botCount, int botDifficulty), {
     if (Module.roomCreationPending) return;
     Module.roomCreationPending = true;
     fetch('/servers', {method:'POST', headers:{'Content-Type':'application/json'},
         body:JSON.stringify({name:UTF8ToString(name).slice(0, 128), map:UTF8ToString(mapName),
-            gametype:UTF8ToString(gameType)})})
+            gametype:UTF8ToString(gameType), botCount:botCount,
+            botDifficulty:['easy', 'normal', 'hard'][botDifficulty] || 'normal'})})
       .then(async response => {
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'Unable to create the server.');

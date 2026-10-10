@@ -47,7 +47,7 @@ def observe(args):
     deadline = start + args.seconds
     next_query = start
     peers = {}
-    counts, rtts, pings, maps = [], [], [], set()
+    counts, bot_counts, rtts, pings, maps = [], [], [], [], set()
     lost_queries = 0
     while time.monotonic() < deadline:
         now = time.monotonic()
@@ -63,6 +63,7 @@ def observe(args):
                 fields = lines[1].split('\\')
                 info = dict(zip(fields[1::2], fields[2::2]))
                 maps.add(info['mapname'])
+                bot_counts.append(int(info.get('bots', '0')))
                 current_pings = [int(line.split(' ', 2)[1]) for line in lines[2:] if line.strip()]
                 counts.append(len(current_pings))
                 pings.extend(current_pings)
@@ -125,7 +126,9 @@ def observe(args):
     query.close()
     connected = [value for value in peers.values() if value['in'] and value['out']]
     report = {'seconds': seconds, 'expectedClients': args.expected_clients,
-              'observedClients': len(connected), 'minStatusPlayers': min(counts, default=0),
+              'observedClients': len(connected), 'expectedBots': args.expected_bots,
+              'minStatusBots': min(bot_counts, default=0), 'maxStatusBots': max(bot_counts, default=0),
+              'minStatusPlayers': min(counts, default=0),
               'maxStatusPlayers': max(counts, default=0), 'maps': sorted(maps),
               'cpuPercentOneCore': (after['usage_usec'] - before['usage_usec']) / seconds / 10000,
               'cpuThrottledMs': (after.get('throttled_usec', 0) - before.get('throttled_usec', 0)) / 1000,
@@ -140,8 +143,10 @@ def observe(args):
               'limits': 'Server-interface cadence; ack RTT includes LAN, gateway and client scheduling. '
                         'Status RTT is container-local. This is not client FPS or a packet-loss measurement.'}
     report['passed'] = (len(connected) == args.expected_clients and
-                        min(counts, default=0) == args.expected_clients and
-                        max(counts, default=0) == args.expected_clients and
+                        min(counts, default=0) == args.expected_clients + args.expected_bots and
+                        max(counts, default=0) == args.expected_clients + args.expected_bots and
+                        min(bot_counts, default=0) == args.expected_bots and
+                        max(bot_counts, default=0) == args.expected_bots and
                         not lost_queries and not packet_stats[1])
     return report
 
@@ -152,19 +157,21 @@ def main():
     parser.add_argument('--seconds', type=int, default=60)
     parser.add_argument('--port', type=int, default=28960)
     parser.add_argument('--expected-clients', type=int, default=8)
+    parser.add_argument('--expected-bots', type=int, default=0)
     parser.add_argument('--output', type=Path)
     parser.add_argument('--ssh')
     parser.add_argument('--ssh-control')
     parser.add_argument('--in-container', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     assert 5 <= args.seconds <= 3600 and 1 <= args.expected_clients <= 64
+    assert 0 <= args.expected_bots <= 16 and args.expected_clients + args.expected_bots <= 64
     assert 1 <= args.port <= 65535
     if args.in_container:
         report = observe(args)
     else:
         command = ['docker', 'exec', '-u', '0', '-i', args.container, 'python3', '-', '--in-container',
                    '--seconds', str(args.seconds), '--port', str(args.port),
-                   '--expected-clients', str(args.expected_clients)]
+                   '--expected-clients', str(args.expected_clients), '--expected-bots', str(args.expected_bots)]
         if args.ssh:
             command = ['ssh'] + (['-S', args.ssh_control] if args.ssh_control else []) + [args.ssh, shlex.join(command)]
         report = json.loads(subprocess.check_output(command, input=Path(__file__).read_bytes()))

@@ -325,3 +325,22 @@ latency or a universal FPS floor.
 | Initial load is slow | The first browser visit downloads the private package; wait for the byte progress. Later visits reuse that origin's cache. |
 | Deployment refuses an update | Leave active matches, commit/push intended source changes, and resolve a dirty or divergent Pi checkout before retrying. |
 | Simulation slows with more players | Check per-container CPU use, temperature, power supply and throttling. Measure your actual load; the configured slot/room limit is not measured Pi capacity. |
+
+## Rooms with bots
+
+In **Start New Server**, set **Bots** and **Bot Difficulty** before creating the
+room. The default is no bots; the supported range is 0–16. Start with eight for
+practice and measure your host before increasing the count or running several
+active rooms. Bots consume native server CPU and player slots but do not need
+additional browser clients or GPU rendering on the Pi. Clients render bot
+soldiers through the same original model/animation path as other players.
+
+The Pi image includes the first-party lifecycle script from
+`downstream/server/browser_bots.gsc`. The supervisor copies it into the room's
+private profile only when bots are enabled and persists count/difficulty in
+that room's config across map rotation. No third-party bot package, waypoint
+download or separate Docker service is needed. Bots alone do not prevent the
+normal five-minute room cleanup.
+
+See [Bots](../README.md#bots) for difficulty settings and the current combat-AI
+limitations in objective modes.

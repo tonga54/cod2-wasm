@@ -2653,11 +2653,17 @@ void Scr_LoadGameType(void)
     Scr_FreeThread((unsigned short)threadId);
 }
 
+static unsigned int s_browserBotsMain;
+
 void Scr_StartupGameType(void)
 {
     unsigned int handle = g_scr_data.gametype.startupgametype;
     unsigned int threadId = Scr_ExecThread(handle, 0);
     Scr_FreeThread((unsigned short)threadId);
+    if (s_browserBotsMain) {
+        threadId = Scr_ExecThread(s_browserBotsMain, 0);
+        Scr_FreeThread((unsigned short)threadId);
+    }
 }
 
 void Scr_PlayerConnect(gentity_t *self)
@@ -4438,6 +4444,15 @@ void GScr_LoadScripts(int inst)
     g_scr_data.createstruct = GScr_LoadScriptFunction("codescripts/struct", "createstruct");
 
     GScr_LoadGameTypeScript();
+    // Keep optional first-party scripts and AI state outside reconstructed ABI.
+    {
+        extern int Dvar_GetInt(const char *name);
+        extern void SV_BotResetNavigation(void);
+        SV_BotResetNavigation();
+        s_browserBotsMain = 0;
+        if (Dvar_GetInt("scr_bot_count") > 0)
+            s_browserBotsMain = GScr_LoadScriptFunction("maps/mp/browser_bots", "main");
+    }
 
     {
         extern const dvar_t *sv_mapname;

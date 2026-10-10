@@ -1261,7 +1261,7 @@ void SV_DirectConnect(netadr_t from)
 
     maxClients = (*(const dvar_t **)imp_sv_maxclients)->current.integer;
     for (clientNum = 0, cl = svs->clients; clientNum < maxClients; ++clientNum, ++cl) {
-        if (NET_CompareBaseAdr(from, cl->netchan.remoteAddress) &&
+        if (cl->state && NET_CompareBaseAdr(from, cl->netchan.remoteAddress) &&
             (qport == cl->netchan.qport || from.port == cl->netchan.remoteAddress.port)) {
             int reconnectMsec;
 
@@ -1731,7 +1731,7 @@ gentity_t *SV_AddTestClient(void)
             return NULL;
     }
 
-    sprintf(userinfo, "connect \"\\cg_predictItems\\1\\cl_anonymous\\0\\color\\4\\head\\default\\model\\multi\\snaps\\20\\rate\\5000\\name\\bot%d\\protocol\\%d\"", botport, 0x76);
+    sprintf(userinfo, "connect \"\\cg_predictItems\\1\\cl_anonymous\\0\\color\\4\\head\\default\\model\\multi\\snaps\\20\\rate\\5000\\name\\[BOT] Recruit%d\\protocol\\%d\"", botport, 0x76);
     SV_Cmd_TokenizeString(userinfo);
 
     memset(&adr, 0, sizeof(adr));

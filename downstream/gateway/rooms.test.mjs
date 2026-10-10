@@ -11,20 +11,22 @@ echo.on('message', (data, peer) => echo.send(data, peer.port, peer.address));
 echo.bind(0, '127.0.0.1'); await once(echo, 'listening');
 const udpPort = echo.address().port;
 let creates = 0, deletes = 0;
+let requestedBots = 0, requestedDifficulty = 'normal', roomBots = 0;
 const manager = http.createServer(async (req, res) => {
   assert.equal(req.url, '/rooms');
   res.setHeader('Content-Type', 'application/json');
   if (req.method === 'POST') {
     let body=''; for await (const chunk of req) body += chunk;
     assert.deepEqual(JSON.parse(body), {name:'Second room', map:creates === 0 ? 'mp_toujane' : 'mp_carentan',
-      gametype:creates < 2 ? 'tdm' : ['dm','tdm','ctf','hq','sd'][creates-2]});
+      gametype:creates < 2 ? 'tdm' : ['dm','tdm','ctf','hq','sd'][creates-2] || 'tdm',
+      botCount:requestedBots, botDifficulty:requestedDifficulty});
     ++creates; res.writeHead(201); res.end(JSON.stringify({id:1, port:udpPort+1}));
   } else if (req.method === 'DELETE') {
     let body=''; for await (const chunk of req) body += chunk;
     const value=JSON.parse(body); assert.equal(value.id,0);
     if(value.ownerToken !== 'a'.repeat(64)){res.writeHead(403);res.end(JSON.stringify({error:'Not owner'}));}
     else {++deletes;res.end(JSON.stringify({deleted:0}));}
-  } else res.end(JSON.stringify({rooms:[{id:0,port:udpPort},{id:1,port:udpPort+1}]}));
+  } else res.end(JSON.stringify({rooms:[{id:0,port:udpPort},{id:1,port:udpPort+1,botCount:roomBots}]}));
 });
 manager.listen(0,'127.0.0.1'); await once(manager,'listening');
 const gateway = createGateway({udpHost:'127.0.0.1', udpPort, roomsEnabled:true,
@@ -70,6 +72,19 @@ try {
     response=await fetch(origin+'/servers',{method:'POST',headers:{Origin:origin},body:JSON.stringify({name:'Second room',gametype})});
     assert.equal(response.status,400); assert.equal(creates,7);
   }
+  for (const botCount of [-1,17,1.5,true,null,'8',{}]) {
+    response=await fetch(origin+'/servers',{method:'POST',headers:{Origin:origin},body:JSON.stringify({name:'Second room',botCount})});
+    assert.equal(response.status,400); assert.equal(creates,7);
+  }
+  for (const botDifficulty of ['expert','hard;quit','',null,{},1]) {
+    response=await fetch(origin+'/servers',{method:'POST',headers:{Origin:origin},body:JSON.stringify({name:'Second room',botDifficulty})});
+    assert.equal(response.status,400); assert.equal(creates,7);
+  }
+  for (const botDifficulty of ['easy','normal','hard']) {
+    requestedBots=8; requestedDifficulty=botDifficulty;
+    response=await fetch(origin+'/servers',{method:'POST',headers:{Origin:origin},body:JSON.stringify({name:'Second room',map:'mp_carentan',botCount:8,botDifficulty})});
+    assert.equal(response.status,201);
+  }
   const first=await open(0); await Promise.all(Array.from({length:63},()=>open(0)));
   response=await fetch(origin+'/servers');
   const occupied = (await response.json()).rooms;
@@ -77,7 +92,10 @@ try {
   assert.equal(occupied.find(room=>room.id===0).maxPlayers,64);
   assert.equal(occupied.find(room=>room.id===1).connections,0);
   await rejected(0,503);
-  await Promise.all(Array.from({length:64},()=>open(1))); await rejected(1,503);
+  roomBots=8;
+  await Promise.all(Array.from({length:56},()=>open(1))); await rejected(1,503);
+  response=await fetch(origin+'/servers');
+  assert.equal((await response.json()).rooms.find(room=>room.id===1).maxHumans,56);
   await rejected(2,503); await rejected('8',404);
   const reply=once(first,'message'); first.send(Buffer.from('room-zero'));
   assert.equal((await reply)[0].toString(),'room-zero');

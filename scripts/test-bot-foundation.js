@@ -69,7 +69,8 @@ assert.match(script, /PlayerCmd_HasWeapon\(&pSelf->client->ps, weaponIndex\)/);
 
 const tracked = childProcess.execFileSync('git', ['-C', root, 'ls-files'], { encoding: 'utf8' })
   .trim().split('\n').filter(Boolean);
-assert.equal(tracked.filter(file => /\.(?:gsc|wp)$/i.test(file)).length, 0,
-  'third-party bot scripts or waypoint graphs must not be tracked');
+assert.deepEqual(tracked.filter(file => /\.(?:gsc|wp)$/i.test(file) &&
+  file !== 'downstream/server/browser_bots.gsc'), [],
+  'only the first-party bot lifecycle script may be tracked; no imported bot scripts or waypoint graphs');
 
 console.log('Call of Duty 2 clean-room bot foundation contract passed');

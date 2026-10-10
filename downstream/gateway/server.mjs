@@ -92,7 +92,15 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
             if (!['dm', 'tdm', 'ctf', 'hq', 'sd'].includes(gametype)) {
               json(response, 400, {error:'Choose a supported game mode.'}); return;
             }
-            body = {name:body.name, map, gametype};
+            const botCount = body.botCount === undefined ? 0 : body.botCount;
+            const botDifficulty = body.botDifficulty === undefined ? 'normal' : body.botDifficulty;
+            if (!Number.isInteger(botCount) || botCount < 0 || botCount > 16) {
+              json(response, 400, {error:'Choose between 0 and 16 bots.'}); return;
+            }
+            if (!['easy', 'normal', 'hard'].includes(botDifficulty)) {
+              json(response, 400, {error:'Choose Easy, Normal or Hard bots.'}); return;
+            }
+            body = {name:body.name, map, gametype, botCount, botDifficulty};
           }
         }
         const result = await manager(request.method, body);
@@ -105,6 +113,7 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
             room.connections = [...wss.clients].filter(ws => ws.roomId === room.id).length +
               (reservations.get(room.id) || 0);
             room.maxPlayers = maxClients;
+            room.maxHumans = maxClients - Math.max(room.botCount || 0, room.bots || 0);
           }
         }
         json(response, result.status, result.value);
@@ -165,6 +174,9 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
         const list = await manager('GET');
         const room = list.value.rooms?.find(room => room.id === roomId);
         if (!room || room.port !== udpPort + roomId) throw new Error('Room unavailable');
+        const bots = Math.max(room.botCount || 0, room.bots || 0);
+        if ([...wss.clients].filter(ws => ws.roomId === roomId).length +
+            (reservations.get(roomId) || 0) > maxClients - bots) throw new Error('Room full');
         destination = room.port;
       }
       wss.handleUpgrade(request, socket, head, ws => {

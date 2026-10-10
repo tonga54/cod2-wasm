@@ -16,13 +16,15 @@ typedef struct {const char *gameType, *gameTypeName;} gameType_t;
 static struct {int numGameTypes,mapCount;gameType_t gameTypes[5];struct {const char *mapLoadName;} mapList[2];} sharedUiInfo;
 static dvar_t gt,map;static dvar_t *ui_netGameType=&gt,*ui_currentNetMap=&map;
 static char selectedName[32];static char *ui_netGameTypeName=selectedName;
+static int botCount=8,botDifficulty=2;
 static int visibilityCalls,selectionCalls,creates;static const char *createdMap,*createdType;
 static void Dvar_SetInt(dvar_t *var,int value){var->current.integer=value;}
 static void Dvar_SetString(char *var,const char *value){strcpy(var,value);}
 static const char *Dvar_GetString(const char *name){assert(!strcmp(name,"sv_hostname"));return "Mode test";}
+static int Dvar_GetInt(const char *name){if(!strcmp(name,"ui_botCount"))return botCount;assert(!strcmp(name,"ui_botDifficulty"));return botDifficulty;}
 static void UI_UpdateMapVisibility(int value){assert(value==gt.current.integer);visibilityCalls++;}
 static void UI_SelectFirstVisibleMap(int value){assert(value==map.current.integer);selectionCalls++;}
-static void Web_CreateServer(const char *name,const char *mapName,const char *gameType){assert(!strcmp(name,"Mode test"));createdMap=mapName;createdType=gameType;creates++;}
+static void Web_CreateServer(const char *name,const char *mapName,const char *gameType,int count,int difficulty){assert(count==botCount&&difficulty==botDifficulty);assert(!strcmp(name,"Mode test"));createdMap=mapName;createdType=gameType;creates++;}
 static int UI_IsActionKey(int key)
 '''+key+r'''
 static int selectMode(int key){
@@ -44,8 +46,10 @@ int main(void){
  assert(visibilityCalls==7 && selectionCalls==7 && map.current.integer==1);
  for(int i=0;i<5;i++)for(int m=0;m<2;m++){gt.current.integer=i;map.current.integer=m;createRoom();assert(createdMap==sharedUiInfo.mapList[m].mapLoadName);assert(createdType==modes[i]);}
  assert(creates==10);
+ for(botCount=0;botCount<=16;botCount++)for(botDifficulty=0;botDifficulty<3;botDifficulty++)createRoom();
+ assert(creates==61);
  gt.current.integer=5;createRoom();gt.current.integer=-1;createRoom();
- gt.current.integer=1;map.current.integer=2;createRoom();map.current.integer=-1;createRoom();assert(creates==10);
+ gt.current.integer=1;map.current.integer=2;createRoom();map.current.integer=-1;createRoom();assert(creates==61);
  return 0;
 }
 '''

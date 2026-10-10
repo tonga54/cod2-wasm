@@ -32,6 +32,7 @@ FROM ubuntu:22.04
 COPY --from=runtime-libraries /runtime/ /
 RUN mkdir -p /game/main /profile
 COPY server.cfg /config/server.cfg
+COPY downstream/server/browser_bots.gsc /config/browser_bots.gsc
 # Include only the public hashes, never the private archives. A changed asset
 # set then changes the image, so compose recreates the server's cached IWD list.
 COPY site/wasm-game-data.json /config/browser-assets.json

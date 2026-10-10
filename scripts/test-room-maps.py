@@ -19,7 +19,7 @@ spec.loader.exec_module(rooms)
 with tempfile.TemporaryDirectory(prefix='cod2-room-maps-') as directory:
     profile = Path(directory)
     with patch.object(rooms, 'Path', side_effect=lambda name: profile if name == '/profile' else Path(name)), \
-         patch.object(rooms.shutil, 'copyfile', side_effect=lambda _, dest: Path(dest).write_text((root / 'server.cfg').read_text())), \
+         patch.object(rooms.shutil, 'copyfile', side_effect=lambda src, dest: Path(dest).write_text((root / ('downstream/server/browser_bots.gsc' if src.endswith('.gsc') else 'server.cfg')).read_text())), \
          patch.object(rooms.subprocess, 'Popen') as launch:
         for case, (mapname, gametype) in enumerate((m, g) for m in rooms.SUPPORTED_MAPS for g in rooms.SUPPORTED_GAMETYPES):
             room_id = case % 3
@@ -40,6 +40,12 @@ with tempfile.TemporaryDirectory(prefix='cod2-room-maps-') as directory:
             assert f'set g_gametype "{gametype}"' in config
             assert f'set sv_mapRotation "gametype {gametype} map mp_toujane map mp_carentan"' in config
             assert f'set sv_mapRotationCurrent "{expected}"' in config
+        created = rooms.start_room(0, 'Bots', 'mp_carentan', 'tdm', 8, 'hard')
+        assert created['botCount'] == 8 and created['botDifficulty'] == 'hard'
+        config = (profile / 'room-0/raw/server.cfg').read_text()
+        assert 'set scr_bot_count "8"' in config
+        assert 'set scr_bot_difficulty "2"' in config
+        assert (profile / 'room-0/raw/maps/mp/browser_bots.gsc').read_text() == (root / 'downstream/server/browser_bots.gsc').read_text()
         before = launch.call_count
         for mapname in ('mp_dawnville', 'mp_carentan;quit', ''):
             try:
@@ -89,6 +95,10 @@ with patch.object(rooms.socket, 'socket', return_value=udp):
         else:
             assert info is None
 
+    udp.recv.return_value = b'\xff\xff\xff\xffinfoResponse\n\\mapname\\mp_toujane\\gametype\\tdm\\clients\\9\\bots\\8'
+    info = rooms.info_for(room)
+    assert info['players'] == 9 and info['bots'] == 8 and info['humans'] == 1
+
 # Test the internal HTTP API with real parsing, validation and reply handling.
 server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), rooms.Handler)
 thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -108,19 +118,26 @@ try:
         for body, expected in (({'name': 'Legacy'}, 'mp_toujane'),
                                ({'name': 'Carentan', 'map': 'mp_carentan'}, 'mp_carentan')):
             assert post(body) == 201
-            assert start.call_args.args == (0, body['name'], expected, 'tdm')
+            assert start.call_args.args == (0, body['name'], expected, 'tdm', 0, 'normal')
         for gametype in rooms.SUPPORTED_GAMETYPES:
             assert post({'name':'Selected mode', 'map':'mp_carentan', 'gametype':gametype}) == 201
-            assert start.call_args.args == (0, 'Selected mode', 'mp_carentan', gametype)
+            assert start.call_args.args == (0, 'Selected mode', 'mp_carentan', gametype, 0, 'normal')
+        for difficulty in rooms.BOT_DIFFICULTIES:
+            assert post({'name': 'Bots', 'botCount': 8, 'botDifficulty': difficulty}) == 201
+            assert start.call_args.args == (0, 'Bots', 'mp_toujane', 'tdm', 8, difficulty)
         before = start.call_count
         for mapname in ('mp_dawnville', 'mp_carentan;quit', [], None, 1):
             assert post({'name': 'Invalid', 'map': mapname}) == 400
         for gametype in ('sw', 'ctf;quit', '', [], None, 1):
             assert post({'name':'Invalid', 'gametype':gametype}) == 400
+        for count in (-1, 17, 1.5, True, None, '8', []):
+            assert post({'name':'Invalid', 'botCount':count}) == 400
+        for difficulty in ('expert', 'hard;quit', '', None, [], 1):
+            assert post({'name':'Invalid', 'botDifficulty':difficulty}) == 400
         assert start.call_count == before
 
     # All three slots belong to user-created games, including the first slot.
-    def create(room_id, name, mapname, gametype):
+    def create(room_id, name, mapname, gametype, bot_count, bot_difficulty):
         child = Mock()
         child.poll.return_value = None
         created = {'id': room_id, 'port': rooms.BASE_PORT + room_id,
@@ -183,7 +200,7 @@ finally:
 with patch.object(rooms.stopping, 'wait', side_effect=[False, True]), \
      patch.object(rooms.time, 'monotonic', return_value=rooms.IDLE_SECONDS + 1), \
      patch.object(rooms, 'info_for', side_effect=lambda room: {
-         'players': 1 if room['id'] == 1 else 0}), \
+         'players': 8, 'humans': 1 if room['id'] == 1 else 0}), \
      patch.object(rooms, 'stop_room') as stop:
     rooms.cleanup()
     assert sorted(call.args[0]['id'] for call in stop.call_args_list) == [0, 2]

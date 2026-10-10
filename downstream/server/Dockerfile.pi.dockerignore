@@ -11,3 +11,5 @@
 !server.cfg
 !site/
 !site/wasm-game-data.json
+
+!downstream/server/browser_bots.gsc

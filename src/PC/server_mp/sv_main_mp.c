@@ -131,6 +131,7 @@ void SV_RunFrame(void);
 void SV_BotUserMove(client_t *cl);
 qboolean SV_BotIsTestClient(int clientNum);
 void SV_BotResetClient(int clientNum);
+static void SV_BotResetAIClient(int clientNum);
 qboolean SV_BotStop(int clientNum);
 qboolean SV_BotSetMovement(int clientNum, int forward, int right);
 qboolean SV_BotSetAngles(int clientNum, const vec_t *angles);
@@ -411,6 +412,7 @@ void SVC_Status(netadr_t from)
     char player[0x400];
     char finalString[0x2000];
     int statusLength;
+    int botCount = 0;
     int i;
     int mod;
 
@@ -438,16 +440,16 @@ void SVC_Status(netadr_t from)
     for (i = 0; i < sv_maxclients->current.integer; ++i) {
         client_t *cl = &svs.clients[i];
         int newStatusLength;
+        int score = 0;
 
         if (cl->state <= 1)
             continue;
 
-        SV_GameClientNum(i);
-
+        if (SV_BotIsTestClient(i)) ++botCount;
         if (*(int *)imp_gameInitialized)
-            G_GetClientScore((int)(cl - svs.clients));
+            score = G_GetClientScore(i);
 
-        Com_sprintf(player, sizeof(player), "%i %i \"%s\"\n", 0, cl->ping, cl->name);
+        Com_sprintf(player, sizeof(player), "%i %i \"%s\"\n", score, cl->ping, cl->name);
         newStatusLength = statusLength + (int)strlen(player);
         if ((unsigned int)newStatusLength > 0x3fff)
             break;
@@ -455,6 +457,8 @@ void SVC_Status(netadr_t from)
         strcpy(status + statusLength, player);
         statusLength = newStatusLength;
     }
+
+    Info_SetValueForKey(infostring, "bots", va("%i", botCount));
 
     {
         const char *g_password = Dvar_GetString("g_password");
@@ -557,6 +561,7 @@ void SVC_Info(netadr_t from)
     int maxclients;
     int privateCount;
     int clientCount;
+    int botCount;
     int publicMaxClients;
     int i;
     int value;
@@ -588,6 +593,11 @@ void SVC_Info(netadr_t from)
     }
 
     infostring[0] = '\0';
+    botCount = 0;
+    for (i = 0; i < maxclients; ++i)
+        if (SV_BotIsTestClient(i) && svs.clients[i].state >= 2)
+            ++botCount;
+    Info_SetValueForKey(infostring, "bots", va("%i", botCount));
     Info_SetValueForKey(infostring, "challenge", SV_Cmd_Argv(1));
     Info_SetValueForKey(infostring, "protocol", va("%i", 0x76));
     Info_SetValueForKey(infostring, "hostname", sv_hostname->current.string);
@@ -877,6 +887,7 @@ void SV_BotResetClient(int clientNum)
         return;
 
     memset(&s_botCmdState[clientNum], 0, sizeof(s_botCmdState[clientNum]));
+    SV_BotResetAIClient(clientNum);
 }
 
 qboolean SV_BotStop(int clientNum)
@@ -890,6 +901,7 @@ qboolean SV_BotStop(int clientNum)
     state->buttons = 0;
     state->forwardmove = 0;
     state->rightmove = 0;
+    SV_BotResetAIClient(clientNum);
     return 1;
 }
 
@@ -970,6 +982,8 @@ qboolean SV_BotSetAction(int clientNum, const char *action)
     return 0;
 }
 
+#include "sv_bot_ai.inc"
+
 void SV_BotUserMove(client_t *cl)
 {
     cod2BotCommandState_t *state;
@@ -990,6 +1004,7 @@ void SV_BotUserMove(client_t *cl)
     ps = SV_GameClientNum(clientNum);
     if (!ps)
         return;
+    SV_BotRunAI(clientNum, ps);
 
     memset(&cmd, 0, sizeof(cmd));
     cmd.serverTime = svs.time;
@@ -1202,6 +1217,11 @@ void SV_Frame(int msec)
 
         if (cl->state != 4 || !cl->gentity) {
             cl->ping = 999;
+            continue;
+        }
+
+        if (cl->bIsTestClient && cl->netchan.remoteAddress.type == NA_BOT) {
+            cl->ping = 0;
             continue;
         }
 

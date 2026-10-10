@@ -8,6 +8,7 @@ import re
 import struct
 import zipfile
 from browser_sound_assets import collect_sound_assets
+from browser_bot_menu import apply_bot_menu
 from weapon_balance import apply_weapon_balance, load_profile
 
 root = Path(__file__).resolve().parent.parent
@@ -156,6 +157,8 @@ try:
             assert data.count(b'"+melee_breath"') == 1
             data = data.replace(b'"@MENU_MELEE_STEADY"', b'"Sprint / Hold Breath"')
             data = data.replace(b'"+melee_breath"', b'"+sprint"')
+        if name == "ui_mp/createserver.menu":
+            data = apply_bot_menu(data)
         if name == "ui_mp/joinserver.menu":
             # Add an owner-only action to the retail server browser layout.
             marker = b'\n//\tBACK AND NEXT BUTTONS'

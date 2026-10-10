@@ -48,6 +48,8 @@ void SV_ExecuteClientMessage(client_t *cl, msg_t *msg);
 gentity_t *SV_AddTestClient(void);
 qboolean SV_BotIsTestClient(int clientNum);
 void SV_BotResetClient(int clientNum);
+void SV_BotResetNavigation(void);
+qboolean SV_BotEnableAI(int clientNum, int difficulty);
 qboolean SV_BotStop(int clientNum);
 qboolean SV_BotSetMovement(int clientNum, int forward, int right);
 qboolean SV_BotSetAngles(int clientNum, const vec_t *angles);

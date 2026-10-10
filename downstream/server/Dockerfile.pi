@@ -15,6 +15,7 @@ COPY --chmod=755 downstream/server/pi-engine.sh /usr/local/bin/cod2_lnxded
 COPY --chmod=755 downstream/server/entrypoint.sh /usr/local/bin/start-cod2
 COPY downstream/server/rooms.py /usr/local/lib/cod2-rooms.py
 COPY server.cfg /config/server.cfg
+COPY downstream/server/browser_bots.gsc /config/browser_bots.gsc
 COPY site/wasm-game-data.json /config/browser-assets.json
 WORKDIR /game
 USER 1000:1000

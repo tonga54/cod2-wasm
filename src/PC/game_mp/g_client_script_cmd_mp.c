@@ -1005,6 +1005,21 @@ static void PlayerCmd_BotIsBot(scr_entref_t entref)
     Scr_AddBool(SV_BotIsTestClient(entref.entnum));
 }
 
+static void PlayerCmd_BotAI(scr_entref_t entref)
+{
+    extern qboolean SV_BotEnableAI(int clientNum, int difficulty);
+    int difficulty;
+    if (!PlayerCmd_BotParamCount(1, "USAGE: self botAI(<difficulty 0..2>)\n") ||
+        !PlayerCmd_GetBotEntity(entref))
+        return;
+    difficulty = Scr_GetInt(0);
+    if (difficulty < 0 || difficulty > 2) {
+        Scr_ParamError(0, "bot difficulty must be 0, 1 or 2");
+        return;
+    }
+    Scr_AddBool(SV_BotEnableAI(entref.entnum, difficulty));
+}
+
 static void PlayerCmd_BotStop(scr_entref_t entref)
 {
     if (!PlayerCmd_BotParamCount(0, "USAGE: self botStop()\n") ||
@@ -1652,6 +1667,7 @@ static const BuiltinMethodDef player_methods[] __attribute__((used)) = {
     { "getplayerangles", (BuiltinMethod)PlayerCmd_getAngles, 0 },
     { "isbot", (BuiltinMethod)PlayerCmd_BotIsBot, 0 },
     { "botstop", (BuiltinMethod)PlayerCmd_BotStop, 0 },
+    { "botai", (BuiltinMethod)PlayerCmd_BotAI, 0 },
     { "botmovement", (BuiltinMethod)PlayerCmd_BotMovement, 0 },
     { "botangles", (BuiltinMethod)PlayerCmd_BotAngles, 0 },
     { "botweapon", (BuiltinMethod)PlayerCmd_BotWeapon, 0 },

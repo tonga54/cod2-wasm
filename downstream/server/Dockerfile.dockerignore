@@ -9,3 +9,5 @@
 !downstream/server/
 !downstream/server/entrypoint.sh
 !downstream/server/rooms.py
+
+!downstream/server/browser_bots.gsc

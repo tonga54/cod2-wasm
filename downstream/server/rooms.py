@@ -19,6 +19,8 @@ BASE_PORT = 28960
 IDLE_SECONDS = 300
 SUPPORTED_MAPS = ('mp_toujane', 'mp_carentan')
 SUPPORTED_GAMETYPES = ('dm', 'tdm', 'ctf', 'hq', 'sd')
+MAX_BOTS = 16
+BOT_DIFFICULTIES = ('easy', 'normal', 'hard')
 DEFAULT_NAME = 'Toujane - Carentan'
 rooms = {}
 lock = threading.Lock()
@@ -43,23 +45,35 @@ def info_for(room):
         values = dict(zip(fields[1::2], fields[2::2]))
         if values.get('mapname') not in SUPPORTED_MAPS or values.get('gametype') not in SUPPORTED_GAMETYPES:
             return None
+        players = int(values.get('clients', '0'))
+        bots = min(players, max(0, int(values.get('bots', '0'))))
         return {'id': room['id'], 'port': room['port'], 'info': info,
                 'instance': room.get('instance', ''),
                 'ping': max(1, round((time.monotonic() - started) * 1000)),
-                'players': int(values.get('clients', '0'))}
+                'players': players, 'bots': bots, 'humans': players - bots,
+                'botCount': room.get('botCount', 0),
+                'botDifficulty': room.get('botDifficulty', 'normal')}
     except (OSError, ValueError):
         return None
 
 
-def start_room(room_id, name, mapname='mp_toujane', gametype='tdm'):
+def start_room(room_id, name, mapname='mp_toujane', gametype='tdm', bot_count=0, bot_difficulty='normal'):
     if mapname not in SUPPORTED_MAPS:
         raise ValueError('Unsupported map')
     if gametype not in SUPPORTED_GAMETYPES:
         raise ValueError('Unsupported game mode')
+    if type(bot_count) is not int or not 0 <= bot_count <= MAX_BOTS:
+        raise ValueError('Choose between 0 and 16 bots.')
+    if bot_difficulty not in BOT_DIFFICULTIES:
+        raise ValueError('Choose Easy, Normal or Hard bots.')
     profile = Path('/profile') / f'room-{room_id}'
     raw = profile / 'raw'
     raw.mkdir(parents=True, exist_ok=True)
     shutil.copyfile('/config/server.cfg', raw / 'server.cfg')
+    if bot_count:
+        scripts = raw / 'maps/mp'
+        scripts.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile('/config/browser_bots.gsc', scripts / 'browser_bots.gsc')
     # Start the rotation after the selected map so it changes at round end.
     remaining = SUPPORTED_MAPS[SUPPORTED_MAPS.index(mapname) + 1:]
     rotation = f'gametype {gametype} ' + ' '.join('map ' + item for item in remaining) if remaining else ''
@@ -67,7 +81,9 @@ def start_room(room_id, name, mapname='mp_toujane', gametype='tdm'):
     with (raw / 'server.cfg').open('a') as config:
         config.write(f'\nset g_gametype "{gametype}"\n'
                      f'set sv_mapRotation "{full_rotation}"\n'
-                     f'set sv_mapRotationCurrent "{rotation}"\n')
+                     f'set sv_mapRotationCurrent "{rotation}"\n'
+                     f'set scr_bot_count "{bot_count}"\n'
+                     f'set scr_bot_difficulty "{BOT_DIFFICULTIES.index(bot_difficulty)}"\n')
     # Names are one console argument. No arbitrary commands, paths,
     # launch options, UDP destinations or shell interpretation are accepted.
     name = re.sub(r'[^A-Za-z0-9 _|.-]', '', name).strip()[:32] or DEFAULT_NAME
@@ -80,7 +96,8 @@ def start_room(room_id, name, mapname='mp_toujane', gametype='tdm'):
     child = subprocess.Popen(args, stdin=subprocess.DEVNULL, start_new_session=True)
     room = {'id': room_id, 'port': BASE_PORT + room_id, 'process': child,
             'last_used': time.monotonic(), 'instance': secrets.token_hex(16),
-            'ownerToken': secrets.token_hex(32)}
+            'ownerToken': secrets.token_hex(32), 'botCount': bot_count,
+            'botDifficulty': bot_difficulty}
     rooms[room_id] = room
     return room
 
@@ -140,6 +157,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         gametype = body.get('gametype', 'tdm')
         if not isinstance(gametype, str) or gametype not in SUPPORTED_GAMETYPES:
             return self.reply(400, {'error': 'Choose a supported game mode.'})
+        bot_count = body.get('botCount', 0)
+        if type(bot_count) is not int or not 0 <= bot_count <= MAX_BOTS:
+            return self.reply(400, {'error': 'Choose between 0 and 16 bots.'})
+        bot_difficulty = body.get('botDifficulty', 'normal')
+        if not isinstance(bot_difficulty, str) or bot_difficulty not in BOT_DIFFICULTIES:
+            return self.reply(400, {'error': 'Choose Easy, Normal or Hard bots.'})
         with lock:
             if stopping.is_set():
                 return self.reply(503, {'error': 'The host is shutting down.'})
@@ -147,7 +170,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                          if i not in rooms or rooms[i]['process'].poll() is not None]
             if not available:
                 return self.reply(409, {'error': 'Three servers are already running. Join an existing server.'})
-            room = start_room(available[0], name, mapname, gametype)
+            room = start_room(available[0], name, mapname, gametype, bot_count, bot_difficulty)
         for _ in range(40):
             info = info_for(room)
             if info:
@@ -190,7 +213,7 @@ def cleanup():
             current = list(rooms.values())
         for room in current:
             info = info_for(room)
-            if info and info['players']:
+            if info and info.get('humans', info['players']):
                 room['last_used'] = time.monotonic()
             elif time.monotonic() - room['last_used'] > IDLE_SECONDS:
                 with lock:

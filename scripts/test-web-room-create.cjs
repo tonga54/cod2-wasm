@@ -5,11 +5,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../downstream/wasm/web_net.c'), 'utf8');
-const start = source.indexOf('EM_JS(void, Web_CreateServer, (const char *name, const char *mapName, const char *gameType), {');
+const start = source.indexOf('EM_JS(void, Web_CreateServer, (const char *name, const char *mapName, const char *gameType, int botCount, int botDifficulty), {');
 assert.ok(start >= 0);
 const body = source.slice(source.indexOf('{', start) + 1, source.indexOf('\n});', start));
 
-async function check(map, reply, expected, gametype = 'tdm') {
+async function check(map, reply, expected, gametype = 'tdm', botCount = 0, difficulty = 1) {
   const Module = {}, requests = [], results = [], allocated = new Set();
   let finish;
   const context = vm.createContext({Module,
@@ -23,11 +23,11 @@ async function check(map, reply, expected, gametype = 'tdm') {
     _web_created_room: (id, error) => results.push([id, error]),
     _free: value => assert.ok(allocated.delete(value))
   });
-  vm.runInContext('function create(name, mapName, gameType) {' + body + '\n}', context);
-  context.create('Selected room', map, gametype);
+  vm.runInContext('function create(name, mapName, gameType, botCount, botDifficulty) {' + body + '\n}', context);
+  context.create('Selected room', map, gametype, botCount, difficulty);
   context.create('Duplicate', 'mp_toujane', 'dm');
   assert.equal(requests.length, 1);
-  assert.deepEqual(requests[0], {name: 'Selected room', map, gametype});
+  assert.deepEqual(requests[0], {name: 'Selected room', map, gametype, botCount, botDifficulty: ['easy','normal','hard'][difficulty]});
   finish({ok: reply.ok, json: async () => reply.value});
   for (let i = 0; i < 10; ++i) await Promise.resolve();
   assert.deepEqual(results, [expected]);
@@ -38,7 +38,8 @@ async function check(map, reply, expected, gametype = 'tdm') {
   for (const gametype of ['dm', 'tdm', 'ctf', 'hq', 'sd'])
     for (const map of ['mp_toujane', 'mp_carentan'])
       await check(map, {ok: true, value: {id: 0}}, [0, 0], gametype);
-  await check('mp_carentan', {ok: true, value: {id: 1}}, [1, 0]);
+  for (const difficulty of [0,1,2])
+    await check('mp_carentan', {ok: true, value: {id: 1}}, [1, 0], 'tdm', 8, difficulty);
   await check('mp_toujane', {ok: true, value: {id: 2}}, [2, 0]);
   await check('mp_carentan', {ok: false, value: {error: 'Server unavailable'}}, [-1, 'Server unavailable']);
   await check('mp_carentan', {ok: true, value: {id: 8}}, [-1, 'Invalid server response.']);

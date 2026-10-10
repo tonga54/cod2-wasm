@@ -870,7 +870,7 @@ int Menu_Count(displayContextDef_t *dc)
 
 #ifdef __EMSCRIPTEN__
 /* Keep the retail menu widgets and layout, exposing only settings implemented
- * by the browser's fixed Toujane/TDM room service. Original files stay intact. */
+ * by the browser room service. Original files stay intact. */
 static void UI_ConfigureBrowserMenu(menuDef_t *menu)
 {
     const char *name = menu->window.name;
@@ -891,7 +891,10 @@ static void UI_ConfigureBrowserMenu(menuDef_t *menu)
                 item->dvar = NULL;
                 item->text = "64";
                 item->action = NULL;
-            } else if (I_stricmp(dvar, "sv_hostname") && !item->window.ownerDraw &&
+            } else if (I_stricmp(dvar, "sv_hostname") &&
+                       I_stricmp(dvar, "ui_botCount") && I_stricmp(dvar, "ui_botDifficulty") &&
+                       I_stricmp(text, "Bots") && I_stricmp(text, "Bot Difficulty") &&
+                       !item->window.ownerDraw &&
                        I_stricmp(text, "@MENU_SERVER_SETTINGS") &&
                        I_stricmp(text, "@MENU_GAME_TYPE") &&
                        I_stricmp(text, "@MENU_SERVER_NAME") &&

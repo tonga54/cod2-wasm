@@ -1882,7 +1882,9 @@ void SV_SendClientMessages(void)
 
     for (i = 0; i < maxClients; i++, c++) {
 
-        if (c->state == 0 || svsTime < c->nextSnapshotTime)
+        // Simulated players have no socket or renderer receiving snapshots.
+        // They remain ordinary entities in every human player's snapshot.
+        if (c->state == 0 || c->bIsTestClient || svsTime < c->nextSnapshotTime)
             continue;
 
         numclients++;

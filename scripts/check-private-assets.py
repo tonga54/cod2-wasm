@@ -10,6 +10,7 @@ import zipfile
 import csv
 import io
 from weapon_balance import apply_weapon_balance, load_profile
+from browser_bot_menu import apply_bot_menu
 
 root = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
@@ -61,6 +62,8 @@ try:
                     expected = original.replace(b"delay = 2;", b'delay = 3;\n\tself setClientCvar("cg_respawnDeadline", getTime() + 3000);')
                     expected = expected.replace(b'self.sessionstate = "playing";', b'self.sessionstate = "playing";\n\tself setClientCvar("cg_respawnDeadline", 0);')
                     assert data == expected, name
+                elif name == "ui_mp/createserver.menu":
+                    assert data == apply_bot_menu(original), name
                 elif name == "ui_mp/joinserver.menu":
                     # Strip the reviewed owner action and compare every original byte.
                     normalized = original.replace(b'\r\n', b'\n')

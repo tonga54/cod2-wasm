@@ -31,11 +31,45 @@ private token; changing browsers or clearing site storage loses that record.
 The slot limit is configuration, not a claim that 64-player matches have been
 load-tested.
 
+## Bots
+
+In **Start New Server**, choose **Bots** (None or 1–16) and **Bot Difficulty**
+(Easy, Normal or Hard), alongside the room name, map and Game Type. Left-click
+cycles forward; right-click cycles backward. The default is **None**. Settings
+belong to that room and survive map rotation.
+
+| Difficulty | Reaction delay | Aim and turning |
+| --- | --- | --- |
+| Easy | 700 ms | Slower turns and wider aiming error |
+| Normal | 400 ms | Balanced turns and accuracy |
+| Hard | 200 ms | Faster turns and smaller aiming error |
+
+Bots are server-controlled players, marked **[BOT]** in their names. They join
+teams through the original gametype callbacks, choose faction-appropriate
+rifles/automatic weapons, patrol navigable routes, acquire visible enemies,
+shoot, reload and respawn under the mode's rules. Walls, other players and
+smoke block target visibility. Health, ammunition, recoil and weapon cadence
+use the same gameplay rules as human players.
+
+This first version provides **combat AI**, most useful in DM/TDM. The bots can
+join all five modes and obey round/respawn rules; coordinated flag strategies,
+HQ tactics and bomb planting/defusing are not implemented. Navigation is built
+from map collision and spawn locations, with bounded work per server frame;
+complex routes can still need improvements.
+
+Bots occupy ordinary player slots: eight bots leave 56 human slots. They do not
+keep a room alive after its last human leaves; the usual five-minute idle
+cleanup still applies. No browser or rendering process is needed for each bot.
+For a custom room creator, POST `/servers` with `botCount` (integer 0–16) and
+`botDifficulty` (`easy`, `normal`, `hard`); omitted fields retain the defaults.
+
 ## Additions beyond the original game
 
 These are intentional changes, rather than features claimed to be part of
 retail CoD2:
 
+- **Configurable combat bots:** first-party server AI with per-room quantity and
+  difficulty settings, normal weapon rules and collision-based navigation.
 - **Sprint:** Shift + W increases movement speed, lowers and swings the weapon,
   and uses the running body animation. Sprint currently has no stamina limit.
   Melee moves to V; scoped Hold Breath continues to use Shift.
