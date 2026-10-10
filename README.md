@@ -71,7 +71,8 @@ Navigation is built from map collision, spawn locations and announced
 objectives, with bounded work per server frame and shared spatial lookups.
 Cached routes, corner steering and temporary blocked-edge exclusions improve
 progress. Guards spread out, and original ladder materials connect accessible
-rooftops; scoped bots seek lookout positions and wait to finish aiming.
+rooftops. Directed, collision-checked drops and low-parapet jumps provide
+exits from supported elevated areas; scoped bots seek lookout positions and wait to finish aiming.
 This is first-party multiplayer AI, not the retail campaign AI. Complex routes
 and tactical coordination can still need improvements.
 See [Bot behavior and validation](docs/BOT_AI.md) for the implementation and

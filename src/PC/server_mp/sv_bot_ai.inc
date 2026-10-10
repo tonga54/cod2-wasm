@@ -20,7 +20,8 @@ extern qboolean SV_EntityContact(const vec_t *, const vec_t *, const gentity_t *
 #define BOT_NAV_EDGES_PER_FRAME 128
 #define BOT_NAV_TIME_MS 4
 #define BOT_NAV_DIRECTIONS 8
-#define BOT_NAV_LINKS (BOT_NAV_DIRECTIONS+1)
+#define BOT_NAV_TRAVERSAL (BOT_NAV_DIRECTIONS+1)
+#define BOT_NAV_LINKS (BOT_NAV_TRAVERSAL+BOT_NAV_DIRECTIONS)
 #define BOT_ROUTE_MAX 64
 #define BOT_BLOCKED_MAX 8
 #define BOT_THINK_MS 200
@@ -30,6 +31,7 @@ extern qboolean SV_EntityContact(const vec_t *, const vec_t *, const gentity_t *
 typedef struct {
     vec3_t origin;
     short edge[BOT_NAV_LINKS];
+    unsigned char jumpMask;
     float ladderYaw, priority;
 } botNavNode_t;
 
@@ -44,6 +46,8 @@ typedef struct {
     int guardAt, nextDodge, dodgeUntil, lastTarget, lastVisibleAt;
     int routeCount, routeIndex, routeFrom, blockedIndex, stuckCount, detourUntil;
     int perchUntil, guardUntil;
+    int nextTraversalJump, failedPaths;
+    float failedPathDistance;
     short route[BOT_ROUTE_MAX], blockedFrom[BOT_BLOCKED_MAX], blockedTo[BOT_BLOCKED_MAX];
     int blockedUntil[BOT_BLOCKED_MAX];
     unsigned int random;
@@ -113,10 +117,10 @@ static float Bot_ApproachAngle(float current, float desired, float step)
     return current + delta;
 }
 
-static qboolean Bot_Ground(const vec_t *at, vec_t *ground)
+static qboolean Bot_GroundDepth(const vec_t *at, vec_t *ground, float depth)
 {
     vec3_t start = {at[0], at[1], at[2]+18.5f};
-    vec3_t end = {at[0], at[1], at[2]-96};
+    vec3_t end = {at[0], at[1], at[2]-depth};
     trace_t tr;
     memset(&tr, 0, sizeof(tr));
     G_TraceCapsule(&tr, start, s_botZero, s_botZero, end, 1023, BOT_WORLD_MASK);
@@ -125,6 +129,11 @@ static qboolean Bot_Ground(const vec_t *at, vec_t *ground)
     ground[0] = at[0]; ground[1] = at[1];
     ground[2] = start[2] + (end[2]-start[2])*tr.fraction + 1;
     return 1;
+}
+
+static qboolean Bot_Ground(const vec_t *at, vec_t *ground)
+{
+    return Bot_GroundDepth(at,ground,96);
 }
 
 static qboolean Bot_Clear(const vec_t *a, const vec_t *b, int clientNum, int mask)
@@ -182,7 +191,9 @@ static void Bot_NavQueue(int node)
     int at=s_botNavOpenCount++;
     float x=s_botNav[node].origin[0]-(s_botNavMin[0]+s_botNavMax[0])*.5f;
     float y=s_botNav[node].origin[1]-(s_botNavMin[1]+s_botNavMax[1])*.5f;
-    s_botNav[node].priority=s_botNavBounded?x*x+y*y:0;
+    // Central lanes lead, but continuous central growth cannot starve an
+    // older spawn/roof frontier indefinitely. Insertion order adds fairness.
+    s_botNav[node].priority=s_botNavBounded?x*x+y*y+node*2048.0f:0;
     while(at && Bot_NavBefore(node,s_botNavOpen[(at-1)/2])) {
         s_botNavOpen[at]=s_botNavOpen[(at-1)/2]; at=(at-1)/2;
     }
@@ -213,6 +224,7 @@ static int Bot_NavAdd(const vec_t *origin)
        origin[1]<s_botNavMin[1] || origin[1]>s_botNavMax[1])) return -1;
     i = s_botNavCount++;
     memcpy(s_botNav[i].origin, origin, sizeof(vec3_t));
+    s_botNav[i].jumpMask=0;
     for (j = 0; j < BOT_NAV_LINKS; ++j) s_botNav[i].edge[j] = -1;
     hash = ((unsigned int)(int)floorf(origin[0]/BOT_NAV_STEP)*73856093u ^
             (unsigned int)(int)floorf(origin[1]/BOT_NAV_STEP)*19349663u) & (BOT_NAV_HASH-1);
@@ -308,13 +320,69 @@ static void Bot_NavLadder(int from, int direction)
     }
 }
 
+static int Bot_TraversalDirection(int from, int to)
+{
+    int direction;
+    if(from<0 || to<0) return -1;
+    for(direction=0;direction<BOT_NAV_DIRECTIONS;++direction)
+        if(s_botNav[from].edge[BOT_NAV_TRAVERSAL+direction]==to) return direction;
+    return -1;
+}
+
+static qboolean Bot_TraversalClear(const vec_t *a, const vec_t *b)
+{
+    const vec3_t maxs={15,15,70};
+    trace_t tr;
+    memset(&tr,0,sizeof(tr));
+    // Departure/fall checks include the feet, unlike step-height walk checks.
+    G_TraceCapsule(&tr,a,s_botMins,maxs,b,1023,BOT_WORLD_MASK);
+    return !tr.startsolid && !tr.allsolid && tr.fraction>=1;
+}
+
+static int Bot_NavDrop(int from, int direction)
+{
+    botNavNode_t *node=&s_botNav[from];
+    float limit=fminf(192,Dvar_GetFloat("bg_fallDamageMinHeight")-48);
+    float jumpRise=fmaxf(0,fminf(36,Dvar_GetFloat("jump_height")-3));
+    int offset;
+    // Drops are directed: a walkable landing does not imply a way back up.
+    // Reserve height for the original jump arc and reject damaging falls.
+    if(limit<=18.5f) return -1;
+    for(offset=32;offset<=96;offset+=32) {
+        vec3_t departure={node->origin[0]+s_botDirections[direction][0]*offset,
+                          node->origin[1]+s_botDirections[direction][1]*offset,node->origin[2]},ground;
+        vec3_t raised={node->origin[0],node->origin[1],node->origin[2]+jumpRise};
+        qboolean jump;
+        int next;
+        if(!Bot_GroundDepth(departure,ground,limit) ||
+           node->origin[2]-ground[2]<=18.5f || node->origin[2]-ground[2]>limit ||
+           !Bot_TraversalClear(ground,ground)) continue;
+        jump=!Bot_TraversalClear(node->origin,departure);
+        if(jump) {
+            // A low parapet can use the normal jump button, provided the
+            // standing capsule has headroom and a clear raised departure.
+            departure[2]+=jumpRise;
+            if(jumpRise<=0 || !Bot_TraversalClear(node->origin,raised) ||
+               !Bot_TraversalClear(raised,departure)) continue;
+        }
+        if(!Bot_TraversalClear(departure,ground)) continue;
+        next=Bot_NavAdd(ground);
+        if(next<0) continue;
+        node->edge[BOT_NAV_TRAVERSAL+direction]=(short)next;
+        if(jump) node->jumpMask|=(unsigned char)(1u<<direction);
+        return next;
+    }
+    return -1;
+}
+
 static int Bot_NavEdge(int from, int direction)
 {
     botNavNode_t *node=&s_botNav[from];
     int next;
     vec3_t candidate={node->origin[0]+s_botDirections[direction][0]*BOT_NAV_STEP,
                       node->origin[1]+s_botDirections[direction][1]*BOT_NAV_STEP,node->origin[2]},ground;
-    if(node->edge[direction]>=0) return node->edge[direction];
+    if(node->edge[direction]!=-1) return node->edge[direction]>=0?
+        node->edge[direction]:node->edge[BOT_NAV_TRAVERSAL+direction];
     if(Bot_Ground(candidate,ground) && Bot_WalkEdge(node->origin,ground)) {
         next=Bot_NavAdd(ground);
         if(next>=0) {
@@ -323,8 +391,9 @@ static int Bot_NavEdge(int from, int direction)
             return next;
         }
     }
+    node->edge[direction]=-2; // Static failed geometry need not be retraced.
     Bot_NavLadder(from,direction);
-    return -1;
+    return Bot_NavDrop(from,direction);
 }
 
 static void Bot_NavScout(int start, const vec_t *desired)
@@ -374,7 +443,7 @@ static void Bot_NavFrame(void)
         }
         // Accelerate warm-up when traces are cheap, with a wall-time bound to
         // protect the multiplayer tick on the Pi and on slower hosts.
-        if((budget&7)==7 && Sys_Milliseconds()-started>=BOT_NAV_TIME_MS) break;
+        if(Sys_Milliseconds()-started>=BOT_NAV_TIME_MS) break;
     }
 }
 
@@ -415,7 +484,7 @@ qboolean SV_BotSetGoal(int clientNum, const vec_t *origin, float radius, int beh
     if(ai->objectiveUntil<=svs.time || ai->objectiveBehavior!=behavior ||
        Bot_DistanceSq(ai->objective,origin)>32*32) {
         ai->nextPath=0;
-        ai->goal=-1; ai->routeCount=0; ai->guardUntil=0;
+        ai->goal=-1; ai->routeCount=0; ai->guardUntil=0; ai->failedPaths=0;
         Bot_NavSeedPoint(origin);
         if(entityNum>=0) {
             vec3_t entry={origin[0],origin[1],g_entities[entityNum].r.absmin[2]+8};
@@ -516,8 +585,8 @@ static int Bot_NearestNodeForGoal(const vec_t *origin, qboolean requireClear, in
     for(x=-6;x<=6;++x) for(y=-6;y<=6;++y) {
       float gridX=(floorf(origin[0]/BOT_NAV_STEP)+x)*BOT_NAV_STEP;
       float gridY=(floorf(origin[1]/BOT_NAV_STEP)+y)*BOT_NAV_STEP;
-      unsigned int hash=((unsigned int)(int)(gridX/BOT_NAV_STEP)*73856093u ^
-                         (unsigned int)(int)(gridY/BOT_NAV_STEP)*19349663u)&(BOT_NAV_HASH-1);
+      unsigned int hash=((unsigned int)(int)floorf(gridX/BOT_NAV_STEP)*73856093u ^
+                         (unsigned int)(int)floorf(gridY/BOT_NAV_STEP)*19349663u)&(BOT_NAV_HASH-1);
       while(s_botNavHash[hash]) {
         i=s_botNavHash[hash]-1;
         hash=(hash+1)&(BOT_NAV_HASH-1);
@@ -619,7 +688,7 @@ static void Bot_GuardPoint(int clientNum, botAIState_t *ai, playerState_t *ps)
         float a=angle+i*6.2831853f/24;
         vec3_t at={ai->objective[0]+cosf(a)*radius,ai->objective[1]+sinf(a)*radius,ai->objective[2]};
         vec3_t ground;
-        int node=Bot_Ground(at,ground)?Bot_NearestNode(ground,0):-1;
+        int node=Bot_GroundDepth(at,ground,192)?Bot_NearestNode(ground,0):-1;
         float score;
         if(node<0 || Bot_DistanceSq(ground,s_botNav[node].origin)>64*64) continue;
         score=Bot_DistanceSq(desired,s_botNav[node].origin);
@@ -639,7 +708,8 @@ static void Bot_FindPath(botAIState_t *ai, playerState_t *ps)
         int to=ai->route[ai->routeIndex];
         // In mid-climb there is no nearby walkable floor. Keep the active
         // ladder link until the landing instead of erasing it on a replan.
-        if(from>=0 && s_botNav[from].edge[BOT_NAV_DIRECTIONS]==to) return;
+        if(from>=0 && (s_botNav[from].edge[BOT_NAV_DIRECTIONS]==to ||
+           (ps->groundEntityNum==1023 && Bot_TraversalDirection(from,to)>=0))) return;
     }
     // Cache a route instead of recentering on the nearest cell every frame.
     // Searches and reverse paths share bounded buffers; commands allocate nothing.
@@ -648,6 +718,12 @@ static void Bot_FindPath(botAIState_t *ai, playerState_t *ps)
     const vec_t *desired=ai->coverUntil>svs.time?ai->cover:
         ai->detourUntil>svs.time?NULL:ai->objectiveUntil>svs.time?
         (ai->objectiveBehavior==1?ai->guardPoint:ai->objective):ai->memoryUntil>svs.time?ai->lastSeen:NULL;
+    vec3_t projected;
+    // Model origins (especially HQ radios) may be above the walking floor.
+    // Project announced, non-brush objectives without choosing the roof above.
+    if(desired && ai->objectiveUntil>svs.time && ai->objectiveBehavior!=1 &&
+       ai->objectiveEntity<0 && ai->coverUntil<=svs.time && ai->detourUntil<=svs.time &&
+       Bot_GroundDepth(desired,projected,192)) desired=projected;
     float closestDistance=1e30f;
     ai->waypoint=-1; ai->routeCount=ai->routeIndex=0;
     if(start<0) { Bot_NavSeedPoint(ps->origin); return; }
@@ -681,14 +757,30 @@ static void Bot_FindPath(botAIState_t *ai, playerState_t *ps)
         if(current==ai->goal) break;
         // Different neighbour order avoids every teammate choosing the same lane.
         for(i=0;i<BOT_NAV_LINKS;++i) {
-            next=s_botNav[current].edge[i==BOT_NAV_DIRECTIONS?i:(i+(ai->random&7))%BOT_NAV_DIRECTIONS];
+            next=s_botNav[current].edge[i>=BOT_NAV_DIRECTIONS?i:(i+(ai->random&7))%BOT_NAV_DIRECTIONS];
             if(next>=0 && parent[next]<0 && !Bot_EdgeBlocked(ai,current,next)) {
                 parent[next]=(short)current; queue[tail++]=(short)next;
             }
         }
     }
-    if(ai->goal<0 || parent[ai->goal]<0)
+    if(ai->goal<0 || parent[ai->goal]<0) {
         ai->goal=desired?closest:Bot_PatrolGoal(ai,ps,queue,tail);
+        // Reaching a nearby projected cell must not reset strategic recovery.
+        // An unreachable objective otherwise attracts the whole team to the
+        // same corner even though each short route technically completes.
+        if(desired && Bot_DistanceSq(ps->origin,desired)>96*96) {
+            float remaining=sqrtf(Bot_DistanceSq(ps->origin,desired));
+            // Partial routes during warm-up still make useful progress. Count
+            // only consecutive decisions without approaching the destination.
+            if(!ai->failedPaths || remaining<ai->failedPathDistance-24) {
+                ai->failedPathDistance=remaining; ai->failedPaths=1;
+            } else ++ai->failedPaths;
+            if(ai->failedPaths>=4) {
+                ai->detourUntil=svs.time+6000; ai->failedPaths=0;
+                ai->goal=Bot_PatrolGoal(ai,ps,queue,tail);
+            }
+        }
+    } else ai->failedPaths=0;
     if(ai->goal<0) return;
     current=ai->goal;
     while(current!=start) { reverse[length++]=(short)current; current=parent[current]; }
@@ -707,8 +799,11 @@ static void Bot_FindPath(botAIState_t *ai, playerState_t *ps)
 
 static void Bot_AdvanceRoute(botAIState_t *ai, playerState_t *ps)
 {
-    while(ai->routeIndex<ai->routeCount &&
-          Bot_DistanceSq(ps->origin,s_botNav[ai->route[ai->routeIndex]].origin)<18*18) {
+    while(ai->routeIndex<ai->routeCount) {
+        int from=ai->routeIndex?ai->route[ai->routeIndex-1]:ai->routeFrom;
+        int to=ai->route[ai->routeIndex];
+        float radius=from>=0 && Bot_DistanceSq(s_botNav[from].origin,s_botNav[to].origin)<24*24?8:18;
+        if(Bot_DistanceSq(ps->origin,s_botNav[to].origin)>=radius*radius) break;
         ai->routeFrom=ai->route[ai->routeIndex++];
         ai->stuckCount=0;
     }
@@ -723,11 +818,16 @@ static void Bot_AdvanceRoute(botAIState_t *ai, playerState_t *ps)
             const vec_t *a=s_botNav[ai->route[ai->routeIndex]].origin;
             const vec_t *b=s_botNav[ai->route[next]].origin;
             int i;
-            qboolean straight=fabsf(ps->origin[2]-a[2])<8;
+            float dx=b[0]-a[0],dy=b[1]-a[1];
+            qboolean straight=fabsf(ps->origin[2]-a[2])<8 &&
+                fabsf((ps->origin[0]-a[0])*dy-(ps->origin[1]-a[1])*dx)<=sqrtf(dx*dx+dy*dy)*4;
             // Collinear flat links already contain sampled floor/cliff checks.
             // Reuse those checks; only the shortcut capsule needs retracing.
             for(i=ai->routeIndex;i<=next && straight;++i) {
                 const vec_t *at=s_botNav[ai->route[i]].origin;
+                int from=i?ai->route[i-1]:ai->routeFrom;
+                if(from>=0 && (s_botNav[from].edge[BOT_NAV_DIRECTIONS]==ai->route[i] ||
+                   Bot_TraversalDirection(from,ai->route[i])>=0)) straight=0;
                 if(fabsf(at[2]-a[2])>2 || fabsf((at[0]-a[0])*(b[1]-a[1])-
                    (at[1]-a[1])*(b[0]-a[0]))>.1f) straight=0;
             }
@@ -858,8 +958,8 @@ static void SV_BotRunAI(int clientNum, playerState_t *ps)
     float desiredYaw, desiredPitch=0, moveYaw, turnStep, distance=0;
     int oldButtons=cmd->buttons, elapsed, firing=0;
     qboolean sniper=Bot_IsSniper(ps);
-    qboolean visible=0, objective=0, holding=0, using=0, ladder=0;
-    int ladderFrom=-1;
+    qboolean visible=0, objective=0, holding=0, using=0, ladder=0, traversing=0;
+    int ladderFrom=-1, traversalDirection=-1;
     if(!ai->enabled || !client) return;
     cmd->buttons=0; cmd->forwardmove=cmd->rightmove=0; cmd->hasWeapon=0;
     if(client->sess.sessionState!=SESS_STATE_PLAYING || g_entities[clientNum].health<=0) {
@@ -938,7 +1038,7 @@ static void SV_BotRunAI(int clientNum, playerState_t *ps)
     if(objective && ai->objectiveBehavior!=1 && !holding && ai->coverUntil<=svs.time && ai->detourUntil<=svs.time &&
        Bot_DistanceSq(ps->origin,ai->objective)<192*192) {
         vec3_t ground;
-        if(Bot_Ground(ai->objective,ground) && Bot_WalkEdge(ps->origin,ground)) {
+        if(Bot_GroundDepth(ai->objective,ground,192) && Bot_WalkEdge(ps->origin,ground)) {
             moveYaw=atan2f(ground[1]-ps->origin[1],ground[0]-ps->origin[0])*BOT_RAD_TO_DEG;
             desiredYaw=moveYaw; distance=Bot_DistanceSq(ps->origin,ground);
         }
@@ -946,6 +1046,8 @@ static void SV_BotRunAI(int clientNum, playerState_t *ps)
     if(ai->waypoint>=0 && ai->routeIndex<ai->routeCount) {
         ladderFrom=ai->routeIndex>0?ai->route[ai->routeIndex-1]:ai->routeFrom;
         ladder=ladderFrom>=0 && s_botNav[ladderFrom].edge[BOT_NAV_DIRECTIONS]==ai->waypoint;
+        traversalDirection=Bot_TraversalDirection(ladderFrom,ai->waypoint);
+        traversing=traversalDirection>=0 && !ladder;
     }
     if(holding || (sniper && ai->perchUntil>svs.time && ai->memoryUntil<=svs.time)) {
         distance=0;
@@ -1004,6 +1106,10 @@ static void SV_BotRunAI(int clientNum, playerState_t *ps)
         desiredPitch=s_botNav[ai->waypoint].origin[2]>s_botNav[ladderFrom].origin[2]?-25:0;
         firing=0; cmd->buttons=0;
     }
+    if(traversing && !using) {
+        desiredYaw=moveYaw; desiredPitch=0;
+        firing=0; cmd->buttons=0;
+    }
     turnStep=(ai->difficulty==0?150.0f:ai->difficulty==1?220.0f:300.0f)*elapsed*.001f;
     ai->aim[0]=Bot_ApproachAngle(ai->aim[0],desiredPitch,turnStep);
     ai->aim[1]=Bot_ApproachAngle(ai->aim[1],desiredYaw,turnStep);
@@ -1019,7 +1125,7 @@ static void SV_BotRunAI(int clientNum, playerState_t *ps)
     }
     // Advance until the weapon has a useful engagement range. Brief dodges
     // have pauses; constant sideways movement made bots orbit and hit walls.
-    if(visible && !ladder && !holding && !using && !(objective && ai->objectiveBehavior>=2) && ai->coverUntil<=svs.time) {
+    if(visible && !ladder && !traversing && !holding && !using && !(objective && ai->objectiveBehavior>=2) && ai->coverUntil<=svs.time) {
         WeaponDef *weapon=ps->weapon>0?BG_GetWeaponDef(ps->weapon):NULL;
         float range=sniper?900:weapon && weapon->weapClass==WEAPCLASS_SMG?240:
             weapon && weapon->weapClass==WEAPCLASS_MG?600:480;
@@ -1046,7 +1152,7 @@ static void SV_BotRunAI(int clientNum, playerState_t *ps)
         }
         cmd->buttons&=~BUTTON_SPRINT;
     }
-    if(ai->avoidUntil>svs.time && !ladder && !holding && !using) {
+    if(ai->avoidUntil>svs.time && !ladder && !traversing && !holding && !using) {
         cmd->forwardmove=-60; cmd->rightmove=ai->avoidSide; cmd->buttons&=~BUTTON_SPRINT;
     }
     if(ladder && !using) {
@@ -1062,7 +1168,19 @@ static void SV_BotRunAI(int clientNum, playerState_t *ps)
         cmd->buttons&=~BUTTON_SPRINT;
         ai->wantsMove=cmd->forwardmove || cmd->rightmove;
     }
-    if((cmd->forwardmove || cmd->rightmove) && !ladder) {
+    if(traversing && !using) {
+        float delta=(moveYaw-ai->aim[1])/BOT_RAD_TO_DEG;
+        cmd->forwardmove=(signed char)(cosf(delta)*127);
+        cmd->rightmove=(signed char)(-sinf(delta)*127);
+        cmd->buttons&=~BUTTON_SPRINT;
+        if((s_botNav[ladderFrom].jumpMask&(1u<<traversalDirection)) &&
+           ps->groundEntityNum!=1023 && svs.time>=ai->nextTraversalJump) {
+            cmd->buttons|=0x400;
+            ai->nextTraversalJump=svs.time+1200;
+        }
+        ai->wantsMove=1;
+    }
+    if((cmd->forwardmove || cmd->rightmove) && !ladder && !traversing) {
         float yaw=ai->aim[1]/BOT_RAD_TO_DEG;
         if(!Bot_CanMove(clientNum,ps->origin,yaw,cmd->forwardmove,cmd->rightmove)) {
             int forward=cmd->forwardmove, right=cmd->rightmove, side;
@@ -1080,7 +1198,7 @@ static void SV_BotRunAI(int clientNum, playerState_t *ps)
             }
             ai->wantsMove=1; // A blocked request must still recover.
         } else ai->wantsMove=1;
-    } else if(!ladder) ai->wantsMove=0;
+    } else if(!ladder && !traversing) ai->wantsMove=0;
     if(!(cmd->buttons&0x200) && (ps->pm_flags&3)) cmd->buttons|=0x400;
     if(using) return;
     if(ps->weapon>0) {

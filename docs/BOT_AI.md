@@ -55,22 +55,28 @@ Navigation grows from actual collision, spawn points and objective positions.
 The grid distinguishes floors and uses eight horizontal neighbors, allowing
 safe diagonal routes through buildings and stairways. Ground sampling starts
 within step height to avoid accidentally selecting the ceiling or roof above
-a room. Original ladder collision materials create climb/descend links to
+a room. Walk checks combine sampled floor height with standing-body clearance.
+Original ladder collision materials create climb/descend links to
 accessible upper floors and rooftops. Ordinary movement owns ladder attachment,
 collision, climbing and falling; AI does not teleport or write player velocity.
-Jump-only and mantle-only routes remain unsupported.
+Directed drop links let bots leave roofs and elevated rooms. They check a full
+standing capsule at departure and landing, reject damaging falls, and can use
+a normal jump pulse over a low parapet when headroom permits. These links use the configured original jump height and never invent a
+reverse climb. General obstacle/gap jumps and mantle routes remain unsupported.
 
-A shared priority queue expands the arena's central combat lanes before remote
-spawn courtyards. Each path decision also scouts up to six nearby cells toward
+A shared priority queue favors central combat lanes while weighting insertion
+order so continuous central growth cannot starve older spawn/roof frontiers.
+Each path decision also scouts up to six nearby cells toward
 the objective or shared fighting area, with its own four-millisecond budget.
 This keeps distant spawn nodes connected as the shared graph warms up. Local
 branches can initially go away from their destination to reach a doorway around
 a wall, reject repeated scout cells and avoid choosing an idle patrol cell.
 Warm-up uses at most 128 edge attempts and a four-millisecond time budget,
-checked every eight attempts. A single collision attempt can exceed that budget
+checked after each attempt. A single collision attempt can exceed that budget
 on a slow host; it is a work bound, not a latency guarantee. The spawn envelope
 plus a 512-unit margin bounds exploration so exterior ground planes do not
-consume the graph. Searches share fixed buffers and bots cache up to 64 route
+consume the graph. Failed static edges are cached so nearby walls do not
+repeatedly consume collision traces. Searches share fixed buffers and bots cache up to 64 route
 nodes. Flat, collinear sections reuse their sampled floor checks and need just
 one shortcut capsule trace; turns and stairs retain their individual nodes. Replanning
 does not force a bot to walk backward to a grid center.
@@ -78,13 +84,18 @@ does not force a bot to walk backward to a grid center.
 Immediate collision checks and local steering help bots pass corners and
 teammates. A blocked route receives a per-bot eight-second edge exclusion;
 repeated failures trigger a six-second exploration detour before retrying the
-strategic objective. Disconnected objective projections also trigger recovery.
+strategic objective. Disconnected objective projections also trigger recovery,
+including repeated arrivals at the same nearby cell outside a reachable route.
+Partial routes that still approach the objective during graph warm-up keep
+their objective; only consecutive decisions without progress count as failures.
+Announced model objectives such as radios are projected onto their walking
+floor; their model center cannot silently choose an unreachable roof instead.
 Path decisions run every 1.2 seconds, with prompt advancement between cached
 waypoints. Navigation and command generation allocate no per-frame heap memory.
 
 This is multiplayer AI written for this project. It does not reuse campaign
 scripts or promise campaign-level tactical behavior. It has no authored navmesh,
-jump/mantle route planner, tactical grenade planner or mounted-gun strategy.
+general jump/mantle route planner, tactical grenade planner or mounted-gun strategy.
 Complex routes, coordination and stalemates still warrant playtesting.
 
 ## Objective engine corrections
@@ -110,8 +121,9 @@ and bots:
 
 The normal static suite includes the production bot controller and regression
 tests for route progress, blocked-route alternatives, guard spacing, ladder
-links/input, warm-up time limits, jump tracking, scoped ADS and weapon-range
-pursuit. It also tests vector order, objective contact/use, linked-player
+links/input, frontier fairness,
+directed roof exits and fall rejection, warm-up time limits, jump tracking,
+scoped ADS and weapon-range pursuit. It also tests vector order, objective contact/use, linked-player
 transforms and trigger/field dispatch. The vector and linked-player tests run under ASan/UBSan.
 The tests reject variants with the old reversed vectors, outside-only flag
 contact, wrong use flag/team/hint fields, three-row transform and missing field
@@ -150,11 +162,16 @@ python3 scripts/prepare-bot-navigation-qa.py
 ```
 
 Mount the generated `out/bot-navigation-controlled.gsc` in an isolated Toujane
-TDM room. The scenario arranges one actor at an original ladder, then uses only
+TDM room. The default scenario arranges one actor at an original ladder, then uses only
 normal bot input for the climb onto the roof and the return to the ground.
 Both landings must pass position and original grounded-state checks. This
 scenario completed both phases on the Raspberry Pi; it verifies that route
 replanning preserves the link during a climb, not every ladder on every map.
+
+Add `--roof-exits` when generating to also probe complex elevated escapes on
+Toujane and Carentan. These are diagnostic stress cases, not certified routes;
+some enclosed roofs remain disconnected. They test a safe, grounded exit
+without damage, while objective completion has its own scenario above.
 
 Separately observe autonomous matches on Toujane, Carentan and Dawnville: check that bots
 reach objectives, score, change roles, obey round transitions and fight under
