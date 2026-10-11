@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Measure an isolated native bot match (requires Docker and private map assets)."""
+"""Measure an isolated native/Pi bot match (requires Docker and private map assets)."""
 import argparse
+import hashlib
 import json
 import math
 from pathlib import Path
+import platform
 import re
 import subprocess
 import time
@@ -19,6 +21,7 @@ def main():
     parser.add_argument('--bots', type=int, choices=range(1, 33), default=16)
     parser.add_argument('--seconds', type=int, default=90)
     parser.add_argument('--expect-passes', type=int, default=0, help='Minimum completed controlled scenarios')
+    parser.add_argument('--stop-after-passes', action='store_true', help='End a controlled scenario once all expected passes arrive')
     parser.add_argument('--image', default='local/cod2-native-server:dev')
     parser.add_argument('--runtime', choices=['native', 'pi'], default='native')
     parser.add_argument('--difficulty', type=int, choices=range(3), default=1)
@@ -30,10 +33,15 @@ def main():
     args = parser.parse_args()
     if args.seconds < 5:
         parser.error('--seconds must be at least 5')
+    if args.stop_after_passes and args.expect_passes < 1:
+        parser.error('--stop-after-passes requires a positive --expect-passes')
     for item in (args.binary, args.policy, args.assets, args.config):
         if not item.exists():
             parser.error(f'missing {item}')
     args.output.mkdir(parents=True, exist_ok=True)
+    model_path = Path('/proc/device-tree/model')
+    host = {'system': platform.system(), 'machine': platform.machine(),
+            'model': model_path.read_bytes().rstrip(b'\0').decode() if model_path.exists() else None}
     name = 'cod2-bot-qa-' + uuid.uuid4().hex[:10]
 
     def docker(*command):
@@ -44,10 +52,10 @@ def main():
         return int(dict(zip(fields[::2], fields[1::2]))['usage_usec'])
 
     engine = '/usr/local/bin/qemu-i386 -L /opt/cod2-i386 /qa-engine' if args.runtime == 'pi' else '/qa-engine'
-    platform = 'linux/arm64' if args.runtime == 'pi' else 'linux/amd64'
+    docker_platform = 'linux/arm64' if args.runtime == 'pi' else 'linux/amd64'
     log = ''
     try:
-        docker('run', '-d', '--name', name, '--platform', platform, '--network', 'none', '--ulimit', 'core=0',
+        docker('run', '-d', '--name', name, '--platform', docker_platform, '--network', 'none', '--ulimit', 'core=0',
                '--read-only', '--tmpfs', '/profile:uid=1000,gid=1000,size=32m', '--tmpfs', '/tmp:size=16m',
                '-v', f'{args.assets.resolve()}:/game/main:ro',
                '-v', f'{args.binary.resolve()}:/qa-engine:ro',
@@ -74,7 +82,16 @@ def main():
         started = time.monotonic()
         before = cpu()
         print(f'{args.map}/{args.mode}: {args.bots} bots joined; measuring {args.seconds}s', flush=True)
-        time.sleep(args.seconds)
+        if args.stop_after_passes:
+            deadline = started + args.seconds
+            while time.monotonic() < deadline:
+                time.sleep(min(5, max(0, deadline - time.monotonic())))
+                log = docker('logs', name)
+                if re.search(r'\[bot(?:-nav)?-qa\] FAIL ', log) or len(re.findall(
+                        r'\[bot(?:-nav)?-qa\] PASS ', log)) >= args.expect_passes:
+                    break
+        else:
+            time.sleep(args.seconds)
         after = cpu()
         elapsed = time.monotonic() - started
         log = docker('logs', name)
@@ -98,9 +115,13 @@ def main():
         result = {
             'map': args.map, 'mode': args.mode, 'bots': args.bots, 'seconds': round(elapsed, 2),
             'runtime': args.runtime, 'difficulty': args.difficulty,
+            'host': host,
+            'engineSha256': hashlib.sha256(args.binary.read_bytes()).hexdigest(),
+            'policySha256': hashlib.sha256(args.policy.read_bytes()).hexdigest(),
             'cpuPercentOfOneCore': round((after - before) / (elapsed * 10000), 2),
             'sampled256UnitCellsPerBot': cells,
             'lastMatchState': re.findall(r'\[bots\] match (.+)', log)[-1:],
+            'matchStates': list(dict.fromkeys(re.findall(r'\[bots\] match (.+)', log))),
             'lastWorkCounters': re.findall(r'\[bots\] work (.+)', log)[-1:],
             'simulationFps': round(sum(p['frames'] for p in windows) * 1000 / sum(p['wall'] for p in windows), 2) if windows else None,
             'maxGameFrameMs': max((p['maxGame'] for p in windows), default=None),

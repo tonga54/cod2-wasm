@@ -1311,7 +1311,11 @@ static void SV_BotPlanFrame(void)
     int checked=0, plans=0,i;
     for(i=0;i<level.maxclients && !s_botAI[i].enabled;++i) {}
     if(i==level.maxclients) return;
-    Bot_NavFrame();
+    // Give pending routes the first share of the existing navigation budget.
+    // Background discovery can exhaust it with a single expensive roof probe
+    // on slower hosts, leaving an isolated bot waiting for the whole map flood.
+    Bot_WorkFrame();
+    if(!s_botNavSeeded) Bot_NavSeed();
     while(checked++<level.maxclients && plans<BOT_PATHS_PER_FRAME) {
         int index=s_botPlanCursor;
         s_botPlanCursor=(s_botPlanCursor+1)%level.maxclients;
@@ -1325,6 +1329,7 @@ static void SV_BotPlanFrame(void)
         if(s_botWorkPathMs>=BOT_PATH_TIME_MS) break;
         ++plans;
     }
+    Bot_NavFrame();
 }
 
 static void Bot_AdvanceRoute(botAIState_t *ai, playerState_t *ps)

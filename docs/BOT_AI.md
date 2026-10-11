@@ -628,3 +628,83 @@ speedup. They exclude human browser/network traffic. The Raspberry Pi was not
 accessed or changed. Reports: `out/bot-coop-performance-baseline/`,
 `out/bot-coop-performance-final/`, `out/bot-coop-controlled/` and
 `out/bot-coop-` build/test logs.
+
+## Direct Raspberry Pi 5 validation — 2026-10-11
+
+The runtime matches in this pass run on the owner's Raspberry Pi 5 Model B
+(`aarch64`, 4 KiB pages), with the deployed ARM64 container and its QEMU/i386
+runtime. Tests run sequentially in isolated, network-disabled containers using
+the private retail map package. The public game services stay running; no human
+clients are connected during the measurements. Browser rendering, network load
+and a human's assessment of combat fairness remain outside these checks.
+
+Pending bot routes now receive their share of the existing navigation budget
+before background map exploration. On a slower host, a costly background probe
+could exhaust that budget before an isolated actor could explore its own exit.
+The shared limits, rotating planner admission, navigation storage and combat
+settings are unchanged. Background exploration consumes the remaining budget.
+A slow-geometry regression exercises this ordering: the published controller
+fails to discover the local route while the updated controller succeeds.
+
+The runtime harness records the host model, executable/policy SHA-256 hashes
+and distinct match states. Controlled scenarios can stop as soon as their
+expected assertions finish, avoiding idle test load on the Pi. Ordinary timed
+performance matches retain their full duration without polling the game log.
+
+Native i386 and WebAssembly builds, ASan/UBSan controller tests, simulation
+cadence and bot foundation checks passed. This pass does not claim the entire
+static suite passed; the earlier host ABI limitation remains as documented above.
+
+All nine controlled objective scenarios passed on the Pi: CTF, HQ and S&D on
+Carentan, Toujane and Dawnville (27 assertions). They include stable survivor
+roles, shared actor election/stall handoff, original flag pickup/capture,
+HQ capture/destruction (9.5 s each), and bomb plant/defuse (5.5 / 10.5 s).
+These fixtures arrange actors near the objective; autonomous combat is measured
+separately. Toujane's ladder ascent/descent and elevated exit, and Carentan's
+elevated exit, also passed with original movement and no fall damage.
+
+The unmodified controller needed 89 seconds for Dawnville's sloping-roof exit
+on the Pi; a separate diagnostic reference took 70.5 seconds. The three
+updated runs took 31.5, 24 and 31.5 seconds. This improves a measured failure mode but
+still leaves a noticeable delay on that roof. It does not prove that every
+rooftop, doorway or combat escape is reliable.
+
+
+Final 32-Normal-bot autonomous matches on the Pi:
+
+| Map / mode | Duration | Ticks/s | CPU, one core | Max single-bot AI | Max game frame |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Dawnville / TDM | 90 s | 20.00 | 45.63% | 5 ms | 52 ms |
+| Toujane / CTF | 150 s | 20.00 | 44.19% | 5 ms | 60 ms |
+| Carentan / HQ | 150 s | 20.00 | 50.66% | 5 ms | 536 ms |
+| Dawnville / S&D | 150 s | 20.00 | 46.69% | 4 ms | 183 ms |
+| Carentan / DM | 60 s | 20.01 | 42.27% | 4 ms | 59 ms |
+
+Same-duration reference matches before the scheduling correction used 44.83%,
+44.91% and 49.40% of one core for TDM, CTF and HQ respectively, also at about
+20 ticks/s. These are individual stochastic matches, not a statistically
+established CPU improvement. Temperature samples stayed below 60 C and sampled
+`get_throttled` values remained `0x0`. There are no added navigation arrays,
+per-bot state fields, larger work limits or extra per-frame graph scans.
+
+Average tick rate does not imply hitch-free frames. HQ's 536 ms peak occurred
+during initial bot admission; the reference had 553 ms in the same startup
+phase. After the first 30 seconds, the final HQ run still had a 176 ms game-frame
+peak. Those general game-frame hitches remain unresolved; the single-bot AI
+peak was 5 ms. The change should not be described as eliminating server stutter.
+
+The final autonomous CTF run captured twice, versus once in the reference.
+HQ captured and defended a radio; S&D planted during combat and completed
+scoring rounds. TDM recorded scoped bots holding elevated positions, with 13
+sampled holds and a maximum height of 167 units above the relevant anchor.
+These five-second samples establish arrival/holding, not an assessment of
+concealment by a human opponent. CTF recorded no sniper holding samples in this
+run. Normal aiming and reaction settings were not increased.
+
+The final suite completed 18 sessions/scenarios without failures, plus the
+separate first successful corrected Dawnville run. All used the same executable
+SHA-256 `437af46071889608d5200ec3f02afbed567e2562f5809d6d31b622a35210e6a5`.
+Reports and logs are under `out/bot-pi-truth/`; `suite-results.json` summarizes
+the final suite. Test containers are removed after each case. The results
+support the navigation improvement but do not certify a numerical intelligence
+rating or universal freedom from stalls.

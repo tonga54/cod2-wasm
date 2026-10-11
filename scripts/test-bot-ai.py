@@ -16,6 +16,7 @@ support = r'''
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
 #include <time.h>
@@ -42,8 +43,9 @@ static gclient_t clients[64]; static WeaponDef weapon={"test",0,0,0,0,0,30},seco
 static int humanClient=-1;
 static int traceCount, wall, wallDoor, smoke, friendly,crowd,stairs,ladderWorld,navClock,dropWorld,tacticalWall;
 static int teammateBlocker=-1,perchWorld,courtesyWall;
+static int slowBackground,traceMs;
 static float fallMin=256;
-int Sys_Milliseconds(void){return navClock?navClock++:0;}
+int Sys_Milliseconds(void){return slowBackground?traceMs:navClock?navClock++:0;}
 static int Dvar_GetInt(const char *name){(void)name;return 0;}
 static playerState_t *SV_GameClientNum(int num){return &clients[num].ps;}
 static int SV_BotIsTestClient(int num){return num>=0&&num<level.maxclients&&num!=humanClient;}
@@ -57,6 +59,7 @@ qboolean SV_EntityContact(const vec_t *mins,const vec_t *maxs,const gentity_t *e
 }
 void G_TraceCapsule(trace_t *t,const vec_t *a,const vec_t *mi,const vec_t *ma,const vec_t *b,int pass,int mask){
  (void)mi;(void)ma;(void)pass;(void)mask;traceCount++;t->fraction=1;t->normal[2]=1;t->startsolid=t->allsolid=t->contents=0;
+ if(slowBackground && a[0]<-1024)traceMs+=4;
  if(courtesyWall && mi[0]<0 && mask==0x02810011 && b[1]<a[1]){t->fraction=.5f;t->entityNum=1022;return;}
  if(perchWorld && a[0]<256 && a[2]==41 && a[2]==b[2]){t->fraction=b[0]>a[0]?1:.08f;return;}
  if(perchWorld && a[0]<256 && a[2]==19 && b[0]>a[0]){t->fraction=.25f;return;}
@@ -464,6 +467,17 @@ int main(void){
  SV_BotEnableAI(0,1);SV_BotSetGoal(0,(float[3]){512,0,65},48,0,-1);
  Bot_FindPath(&s_botAI[0],&clients[0].ps);
  assert(s_botAI[0].goal==last&&s_botAI[0].failedPaths==0);
+ // An expensive remote background probe must not consume the local route's
+ // entire allowance before an isolated actor can discover its first exit.
+ SV_BotResetNavigation();s_botNavSeeded=s_botNavBounded=1;svs.time+=50;
+ s_botNavMin[0]=-4096;s_botNavMax[0]=512;s_botNavMin[1]=-512;s_botNavMax[1]=512;
+ Bot_NavAdd((float[3]){-2048,0,1});Bot_NavAdd((float[3]){0,0,1});
+ memcpy(clients[0].ps.origin,(float[3]){0,0,1},sizeof(vec3_t));
+ clients[0].sess.sessionState=SESS_STATE_PLAYING;g_entities[0].health=100;
+ SV_BotEnableAI(0,1);SV_BotSetGoal(0,(float[3]){224,0,1},12,0,-1);
+ Bot_RequestPath(&s_botAI[0]);slowBackground=1;traceMs=0;SV_BotPlanFrame();slowBackground=0;
+ assert(s_botAI[0].routeCount>0 && s_botNav[s_botAI[0].waypoint].origin[0]>0);
+ assert(s_botWorkEdges<=BOT_NAV_EDGES_PER_FRAME && s_botWorkPaths<=BOT_PATHS_PER_FRAME);
  // The warm-up budget must yield to a slow host before exhausting all edges.
  SV_BotResetNavigation();s_botNavSeeded=1;Bot_NavAdd((float[3]){0,0,1});
  svs.time+=50;navClock=1;traceCount=0;Bot_NavFrame();navClock=0;
