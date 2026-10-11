@@ -291,17 +291,34 @@ extern unsigned int Scr_GetEntityIdRef(unsigned int entId);
 
 #define VM_STACKBUF_HEADER_SIZE ((unsigned)offsetof(VariableStackBuffer, buf)) /* 0x0b on x86; 0x0f on x64 (pos is 8 bytes) */
 #define VM_STACKBUF_VALUE_SIZE 5
-#define VM_LOCAL_ARCHIVE_SLOTS 256u
+#define VM_LOCAL_ARCHIVE_SLOTS 65534u
 #define VM_LOCAL_ARCHIVE_MAX_LOCALS 64u
 
 typedef struct VM_LocalVarArchive_s {
     unsigned int localId;
     unsigned int count;
+    VariableStackBuffer *stackValue;
     unsigned short vars[VM_LOCAL_ARCHIVE_MAX_LOCALS];
 } VM_LocalVarArchive;
 
 static VM_LocalVarArchive vmLocalVarArchives[VM_LOCAL_ARCHIVE_SLOTS];
-static unsigned int vmLocalVarArchiveNext;
+static void VM_ForgetArchivedFrame(VariableStackBuffer *stackValue, unsigned int localId)
+{
+    if (localId < VM_LOCAL_ARCHIVE_SLOTS && vmLocalVarArchives[localId].stackValue == stackValue) {
+        vmLocalVarArchives[localId].localId = 0;
+        vmLocalVarArchives[localId].count = 0;
+        vmLocalVarArchives[localId].stackValue = NULL;
+    }
+}
+static void VM_ForgetLocalVarArchive(VariableStackBuffer *stackValue)
+{
+    unsigned int localId = stackValue->localId;
+    while (localId && localId < VM_LOCAL_ARCHIVE_SLOTS) {
+        unsigned int parentId = GetSafeParentLocalId(localId);
+        VM_ForgetArchivedFrame(stackValue, localId);
+        localId = parentId;
+    }
+}
 
 void Scr_ClearErrorMessage(void);
 void Scr_Settings(int developer, int developer_script, int abort_on_error);
@@ -545,20 +562,13 @@ static VariableStackBuffer *__attribute_regparm__(3)
     stackValue->time = (byte)svp->time;
 
     {
-        VM_LocalVarArchive *archive = NULL;
+        VM_LocalVarArchive *archive;
 
-        for (i = 0; i < (int)VM_LOCAL_ARCHIVE_SLOTS; i++) {
-            if (vmLocalVarArchives[i].localId == localId) {
-                archive = &vmLocalVarArchives[i];
-                break;
-            }
-        }
-
-        if (!archive) {
-            archive = &vmLocalVarArchives[vmLocalVarArchiveNext++ % VM_LOCAL_ARCHIVE_SLOTS];
-        }
-
+        if (!localId || localId >= VM_LOCAL_ARCHIVE_SLOTS)
+            Com_Error(1, "invalid archived script local id");
+        archive = &vmLocalVarArchives[localId];
         archive->localId = localId;
+        archive->stackValue = stackValue;
         VM_ArchiveLocalVars(archive, localId, localVarCount, cacheLocalVarCount);
     }
 
@@ -581,8 +591,18 @@ static VariableStackBuffer *__attribute_regparm__(3)
 #else
             *(const char **)(record + 1) = scrVmPub.function_frame->fs.pos;
 #endif
-            scrVmPub.localVars -= scrVmPub.function_frame->fs.localVarCount;
             localId = GetParentLocalId(localId);
+            // Save every caller's exact local order as well as the innermost
+            // frame. Reconstructing callers from sibling order swaps locals.
+            if (localId && localId < VM_LOCAL_ARCHIVE_SLOTS) {
+                VM_LocalVarArchive *archive = &vmLocalVarArchives[localId];
+                archive->localId = localId;
+                archive->stackValue = stackValue;
+                VM_ArchiveLocalVars(archive, localId,
+                    scrVmPub.function_frame->fs.localVarCount,
+                    scrVmPub.function_frame->fs.localVarCount);
+            }
+            scrVmPub.localVars -= scrVmPub.function_frame->fs.localVarCount;
         } else {
             *(int *)(record + 1) = value->u.intValue;
         }
@@ -617,6 +637,7 @@ static void __attribute_regparm__(3)
         if (type == 7) {
             unsigned int parentLocalId = GetParentLocalId(localId);
 
+            VM_ForgetArchivedFrame(stackValue, localId);
             Scr_KillThread(localId);
             RemoveRefToObject(localId);
 
@@ -650,6 +671,7 @@ static void __attribute_regparm__(3)
         count++;
     }
 
+    VM_ForgetArchivedFrame(stackValue, localId);
     Scr_KillThread(localId);
     RemoveRefToObject(localId);
     MT_Free(stackValue, stackValue->bufLen);
@@ -663,6 +685,9 @@ static void __attribute_regparm__(3)
     byte *buf = (byte *)stackValue->buf + size * VM_STACKBUF_VALUE_SIZE;
     unsigned int count = 0;
 
+    // A partial cancellation changes the active frame; its old local cache
+    // must not survive with an id that the script allocator can immediately reuse.
+    VM_ForgetLocalVarArchive(stackValue);
     while (count != size) {
         VariableUnion u;
         int type;
@@ -795,6 +820,7 @@ void Scr_InitSystem(void)
     unsigned int timeArrayId = AllocObject();
     struct scrVarPub_t *p = (struct scrVarPub_t *)imp_scrVarPub;
 
+    memset(vmLocalVarArchives, 0, sizeof(vmLocalVarArchives));
     p->timeArrayId = timeArrayId;
     p->pauseArrayId = Scr_AllocArray();
     p->levelId = AllocObject();
@@ -836,7 +862,9 @@ void Scr_ShutdownSystem(int sys, int bComplete)
 
             RemoveObjectVariable(timeId, startLocalId);
             Scr_ClearWaitTime(startLocalId);
-            VM_TerminateStack(startLocalId, startLocalId, stackValue);
+            // Shutdown cancels the whole chain; it cannot schedule a caller
+            // back into the time array that is being drained.
+            VM_TerminateStack(0, startLocalId, stackValue);
         }
         RemoveRefToObject(timeId);
 
@@ -1593,6 +1621,14 @@ static void VM_NotifyAppendStackParams(VariableUnion *stackRef, VariableStackBuf
         newStackValue->localId = stackValue->localId;
         newStackValue->time = stackValue->time;
         memcpy(newStackValue->buf, stackValue->buf, oldBytes);
+        {
+            unsigned int localId = stackValue->localId;
+            while (localId && localId < VM_LOCAL_ARCHIVE_SLOTS) {
+                if (vmLocalVarArchives[localId].stackValue == stackValue)
+                    vmLocalVarArchives[localId].stackValue = newStackValue;
+                localId = GetSafeParentLocalId(localId);
+            }
+        }
         MT_Free(stackValue, stackValue->bufLen);
         stackRef->stackValue = SCR_STACK_ENC(newStackValue);
         stackValue = newStackValue;
@@ -1607,7 +1643,7 @@ static void VM_NotifyAppendStackParams(VariableUnion *stackRef, VariableStackBuf
 
         AddRefToValue(value->type, value->u);
         dst[0] = (byte)value->type;
-        *(int *)(dst + 1) = value->u.intValue;
+        memcpy(dst + 1, &value->u.intValue, sizeof(value->u.intValue));
         dst += VM_STACKBUF_VALUE_SIZE;
     }
 }
@@ -6774,7 +6810,7 @@ static int VM_CandidateHandleWaitTill(const char **pos, unsigned int *localVarCo
                                            startTop, resultLocalId, threadCount);
 }
 
-static void VM_CandidateHandleNotifyCall(VariableValue **top)
+static void VM_CandidateHandleNotifyCall(const char **pos, VariableValue **top)
 {
     unsigned int notifyListOwnerId;
     unsigned int stringValue;
@@ -6791,7 +6827,11 @@ static void VM_CandidateHandleNotifyCall(VariableValue **top)
     stringValue = (*top)->u.stringValue;
     --*top;
 
+    // Endon may cancel the currently executing frame. Match the reference VM:
+    // publish its continuation, then recover the possibly terminated position.
+    scrVmPub.function_frame->fs.pos = *pos;
     VM_Notify(notifyListOwnerId, stringValue, *top);
+    *pos = scrVmPub.function_frame->fs.pos;
     RemoveRefToObject(notifyListOwnerId);
     SL_RemoveRefToString(stringValue);
 
@@ -7763,7 +7803,7 @@ static unsigned int VM_Execute_CXX_Candidate_Pass66(struct function_stack_t fs)
             break;
 
         case VMOP_NotifyCall:
-            VM_CandidateHandleNotifyCall(&top);
+            VM_CandidateHandleNotifyCall(&pos, &top);
             break;
 
         case VMOP_EndOnCallback:
@@ -7846,29 +7886,29 @@ static unsigned int VM_RestoreLocalVarsFromSibling(unsigned int localId)
     return localVarCount;
 }
 
-static unsigned int VM_RestoreArchivedLocalVars(VariableStackBuffer *stackValue)
+static unsigned int VM_RestoreArchivedFrameLocalVars(VariableStackBuffer *stackValue, unsigned int localId)
 {
-    unsigned int i;
-
-    for (i = 0; i < VM_LOCAL_ARCHIVE_SLOTS; i++) {
-        VM_LocalVarArchive *archive = &vmLocalVarArchives[i];
-
-        if (archive->localId == stackValue->localId) {
+    if (localId && localId < VM_LOCAL_ARCHIVE_SLOTS) {
+        VM_LocalVarArchive *archive = &vmLocalVarArchives[localId];
+        if (archive->localId == localId && archive->stackValue == stackValue) {
             unsigned int count = archive->count;
             unsigned int varIndex;
-
             for (varIndex = 0; varIndex < count; varIndex++) {
                 ++scrVmPub.localVars;
                 *scrVmPub.localVars = archive->vars[varIndex];
             }
-
             archive->localId = 0;
             archive->count = 0;
+            archive->stackValue = NULL;
             return count;
         }
     }
+    return VM_RestoreLocalVarsFromSibling(localId);
+}
 
-    return VM_RestoreLocalVarsFromSibling(stackValue->localId);
+static unsigned int VM_RestoreArchivedLocalVars(VariableStackBuffer *stackValue)
+{
+    return VM_RestoreArchivedFrameLocalVars(stackValue, stackValue->localId);
 }
 
 static void VM_Resume(unsigned int timeId)
@@ -7961,7 +8001,7 @@ static void VM_Resume(unsigned int timeId)
 
             for (i = 1; i < (unsigned int)scrVmPub.function_count; i++) {
                 function_frame_t *frame = &scrVmPub.function_frame_start[i];
-                frame->fs.localVarCount = VM_RestoreLocalVarsFromSibling(frame->fs.localId);
+                frame->fs.localVarCount = VM_RestoreArchivedFrameLocalVars(stackValue, frame->fs.localId);
             }
 
             localVarCount = VM_RestoreArchivedLocalVars(stackValue);

@@ -27,11 +27,13 @@ populate()
             existing++;
         }
     }
+    players = undefined;
     for(i = existing; i < count; i++)
     {
         bot = addTestClient();
         if(isDefined(bot))
             bot thread joinGame(difficulty);
+        bot = undefined;
         wait .25;
     }
 }
@@ -61,6 +63,7 @@ joinGame(difficulty)
             if(players[i] isBot() && isDefined(players[i].pers["team"]) &&
                players[i].pers["team"] == self.pers["team"] &&
                (players[i] getEntityNumber()) < (self getEntityNumber())) rank++;
+        players = undefined;
         slot = rank % 4;
         if(!isDefined(faction)) faction = game["allies"];
         choices[0] = "mp40_mp";
@@ -95,7 +98,7 @@ joinGame(difficulty)
     self closeMenu();
     self closeInGameMenu();
     self botAI(difficulty);
-    self thread objectiveThink(difficulty);
+    self.bot_difficulty = difficulty;
     // Native commands use the normal use button to request a respawn. S&D and
     // HQ still decide whether that player may respawn; no forced spawn here.
 }
@@ -103,63 +106,82 @@ joinGame(difficulty)
 objectiveState()
 {
     level endon("intermission");
+    phase = 0;
+    nextRoster = 0;
     for(;;)
     {
-        level.bot_mode = getCvar("g_gametype");
-        level.bot_players = getEntArray("player", "classname");
-        counts["allies"] = 0;
-        counts["axis"] = 0;
-        counts["none"] = 0;
-        for(i = 0; i < level.bot_players.size; i++)
+        if(getTime() >= nextRoster)
         {
-            player = level.bot_players[i];
-            if(!(player isBot()) || !isDefined(player.pers["team"]) || player.pers["team"] == "spectator")
-                continue;
-            team = player.pers["team"];
-            if(!isDefined(counts[team])) counts[team] = 0;
-            player.bot_rank = counts[team];
-            counts[team]++;
+            nextRoster = getTime() + 500;
+            level.bot_mode = getCvar("g_gametype");
+            // Keep the shared cache independent of entity lifetimes across rounds.
+            players = getEntArray("player", "classname");
+            numbers = [];
+            counts["allies"] = 0;
+            counts["axis"] = 0;
+            counts["none"] = 0;
+            for(i = 0; i < players.size; i++)
+            {
+                player = players[i];
+                numbers[i] = player getEntityNumber();
+                if(!(player isBot()) || !isDefined(player.pers["team"]) || player.pers["team"] == "spectator")
+                    continue;
+                team = player.pers["team"];
+                if(!isDefined(counts[team])) counts[team] = 0;
+                player.bot_rank = counts[team];
+                counts[team]++;
+            }
+            level.bot_player_numbers = numbers;
+            level.bot_team_size = counts;
+            player = undefined;
+            players = undefined;
+            if(getCvarInt("scr_bot_debug") && (!isDefined(level.bot_match_debug_at) || getTime() >= level.bot_match_debug_at))
+            {
+                level.bot_match_debug_at = getTime() + 5000;
+                status = "mode=" + getCvar("g_gametype") + " allies=" + getTeamScore("allies") + " axis=" + getTeamScore("axis");
+                if(isDefined(level.bombplanted)) status += " bombPlanted=" + level.bombplanted;
+                if(isDefined(level.roundended)) status += " roundEnded=" + level.roundended;
+                if(isDefined(level.radio))
+                    for(j = 0; j < level.radio.size; j++)
+                        if(isDefined(level.radio[j].hidden) && !level.radio[j].hidden)
+                            status += " radioTeam=" + level.radio[j].team;
+                println("[bots] match " + status);
+            }
         }
-        level.bot_team_size = counts;
-        if(getCvarInt("scr_bot_debug") && (!isDefined(level.bot_match_debug_at) || getTime() >= level.bot_match_debug_at))
+        // One shared scheduler replaces a sleeping policy and two endon
+        // listeners per bot. Numbers and deadlines carry no entity references.
+        for(i = 0; i < level.bot_player_numbers.size; i++)
         {
-            level.bot_match_debug_at = getTime() + 5000;
-            status = "mode=" + getCvar("g_gametype") + " allies=" + getTeamScore("allies") + " axis=" + getTeamScore("axis");
-            if(isDefined(level.bombplanted)) status += " bombPlanted=" + level.bombplanted;
-            if(isDefined(level.roundended)) status += " roundEnded=" + level.roundended;
-            if(isDefined(level.radio))
-                for(j = 0; j < level.radio.size; j++)
-                    if(isDefined(level.radio[j].hidden) && !level.radio[j].hidden)
-                        status += " radioTeam=" + level.radio[j].team;
-            println("[bots] match " + status);
+            if(level.bot_player_numbers[i] % 5 != phase) continue;
+            player = botPlayer(level.bot_player_numbers[i]);
+            if(!isDefined(player) || !isDefined(player.bot_difficulty)) continue;
+            if(!isDefined(player.bot_objective_next) || getTime() >= player.bot_objective_next)
+            {
+                player objectiveThink();
+                interval = 500;
+                if(player.bot_difficulty == 0) interval = 750;
+                else if(player.bot_difficulty == 2) interval = 250;
+                player.bot_objective_next = getTime() + interval;
+            }
         }
-        wait .5;
+        player = undefined;
+        phase = (phase + 1) % 5;
+        wait .05;
     }
 }
 
-objectiveThink(difficulty)
+objectiveThink()
 {
-    self notify("bot_objectives_stop");
-    self endon("bot_objectives_stop");
-    self endon("disconnect");
-    level endon("intermission");
-    wait ((self getEntityNumber()) % 16) * .025;
-    for(;;)
+    if(isAlive(self) && self.sessionstate == "playing" && isDefined(self.bot_rank))
     {
-        if(isAlive(self) && self.sessionstate == "playing" && isDefined(self.bot_rank))
-        {
-            mode = level.bot_mode;
-            if(mode == "ctf") self ctfObjective();
-            else if(mode == "hq") self hqObjective();
-            else if(mode == "sd") self sdObjective();
-            else if(mode == "tdm") self tdmObjective();
-            else self botClearGoal(); // DM: every other live player is hostile.
-        }
-        else self botClearGoal();
-        if(difficulty == 0) wait .75;
-        else if(difficulty == 2) wait .25;
-        else wait .5;
+        mode = level.bot_mode;
+        if(mode == "ctf") self ctfObjective();
+        else if(mode == "hq") self hqObjective();
+        else if(mode == "sd") self sdObjective();
+        else if(mode == "tdm") self tdmObjective();
+        else self botClearGoal(); // DM: every other live player is hostile.
     }
+    else self botClearGoal();
 }
 
 setObjective(point, radius, behavior, entity, intent)
@@ -182,10 +204,10 @@ selectActor(point, group, groups)
 {
     actor = undefined;
     best = 1000000;
-    for(i = 0; i < level.bot_players.size; i++)
+    for(i = 0; i < level.bot_player_numbers.size; i++)
     {
-        player = level.bot_players[i];
-        if(!isAlive(player) || player.sessionstate != "playing" ||
+        player = botPlayer(level.bot_player_numbers[i]);
+        if(!isDefined(player) || !isAlive(player) || player.sessionstate != "playing" ||
            !isDefined(player.pers["team"]) || player.pers["team"] != self.pers["team"]) continue;
         // Cover a human or bot already interacting instead of competing for
         // the trigger and resetting their original progress timer.
@@ -224,10 +246,10 @@ ctfObjective()
     }
     friendlyCarrier = undefined;
     enemyCarrier = undefined;
-    for(i = 0; i < level.bot_players.size; i++)
+    for(i = 0; i < level.bot_player_numbers.size; i++)
     {
-        player = level.bot_players[i];
-        if(!isAlive(player) || !isDefined(player.flag)) continue;
+        player = botPlayer(level.bot_player_numbers[i]);
+        if(!isDefined(player) || !isAlive(player) || !isDefined(player.flag)) continue;
         if(player.flag == enemy) friendlyCarrier = player;
         if(player.flag == own) enemyCarrier = player;
     }

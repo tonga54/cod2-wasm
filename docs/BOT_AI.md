@@ -108,9 +108,11 @@ Path decisions run every 1.2 seconds, with prompt advancement between cached
 waypoints. Navigation and command generation allocate no per-frame heap memory.
 
 Movement and aim commands run once per original 50 ms simulation tick,
-including each tick of a delayed-frame catch-up. Objective script threads start
-at staggered phases and reuse the shared mode state. Perception preserves the
-difficulty view cone and smoke checks; a rotating third sightline candidate
+including each tick of a delayed-frame catch-up. One shared objective scheduler
+assigns five client phases across the original 50 ms ticks, preserving the
+250/500/750 ms difficulty intervals. Its roster contains client numbers; active
+entities are resolved only during a decision and released before waiting.
+Perception preserves the difficulty view cone and smoke checks; a rotating third sightline candidate
 prevents blocked nearby opponents from permanently hiding the next visible
 one. A visibility result is reused only within the same tick.
 
@@ -150,6 +152,12 @@ and bots:
 - Private packaging includes dynamically named original flag/radio models and
   objective materials with their original dependencies. Retail asset bytes are
   preserved; generated archives remain private.
+
+Round restarts reuse compiled scripts while creating fresh runtime state.
+Suspended frames retain their exact local-variable order, and variable cleanup
+preserves shared references when hash collisions or notification cancellation
+move sibling entries. The original S&D script can restore an empty secondary
+weapon slot from its `"none"` value, without raising an invalid-weapon error.
 
 ## Validation
 

@@ -540,7 +540,9 @@ void PlayerCmd_SetWeaponSlotWeapon(scr_entref_t entref)
     slot = PlayerCmd_GetWeaponSlotParam(0);
     weaponName = Scr_GetString(1);
 
-    if (weaponName[0]) {
+    // The original S&D script restores both slots between rounds. An empty
+    // secondary slot is returned as "none" and must clear the slot as well.
+    if (weaponName[0] && I_stricmp(weaponName, "none") != 0) {
         weaponIndex = G_GetWeaponIndexForName(weaponName);
         if (!weaponIndex)
             Scr_ParamError(1, va("Unknown weapon %s.", weaponName));

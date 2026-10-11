@@ -2454,6 +2454,19 @@ static void Scr_XenonStub(void)
     return;
 }
 
+/* The shared bot roster stores client numbers rather than holding entities
+ * across respawns and round shutdown. Resolve only a currently live client. */
+static void Scr_BotPlayer(void)
+{
+    int number = Scr_GetInt(0);
+    gentity_t *ent;
+    if (number < 0 || number >= level.maxclients)
+        return;
+    ent = &((gentity_t *)imp_g_entities)[number];
+    if (ent->r.inuse && ent->client)
+        Scr_AddEntity(ent);
+}
+
 BuiltinFunction Scr_GetFunction(const char **pName, int *type)
 {
     int i;
@@ -2463,6 +2476,13 @@ BuiltinFunction Scr_GetFunction(const char **pName, int *type)
             *type = functions[i].type;
             return functions[i].actionFunc;
         }
+    }
+
+    if (I_stricmp(*pName, "botplayer") == 0) {
+        static const char botplayer_name[] = "botplayer";
+        *pName = botplayer_name;
+        *type = 0;
+        return (BuiltinFunction)Scr_BotPlayer;
     }
 
     if (I_stricmp(*pName, "endparty") == 0) {

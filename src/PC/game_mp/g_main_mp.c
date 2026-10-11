@@ -591,7 +591,7 @@ void G_InitGame(int levelTime, int randomSeed, qboolean restart, qboolean savepe
         Com_Printf("Not logging to disk.\n");
     }
 
-    {
+    if (!restart) {
         int *p = Hunk_AllocLowInternal(0);
         *(void **)&scrVarPub = (void *)p;
         *(byte *)p = 0;
@@ -612,12 +612,14 @@ void G_InitGame(int levelTime, int randomSeed, qboolean restart, qboolean savepe
     G_InitTurrets();
     GScr_PostResetTimeout();
     G_SetupWeaponDef();
-    Scr_BeginLoadScripts();
-    GScr_LoadScripts(1);
-    DBG_PrintFreeVars(str_dbg_load);
-    Scr_PostCompileScripts();
-    Scr_EndLoadScripts();
-    DBG_PrintFreeVars(str_dbg_endload);
+    if (!restart) {
+        Scr_BeginLoadScripts();
+        GScr_LoadScripts(1);
+        DBG_PrintFreeVars(str_dbg_load);
+        Scr_PostCompileScripts();
+        Scr_EndLoadScripts();
+        DBG_PrintFreeVars(str_dbg_endload);
+    }
 
     *(void **)imp_bgs = (void *)&level_bgs;
     level_bgs.animScriptData.soundAlias = (snd_alias_list_t * (*)()) Com_FindSoundAlias;
@@ -625,12 +627,14 @@ void G_InitGame(int levelTime, int randomSeed, qboolean restart, qboolean savepe
 
     G_InitPlayerAnimTrees(restart);
 
-    GScr_LoadConsts();
-    G_ParseHitLocDmgTable();
-    Scr_FreeScripts(1);
-    Scr_BeginLoadAnimScripts();
-    GScr_LoadAnimScripts();
-    Scr_EndLoadAnimScripts();
+    if (!restart) {
+        GScr_LoadConsts();
+        G_ParseHitLocDmgTable();
+        Scr_FreeScripts(1);
+        Scr_BeginLoadAnimScripts();
+        GScr_LoadAnimScripts();
+        Scr_EndLoadAnimScripts();
+    }
     G_RegisterDvars_impl();
 
     Com_Printf(str_dbg_vmtop_fmt, *(void **)((byte *)&scrVmPub + 16));
@@ -866,7 +870,7 @@ void G_InitGame(int levelTime, int randomSeed, qboolean restart, qboolean savepe
         Com_Printf("Not logging to disk.\n");
     }
 
-    {
+    if (!restart) {
         int *p = Hunk_AllocLowInternal(0);
         *(void **)&scrVarPub = (void *)p;
         *(byte *)p = 0;
@@ -887,12 +891,14 @@ void G_InitGame(int levelTime, int randomSeed, qboolean restart, qboolean savepe
     G_InitTurrets();
     GScr_PostResetTimeout();
     G_SetupWeaponDef();
-    Scr_BeginLoadScripts();
-    GScr_LoadScripts(1);
-    DBG_PrintFreeVars(str_dbg_load);
-    Scr_PostCompileScripts();
-    Scr_EndLoadScripts();
-    DBG_PrintFreeVars(str_dbg_endload);
+    if (!restart) {
+        Scr_BeginLoadScripts();
+        GScr_LoadScripts(1);
+        DBG_PrintFreeVars(str_dbg_load);
+        Scr_PostCompileScripts();
+        Scr_EndLoadScripts();
+        DBG_PrintFreeVars(str_dbg_endload);
+    }
 
     *(void **)imp_bgs = (void *)&level_bgs;
     level_bgs.animScriptData.soundAlias = (snd_alias_list_t * (*)()) Com_FindSoundAlias;
@@ -900,12 +906,14 @@ void G_InitGame(int levelTime, int randomSeed, qboolean restart, qboolean savepe
 
     G_InitPlayerAnimTrees(restart);
 
-    GScr_LoadConsts();
-    G_ParseHitLocDmgTable();
-    Scr_FreeScripts(1);
-    Scr_BeginLoadAnimScripts();
-    GScr_LoadAnimScripts();
-    Scr_EndLoadAnimScripts();
+    if (!restart) {
+        GScr_LoadConsts();
+        G_ParseHitLocDmgTable();
+        Scr_FreeScripts(1);
+        Scr_BeginLoadAnimScripts();
+        GScr_LoadAnimScripts();
+        Scr_EndLoadAnimScripts();
+    }
     G_RegisterDvars_impl();
 
     Com_Printf(str_dbg_vmtop_fmt, *(void **)((byte *)&scrVmPub + 16));

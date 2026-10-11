@@ -12,8 +12,8 @@ source = (root / 'downstream/server/browser_bots.gsc').read_text().replace(
     '    level thread objectiveState();',
     '    level thread objectiveState();\n    level thread qaNavigation();', 1)
 source = source.replace(
-    '    self botAI(difficulty);\n    self thread objectiveThink(difficulty);',
-    '    self disableWeapon();\n    self botStop();')
+    '    self botAI(difficulty);\n    self.bot_difficulty = difficulty;',
+    '    self disableWeapon();\n    self botStop();\n    self.bot_difficulty = undefined;')
 scenario = r'''
 qaNavigation()
 {
@@ -30,7 +30,7 @@ qaNavigation()
     for(i = 0; i < players.size; i++)
     {
         if(!(players[i] isBot()) || !isAlive(players[i])) continue;
-        players[i] notify("bot_objectives_stop");
+        players[i].bot_difficulty = undefined;
         players[i] botStop();
         players[i] disableWeapon();
         if(!isDefined(actor)) actor = players[i];

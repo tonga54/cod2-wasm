@@ -18,6 +18,7 @@ extern unsigned char scrVarGlob[];
 #define SCRVL_VAR_HASH 0x40
 #define SCRVL_VAR_COLLISION 0x20
 #define SCRVL_VAR_ALLOCATED 0x60
+#define SCRVL_VAR_EXTERNAL_ARRAY_KEY 0x80
 #define SCRVL_VAR_MASK 0x1f
 #define SCRVL_VAR_UNDEFINED 0
 #define SCRVL_VAR_POINTER 1
@@ -247,6 +248,7 @@ void Scr_CastVector(VariableValue *value);
 void SetVariableValue(unsigned int id, VariableValue *value);
 void ClearVariableValue(unsigned int id);
 void FreeChildValue(unsigned int id);
+static void Scr_RemoveRefToArrayNameValue(unsigned int name);
 static inline __attribute__((always_inline)) void Scr_MakeObjectChildrenExternal(unsigned int parentId);
 static inline __attribute__((always_inline)) void Scr_FreeObjectChildren(unsigned int parentId);
 void ClearObjectInternal(unsigned int parentId);
@@ -317,8 +319,6 @@ static inline __attribute__((always_inline)) unsigned int AllocVariable(void)
 
         id = VG_ID(index);
         s_varNetDbg++;
-        if ((s_varNetDbg & 0x7ff) == 0)
-            fprintf(stderr, "[varleak] net=%u\n", s_varNetDbg);
         return id;
     }
 }
@@ -523,7 +523,9 @@ void Scr_SetThreadNotifyName(unsigned int startLocalId, unsigned int stringValue
 
 short unsigned int Scr_GetThreadNotifyName(unsigned int startLocalId)
 {
-    return *(unsigned short *)((byte *)scrVarGlob + startLocalId * 16 + 9);
+    unsigned short name;
+    memcpy(&name, (byte *)scrVarGlob + startLocalId * 16 + 9, sizeof(name));
+    return name;
 }
 
 void Scr_SetThreadWaitTime(unsigned int startLocalId, unsigned int waitTime)
@@ -636,10 +638,11 @@ static inline __attribute__((always_inline)) void FreeChildValue_core(unsigned i
     unsigned int prevSiblingIndex;
     unsigned int nextSiblingIndex;
     unsigned int freeHead;
+    unsigned int arrayName = VG_NAME(id);
+    unsigned int externalArrayKey = VG_STATUS(id) & SCRVL_VAR_EXTERNAL_ARRAY_KEY;
 
     type = VG_STATUS(id) & SCRVL_VAR_MASK;
     value.intValue = VG_U32(id);
-    RemoveRefToValue_core(type, value);
 
     index = VG_NEXT(id);
     prevSiblingIndex = VG_PREV(index);
@@ -654,6 +657,11 @@ static inline __attribute__((always_inline)) void FreeChildValue_core(unsigned i
     VG_PREV(index) = 0;
     VG_PREV(freeHead) = (unsigned short)index;
     VG_U16(0) = (unsigned short)index;
+    if (externalArrayKey)
+        Scr_RemoveRefToArrayNameValue(arrayName);
+    // Value release can recursively clear this parent. Detach the child and
+    // return its slot first; no callback may encounter or release it twice.
+    RemoveRefToValue_core(type, value);
 }
 
 static inline __attribute__((always_inline)) void SetVariableValue_core(unsigned int id, VariableValue *value)
@@ -662,10 +670,9 @@ static inline __attribute__((always_inline)) void SetVariableValue_core(unsigned
     VariableUnion oldValue;
 
     oldValue.intValue = VG_U32(id);
-    RemoveRefToValue_core(status & SCRVL_VAR_MASK, oldValue);
-
-    VG_STATUS(id) = (VG_STATUS(id) & ~SCRVL_VAR_MASK) | value->type;
+    VG_STATUS(id) = (status & ~SCRVL_VAR_MASK) | value->type;
     VG_U32(id) = value->u.intValue;
+    RemoveRefToValue_core(status & SCRVL_VAR_MASK, oldValue);
 }
 
 Bool IsValidArrayIndex(unsigned int unsignedValue)
@@ -783,7 +790,11 @@ void Scr_RemoveThreadNotifyName(unsigned int startLocalId)
 {
     byte *entry = (byte *)scrVarGlob + startLocalId * 16;
     unsigned int notifyName;
-    notifyName = *(unsigned short *)((byte *)scrVarGlob + startLocalId * 16 + 9);
+    {
+        unsigned short name;
+        memcpy(&name, (byte *)scrVarGlob + startLocalId * 16 + 9, sizeof(name));
+        notifyName = name;
+    }
 
     SL_RemoveRefToString(notifyName);
 
@@ -1693,12 +1704,12 @@ static void __attribute_regparm__(2)
     unsigned int valueId = entry->hash.id;
     VariableValueInternal *entryValue = ScrVarEntry(valueId);
     unsigned int status;
+    int arrayParent = (parentValue->w.status & SCRVL_VAR_MASK) == SCRVL_VAR_ARRAY;
 
-    if ((parentValue->w.status & SCRVL_VAR_MASK) == SCRVL_VAR_ARRAY) {
+    if ((entryValue->w.status & SCRVL_VAR_ALLOCATED) == SCRVL_VAR_ALLOCATED)
+        return;
+    if (arrayParent)
         parentValue->u.o.u.size--;
-        Scr_RemoveRefToArrayNameValue(entryValue->w.status >> 8);
-    }
-
     status = entryValue->w.status;
 
     if ((status & SCRVL_VAR_ALLOCATED) == SCRVL_VAR_HASH) {
@@ -1711,17 +1722,32 @@ static void __attribute_regparm__(2)
             unsigned int entryNextSiblingIndex = entryValue->nextSibling;
             unsigned int swapPrevIndex = swapEntry->hash.u.prev;
             unsigned int swapNextSiblingIndex = swapValue->nextSibling;
-            unsigned int entryHash = *(unsigned int *)&entry->hash;
+            unsigned int swapId = swapEntry->hash.id;
+
+            // Relocate both sibling positions before updating their neighbors.
+            // A hash collision can be the adjacent child of the same parent;
+            // writing the old neighbor links first would make that ring cyclic.
+            unsigned int newEntryPrev = swapPrevIndex == entryIndex ? swapIndex :
+                swapPrevIndex == swapIndex ? entryIndex : swapPrevIndex;
+            unsigned int newEntryNext = swapNextSiblingIndex == entryIndex ? swapIndex :
+                swapNextSiblingIndex == swapIndex ? entryIndex : swapNextSiblingIndex;
+            unsigned int newSwapPrev = entryPrevIndex == entryIndex ? swapIndex :
+                entryPrevIndex == swapIndex ? entryIndex : entryPrevIndex;
+            unsigned int newSwapNext = entryNextSiblingIndex == entryIndex ? swapIndex :
+                entryNextSiblingIndex == swapIndex ? entryIndex : entryNextSiblingIndex;
 
             swapValue->w.status = (swapValue->w.status & ~SCRVL_VAR_ALLOCATED) | SCRVL_VAR_HASH;
 
-            VG_PREV(swapNextSiblingIndex) = (unsigned short)entryIndex;
-            VG_NEXT_SIBLING(VG_ID(swapPrevIndex)) = (unsigned short)entryIndex;
-            VG_PREV(entryNextSiblingIndex) = (unsigned short)swapIndex;
-            VG_NEXT_SIBLING(VG_ID(entryPrevIndex)) = (unsigned short)swapIndex;
-
-            *(unsigned int *)&entry->hash = *(unsigned int *)&swapEntry->hash;
-            *(unsigned int *)&swapEntry->hash = entryHash;
+            entry->hash.id = (unsigned short)swapId;
+            swapEntry->hash.id = (unsigned short)valueId;
+            entry->hash.u.prev = (unsigned short)newEntryPrev;
+            swapEntry->hash.u.prev = (unsigned short)newSwapPrev;
+            swapValue->nextSibling = (unsigned short)newEntryNext;
+            entryValue->nextSibling = (unsigned short)newSwapNext;
+            VG_NEXT_SIBLING(VG_ID(newEntryPrev)) = (unsigned short)entryIndex;
+            VG_PREV(newEntryNext) = (unsigned short)entryIndex;
+            VG_NEXT_SIBLING(VG_ID(newSwapPrev)) = (unsigned short)swapIndex;
+            VG_PREV(newSwapNext) = (unsigned short)swapIndex;
 
             status = entryValue->w.status;
             entryIndex = swapIndex;
@@ -1745,7 +1771,11 @@ static void __attribute_regparm__(2)
     }
 
     entryValue->w.status = (status & ~SCRVL_VAR_ALLOCATED) | SCRVL_VAR_ALLOCATED;
+    if (arrayParent)
+        entryValue->w.status |= SCRVL_VAR_EXTERNAL_ARRAY_KEY;
     entryValue->v.index = (unsigned short)entryIndex;
+    // Retain an array key until FreeChildValue unlinks its sibling. Releasing
+    // it here can recursively clear the parent while this child is still linked.
 }
 
 void RemoveRefToObject(unsigned int id)
@@ -1953,8 +1983,14 @@ void Scr_KillEndonThread(unsigned int threadId)
 {
     VariableValueInternal *parentValue = (VariableValueInternal *)((byte *)scrVarGlob + threadId * 16);
 
-    RemoveRefToObject(parentValue->u.o.u.self);
+    unsigned int self;
+    if ((parentValue->w.status & SCRVL_VAR_MASK) == 0x17)
+        return;
+    self = parentValue->u.o.u.self;
+    // Releasing self can recursively cancel this listener. Mark it dead first
+    // and transfer its self reference exactly once.
     parentValue->w.status = (parentValue->w.status & ~0x1f) | 0x17;
+    RemoveRefToObject(self);
 }
 
 static inline __attribute__((always_inline)) void Scr_MakeObjectChildrenExternal(unsigned int parentId)
@@ -2373,7 +2409,13 @@ void ClearObject(unsigned int id)
 void Scr_KillThread(unsigned int parentId)
 {
     unsigned int pauseEntry;
+    unsigned int status = VG_STATUS(parentId);
 
+    if ((status & SCRVL_VAR_MASK) == 0x17)
+        return;
+    // Recursive reference/notify cleanup must observe a terminated thread.
+    // Its fields and self reference are released by this first invocation.
+    VG_STATUS(parentId) = (status & ~SCRVL_VAR_MASK) | 0x17;
     Scr_FreeObjectChildren(parentId);
 
     RemoveRefToObject(VG_SIBLING(parentId));
@@ -3144,30 +3186,7 @@ void FreeChildValue(unsigned int id)
 
 void FreeValue(unsigned int id)
 {
-    VariableUnion value;
-    unsigned int type;
-    unsigned int index;
-    unsigned int prevSiblingIndex;
-    unsigned int nextSiblingIndex;
-    unsigned int freeHead;
-
-    type = VG_STATUS(id) & SCRVL_VAR_MASK;
-    value.intValue = VG_U32(id);
-    RemoveRefToValue_core(type, value);
-
-    index = VG_NEXT(id);
-    prevSiblingIndex = VG_PREV(index);
-    nextSiblingIndex = VG_NEXT_SIBLING(id);
-
-    VG_PREV(nextSiblingIndex) = (unsigned short)prevSiblingIndex;
-    VG_NEXT_SIBLING(VG_ID(prevSiblingIndex)) = (unsigned short)nextSiblingIndex;
-
-    VG_STATUS(id) = 0;
-    freeHead = VG_U16(0);
-    VG_U16(id) = (unsigned short)freeHead;
-    VG_PREV(index) = 0;
-    VG_PREV(freeHead) = (unsigned short)index;
-    VG_U16(0) = (unsigned short)index;
+    FreeChildValue_core(id);
 }
 
 void SetVariableValue(unsigned int id, VariableValue *value)
@@ -3181,8 +3200,8 @@ void ClearVariableValue(unsigned int id)
     VariableUnion value;
 
     value.intValue = VG_U32(id);
-    RemoveRefToValue(status & SCRVL_VAR_MASK, value);
     VG_STATUS(id) &= ~SCRVL_VAR_MASK;
+    RemoveRefToValue(status & SCRVL_VAR_MASK, value);
 }
 
 void ClearArray(unsigned int parentId, VariableValue *value)

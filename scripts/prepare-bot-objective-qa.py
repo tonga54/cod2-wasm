@@ -4,7 +4,7 @@ from pathlib import Path
 root=Path(__file__).resolve().parents[1]
 source=(root/'downstream/server/browser_bots.gsc').read_text().replace(
     '    level thread objectiveState();','    level thread objectiveState();\n    level thread qaScenario();',1)
-source=source.replace('    self botAI(difficulty);\n    self thread objectiveThink(difficulty);', '    self disableWeapon();\n    self botStop();')
+source=source.replace('    self botAI(difficulty);\n    self.bot_difficulty = difficulty;', '    self disableWeapon();\n    self botStop();\n    self.bot_difficulty = undefined;')
 scenario=r'''
 qaScenario()
 {
@@ -19,7 +19,7 @@ qaScenario()
     for(i = 0; i < players.size; i++)
     {
         if(!(players[i] isBot()) || !isAlive(players[i])) continue;
-        players[i] notify("bot_objectives_stop");
+        players[i].bot_difficulty = undefined;
         players[i] botStop();
         players[i] disableWeapon();
         if(players[i].pers["team"] == team && !isDefined(actor)) actor = players[i];
@@ -37,7 +37,7 @@ qaScenario()
         before = getTeamScore(team);
         actor enableWeapon();
         actor botAI(1);
-        actor thread objectiveThink(1);
+        actor.bot_difficulty = 1;
         actor setOrigin(enemy.origin + (0,0,4));
         wait 2;
         if(!isDefined(actor.flag))
@@ -77,7 +77,7 @@ qaScenario()
         for(i = 0; i < players.size; i++) players[i] setOrigin(park);
         actor enableWeapon();
         actor botAI(1);
-        actor thread objectiveThink(1);
+        actor.bot_difficulty = 1;
         actor setOrigin(radio.origin + (0,0,4));
         started = getTime();
         for(t = 0; t < 180 && radio.team != team; t++) wait .5;
@@ -87,12 +87,12 @@ qaScenario()
             return;
         }
         println("[bot-qa] PASS original_hq_capture ms=" + (getTime()-started));
-        actor notify("bot_objectives_stop");
+        actor.bot_difficulty = undefined;
         actor botStop();
         actor setOrigin(park);
         other enableWeapon();
         other botAI(1);
-        other thread objectiveThink(1);
+        other.bot_difficulty = 1;
         other setOrigin(radio.origin + (0,0,4));
         started = getTime();
         for(t = 0; t < 180 && !radio.hidden; t++) wait .5;
@@ -115,7 +115,7 @@ qaScenario()
         }
         actor enableWeapon();
         actor botAI(1);
-        actor thread objectiveThink(1);
+        actor.bot_difficulty = 1;
         started = getTime();
         for(t = 0; t < 60 && !level.bombplanted; t++) wait .5;
         if(!level.bombplanted)
@@ -126,7 +126,7 @@ qaScenario()
         elapsed = getTime()-started;
         if(elapsed < 5000) println("[bot-qa] FAIL shortened_plant_timer");
         else println("[bot-qa] PASS original_bomb_plant ms=" + elapsed);
-        actor notify("bot_objectives_stop");
+        actor.bot_difficulty = undefined;
         actor botStop();
         actor setOrigin(park);
         bomb = getEnt("bombtrigger", "targetname");
@@ -137,7 +137,7 @@ qaScenario()
         }
         other enableWeapon();
         other botAI(1);
-        other thread objectiveThink(1);
+        other.bot_difficulty = 1;
         started = getTime();
         for(t = 0; t < 80 && isDefined(bomb); t++) wait .5;
         elapsed = getTime()-started;
