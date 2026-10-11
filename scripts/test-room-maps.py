@@ -100,6 +100,31 @@ with patch.object(rooms.socket, 'socket', return_value=udp):
     info = rooms.info_for(room)
     assert info['players'] == 9 and info['bots'] == 8 and info['humans'] == 1
 
+# Discovery and the gateway's immediate post-creation upgrade survive one
+# delayed reply. Cached results cannot prolong the grace or revive a dead room.
+with patch.object(rooms.socket, 'socket', return_value=udp), \
+     patch.object(rooms.time, 'monotonic', return_value=100):
+    fresh = rooms.info_for(room)
+    assert fresh and room['last_info'][0] == 100
+    udp.recv.side_effect = rooms.socket.timeout('spawn in progress')
+    for now in (100.4, 101, 102):
+        with patch.object(rooms.time, 'monotonic', return_value=now):
+            fallback = rooms.info_for(room)
+            assert fallback and fallback['info'] == fresh['info']
+            assert 'ownerToken' not in fallback and room['last_info'][0] == 100
+    with patch.object(rooms.time, 'monotonic', return_value=102.001):
+        assert rooms.info_for(room) is None
+    process.poll.return_value = 1
+    assert rooms.info_for(room) is None
+    process.poll.return_value = None
+    udp.recv.side_effect = None
+    udp.recv.return_value = b'invalid reply'
+    assert rooms.info_for(room) is None
+    cold = {key:value for key,value in room.items() if key != 'last_info'}
+    udp.recv.side_effect = OSError('no first reply')
+    assert rooms.info_for(cold) is None
+    udp.recv.side_effect = None
+
 # Test the internal HTTP API with real parsing, validation and reply handling.
 server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), rooms.Handler)
 thread = threading.Thread(target=server.serve_forever, daemon=True)

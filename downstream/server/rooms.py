@@ -17,6 +17,7 @@ import time
 MAX_ROOMS = 3
 BASE_PORT = 28960
 IDLE_SECONDS = 300
+INFO_GRACE_SECONDS = 2
 SUPPORTED_MAPS = ('mp_toujane', 'mp_carentan', 'mp_dawnville')
 SUPPORTED_GAMETYPES = ('dm', 'tdm', 'ctf', 'hq', 'sd')
 MAX_BOTS = 32
@@ -47,13 +48,25 @@ def info_for(room):
             return None
         players = int(values.get('clients', '0'))
         bots = min(players, max(0, int(values.get('bots', '0'))))
-        return {'id': room['id'], 'port': room['port'], 'info': info,
+        result = {'id': room['id'], 'port': room['port'], 'info': info,
                 'instance': room.get('instance', ''),
                 'ping': max(1, round((time.monotonic() - started) * 1000)),
                 'players': players, 'bots': bots, 'humans': players - bots,
                 'botCount': room.get('botCount', 0),
                 'botDifficulty': room.get('botDifficulty', 'normal')}
-    except (OSError, ValueError):
+        room['last_info'] = (time.monotonic(), result.copy())
+        return result
+    except OSError:
+        # A cold bot spawn or round transition can briefly delay getinfo.
+        # Keep a recently confirmed live room available for its socket upgrade;
+        # a timeout must not make a just-created server appear to be deleted.
+        previous = room.get('last_info')
+        if (previous and room['process'].poll() is None and
+                time.monotonic() - previous[0] <= INFO_GRACE_SECONDS):
+            return {**previous[1], 'ping': max(previous[1]['ping'],
+                    round((time.monotonic() - started) * 1000))}
+        return None
+    except ValueError:
         return None
 
 
