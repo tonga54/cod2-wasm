@@ -46,6 +46,7 @@ static int humanClient=-1;
 static int traceCount, wall, wallDoor, smoke, friendly,crowd,stairs,ladderWorld,navClock,dropWorld,tacticalWall;
 static int teammateBlocker=-1,perchWorld,courtesyWall;
 static int slowBackground,traceMs,pedestalWorld,contactCount;
+static int hiddenNear;
 static float fallMin=256;
 int Sys_Milliseconds(void){return slowBackground?traceMs:navClock?navClock++:0;}
 static int Dvar_GetInt(const char *name){(void)name;return 0;}
@@ -62,6 +63,7 @@ qboolean SV_EntityContact(const vec_t *mins,const vec_t *maxs,const gentity_t *e
 }
 void G_TraceCapsule(trace_t *t,const vec_t *a,const vec_t *mi,const vec_t *ma,const vec_t *b,int pass,int mask){
  (void)mi;(void)ma;(void)pass;(void)mask;traceCount++;t->fraction=1;t->normal[2]=1;t->startsolid=t->allsolid=t->contents=0;
+ if(hiddenNear && mask==0x02802831 && b[0]==128){t->fraction=.5f;t->entityNum=1022;return;}
  if(slowBackground && a[0]<-1024)traceMs+=4;
  if(courtesyWall && mi[0]<0 && mask==0x02810011 && b[1]<a[1]){t->fraction=.5f;t->entityNum=1022;return;}
  if(perchWorld && a[0]<256 && a[2]==41 && a[2]==b[2]){t->fraction=b[0]>a[0]?1:.08f;return;}
@@ -616,6 +618,26 @@ int main(void){
  svs.time+=200;assert(Bot_AcquireTarget(0,&s_botAI[0],&clients[0].ps)==4);
  traceCount=0;assert(Bot_ObserveTarget(0,&s_botAI[0],4)&&traceCount==0);
  wall=wallDoor=0;level.maxclients=3;
+ // A close visible threat can interrupt tunnel vision on a distant enemy.
+ // Hidden contacts, teammates and opponents outside the view cone cannot.
+ SV_BotResetNavigation();svs.time+=1000;SV_BotEnableAI(0,1);
+ clients[1].ps.origin[0]=600;clients[1].ps.origin[1]=0;
+ clients[2].ps.origin[0]=128;clients[2].ps.origin[1]=0;
+ s_botAI[0].target=s_botAI[0].lastTarget=1;s_botAI[0].acquiredAt=svs.time-3000;
+ traceCount=0;Bot_Think(0,&s_botAI[0],&clients[0].ps);
+ assert(s_botAI[0].target==2 && s_botAI[0].acquiredAt==svs.time && traceCount==1);
+ assert(s_botAI[0].lastSeen[0]==128); // Only the observed threat enters memory.
+ s_botAI[0].target=1;svs.time+=200;hiddenNear=1;traceCount=0;
+ assert(Bot_AcquireTarget(0,&s_botAI[0],&clients[0].ps)==1 && traceCount==2);
+ hiddenNear=0;clients[2].ps.origin[0]=-128;svs.time+=200;traceCount=0;
+ assert(Bot_AcquireTarget(0,&s_botAI[0],&clients[0].ps)==1 && traceCount==1);
+ clients[2].ps.origin[0]=128;clients[2].sess.cs.team=TEAM_ALLIES;svs.time+=200;
+ assert(Bot_AcquireTarget(0,&s_botAI[0],&clients[0].ps)==1);
+ clients[2].sess.cs.team=TEAM_AXIS;clients[1].ps.origin[0]=200;svs.time+=200;traceCount=0;
+ assert(Bot_AcquireTarget(0,&s_botAI[0],&clients[0].ps)==1 && traceCount==1);
+ clients[1].ps.origin[0]=600;smoke=1;svs.time+=200;traceCount=0;
+ assert(Bot_AcquireTarget(0,&s_botAI[0],&clients[0].ps)==-1 && traceCount<=3);smoke=0;
+ puts("PASS: urgent visible threats interrupt distant aim with original reaction delay; hidden/behind/team contacts rejected; close fights stable; at most three perception rays");
  // A live route is reused without a BFS, nearest-node scan or scout work.
  SV_BotResetNavigation();s_botNavSeeded=1;
  for(i=0;i<8;i++){int n=Bot_NavAdd((float[3]){i*32,0,1});if(i)s_botNav[n-1].edge[0]=n;}

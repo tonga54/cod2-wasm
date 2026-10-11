@@ -261,6 +261,12 @@ void CDirect3DTexture_CDirect3DTexture(const CDirect3DTexture *_this, UINT32 Wid
     glGenTextures(1, &tex->texIDStorage);
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevTex);
     glBindTexture(GL_TEXTURE_2D, tex->texIDStorage);
+#ifdef __EMSCRIPTEN__
+    /* Partial authored mip chains are complete in D3D. WebGL otherwise
+     * samples black when a material requests mip filtering beyond that chain.
+     * Use the existing levels, without generating textures or extra passes. */
+    glTexParameteri(GL_TEXTURE_2D, 0x813D, tex->levelCount - 1);
+#endif
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);

@@ -127,9 +127,23 @@ objectiveState()
         {
             nextRoster = getTime() + 500;
             level.bot_mode = getCvar("g_gametype");
+            // Native DM/TDM patrols do not consume the scripted objective
+            // roster. Avoid rebuilding arrays/ranks for every living bot.
+            if(level.bot_mode == "tdm" || level.bot_mode == "dm")
+            {
+                if(getCvarInt("scr_bot_debug") && (!isDefined(level.bot_match_debug_at) || getTime() >= level.bot_match_debug_at))
+                {
+                    level.bot_match_debug_at = getTime() + 5000;
+                    println("[bots] match mode=" + level.bot_mode + " allies=" + getTeamScore("allies") + " axis=" + getTeamScore("axis"));
+                }
+                wait .5;
+                continue;
+            }
             // Keep the shared cache independent of entity lifetimes across rounds.
             players = getEntArray("player", "classname");
             numbers = [];
+            phases = [];
+            for(j = 0; j < 5; j++) phases[j] = [];
             counts["allies"] = 0;
             counts["axis"] = 0;
             counts["none"] = 0;
@@ -147,6 +161,8 @@ objectiveState()
                 // Otherwise each casualty flips parity/site/defender roles and
                 // sends living bots back across the map on the next refresh.
                 team = player.pers["team"];
+                bucket = numbers[i] % 5;
+                phases[bucket][phases[bucket].size] = numbers[i];
                 if(!isDefined(ranks[team])) ranks[team] = 0;
                 player.bot_rank = ranks[team];
                 ranks[team]++;
@@ -160,6 +176,7 @@ objectiveState()
                 counts[team]++;
             }
             level.bot_player_numbers = numbers;
+            level.bot_phases = phases;
             level.bot_team_size = counts;
             player = undefined;
             players = undefined;
@@ -176,24 +193,19 @@ objectiveState()
                 println("[bots] match " + status);
             }
         }
-        // Deathmatch patrols and observed team contacts run in native AI.
-        // There is no scripted objective needing a 20 Hz scheduler; retain
-        // only the shared roster/debug refresh in these two modes.
-        if(level.bot_mode == "tdm" || level.bot_mode == "dm")
-        {
-            wait .5;
-            continue;
-        }
         // One shared scheduler replaces a sleeping policy and two endon
         // listeners per bot. Numbers and deadlines carry no entity references.
-        for(i = 0; i < level.bot_player_numbers.size; i++)
+        carriers = undefined;
+        for(i = 0; i < level.bot_phases[phase].size; i++)
         {
-            if(level.bot_player_numbers[i] % 5 != phase) continue;
-            player = botPlayer(level.bot_player_numbers[i]);
+            player = botPlayer(level.bot_phases[phase][i]);
             if(!isDefined(player) || !isDefined(player.bot_difficulty)) continue;
             if(!isDefined(player.bot_objective_next) || getTime() >= player.bot_objective_next)
             {
-                player objectiveThink();
+                // No yield between decisions: share one current CTF snapshot
+                // for this phase, then release all entity references below.
+                if(level.bot_mode == "ctf" && !isDefined(carriers)) carriers = ctfCarriers();
+                player objectiveThink(carriers);
                 interval = 500;
                 if(player.bot_difficulty == 0) interval = 750;
                 else if(player.bot_difficulty == 2) interval = 250;
@@ -201,17 +213,18 @@ objectiveState()
             }
         }
         player = undefined;
+        carriers = undefined;
         phase = (phase + 1) % 5;
         wait .05;
     }
 }
 
-objectiveThink()
+objectiveThink(carriers)
 {
     if(isAlive(self) && self.sessionstate == "playing" && isDefined(self.bot_rank))
     {
         mode = level.bot_mode;
-        if(mode == "ctf") self ctfObjective();
+        if(mode == "ctf") self ctfObjective(carriers);
         else if(mode == "hq") self hqObjective();
         else if(mode == "sd") self sdObjective();
         else if(mode == "tdm") self tdmObjective();
@@ -356,15 +369,35 @@ selectActor(point, group, groups, duty)
     return actor;
 }
 
-ctfObjective()
+ctfCarriers()
 {
-    own = getEnt("allied_flag", "targetname");
-    enemy = getEnt("axis_flag", "targetname");
+    state = spawnStruct();
+    state.allied = getEnt("allied_flag", "targetname");
+    state.axis = getEnt("axis_flag", "targetname");
+    for(i = 0; i < level.bot_player_numbers.size; i++)
+    {
+        player = botPlayer(level.bot_player_numbers[i]);
+        if(!isDefined(player) || !isAlive(player) || !isDefined(player.flag)) continue;
+        if(isDefined(state.allied) && player.flag == state.allied) state.alliedCarrier = player;
+        if(isDefined(state.axis) && player.flag == state.axis) state.axisCarrier = player;
+    }
+    return state;
+}
+
+ctfObjective(carriers)
+{
+    if(!isDefined(carriers)) carriers = ctfCarriers();
+    own = carriers.allied;
+    enemy = carriers.axis;
+    friendlyCarrier = carriers.axisCarrier;
+    enemyCarrier = carriers.alliedCarrier;
     if(self.pers["team"] == "axis")
     {
         temp = own;
         own = enemy;
         enemy = temp;
+        friendlyCarrier = carriers.alliedCarrier;
+        enemyCarrier = carriers.axisCarrier;
     }
     if(!isDefined(own) || !isDefined(enemy) || !isDefined(own.home_origin))
     {
@@ -375,15 +408,6 @@ ctfObjective()
     {
         self setObjective(own.home_origin, 12, 3, undefined, "return_enemy_flag");
         return;
-    }
-    friendlyCarrier = undefined;
-    enemyCarrier = undefined;
-    for(i = 0; i < level.bot_player_numbers.size; i++)
-    {
-        player = botPlayer(level.bot_player_numbers[i]);
-        if(!isDefined(player) || !isAlive(player) || !isDefined(player.flag)) continue;
-        if(player.flag == enemy) friendlyCarrier = player;
-        if(player.flag == own) enemyCarrier = player;
     }
     if(!own.atbase && own.origin[2] > -5000)
     {

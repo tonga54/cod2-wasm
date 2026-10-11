@@ -1058,3 +1058,70 @@ private assets, native/WASM builds and browser package checks passed.
 Final executable SHA-256: `38af065c1709fe4c91c53f78120081a118edec26c5db4dd833b991a181c21001`.
 Final policy SHA-256: `4af82a0f98a96ecb2c0f28a145814a5381ea3da9c0a5753989ad7c5266424706`.
 Final reports: `out/bot-routes/v3-results.json`, `v4-results.json` and `hq-roles-results.json`; earlier comparisons and raw logs remain alongside them.
+
+### Threat priorities and cheaper objective scheduling (2026-10-11)
+
+A bot engaged beyond 448 units checks one immediate threat within 224 units
+before committing to the distant target. The new contact must pass the normal
+view cone, collision and smoke checks; a hidden contact cannot replace the
+target or enter memory. Close engagements remain committed, and switching
+targets retains the original reaction delay, aim error and turn speed. Each
+acquisition is capped at three visibility rays, including checks on the old
+target (the old lost-target path could spend four). No navigation, tactical
+trace or simulation-tick budgets were increased.
+
+The objective scheduler builds five lists of client numbers during its existing
+500-ms roster refresh. A phase visits only its assigned bots rather than
+scanning the entire roster every 50 ms. CTF decisions in that phase share one
+fresh flag/carrier snapshot; it is released before yielding, so no cached
+entity references survive between ticks or round teardown. Direct policy
+calls still obtain a fresh snapshot. Living-team counts, stable ranks, duty
+leases, human interaction priority and original use timers are preserved.
+TDM/DM skip the scripted objective roster altogether; native patrols and team
+contacts already provide their decisions.
+
+Controller sanitizers exercise visible/hidden/behind/team threat cases, stable
+close fights, original reaction delays and the three-ray limit. The existing
+64-seed Normal aim checks remain unchanged. Controlled runtime checks use the
+original game scripts, and the isolated Raspberry measurements include normal
+combat and navigation warm-up, without browser traffic. Reports for this change
+are under `out/bot-efficiency/`.
+
+Two alternating 100-second Toujane CTF runs per version, with 32 Normal bots
+on the Pi 5 / i386 QEMU runtime, measured 47.06% and 46.61% of one core before,
+and 42.79% and 45.65% after (means 46.84% vs 44.22%, about 5.6% lower).
+All four maintained 20.00 ticks/s. Matches are not identical workloads: combat,
+respawns and paths vary. The worst game-frame maxima were 67 ms before and
+80 ms after; lower average CPU does not imply fewer worst-case hitches.
+The HQ/SD autonomous checks also retained original game-frame spikes of
+174/171 ms. No reduction of tick rate, aim fairness, movement or rendering is
+used to obtain these measurements.
+
+The final TDM/DM fast path was measured separately. Across the checked
+32-bot matches:
+
+| Map / mode | Duration | Ticks/s | CPU, one core | Max game frame |
+| --- | ---: | ---: | ---: | ---: |
+| Carentan / TDM | 90 s | 20.00 | 45.24% | 49 ms |
+| Dawnville / DM | 60 s | 20.00 | 43.02% | 47 ms |
+| Toujane / CTF, repeat 1 | 100 s | 20.00 | 42.79% | 80 ms |
+| Toujane / CTF, repeat 2 | 100 s | 20.00 | 45.65% | 54 ms |
+| Carentan / HQ | 60 s | 19.99 | 50.30% | 174 ms |
+| Dawnville / SD | 60 s | 20.00 | 50.28% | 171 ms |
+
+The follow-up policy change only removes unused DM/TDM roster work; the
+objective-mode branches are identical to the preceding measured candidate.
+
+Executable SHA-256: `3003359695c895e720e3a71541b063db3773373194a64d229fa87cd16705dd4c`.
+Policy SHA-256: `b473d8cc5a8dbccc5673b8e9985b159aefa2a49b8e6a0d5ecd3100dc5bbcc2b8`.
+
+All 15 controlled runtime assertions passed: six CTF election/interaction cases,
+three carrier-responder/escort replacement cases, four HQ capture/destruction
+and defender respawn cases, and the original S&D plant/defuse timers (5.5/10.5 s
+including the harness observation interval). Native and WASM builds, controller
+sanitizers, the old-target-lock mutation check, frame cadence, objective
+interactions, roster lifetime, render/texture/shader checks, private assets and
+browser package validation passed. This is targeted validation; the previously
+recorded host-ABI failure in the full static archive test remains outside this
+change. The browser smoke test uses a native room server: the baseline's direct
+`devmap` browser-host path produced a pre-existing function-signature mismatch.

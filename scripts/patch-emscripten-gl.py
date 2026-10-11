@@ -147,6 +147,15 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
           var pointPass = "";
           if (pointLights) {
             var pointUV = GLImmediate.useTextureMatrix ? "(u_textureMatrix0 * v_texCoord0).xy" : "v_texCoord0.xy";
+            // Reuse the material's base texel for illumination. This removes
+            // the second texture lookup on flashes, including matrix UVs.
+            var pointSample = "texture2D(u_texUnit0, " + pointUV + ")";
+            var pointAlbedo = pointSample;
+            if (fsTexEnvPass.indexOf(pointSample) !== -1) {
+              fsTexEnvPass = "vec4 cod2BaseTexel = " + pointSample + ";\n" +
+                fsTexEnvPass.split(pointSample).join("cod2BaseTexel");
+              pointAlbedo = "cod2BaseTexel";
+            }
             pointPass = "if (u_cod2LightCount > 0) {\n" +
               (pointNormal ? "highp vec3 n = v_cod2Normal;\n" :
                 "highp vec3 n = cross(dFdx(v_cod2Eye), dFdy(v_cod2Eye));\n") +
@@ -156,10 +165,14 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "highp vec3 delta = u_cod2LightEye[" + light + "].xyz - v_cod2Eye;\n" +
                 "highp float distance2 = dot(delta,delta);\n" +
                 "float attenuation = max(1.0 - distance2 * u_cod2LightEye[" + light + "].w, 0.0);\n" +
-                "float incidence = abs(dot(n,delta)) * inversesqrt(max(distance2, 0.0001));\n" +
+                // Models have authored outward normals; flashes must not
+                // light their back side. Derivative world normals lack a
+                // guaranteed orientation, so retain two-sided world lighting.
+                "float incidence = " + (pointNormal ? "max(dot(n,delta), 0.0)" : "abs(dot(n,delta))") +
+                " * inversesqrt(max(distance2, 0.0001));\n" +
                 "lightSum += u_cod2LightColor[" + light + "].rgb * attenuation * attenuation * incidence;\n}\n";
             }
-            pointPass += "gl_FragColor.rgb += texture2D(u_texUnit0, " + pointUV + ").rgb * lightSum;\n}\n";
+            pointPass += "gl_FragColor.rgb += " + pointAlbedo + ".rgb * lightSum;\n}\n";
           }
           var vsSource = ['''
 POINT_VERTEX_ORIGINAL = 'vsPointSizeDefs, vsClipPlaneDefs, vsLightingDefs, "void main()"'

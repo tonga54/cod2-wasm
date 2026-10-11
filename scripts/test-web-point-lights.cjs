@@ -40,9 +40,11 @@ for (let angle = -180; angle <= 180; angle += 3) {
 const defsStart = linked.indexOf('          // COD2_POINT_LIGHT_SHADER:');
 const defsEnd = linked.indexOf('          var vsSource =', defsStart);
 assert(defsStart >= 0 && defsEnd > defsStart);
-const generate = Function('GLImmediate', 'GLEmulation', linked.slice(defsStart, defsEnd) + '\nreturn {pointVarying,pointDefs,pointPass};');
+const generate = Function('GLImmediate', 'GLEmulation', 'fsTexEnvPass', linked.slice(defsStart, defsEnd) + '\nreturn {pointVarying,pointDefs,pointPass,fsTexEnvPass};');
 for (const model of [false, true]) for (const type of [0, 0x0DE1, 0x8513]) for (const matrix of [false, true]) for (const units of [[], [1], [0], [0, 1]]) {
-  const shader = generate.call({usedTexUnitList: units}, {useTextureMatrix: matrix, TexEnvJIT: {getTexUnitType: () => type}}, {lightingEnabled: model});
+  const uv = matrix ? '(u_textureMatrix0 * v_texCoord0).xy' : 'v_texCoord0.xy';
+  const material = `gl_FragColor = texture2D(u_texUnit0, ${uv}) * v_color;`;
+  const shader = generate.call({usedTexUnitList: units}, {useTextureMatrix: matrix, TexEnvJIT: {getTexUnitType: () => type}}, {lightingEnabled: model}, material);
   const enabled = type === 0x0DE1 && units.includes(0);
   assert.equal(Boolean(shader.pointPass), enabled);
   if (enabled) {
@@ -52,10 +54,19 @@ for (const model of [false, true]) for (const type of [0, 0x0DE1, 0x8513]) for (
     assert.equal(shader.pointPass.includes('highp vec3 n = v_cod2Normal;'), model);
     assert(shader.pointDefs.includes('[4]'));
     for (let i = 0; i < 4; ++i) assert(shader.pointPass.includes('u_cod2LightCount > ' + i));
-    assert(shader.pointPass.includes(matrix ? '(u_textureMatrix0 * v_texCoord0).xy' : 'v_texCoord0.xy'));
+    assert(shader.fsTexEnvPass.includes(uv));
+    assert(shader.pointPass.includes('cod2BaseTexel.rgb * lightSum'));
+    assert.equal((shader.fsTexEnvPass + shader.pointPass).match(/texture2D\(/g).length, 1,
+      'material and flashes share one texture lookup');
+    assert(shader.pointPass.includes(model ? 'max(dot(n,delta), 0.0)' : 'abs(dot(n,delta))'));
     assert(!shader.pointPass.includes('gl_FragColor.a'), 'flash illumination preserves transparency');
   }
 }
+// Materials without a base sample still receive light without referencing an
+// undefined texel, or adding an unconditional sample to unlit frames.
+const noSample = generate.call({usedTexUnitList:[0]}, {useTextureMatrix:false,TexEnvJIT:{getTexUnitType:()=>0x0DE1}}, {lightingEnabled:false}, 'gl_FragColor = v_color;');
+assert.equal(noSample.fsTexEnvPass, 'gl_FragColor = v_color;');
+assert(noSample.pointPass.includes('texture2D(u_texUnit0, v_texCoord0.xy).rgb'));
 assert(linked.includes('fsTexEnvPass, pointPass, fogPass, fsAlphaTestPass'), 'light fades into the original fog');
 const glslStart = linked.indexOf('          function cod2Glsl300(');
 const glslEnd = linked.indexOf('          this.vertexShader =', glslStart);

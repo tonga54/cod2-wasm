@@ -782,13 +782,20 @@ static qboolean Bot_ObserveTarget(int clientNum, botAIState_t *ai, int target)
 
 static int Bot_AcquireTarget(int clientNum, botAIState_t *ai, playerState_t *ps)
 {
-    int nearest[8], i, j, k;
+    int nearest[8], i, j, k, checked=0, urgent=-1;
     float distances[8];
+    qboolean current=ai->target>=0 && Bot_IsEnemy(clientNum,ai->target);
+    float currentDistance=current?Bot_DistanceSq(ps->origin,SV_GameClientNum(ai->target)->origin):0;
+    // A close fight stays committed. A distant engagement may yield to one
+    // immediately threatening visible opponent, without more than three rays.
+    if(current && currentDistance<=448*448) {
+        ++checked;
+        if(Bot_ObserveTarget(clientNum,ai,ai->target)) return ai->target;
+        current=0;
+    }
     for(i=0;i<8;++i) { nearest[i]=-1; distances[i]=6250000; }
     float yaw=ai->aim[1]/BOT_RAD_TO_DEG,viewX=cosf(yaw),viewY=sinf(yaw);
     static const float cone[3]={.57357644f,.42261826f,.25881905f};
-    if (ai->target >= 0 && Bot_IsEnemy(clientNum, ai->target) && Bot_ObserveTarget(clientNum, ai, ai->target))
-        return ai->target;
     for (i = 0; i < level.maxclients; ++i) {
         float distance;
         if (!Bot_IsEnemy(clientNum, i)) continue;
@@ -811,8 +818,18 @@ static int Bot_AcquireTarget(int clientNum, botAIState_t *ai, playerState_t *ps)
     // candidate. Nearby enemies behind cover cannot hide a visible fourth.
     int candidates=0;
     while(candidates<8 && nearest[candidates]>=0) ++candidates;
-    for(i=0;i<3 && i<candidates;++i) {
+    if(current) {
+        if(candidates && distances[0]<224*224) {
+            urgent=nearest[0]; ++checked;
+            if(Bot_ObserveTarget(clientNum,ai,urgent)) return urgent;
+        }
+        ++checked;
+        if(Bot_ObserveTarget(clientNum,ai,ai->target)) return ai->target;
+    }
+    for(i=0;i<3 && i<candidates && checked<3;++i) {
         int slot=i<2?i:2+(ai->perceptionSlot++%(candidates-2));
+        if(nearest[slot]==urgent || nearest[slot]==ai->target) continue;
+        ++checked;
         if(nearest[slot]>=0 && Bot_ObserveTarget(clientNum,ai,nearest[slot])) return nearest[slot];
     }
     return -1;

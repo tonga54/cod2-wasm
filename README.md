@@ -276,7 +276,11 @@ anti-aliasing and 4× anisotropic filtering where supported. Rendering follows
 the display cadence, including 120 Hz. Performance changes cache static vertex
 buffers, texture/sampler/render state, shader uniforms and animation work;
 they do not reduce texture quality or remove map geometry/effects. Up to four
-FX point lights are combined into existing opaque geometry passes. The browser
+FX point lights are combined into existing opaque geometry passes. Their base
+texture sample is shared with the material, and authored model normals prevent
+flashes from illuminating the back side. Partial texture mip chains use their
+existing final level instead of sampling black; no mip generation, additional
+lights, geometry, resolution or post-processing passes are introduced. The browser
 uses Emscripten's fixed-function-only GL path to avoid restoring an unused
 programmable pipeline between draws; shader attributes, lighting and texture
 filtering remain intact. Static model colors and index buffers also stay on the
@@ -348,6 +352,15 @@ recent muzzle-light checks also held about 120 FPS. Results depend on the
 client, host, network and player count. The project does not guarantee zero
 latency or a fixed frame rate on every device.
 
+The 2026-10-11 lighting/mipmap follow-up retained 120 FPS at the same Carentan
+spectator camera and 1280×720 resolution. A warm reference repeat measured
+4.37 ms main-thread / 3.15 ms GPU against 4.33 / 3.19 ms afterward; the initial
+reference had 4.11 / 2.64 ms. These short desktop samples establish no reliable
+GPU speedup and do not represent a low-end laptop. WebGL2 pixel checks verify
+front/back model lighting, unchanged two-sided world lighting, matrix UVs and
+partial-mip sampling. The updated client also completed a live Carentan
+connection, weapon selection and firing check without shader errors.
+
 ```sh
 # Browser package, shared gameplay, rendering, networking and UI regressions
 ./scripts/test-static.sh
@@ -361,6 +374,11 @@ python3 scripts/test-native-file-listing.py
 # Private assets and balance audit
 python3 scripts/check-private-assets.py
 python3 scripts/test-weapon-balance.py
+
+# Optional GPU fixture from the linked production shaders (after build-web.sh)
+node scripts/prepare-web-lighting-qa.cjs
+python3 -m http.server 8099 --bind 127.0.0.1 --directory out/web-lighting-qa
+# Open http://127.0.0.1:8099/lighting-qa.html; all GPU checks must pass.
 
 # Benchmarks; runtime benchmark requires the documented QA stack
 python3 scripts/test-huffman-cache.py --benchmark
