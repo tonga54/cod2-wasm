@@ -32,6 +32,8 @@ qaScenario()
     }
     if(mode == "ctf")
     {
+        selfTest = actor qaStableRoles();
+        actor qaActorElection();
         own = getEnt("allied_flag", "targetname");
         enemy = getEnt("axis_flag", "targetname");
         before = getTeamScore(team);
@@ -145,6 +147,80 @@ qaScenario()
         else if(elapsed < 10000) println("[bot-qa] FAIL shortened_defuse_timer");
         else println("[bot-qa] PASS original_bomb_defuse ms=" + elapsed);
     }
+}
+
+qaStableRoles()
+{
+    players = getEntArray("player", "classname");
+    victim = undefined;
+    survivor = undefined;
+    for(i = 0; i < players.size; i++)
+    {
+        player = players[i];
+        if(player == self || !(player isBot()) || !isAlive(player) ||
+           player.pers["team"] != self.pers["team"]) continue;
+        if(!isDefined(victim)) victim = player;
+        else survivor = player;
+    }
+    if(!isDefined(survivor))
+    {
+        println("[bot-qa] FAIL stable_roles_setup");
+        return false;
+    }
+    rank = survivor.bot_rank;
+    victim suicide();
+    wait 1.2;
+    if(survivor.bot_rank == rank)
+        println("[bot-qa] PASS survivor_role_stable_after_teammate_death");
+    else println("[bot-qa] FAIL survivor_role_changed_after_teammate_death");
+    return true;
+}
+
+qaActorElection()
+{
+    point = self.origin + (10000,0,0);
+    duty = "qa_approach";
+    first = self selectActor(point, 0, 1, duty);
+    again = self selectActor(point, 0, 1, duty);
+    if(!isDefined(first) || first != again)
+    {
+        println("[bot-qa] FAIL shared_actor_election");
+        return;
+    }
+    key = self.pers["team"] + "_" + duty + "_1_0";
+    cache = level.bot_actor_cache[key];
+    cache.until = 0;
+    cache.remaining = distance(first.origin, point);
+    cache.progressAt = getTime() - 13000;
+    first.bot_actor_until = getTime() + 2500;
+    replacement = self selectActor(point, 0, 1, duty);
+    if(!isDefined(replacement) || replacement == first)
+        println("[bot-qa] FAIL stalled_actor_handoff");
+    else
+    {
+        cache.until = 0;
+        cache.remaining = distance(replacement.origin, point) + 64;
+        cache.progressAt = getTime() - 13000;
+        advancing = self selectActor(point, 0, 1, duty);
+        if(advancing == replacement && cache.progressAt == getTime())
+            println("[bot-qa] PASS shared_actor_cache_stall_handoff_progress_lease");
+        else println("[bot-qa] FAIL advancing_actor_lease");
+    }
+    first.bot_actor_until = 0;
+    if(isDefined(replacement)) replacement.bot_actor_until = 0;
+    roster = level.bot_player_numbers;
+    level.bot_player_numbers = [];
+    level.bot_player_numbers[0] = first getEntityNumber();
+    cache.until = 0;
+    cache.number = first getEntityNumber();
+    cache.remaining = distance(first.origin, point);
+    cache.progressAt = getTime() - 13000;
+    sole = self selectActor(point, 0, 1, duty);
+    level.bot_player_numbers = roster;
+    if(isDefined(sole) && sole == first)
+        println("[bot-qa] PASS sole_actor_keeps_objective");
+    else println("[bot-qa] FAIL sole_actor_lost_objective");
+    first.bot_actor_until = 0;
 }
 
 qaPlaceAtTrigger(trigger)

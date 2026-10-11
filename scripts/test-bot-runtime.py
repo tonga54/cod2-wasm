@@ -18,6 +18,7 @@ def main():
     parser.add_argument('--mode', choices=['dm', 'tdm', 'ctf', 'hq', 'sd'], default='tdm')
     parser.add_argument('--bots', type=int, choices=range(1, 33), default=16)
     parser.add_argument('--seconds', type=int, default=90)
+    parser.add_argument('--expect-passes', type=int, default=0, help='Minimum completed controlled scenarios')
     parser.add_argument('--image', default='local/cod2-native-server:dev')
     parser.add_argument('--runtime', choices=['native', 'pi'], default='native')
     parser.add_argument('--difficulty', type=int, choices=range(3), default=1)
@@ -91,6 +92,9 @@ def main():
         profiles = [dict((key, int(value)) for key, value in re.findall(r'(\w+)=(\d+)', line))
                     for line in re.findall(r'\[bots\] profile (.+)', log)]
         windows = [p for p in profiles[1:] if p.get('wall', 0) >= 4500]
+        sniper_samples = [tuple(map(int, m)) for m in re.findall(
+            r'\[bots\] sniper (\d+) catalogue=(\d+) perched=(\d+) guarding=(\d+) relativeHeight=(-?\d+)', log)]
+        held_heights = [height for _, _, perched, guarding, height in sniper_samples if perched or guarding]
         result = {
             'map': args.map, 'mode': args.mode, 'bots': args.bots, 'seconds': round(elapsed, 2),
             'runtime': args.runtime, 'difficulty': args.difficulty,
@@ -102,16 +106,24 @@ def main():
             'maxGameFrameMs': max((p['maxGame'] for p in windows), default=None),
             'maxBotAiMs': max((p['maxAI'] for p in windows), default=None),
             'profile': re.findall(r'\[bots\] profile (.+)', log),
+            'sniperOverwatch': {
+                'catalogueSlotsSeen': max((sample[1] for sample in sniper_samples), default=0),
+                'holdingSamples': len(held_heights),
+                'maxHoldingHeightAboveAnchor': max(held_heights, default=None),
+                'scope': '5s samples; height is relative to the guarded objective or lowest spawn for patrols'
+            },
             'intents': sorted(set(re.findall(r'intent=(\w+)', log))),
-            'controlledPasses': re.findall(r'\[bot-qa\] PASS (.+)', log),
-            'controlledFailures': re.findall(r'\[bot-qa\] FAIL (.+)', log),
+            'controlledPasses': re.findall(r'\[bot(?:-nav)?-qa\] PASS (.+)', log),
+            'controlledFailures': re.findall(r'\[bot(?:-nav)?-qa\] FAIL (.+)', log),
             'scope': f'{args.runtime} Docker match, including navigation warm-up; no browser/network/rendering load. '
                      'Position samples every 5s are diagnostic coverage, not proof of all routes.'
         }
         (args.output / f'{args.map}-{args.mode}.json').write_text(json.dumps(result, indent=2) + '\n')
         print(json.dumps(result, indent=2))
         if result['controlledFailures']:
-            raise RuntimeError('Controlled objective scenario failed')
+            raise RuntimeError('Controlled scenario failed; see saved server log')
+        if len(result['controlledPasses']) < args.expect_passes:
+            raise RuntimeError('Controlled scenarios did not finish before the measurement ended')
     finally:
         try:
             log = docker('logs', name)

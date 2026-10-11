@@ -137,7 +137,7 @@ for use inside the ARM64 Pi container. The default delivery image tags are
 `local/cod2-wasm:dev`, `local/cod2-gateway:dev` and
 `local/cod2-native-server:dev`.
 
-Use a clean checkout of the published `origin/master`. If you change source,
+Use a clean checkout of the published `origin/main`. If you change source,
 commit and push those changes before building; the helper requires that exact
 published revision and checks that the web image was built from it. Keep the
 private game files out of Git. Check the delivery platforms:
@@ -239,7 +239,7 @@ while no players are connected:
 
 ```sh
 cd cod2-wasm
-git pull --ff-only origin master
+git pull --ff-only origin main
 DOCKER_DEFAULT_PLATFORM=linux/arm64 ./scripts/build-docker.sh
 ./scripts/deploy-pi.sh USER@PI_LAN_IP
 ```

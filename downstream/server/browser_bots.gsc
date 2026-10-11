@@ -2,6 +2,7 @@
 // for factions, weapon restrictions, spawning, round rules and respawning.
 main()
 {
+    level.bot_actor_cache = [];
     level thread objectiveState();
     level thread populate();
 }
@@ -94,6 +95,7 @@ joinGame(difficulty)
         weapon = choices[slot];
         self [[level.weapon]](weapon);
         self.pers["bot_faction"] = faction;
+        self.pers["bot_weapon_role"] = slot;
     }
     self closeMenu();
     self closeInGameMenu();
@@ -120,6 +122,9 @@ objectiveState()
             counts["allies"] = 0;
             counts["axis"] = 0;
             counts["none"] = 0;
+            ranks["allies"] = 0;
+            ranks["axis"] = 0;
+            ranks["none"] = 0;
             for(i = 0; i < players.size; i++)
             {
                 player = players[i];
@@ -127,15 +132,20 @@ objectiveState()
                 player.bot_rank = undefined;
                 if(!(player isBot()) || !isDefined(player.pers["team"]) || player.pers["team"] == "spectator")
                     continue;
-                // Only surviving players reserve tactical duties.
+                // Death releases a duty, not every survivor's team identity.
+                // Otherwise each casualty flips parity/site/defender roles and
+                // sends living bots back across the map on the next refresh.
+                team = player.pers["team"];
+                if(!isDefined(ranks[team])) ranks[team] = 0;
+                player.bot_rank = ranks[team];
+                ranks[team]++;
+                // Only surviving players count toward current team strength.
                 if(!isAlive(player) || player.sessionstate != "playing")
                 {
                     player.bot_actor_until = 0;
                     continue;
                 }
-                team = player.pers["team"];
                 if(!isDefined(counts[team])) counts[team] = 0;
-                player.bot_rank = counts[team];
                 counts[team]++;
             }
             level.bot_player_numbers = numbers;
@@ -207,16 +217,58 @@ setObjective(point, radius, behavior, entity, intent)
 
 // A role is based on the bot's rank within its team, not entity parity (which
 // otherwise assigns the whole automatically-balanced team the same role).
-selectActor(point, group, groups)
+selectActor(point, group, groups, duty)
 {
+    // Share elections across the team. A 32-bot objective must not rescan the
+    // entire roster independently for every covering bot's decision.
+    key = self.pers["team"] + "_" + duty + "_" + groups + "_" + group;
+    if(!isDefined(level.bot_actor_cache[key]))
+        level.bot_actor_cache[key] = spawnStruct();
+    cache = level.bot_actor_cache[key];
+    if(isDefined(cache.until) && getTime() < cache.until && distance(cache.point, point) < 64)
+    {
+        if(cache.number < 0) return undefined;
+        cached = botPlayer(cache.number);
+        if(isDefined(cached) && isAlive(cached) && cached.sessionstate == "playing" &&
+           isDefined(cached.pers["team"]) && cached.pers["team"] == self.pers["team"] &&
+           !isDefined(cached.flag) && (!(cached isBot()) || (isDefined(cached.bot_rank) &&
+           (groups <= 1 || cached.bot_rank % groups == group))) &&
+           !(duty == "attack_flag" && isDefined(cached.bot_actor_duty) && cached.bot_actor_duty == "recover" &&
+           cached.bot_actor_until > getTime())) return cached;
+    }
+    // At most once per shared election, replace an approach that has made no
+    // progress for twelve seconds. Never interrupt an original use timer or
+    // an actor already at the trigger. Scalar state survives no entity refs.
+    if(isDefined(cache.number) && cache.number >= 0 && distance(cache.point, point) < 64)
+    {
+        previous = botPlayer(cache.number);
+        if(isDefined(previous) && isAlive(previous))
+        {
+            remaining = distance(previous.origin, point);
+            if(!isDefined(cache.remaining) || remaining < cache.remaining - 48 ||
+               remaining < 192 || isDefined(previous.progressbackground))
+            {
+                cache.remaining = remaining;
+                cache.progressAt = getTime();
+            }
+            else if(getTime() - cache.progressAt > 12000)
+            {
+                cache.retryNumber = cache.number;
+                cache.retryUntil = getTime() + 8000;
+                previous.bot_actor_until = 0;
+            }
+        }
+    }
     actor = undefined;
     best = 1000000;
     leaseActor = undefined;
+    retryActor = undefined;
     for(i = 0; i < level.bot_player_numbers.size; i++)
     {
         player = botPlayer(level.bot_player_numbers[i]);
         if(!isDefined(player) || !isAlive(player) || player.sessionstate != "playing" ||
-           !isDefined(player.pers["team"]) || player.pers["team"] != self.pers["team"]) continue;
+           !isDefined(player.pers["team"]) || player.pers["team"] != self.pers["team"] ||
+           isDefined(player.flag)) continue;
         // Cover a human or bot already interacting instead of competing for
         // the trigger and resetting their original progress timer.
         if(isDefined(player.progressbackground) && distance(player.origin, point) < 256)
@@ -226,28 +278,58 @@ selectActor(point, group, groups)
         }
         if(!(player isBot()) || !isDefined(player.bot_rank)) continue;
         if(groups > 1 && player.bot_rank % groups != group) continue;
+        if(duty == "attack_flag" && isDefined(player.bot_actor_duty) && player.bot_actor_duty == "recover" &&
+           player.bot_actor_until > getTime()) continue;
+        if(isDefined(cache.retryUntil) && getTime() < cache.retryUntil &&
+           (player getEntityNumber()) == cache.retryNumber)
+        {
+            retryActor = player;
+            continue;
+        }
         if(isDefined(player.bot_actor_until) && getTime() < player.bot_actor_until &&
+           isDefined(player.bot_actor_duty) && player.bot_actor_duty == duty &&
            player.bot_actor_group == group && player.bot_actor_groups == groups &&
            distance(player.bot_actor_point, point) < 64) leaseActor = player;
         d = distance(player.origin, point);
+        // Keep scoped support on overwatch when a similarly close assault
+        // bot can interact; a sniper can still take over when needed.
+        if(isDefined(player.pers["bot_weapon_role"]) && player.pers["bot_weapon_role"] == 3) d += 192;
         if(d < best)
         {
             best = d;
             actor = player;
         }
     }
+    // A sole surviving bot keeps trying; a handoff requires a replacement.
+    if(!isDefined(actor) && isDefined(retryActor))
+    {
+        actor = retryActor;
+        cache.progressAt = getTime();
+    }
     // Keep one actor approaching the trigger. Reelecting the nearest on every
     // update made teammates exchange jobs at corners before either arrived.
-    if(isDefined(leaseActor) && (!isDefined(actor) || !isDefined(actor.progressbackground))) return leaseActor;
-    if(isDefined(actor) && (actor isBot()))
+    if(isDefined(leaseActor) && (!isDefined(actor) || !isDefined(actor.progressbackground))) actor = leaseActor;
+    else if(isDefined(actor) && (actor isBot()))
     {
         // Store only scalars/vectors on the actor. No cross-entity references
         // or per-decision structs survive a round teardown.
         actor.bot_actor_point = point;
         actor.bot_actor_group = group;
         actor.bot_actor_groups = groups;
+        actor.bot_actor_duty = duty;
         actor.bot_actor_until = getTime() + 2500;
     }
+    number = -1;
+    if(isDefined(actor)) number = actor getEntityNumber();
+    if(!isDefined(cache.number) || cache.number != number || distance(cache.point, point) >= 64)
+    {
+        cache.progressAt = getTime();
+        cache.remaining = 1000000;
+        if(isDefined(actor)) cache.remaining = distance(actor.origin, point);
+    }
+    cache.number = number;
+    cache.point = point;
+    cache.until = getTime() + 500;
     return actor;
 }
 
@@ -282,7 +364,7 @@ ctfObjective()
     }
     if(!own.atbase && own.origin[2] > -5000)
     {
-        actor = self selectActor(own.origin, 0, 1);
+        actor = self selectActor(own.origin, 0, 1, "recover");
         if(isDefined(actor) && actor == self)
         {
             self setObjective(own.origin, 12, 3, undefined, "recover_own_flag");
@@ -305,10 +387,14 @@ ctfObjective()
         else self botClearGoal(); // Scout the return lanes instead of a carrier pile-up.
         return;
     }
-    if(level.bot_team_size[self.pers["team"]] > 2 && self.bot_rank % 4 == 0 && own.atbase)
+    actor = undefined;
+    if(enemy.origin[2] > -5000) actor = self selectActor(enemy.origin, 0, 1, "attack_flag");
+    if(isDefined(actor) && actor == self)
+        self setObjective(enemy.origin, 12, 0, undefined, "capture_enemy_flag");
+    else if(level.bot_team_size[self.pers["team"]] > 2 && self.bot_rank % 4 == 0 && own.atbase)
         self setObjective(own.home_origin, 160, 1, undefined, "defend_flag_base");
     else if(enemy.origin[2] > -5000)
-        self setObjective(enemy.origin, 12, 0, undefined, "capture_enemy_flag");
+        self setObjective(enemy.origin, 160, 1, undefined, "cover_flag_attack");
     else self botClearGoal();
 }
 
@@ -339,7 +425,9 @@ hqObjective()
         // Keep a capture element inside the radius and a security element
         // watching entrances. Small teams commit everyone to the capture.
         size = level.bot_team_size[self.pers["team"]];
-        if(size > 2 && self.bot_rank >= 2)
+        actor = undefined;
+        if(size > 2) actor = self selectActor(radio.origin, self.bot_rank % 2, 2, "radio");
+        if(size > 2 && (!isDefined(actor) || actor != self))
             self setObjective(radio.origin, 144, 1, undefined, "cover_headquarters_capture");
         else if(radio.team == "none")
             self setObjective(radio.origin, 48, 0, undefined, "capture_headquarters");
@@ -366,7 +454,7 @@ sdObjective()
             self setObjective(bomb.origin, 180, 1, undefined, "defend_planted_bomb");
         else
         {
-            actor = self selectActor(bomb.origin, 0, 1);
+            actor = self selectActor(bomb.origin, 0, 1, "defuse");
             // Preserve the current user throughout the original hold timer.
             if(isDefined(actor) && actor == self)
             {
@@ -405,7 +493,7 @@ sdObjective()
         self setObjective(zone.origin, 180, 1, undefined, "defend_bomb_site");
         return;
     }
-    actor = self selectActor(zone.origin, group, valid.size);
+    actor = self selectActor(zone.origin, group, valid.size, "plant");
     // A planting field is a boolean, not the player. Keep the closest planter
     // stationary so actor selection stays stable while the five seconds pass.
     if(isDefined(actor) && actor == self)

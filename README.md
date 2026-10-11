@@ -65,13 +65,18 @@ bots do not award themselves objectives or bypass round rules. A bot already
 interacting, or a human interacting nearby, keeps that role while teammates
 cover. Difficulty also controls sight angle, bursts and how often objectives
 are reconsidered. Normal and Hard bots seek nearby cover when wounded or
-reloading. Lost enemies are remembered only at their last visible position.
+reloading. Snipers favor elevated, sheltered firing lanes, hold their position
+instead of chasing distant targets, and relocate when compromised. Stalled
+objective approaches can hand their role to another bot. Lost enemies are remembered only at their last visible position.
 
 Navigation is built from map collision, spawn locations and announced
 objectives, with bounded work per server frame and shared spatial lookups.
 Cached A* routes, local doorway refinement, route-progress checks and temporary
 blocked-edge exclusions improve progress. Navigation and search budgets are
-shared across all bots; patrols remember visited areas and spread their destinations. Guards spread out, and original ladder materials connect accessible
+shared across all bots; patrols remember visited areas and spread their destinations.
+Route reservations favor less crowded lanes, and blocked teammates use a stable
+priority to yield passage. Guards evaluate firing lanes and low cover within a
+shared tactical trace budget. Original ladder materials connect accessible
 rooftops. Directed, collision-checked drops and low-parapet jumps provide
 exits from supported elevated areas; scoped bots seek lookout positions and wait to finish aiming.
 This is first-party multiplayer AI, not the retail campaign AI. Complex routes

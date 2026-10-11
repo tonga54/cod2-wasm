@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("--roof-exits", action="store_true", help="Also exercise complex elevated escape routes on Toujane and Carentan")
+parser.add_argument("--roof-exits", action="store_true", help="Also exercise elevated escape routes on Toujane, Carentan and Dawnville")
 args = parser.parse_args()
 
 root = Path(__file__).resolve().parents[1]
@@ -20,6 +20,11 @@ qaNavigation()
     level endon("intermission");
     wait 12;
     map = getCvar("mapname");
+    if(map == "mp_dawnville" && ROOF_EXITS)
+    {
+        qaDawnvilleRoofs();
+        return;
+    }
     if(map != "mp_toujane" && (map != "mp_carentan" || !ROOF_EXITS))
     {
         println("[bot-nav-qa] FAIL scenario_requires_toujane_or_carentan");
@@ -138,6 +143,57 @@ qaNavigation()
     }
     println("[bot-nav-qa] FAIL roof_exit map=" + map + " position=" + actor.origin);
     actor botStop();
+}
+
+qaDawnvilleRoofs()
+{
+    // Authored TDM spawns on three different elevated structures. Only the
+    // fixture uses setOrigin; escape and landing use original movement.
+    starts[0] = (-22,-16906,192);
+    starts[1] = (-361,-18197,180);
+    starts[2] = (1015,-15300,134);
+    goals[0] = (56,-17011,56);
+    goals[1] = (-17,-18134,68);
+    goals[2] = (901,-15604,19);
+    players = getEntArray("player", "classname");
+    for(i = 0; i < players.size; i++)
+    {
+        players[i].bot_difficulty = undefined;
+        players[i] botStop();
+        players[i] disableWeapon();
+        if(i < 3) players[i] setOrigin(starts[i]);
+        else players[i] setOrigin((2824 + (i-3)*40,-15592,-32));
+    }
+    if(players.size < 3)
+    {
+        println("[bot-nav-qa] FAIL requires_three_actors");
+        return;
+    }
+    wait 1;
+    for(i = 0; i < 3; i++) players[i] thread qaDawnvilleExit(i,goals[i]);
+}
+
+qaDawnvilleExit(index, goal)
+{
+    start = self.origin;
+    before = self.health;
+    started = getTime();
+    self botAI(1);
+    for(t = 0; t < 240; t++)
+    {
+        self botGoal(goal,12,3,-1);
+        wait .5;
+        if(self.origin[2] < start[2]-64 && distance(self.origin,start) > 96 && self isOnGround())
+        {
+            if(self.health < before)
+                println("[bot-nav-qa] FAIL roof_exit_damage map=mp_dawnville case=" + index + " health=" + self.health);
+            else println("[bot-nav-qa] PASS roof_exit map=mp_dawnville case=" + index + " ms=" + (getTime()-started) + " position=" + self.origin);
+            self botStop();
+            return;
+        }
+    }
+    println("[bot-nav-qa] FAIL roof_exit map=mp_dawnville case=" + index + " position=" + self.origin);
+    self botStop();
 }
 '''
 output = root / 'out/bot-navigation-controlled.gsc'

@@ -68,7 +68,7 @@ if path.exists():
     assert (path / '.git').is_dir(), 'Destination exists and is not a Git checkout'
     assert subprocess.check_output(['git', '-C', str(path), 'remote', 'get-url', 'origin'], text=True).strip() == 'https://github.com/tonga54/cod2-wasm.git', 'Unexpected repository'
     assert not subprocess.check_output(['git', '-C', str(path), 'status', '--porcelain']), 'Pi source has local changes'
-    assert subprocess.check_output(['git', '-C', str(path), 'branch', '--show-current'], text=True).strip() == 'master', 'Pi checkout must use master'
+    assert subprocess.check_output(['git', '-C', str(path), 'branch', '--show-current'], text=True).strip() == 'main', 'Pi checkout must use main'
 try:
     with urllib.request.urlopen('http://127.0.0.1:8088/gateway/health', timeout=2) as reply:
         health = json.load(reply)
@@ -76,7 +76,7 @@ try:
 except OSError:
     pass
 PY
-ssh "${ssh_options[@]}" "${target}" "set -eu; if test ! -d '${remote_dir}'; then git clone --depth 1 --branch master https://github.com/tonga54/cod2-wasm.git '${remote_dir}'; fi; git -C '${remote_dir}' fetch origin; git -C '${remote_dir}' merge --ff-only origin/master; test \"\$(git -C '${remote_dir}' rev-parse HEAD)\" = '${revision}'; mkdir -p '${remote_dir}/out/pi-runtime' '${remote_dir}/data/browser'"
+ssh "${ssh_options[@]}" "${target}" "set -eu; if test ! -d '${remote_dir}'; then git clone --depth 1 --branch main https://github.com/tonga54/cod2-wasm.git '${remote_dir}'; fi; git -C '${remote_dir}' fetch origin; git -C '${remote_dir}' merge --ff-only origin/main; test \"\$(git -C '${remote_dir}' rev-parse HEAD)\" = '${revision}'; mkdir -p '${remote_dir}/out/pi-runtime' '${remote_dir}/data/browser'"
 
 images_file="${repo_root}/out/pi-images.tar.gz"
 docker save "${web_image}" "${gateway_image}" | gzip -1 > "${images_file}"
