@@ -848,3 +848,85 @@ Raw reports/logs are in `out/bot-lifecycle/`; the intermediate and final
 matrices are `suite-results.json`, `final-results.json` and
 `verified-results.json`. The earlier
 reference failures and diagnostic runs are kept separately.
+
+## Focused exploration, valid arrival regions and HQ startup — 2026-10-11
+
+The previous Carentan upper-radio failure had two causes. Background navigation
+spent its bounded collision work on unrelated map regions while the necessary
+stairs were still unknown. Once the upper floor was connected, the nearest
+navigation node could lie on the radio pedestal: the search demanded that exact
+node even though another reachable cell already satisfied the normal arrival
+radius and height. Objective searches now accept the same arrival region used
+by movement, or precise original trigger contact for entity objectives. Cheap
+bounds rejection prevents distant search cells from issuing trigger-contact
+queries. Guard/sniper positions retain their exact-position behavior.
+
+Incomplete routes promote their reachable frontier and announced destination
+in the existing navigation heap. Priority spreads through at most eight links;
+walk, ladder and safe directed-drop validation still define every connection.
+A reverse heap index gives O(log N) promotion with no graph scan, duplicate
+queue entry or extra collision allowance. Its shared cost is 64 KiB, independent
+of bot count. The original 128-edge / 4-ms navigation and 2-search / 2-ms /
+2,048-node planning limits remain unchanged, as does the tactical trace budget.
+No map-specific coordinates or authored waypoint data were added to production.
+
+HQ's original startup waits five seconds and then respawns all team members.
+Adding all bots during that countdown caused redundant spawns in one frame.
+For a newly populated HQ room, the first pair now starts the original countdown;
+additional bots join incrementally after `level.roundStarted`. A ten-second
+fallback bounds the admission wait if the expected mode state does not arrive.
+This does not override spawn locations, respawn delays, defender lockout, human
+joins or the original HQ script. Full bot population takes several seconds
+longer at startup in exchange for avoiding the mass duplicate spawn. Retained
+clients on map rotation use their existing original lifecycle; this admission
+change is not a general scheduler for every possible simultaneous respawn.
+
+ASan/UBSan controller tests cover exact heap indices and single queue ownership,
+finite priority propagation, trigger-query rejection for distant cells and
+arrival beside an unreachable pedestal. Disabling the arrival-region change
+makes the pedestal regression fail. The broad suite also retains existing
+stairs, ladders, fall-damage safety, 32-bot budgets/fair admission, life reset,
+objective use, sniper behavior and Normal-difficulty checks. Native i386 and
+WebAssembly builds, fixed-tick cadence and package/foundation checks passed.
+Diagnostic frame/VM logging used to locate the HQ spike was removed from the
+production build.
+
+The final Raspberry Pi 5 suite completed 15 isolated sessions, all successful:
+two independent cold/warm upper-radio journeys, two three-roof Dawnville runs,
+Toujane ladder ascent/descent plus roof exit, Carentan roof exit, original CTF /
+HQ / S&D interactions, manual HQ respawn and five autonomous 32-Normal-bot modes.
+The final upper-radio cold runs took 20.5 and 16 seconds; warm returns took 8
+and 5 seconds. The two earlier candidate cold runs took 21 and 18.5 seconds.
+Dawnville's slow roof took 16.5 and 13 seconds with the final executable (15.5
+in the earlier candidate), versus 34.5 seconds in the previous release. All
+roof checks retained their original health; movement after setup used normal
+user commands, without teleports or forced spawns.
+
+| Map / mode | Duration | Ticks/s | CPU, one core | Max game frame | Max single-bot AI |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Dawnville / TDM | 60 s | 20.00 | 43.52% | 61 ms | 5 ms |
+| Toujane / CTF | 90 s | 20.00 | 45.48% | 41 ms | 3 ms |
+| Carentan / HQ | 90 s | 20.00 | 52.05% | 49 ms | 5 ms |
+| Dawnville / SD | 90 s | 20.00 | 43.32% | 178 ms | 4 ms |
+| Carentan / DM | 60 s | 20.00 | 42.98% | 51 ms | 3 ms |
+
+CPU sampling starts after the requested bots have joined and includes the
+remaining navigation warm-up and diagnostics, without human clients, browser
+rendering or network load. Frame maxima also include earlier profile windows
+except the first window. These stochastic matches establish this
+build's observed operating range, not a proven overall CPU speedup. HQ's
+startup-only comparison dropped from a 609-ms maximum game frame in the
+previous release to 67 ms in the first corrected Pi run; the final full-match
+maximum is in the table. S&D retained a 178-ms spike around the original initial
+round restart; its maximum after the first 30 seconds was 22 ms. The separate
+local frame diagnostic also placed that spike in the restart's script phase.
+Frame overruns can still occur. The focused
+routes now pass repeatedly, but 13–20.5-second cold traversals are not instant
+and these tests cannot establish universal freedom from stalls on every route.
+Temperature during the suite was 56 C with `get_throttled=0x0` when sampled.
+
+Final executable SHA-256: `b2a0098d108015183b5807b1c1aa83af091043a8b55f51b7fbf2c3f445262960`.
+Final policy SHA-256: `fdc9bfa226dcf396d3c07266dfebfa82857180eb77c90651598e8cb68d6952ae`.
+Raw diagnostics, candidate runs, final logs and `final-results.json` are retained
+under `out/bot-fixes/` (ignored test output). The old failing upper-radio runs
+remain under `out/bot-lifecycle/` for comparison.

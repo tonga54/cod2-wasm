@@ -45,7 +45,7 @@ static gclient_t clients[64]; static WeaponDef weapon={"test",0,0,0,0,0,30},seco
 static int humanClient=-1;
 static int traceCount, wall, wallDoor, smoke, friendly,crowd,stairs,ladderWorld,navClock,dropWorld,tacticalWall;
 static int teammateBlocker=-1,perchWorld,courtesyWall;
-static int slowBackground,traceMs;
+static int slowBackground,traceMs,pedestalWorld,contactCount;
 static float fallMin=256;
 int Sys_Milliseconds(void){return slowBackground?traceMs:navClock?navClock++:0;}
 static int Dvar_GetInt(const char *name){(void)name;return 0;}
@@ -56,6 +56,7 @@ const char *SL_ConvertToString(unsigned int value){(void)value;return "mp_tdm_sp
 WeaponDef *BG_GetWeaponDef(int index){return index==2?&secondary:&weapon;}
 float SV_FX_GetVisibility(const vec_t *a,const vec_t *b){(void)a;(void)b;return smoke?0:1;}
 qboolean SV_EntityContact(const vec_t *mins,const vec_t *maxs,const gentity_t *ent){
+ contactCount++;
  for(int i=0;i<3;i++)if(mins[i]>=ent->r.absmax[i]||maxs[i]<=ent->r.absmin[i])return 0;
  return 1;
 }
@@ -69,6 +70,7 @@ void G_TraceCapsule(trace_t *t,const vec_t *a,const vec_t *mi,const vec_t *ma,co
  if(teammateBlocker>=0 && mi[0]<0 && (mask&0x02000000) && b[0]>a[0]){t->fraction=.2f;t->entityNum=teammateBlocker;return;}
  if(crowd && (mask&0x02000000)){t->startsolid=1;t->contents=0x02000000;t->fraction=0;return;}
  float floor=stairs?floorf(b[0]/16.0f)*12.0f:ladderWorld&&b[0]>=32?152:0;
+ if(pedestalWorld && fabsf(b[0]-128)<8 && fabsf(b[1])<8)floor=36;
  if(dropWorld)floor=b[0]<32?160:dropWorld==2?-200:0;
  if((dropWorld==3||dropWorld==4)&&a[0]<32&&b[0]>=32&&a[2]<192&&b[2]>=a[2]){
   t->fraction=.5f;t->normal[0]=-1;t->normal[2]=0;return;
@@ -288,6 +290,34 @@ int main(void){
  s_botNavMin[0]=s_botNavMin[1]=-512;s_botNavMax[0]=s_botNavMax[1]=512;
  Bot_NavAdd((float[3]){256,0,1});Bot_NavAdd((float[3]){64,0,1});Bot_NavAdd((float[3]){0,0,1});
  assert(Bot_NavPop()==2&&Bot_NavPop()==1&&Bot_NavPop()==0&&Bot_NavPop()==-1);
+ // Promoting local work uses one queue entry per node and keeps reverse
+ // positions exact through decrease-key and pop. It never requeues closed work.
+ SV_BotResetNavigation();s_botNavBounded=1;
+ s_botNavMin[0]=s_botNavMin[1]=-8192;s_botNavMax[0]=s_botNavMax[1]=8192;
+ for(i=0;i<200;i++)Bot_NavAdd((float[3]){i*32,0,1});
+ Bot_NavPromote(190,-8);Bot_NavPromote(150,-7);Bot_NavPromote(190,-6);
+ assert(s_botNavOpenCount==200 && Bot_NavPop()==190 && Bot_NavPop()==150);
+ Bot_NavPromote(190,-10);assert(s_botNavOpenCount==198);
+ int seenQueue[200]={0};seenQueue[190]=seenQueue[150]=1;
+ while(s_botNavOpenCount) {
+  for(int at=0;at<s_botNavOpenCount;at++)assert(s_botNavPosition[s_botNavOpen[at]]==at);
+  int node=Bot_NavPop();assert(!seenQueue[node]++ && s_botNavPosition[node]==-1);
+ }
+ for(i=0;i<200;i++)assert(seenQueue[i]==1);
+ // Promotion propagates only a bounded number of rings, even across new
+ // geometry. It cannot assign permanent priority to the entire map flood.
+ SV_BotResetNavigation();int ring=Bot_NavAdd((float[3]){0,0,1});
+ Bot_NavPromote(ring,-8);
+ for(i=1;i<=10;i++) {
+  ring=Bot_NavEdge(ring,0);assert(ring>=0);
+  if(i<8)assert(s_botNav[ring].priority==-8+i);
+  else assert(s_botNav[ring].priority>=0);
+ }
+ // Distant route cells never issue precise trigger contact queries.
+ memset(&g_entities[40],0,sizeof(g_entities[40]));
+ for(i=0;i<3;i++){g_entities[40].r.absmin[i]=1000;g_entities[40].r.absmax[i]=1100;}
+ contactCount=0;assert(!Bot_InObjective((float[3]){0,0,1},40)&&contactCount==0);
+ assert(Bot_InObjective((float[3]){1050,1050,1050},40)&&contactCount==1);
  // Continuous new central nodes must not starve an older roof frontier.
  SV_BotResetNavigation();s_botNavBounded=1;
  s_botNavMin[0]=s_botNavMin[1]=-2048;s_botNavMax[0]=s_botNavMax[1]=2048;
@@ -468,7 +498,23 @@ int main(void){
  Bot_NavAdd((float[3]){512,0,96});clients[0].ps.origin[0]=0;
  SV_BotEnableAI(0,1);SV_BotSetGoal(0,(float[3]){512,0,65},48,0,-1);
  Bot_FindPath(&s_botAI[0],&clients[0].ps);
- assert(s_botAI[0].goal==last&&s_botAI[0].failedPaths==0);
+ assert(s_botAI[0].goal>=0 && Bot_AtPoint(s_botNav[s_botAI[0].goal].origin,s_botAI[0].objective,48) && s_botAI[0].failedPaths==0);
+ // The exact nearest node can be on top of a radio pedestal with no
+ // incoming walk edge. Stop at a reachable point inside the capture radius;
+ // do not turn a complete route into repeated failed searches for its model.
+ SV_BotResetNavigation();svs.time+=1000;
+ pedestalWorld=1;
+ int captureStart=Bot_NavAdd((float[3]){0,0,1});
+ int captureFloor=Bot_NavAdd((float[3]){96,0,1});
+ int pedestal=Bot_NavAdd((float[3]){128,0,37});
+ for(int n=0;n<3;n++)for(int edge=0;edge<BOT_NAV_LINKS;edge++)s_botNav[n].edge[edge]=-2;
+ s_botNav[captureStart].edge[0]=captureFloor;
+ memcpy(clients[0].ps.origin,(float[3]){0,0,1},sizeof(vec3_t));
+ SV_BotEnableAI(0,1);SV_BotSetGoal(0,(float[3]){128,0,37},48,0,-1);
+ Bot_FindPath(&s_botAI[0],&clients[0].ps);
+ assert(s_botAI[0].goal==captureFloor && s_botAI[0].goal!=pedestal && s_botAI[0].failedPaths==0);
+ assert(s_botAI[0].routeCount==1 && s_botAI[0].route[0]==captureFloor);
+ pedestalWorld=0;
  // A radio over a ledge must keep the nearby upper landing as its destination,
  // not project onto the ground floor 160 units below the interaction radius.
  SV_BotResetNavigation();svs.time+=1000;dropWorld=1;

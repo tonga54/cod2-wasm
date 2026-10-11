@@ -31,6 +31,17 @@ populate()
     players = undefined;
     for(i = existing; i < count; i++)
     {
+        // HQ restarts all team members after its original five-second count.
+        // Admit the first pair to start that count, then populate incrementally
+        // after it finishes instead of spawning the whole roster twice.
+        if(i == 2 && getCvar("g_gametype") == "hq")
+        {
+            for(grace = 0; grace < 40; grace++)
+            {
+                if(isDefined(level.roundStarted) && level.roundStarted) break;
+                wait .25;
+            }
+        }
         bot = addTestClient();
         if(isDefined(bot))
             bot thread joinGame(difficulty);

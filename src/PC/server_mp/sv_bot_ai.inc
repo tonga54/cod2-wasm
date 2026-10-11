@@ -88,7 +88,7 @@ typedef struct { vec3_t origin; int until, reporter, responders[2], responseUnti
 static botContact_t s_botContacts[3];
 static botNavNode_t s_botNav[BOT_NAV_MAX];
 static unsigned short s_botNavHash[BOT_NAV_HASH];
-static short s_botNavOpen[BOT_NAV_MAX];
+static short s_botNavOpen[BOT_NAV_MAX], s_botNavPosition[BOT_NAV_MAX];
 static int s_botNavOpenCount, s_botNavWorkEdges;
 static int s_botPlanCursor;
 static int s_botNavCount, s_botNavNode, s_botNavDirection, s_botNavFrame, s_botDebugAt;
@@ -259,9 +259,10 @@ static void Bot_NavQueue(int node)
     // older spawn/roof frontier indefinitely. Insertion order adds fairness.
     s_botNav[node].priority=s_botNavBounded?x*x+y*y+node*2048.0f:0;
     while(at && Bot_NavBefore(node,s_botNavOpen[(at-1)/2])) {
-        s_botNavOpen[at]=s_botNavOpen[(at-1)/2]; at=(at-1)/2;
+        s_botNavOpen[at]=s_botNavOpen[(at-1)/2];
+        s_botNavPosition[s_botNavOpen[at]]=(short)at; at=(at-1)/2;
     }
-    s_botNavOpen[at]=(short)node;
+    s_botNavOpen[at]=(short)node; s_botNavPosition[node]=(short)at;
 }
 
 static int Bot_NavPop(void)
@@ -273,10 +274,32 @@ static int Bot_NavPop(void)
         int child=at*2+1;
         if(child+1<s_botNavOpenCount && Bot_NavBefore(s_botNavOpen[child+1],s_botNavOpen[child])) ++child;
         if(!Bot_NavBefore(s_botNavOpen[child],last)) break;
-        s_botNavOpen[at]=s_botNavOpen[child]; at=child;
+        s_botNavOpen[at]=s_botNavOpen[child]; s_botNavPosition[s_botNavOpen[at]]=(short)at; at=child;
     }
-    if(s_botNavOpenCount) s_botNavOpen[at]=(short)last;
+    if(s_botNavOpenCount) {s_botNavOpen[at]=(short)last; s_botNavPosition[last]=(short)at;}
+    s_botNavPosition[result]=-1;
     return result;
+}
+
+// Promote a small collision-checked neighborhood in the existing work heap.
+// Searches still share the original edge/time limits. A reverse heap index
+// makes promotion O(log N), without a map scan or duplicate queue entries.
+static void Bot_NavPromote(int node, float priority)
+{
+    if(node<0 || s_botNavPosition[node]<0 || s_botNav[node].priority<=priority) return;
+    int at=s_botNavPosition[node];
+    s_botNav[node].priority=priority;
+    while(at && Bot_NavBefore(node,s_botNavOpen[(at-1)/2])) {
+        s_botNavOpen[at]=s_botNavOpen[(at-1)/2];
+        s_botNavPosition[s_botNavOpen[at]]=(short)at; at=(at-1)/2;
+    }
+    s_botNavOpen[at]=(short)node; s_botNavPosition[node]=(short)at;
+}
+
+static void Bot_NavPromoteNeighbor(int from, int to)
+{
+    // Eight local rings expire naturally; background exploration remains fair.
+    if(s_botNav[from].priority<-1) Bot_NavPromote(to,s_botNav[from].priority+1);
 }
 
 static int Bot_NavAdd(const vec_t *origin)
@@ -377,6 +400,7 @@ static void Bot_NavLadder(int from, int direction)
         next=Bot_NavAdd(ground);
         if(next<0 || s_botNav[next].edge[BOT_NAV_DIRECTIONS]>=0) continue;
         node->edge[BOT_NAV_DIRECTIONS]=(short)next;
+        Bot_NavPromoteNeighbor(from,next);
         s_botNav[next].edge[BOT_NAV_DIRECTIONS]=(short)from;
         node->ladderYaw=s_botNav[next].ladderYaw=atan2f(s_botDirections[direction][1],s_botDirections[direction][0])*BOT_RAD_TO_DEG;
         if(Dvar_GetInt("scr_bot_debug")) Com_Printf("[bots] ladder %d -> %d at %.0f,%.0f,%.0f -> %.0f,%.0f,%.0f\n",
@@ -434,6 +458,7 @@ static int Bot_NavDrop(int from, int direction)
         next=Bot_NavAdd(ground);
         if(next<0) continue;
         node->edge[BOT_NAV_TRAVERSAL+direction]=(short)next;
+        Bot_NavPromoteNeighbor(from,next);
         if(jump) node->jumpMask|=(unsigned char)(1u<<direction);
         return next;
     }
@@ -448,6 +473,7 @@ static int Bot_NavWalkLink(int from, int direction, const vec_t *candidate)
     next=Bot_NavAdd(ground);
     if(next<0 || next==from) return -1;
     s_botNav[from].edge[direction]=(short)next;
+    Bot_NavPromoteNeighbor(from,next);
     // A half-cell portal must not overwrite an established regular-grid lane.
     if(s_botNav[next].edge[reverse]<0) s_botNav[next].edge[reverse]=(short)from;
     return next;
@@ -576,6 +602,7 @@ static void Bot_ExpandFrontier(int node)
 {
     int direction, started=Sys_Milliseconds();
     Bot_WorkFrame();
+    Bot_NavPromote(node,-8);
     // A disconnected spawn gets one local frontier, not another map flood.
     // These probes spend the same global navigation time and edge allowance.
     for(direction=0;direction<BOT_NAV_DIRECTIONS;++direction) {
@@ -617,7 +644,8 @@ static void Bot_NavFrame(void)
         if(s_botNavNode<0) break;
         ++s_botNavWorkEdges;
         ++s_botWorkEdges;
-        Bot_NavEdge(s_botNavNode,s_botNavDirection);
+        int next=Bot_NavEdge(s_botNavNode,s_botNavDirection);
+        if(next>=0) Bot_NavPromoteNeighbor(s_botNavNode,next);
         if (++s_botNavDirection == BOT_NAV_DIRECTIONS) {
             Bot_RegisterPerch(s_botNavNode);
             s_botNavDirection = 0;
@@ -792,6 +820,11 @@ static qboolean Bot_InObjective(const vec_t *origin, int entityNum)
 {
     vec3_t mins={origin[0]-15,origin[1]-15,origin[2]},
            maxs={origin[0]+15,origin[1]+15,origin[2]+70};
+    // Searches can test many cells. Reject disjoint bounds before asking
+    // collision for the original trigger's precise contact shape.
+    for(int axis=0;axis<3;++axis)
+        if(maxs[axis]<g_entities[entityNum].r.absmin[axis] ||
+           mins[axis]>g_entities[entityNum].r.absmax[axis]) return 0;
     return SV_EntityContact(mins,maxs,&g_entities[entityNum]);
 }
 
@@ -1135,6 +1168,8 @@ static void Bot_GuardPoint(int clientNum, botAIState_t *ai, playerState_t *ps)
     ai->guardUntil=svs.time+(evaluate?(sniper?8000:3000)+(clientNum%5)*50:50);
 }
 
+static qboolean Bot_AtPoint(const vec_t *origin, const vec_t *point, float radius);
+
 static void Bot_BuildPath(botAIState_t *ai, playerState_t *ps)
 {
     if(ai->routeIndex<ai->routeCount) {
@@ -1230,7 +1265,12 @@ static void Bot_BuildPath(botAIState_t *ai, playerState_t *ps)
         if(s_botProfile.enabled) ++s_botProfile.visited;
         float distance=Bot_DistanceSq(s_botNav[current].origin,destination);
         if(distance<closestDistance) { closest=current; closestDistance=distance; }
-        if(current==ai->goal) { found=1; break; }
+        // A model origin may be on an unwalkable radio/flag pedestal. A valid
+        // original arrival volume is the destination, not that single cell.
+        qboolean arrived=kind==2 && ai->objectiveBehavior!=1 &&
+            (ai->objectiveEntity>=0?Bot_InObjective(s_botNav[current].origin,ai->objectiveEntity):
+             Bot_AtPoint(s_botNav[current].origin,ai->objective,ai->objectiveRadius));
+        if(current==ai->goal || arrived) { ai->goal=current; found=1; break; }
         for(i=0;i<BOT_NAV_LINKS;++i) {
             // Stable ordering across replans; aiming's RNG cannot change lanes.
             next=s_botNav[current].edge[i>=BOT_NAV_DIRECTIONS?i:(i+ai->clientNum*3)%BOT_NAV_DIRECTIONS];
@@ -1260,6 +1300,7 @@ static void Bot_BuildPath(botAIState_t *ai, playerState_t *ps)
     }
     s_botPathExpanded+=expanded;
     if(!found) {
+        if(desired && ai->goal>=0) Bot_NavPromote(ai->goal,-8);
         // The entire known component was searched, but still has unexplored
         // exits. Walk to a reachable frontier instead of repeatedly choosing
         // the roof edge nearest a ground-level goal, then randomizing patrols.
