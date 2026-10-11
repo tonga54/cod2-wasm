@@ -7622,11 +7622,13 @@ static unsigned int VM_Execute_CXX_Candidate_Pass66(struct function_stack_t fs)
         case VMOP_CallBuiltin3:
         case VMOP_CallBuiltin4:
         case VMOP_CallBuiltin5:
+            scrVmPub.function_frame->fs.localVarCount = localVarCount;
             VM_CandidateCallBuiltin(&pos, &top, opcode - VMOP_CallBuiltin0);
             break;
 
         case VMOP_CallBuiltin: {
             unsigned int paramCount = *(const unsigned char *)pos++;
+            scrVmPub.function_frame->fs.localVarCount = localVarCount;
             VM_CandidateCallBuiltin(&pos, &top, paramCount);
             break;
         }
@@ -7637,11 +7639,13 @@ static unsigned int VM_Execute_CXX_Candidate_Pass66(struct function_stack_t fs)
         case VMOP_CallBuiltinMethod3:
         case VMOP_CallBuiltinMethod4:
         case VMOP_CallBuiltinMethod5:
+            scrVmPub.function_frame->fs.localVarCount = localVarCount;
             VM_CandidateCallBuiltinMethod(&pos, &top, opcode - VMOP_CallBuiltinMethod0);
             break;
 
         case VMOP_CallBuiltinMethod: {
             unsigned int paramCount = *(const unsigned char *)pos++;
+            scrVmPub.function_frame->fs.localVarCount = localVarCount;
             VM_CandidateCallBuiltinMethod(&pos, &top, paramCount);
             break;
         }
@@ -8121,12 +8125,17 @@ __attribute__((noinline)) unsigned int __attribute_regparm__(3)
         ++scrVmPub.function_count;
         ++scrVmPub.function_frame;
         scrVmPub.function_frame->fs.localId = 0;
+        // Reentrant native callbacks (e.g. suicide -> player-killed) insert
+        // a boundary frame. Reused counts here corrupt the local-cache base
+        // when a callback suspends, leaking its parameters into its caller.
+        scrVmPub.function_frame->fs.localVarCount = 0;
     }
 
     scrVmPub.function_frame->fs.pos = pos;
     ++scrVmPub.function_count;
     ++scrVmPub.function_frame;
     scrVmPub.function_frame->fs.localId = threadId;
+    scrVmPub.function_frame->fs.localVarCount = 0;
 
     startTop->type = 8;
     scrVmPub.inparamcount = 0;

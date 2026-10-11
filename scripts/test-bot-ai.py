@@ -24,13 +24,15 @@ typedef int qboolean; typedef unsigned char byte; typedef float vec_t; typedef f
 #define COD2_BOT_MAX_CLIENTS 64
 #define SESS_STATE_PLAYING 0
 #define SESS_STATE_DEAD 1
+#define SESS_STATE_SPECTATOR 2
 #define TEAM_FREE 0
 #define TEAM_AXIS 1
 #define TEAM_ALLIES 2
+#define TEAM_SPECTATOR 3
 #define WEAPCLASS_SMG 2
 #define WEAPCLASS_MG 1
 typedef struct { float fraction; vec3_t normal; unsigned short entityNum; int startsolid,allsolid,surfaceFlags,contents; } trace_t;
-typedef struct { vec3_t origin,viewangles,velocity; float viewHeightCurrent,fWeaponPosFrac; int pm_type,weapon,weaponTime,pm_flags,groundEntityNum,cursorHintEntIndex,ammoclip[128],ammo[128];char weaponslots[8]; } playerState_t;
+typedef struct { vec3_t origin,viewangles,velocity; float viewHeightCurrent,fWeaponPosFrac; int pm_type,weapon,weaponTime,pm_flags,groundEntityNum,cursorHintEntIndex,ammoclip[128],ammo[128],stats[6];char weaponslots[8]; } playerState_t;
 typedef struct { playerState_t ps; vec3_t damage_from; int damage_fromWorld; struct {int connected,sessionState; struct {int team;}cs;}sess;} gclient_t;
 typedef struct {gclient_t *client; int health; unsigned classname; struct {int inuse;vec3_t currentOrigin,absmin,absmax;}r;} gentity_t;
 typedef struct { int maxclients,num_entities; } level_locals_t;
@@ -467,6 +469,45 @@ int main(void){
  SV_BotEnableAI(0,1);SV_BotSetGoal(0,(float[3]){512,0,65},48,0,-1);
  Bot_FindPath(&s_botAI[0],&clients[0].ps);
  assert(s_botAI[0].goal==last&&s_botAI[0].failedPaths==0);
+ // A radio over a ledge must keep the nearby upper landing as its destination,
+ // not project onto the ground floor 160 units below the interaction radius.
+ SV_BotResetNavigation();svs.time+=1000;dropWorld=1;
+ int upper=Bot_NavAdd((float[3]){0,0,161});
+ int lower=Bot_NavAdd((float[3]){64,0,1});
+ // Abstract a previously verified stair route; this case tests floor choice.
+ s_botNav[lower].edge[4]=upper;s_botNav[upper].edge[0]=lower;
+ memcpy(clients[0].ps.origin,(float[3]){64,0,1},sizeof(vec3_t));
+ SV_BotEnableAI(0,1);SV_BotSetGoal(0,(float[3]){64,0,161},48,0,-1);
+ Bot_FindPath(&s_botAI[0],&clients[0].ps);
+ assert(s_botAI[0].goal==upper && s_botAI[0].planPoint[2]==161);
+ s_botNavFrame=svs.time;s_botAI[0].nextThink=svs.time+200;
+ SV_BotRunAI(0,&clients[0].ps);assert(!s_botAI[0].approachUntil);
+ dropWorld=0;
+ // A bounded search of a large lower floor cannot reach an isolated upper
+ // goal yet. Follow the known route to an unexplored landing instead of
+ // repeatedly ending at the cell directly underneath that goal.
+ SV_BotResetNavigation();svs.time+=1000;short frontierGrid[48][48];
+ for(int x=0;x<48;x++)for(int y=0;y<48;y++) {
+  int node=frontierGrid[x][y]=Bot_NavAdd((float[3]){x*32,y*32,1});
+  for(int edge=0;edge<BOT_NAV_LINKS;edge++)s_botNav[node].edge[edge]=-2;
+ }
+ for(int x=0;x<48;x++)for(int y=0;y<48;y++)for(int edge=0;edge<8;edge+=2) {
+  int nx=x+s_botDirections[edge][0],ny=y+s_botDirections[edge][1];
+  if(nx>=0&&nx<48&&ny>=0&&ny<48)s_botNav[frontierGrid[x][y]].edge[edge]=frontierGrid[nx][ny];
+ }
+ int highFrontier=Bot_NavAdd((float[3]){1152,768,41});
+ int disconnectedUpper=Bot_NavAdd((float[3]){768,768,161});
+ for(int edge=0;edge<BOT_NAV_LINKS;edge++) {
+  s_botNav[highFrontier].edge[edge]=-2;s_botNav[disconnectedUpper].edge[edge]=-2;
+ }
+ s_botNav[highFrontier].edge[0]=-1;s_botNav[frontierGrid[36][24]].edge[8]=highFrontier;
+ memcpy(clients[0].ps.origin,(float[3]){768,768,1},sizeof(vec3_t));
+ SV_BotEnableAI(0,1);SV_BotSetGoal(0,(float[3]){768,768,161},48,0,-1);
+ Bot_WorkFrame();s_botWorkEdges=BOT_NAV_EDGES_PER_FRAME;
+ Bot_FindPath(&s_botAI[0],&clients[0].ps);
+ assert(s_botPathExpanded==BOT_PATH_NODES && s_botAI[0].goal==highFrontier && s_botAI[0].routeCount>0);
+ assert(s_botWorkPaths==1 && s_botWorkEdges==BOT_NAV_EDGES_PER_FRAME);
+ puts("PASS: elevated objective floor selection and upper-frontier progress within the unchanged search budget");
  // An expensive remote background probe must not consume the local route's
  // entire allowance before an isolated actor can discover its first exit.
  SV_BotResetNavigation();s_botNavSeeded=s_botNavBounded=1;svs.time+=50;
@@ -1015,6 +1056,46 @@ int main(void){
  clients[0].ps.ammoclip[0]=5;clients[0].ps.ammo[0]=0;
  SV_BotRunAI(0,&clients[0].ps);assert(!(s_botCmdState[0].buttons&0x10));
  puts("PASS: human right of way while guarding, wall/floor/interaction exclusions, occupied guard slots, shared 32-bot cover budgets/deferred work, safe proactive reloads");
+ // An actual ClientSpawn increments stats[5], even if death was not observed
+ // between server ticks. Pending work and cached movement belong to that life.
+ SV_BotResetNavigation();svs.time+=5000;level.maxclients=2;
+ clients[0].sess.sessionState=SESS_STATE_PLAYING;g_entities[0].health=100;
+ clients[1].sess.sessionState=SESS_STATE_DEAD;clients[0].ps.weapon=0;
+ SV_BotEnableAI(0,1);actor=&s_botAI[0];
+ Bot_NavAdd((float[3]){0,0,1});Bot_NavAdd((float[3]){32,0,1});
+ actor->routeFrom=0;actor->route[0]=1;actor->routeCount=1;actor->waypoint=1;
+ actor->target=actor->lastTarget=1;actor->observedTarget=1;actor->observedVisible=1;
+ actor->observedFrame=svs.time;actor->memoryUntil=svs.time+3000;
+ actor->nextThink=actor->nextPath=actor->nextTraversalJump=svs.time+9000;
+ actor->approachUntil=actor->avoidUntil=svs.time+3000;actor->blockedUntil[0]=svs.time+8000;
+ actor->recentCount=8;actor->pathPending=1;actor->lastOrigin[0]=-1000;
+ clients[0].ps.stats[5]++;clients[0].ps.origin[0]=1024;
+ s_botNavSeeded=1;s_botNavFrame=svs.time;SV_BotPlanFrame();
+ assert(!actor->pathPending && !s_botPathSearches); // No obsolete route search.
+ SV_BotRunAI(0,&clients[0].ps);
+ assert(actor->spawnCount==clients[0].ps.stats[5] && actor->difficulty==1 && actor->enabled);
+ assert(actor->target==-1 && actor->lastTarget==-1 && !actor->memoryUntil);
+ assert(actor->waypoint==-1 && !actor->routeCount && !actor->blockedUntil[0]);
+ assert(!actor->approachUntil && !actor->avoidUntil && !actor->nextTraversalJump);
+ assert(actor->recentCount<=1 && actor->lastOrigin[0]==1024 && actor->lastMoveCheck==svs.time);
+ assert(actor->pathPending && actor->nextThink<=svs.time+200);
+ assert(!(s_botCmdState[0].buttons&1));
+ // Spectator/dead periods never resume navigation or bypass original respawn rules.
+ clients[0].sess.sessionState=SESS_STATE_DEAD;svs.time+=50;
+ SV_BotRunAI(0,&clients[0].ps);
+ assert(s_botCmdState[0].buttons==8 && !actor->pathPending && !actor->wantsMove);
+ clients[0].sess.sessionState=SESS_STATE_SPECTATOR;SV_BotRunAI(0,&clients[0].ps);
+ assert(s_botCmdState[0].buttons==8 && !s_botCmdState[0].forwardmove);
+ clients[0].sess.cs.team=TEAM_SPECTATOR;SV_BotRunAI(0,&clients[0].ps);
+ assert(!s_botCmdState[0].buttons && !s_botCmdState[0].forwardmove);
+ clients[0].sess.cs.team=TEAM_ALLIES;clients[0].sess.sessionState=3;
+ SV_BotRunAI(0,&clients[0].ps);assert(!s_botCmdState[0].buttons);
+ // An observed inactive-to-live transition resets even with a restored counter.
+ clients[0].sess.sessionState=SESS_STATE_PLAYING;
+ clients[0].ps.origin[0]=2048;svs.time+=500;s_botNavFrame=svs.time;
+ SV_BotRunAI(0,&clients[0].ps);
+ assert(actor->lastOrigin[0]==2048 && actor->pathPending && !actor->stuckCount);
+ puts("PASS: original spawn counter resets stale routes/perception/cooldowns, rejects old pending work, respects death/spectator rules");
  SV_BotResetAIClient(0);assert(!s_botAI[0].enabled);
  puts("PASS: bounded/hash navigation, enemy teams, fair perception/memory, difficulty, route progress/recovery, guard spacing, ladders/safe directed drops/time budget, jump tracking/scoped ADS, weapon-range pursuit, friendly-fire avoidance, objective priority/expiry, original use holds, reload/cadence, death/reset");
  return 0;

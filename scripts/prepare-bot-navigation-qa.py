@@ -5,7 +5,10 @@ from pathlib import Path
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--roof-exits", action="store_true", help="Also exercise elevated escape routes on Toujane, Carentan and Dawnville")
+parser.add_argument("--upper-objective", action="store_true", help="Reach Carentan's elevated radio position from the floor below")
 args = parser.parse_args()
+if args.upper_objective:
+    args.roof_exits = True
 
 root = Path(__file__).resolve().parents[1]
 source = (root / 'downstream/server/browser_bots.gsc').read_text().replace(
@@ -20,6 +23,11 @@ qaNavigation()
     level endon("intermission");
     wait 12;
     map = getCvar("mapname");
+    if(UPPER_OBJECTIVE && map != "mp_carentan")
+    {
+        println("[bot-nav-qa] FAIL upper_objective_requires_carentan");
+        return;
+    }
     if(map == "mp_dawnville" && ROOF_EXITS)
     {
         qaDawnvilleRoofs();
@@ -49,6 +57,11 @@ qaNavigation()
     // authored spawn points far from the test route during fixture setup.
     start = (1327,1760,144);
     finish = (1708,2191,-22);
+    if(UPPER_OBJECTIVE)
+    {
+        start = (-831.6,2098.8,-8);
+        finish = (-831.6,2098.8,179.4);
+    }
     if(map == "mp_toujane")
     {
         start = (2630,880,182);
@@ -116,19 +129,37 @@ qaNavigation()
     }
     else
     {
-        actor setOrigin((1327,1760,144));
-        goal = (1708,2191,-22);
+        actor setOrigin(start);
+        goal = finish;
     }
     wait 1;
     actor botAI(1);
     before = actor.health;
+    upperAttempt = 0;
     for(t = 0; t < 240; t++)
     {
-        actor botGoal(goal,12,3,-1);
+        if(UPPER_OBJECTIVE) actor botGoal(goal,48,0,-1);
+        else actor botGoal(goal,12,3,-1);
         wait .5;
+        if(UPPER_OBJECTIVE && distance(actor.origin,goal) < 80 && actor isOnGround())
+        {
+            println("[bot-nav-qa] PASS upper_objective phase=" + upperAttempt + " ms=" + (t+1)*500 + " position=" + actor.origin);
+            actor botStop();
+            if(upperAttempt == 0)
+            {
+                // Reuse learned map geometry, as an actual later life does.
+                actor setOrigin(start);
+                wait 1;
+                actor botAI(1);
+                upperAttempt = 1;
+                t = -1;
+                continue;
+            }
+            return;
+        }
         // Test leaving the elevated area safely. Completing an objective is
         // covered separately by the original mode interaction scenarios.
-        if(actor.origin[2] < start[2] - 96 && distance(actor.origin,start) > 128 && actor isOnGround())
+        if(!UPPER_OBJECTIVE && actor.origin[2] < start[2] - 96 && distance(actor.origin,start) > 128 && actor isOnGround())
         {
             if(actor.health < before)
             {
@@ -141,7 +172,8 @@ qaNavigation()
             return;
         }
     }
-    println("[bot-nav-qa] FAIL roof_exit map=" + map + " position=" + actor.origin);
+    if(UPPER_OBJECTIVE) println("[bot-nav-qa] FAIL upper_objective position=" + actor.origin);
+    else println("[bot-nav-qa] FAIL roof_exit map=" + map + " position=" + actor.origin);
     actor botStop();
 }
 
@@ -196,7 +228,8 @@ qaDawnvilleExit(index, goal)
     self botStop();
 }
 '''
-output = root / 'out/bot-navigation-controlled.gsc'
+output = root / ('out/bot-upper-controlled.gsc' if args.upper_objective else 'out/bot-navigation-controlled.gsc')
 output.parent.mkdir(exist_ok=True)
-output.write_text(source + scenario.replace("ROOF_EXITS", "true" if args.roof_exits else "false"))
+output.write_text(source + scenario.replace("ROOF_EXITS", "true" if args.roof_exits else "false")
+                  .replace("UPPER_OBJECTIVE", "true" if args.upper_objective else "false"))
 print(f'Generated first-party navigation scenario: {output}')

@@ -46,7 +46,7 @@ typedef struct {
 
 typedef struct {
     qboolean enabled, wantsMove, routeMove;
-    int difficulty, target, acquiredAt, nextThink, nextPath, nextError;
+    int difficulty, target, acquiredAt, nextThink, nextPath, nextError, spawnCount;
     int goal, waypoint, lastMoveCheck, avoidUntil, lastFrame;
     int objectiveUntil, objectiveBehavior, objectiveEntity, memoryUntil, coverUntil;
     unsigned int objectiveClassname;
@@ -631,30 +631,42 @@ static void Bot_NavFrame(void)
     s_botWorkNavMs=previousMs+Sys_Milliseconds()-started;
 }
 
-qboolean SV_BotEnableAI(int clientNum, int difficulty)
+static void Bot_ResetLife(botAIState_t *ai, playerState_t *ps)
 {
-    botAIState_t *ai;
-    playerState_t *ps;
-    if (!SV_BotIsTestClient(clientNum) || difficulty < 0 || difficulty > 2) return 0;
-    SV_BotResetAIClient(clientNum);
-    ai = &s_botAI[clientNum];
+    int clientNum=ai->clientNum, difficulty=ai->difficulty, recoveries=ai->recoveries;
+    unsigned int random=ai->random;
+    // ClientSpawn increments stats[5], including round spawns that occur
+    // between AI ticks. Never carry a route, blocked doorway, cached sighting
+    // or traversal cooldown from the previous body into the new spawn.
+    memset(ai,0,sizeof(*ai));
     ai->enabled = 1; ai->difficulty = difficulty;
+    ai->random=random; ai->recoveries=recoveries;
     ai->clientNum=clientNum; ai->progressNode=-1;
     ai->target = ai->lastTarget = ai->goal = ai->waypoint = ai->routeFrom = -1;
     ai->patrolGoal=ai->rejectedGoal=-1;
     ai->objectiveEntity = -1;
     ai->lastHealth = g_entities[clientNum].health;
     ai->observedFrame=-1; ai->observedTarget=-1;
-    ai->random = 0x9e3779b9u ^ (unsigned int)(clientNum+1)*0x85ebca6bu ^ (unsigned int)svs.time;
-    if (!ai->random) ai->random = 1;
     ai->nextThink = svs.time+(clientNum%4)*50;
     ai->lastFrame = ai->lastMoveCheck = svs.time;
-    ps = SV_GameClientNum(clientNum);
     if (ps) {
+        ai->spawnCount=ps->stats[5];
         memcpy(ai->aim, ps->viewangles, sizeof(vec3_t));
         memcpy(ai->lastOrigin, ps->origin, sizeof(vec3_t));
         memcpy(ai->perchOrigin, ps->origin, sizeof(vec3_t));
     }
+}
+
+qboolean SV_BotEnableAI(int clientNum, int difficulty)
+{
+    botAIState_t *ai;
+    if (!SV_BotIsTestClient(clientNum) || difficulty < 0 || difficulty > 2) return 0;
+    SV_BotResetAIClient(clientNum);
+    ai=&s_botAI[clientNum];
+    ai->clientNum=clientNum; ai->difficulty=difficulty;
+    ai->random = 0x9e3779b9u ^ (unsigned int)(clientNum+1)*0x85ebca6bu ^ (unsigned int)svs.time;
+    if (!ai->random) ai->random = 1;
+    Bot_ResetLife(ai,SV_GameClientNum(clientNum));
     Com_Printf("[bots] client %d enabled, difficulty %d\n", clientNum, difficulty);
     return 1;
 }
@@ -1164,7 +1176,9 @@ static void Bot_BuildPath(botAIState_t *ai, playerState_t *ps)
     float frontierScore=1e30f;
     qboolean found=0;
     if(kind==2 && ai->objectiveBehavior!=1 && ai->objectiveEntity<0 &&
-       Bot_GroundDepth(desired,projected,192)) desired=projected;
+       Bot_GroundDepth(desired,projected,192) && fabsf(projected[2]-desired[2])<80) desired=projected;
+    // A radio above a ledge/opening may trace to the floor below. That floor
+    // is outside Bot_AtPoint's vertical tolerance and is not a valid arrival.
     ai->waypoint=-1; ai->routeCount=ai->routeIndex=0;
     ai->planKind=kind;
     if(desired) memcpy(ai->planPoint,desired,sizeof(vec3_t));
@@ -1227,6 +1241,8 @@ static void Bot_BuildPath(botAIState_t *ai, playerState_t *ps)
                 // objective. Horizontal proximity alone revisits the roof.
                 if(s_botNav[start].origin[2]>destination[2]+48)
                     score+=fmaxf(0,s_botNav[current].origin[2]-destination[2])*4;
+                else if(s_botNav[start].origin[2]<destination[2]-48)
+                    score+=fmaxf(0,destination[2]-s_botNav[current].origin[2])*4;
                 if(score<frontierScore) {frontier=current; frontierScore=score;}
             }
             if(next<0 || Bot_EdgeBlocked(ai,current,next)) continue;
@@ -1247,8 +1263,12 @@ static void Bot_BuildPath(botAIState_t *ai, playerState_t *ps)
         // The entire known component was searched, but still has unexplored
         // exits. Walk to a reachable frontier instead of repeatedly choosing
         // the roof edge nearest a ground-level goal, then randomizing patrols.
-        // Truncated large searches retain their ordinary partial-route policy.
-        qboolean exploring=frontier>=0 && !s_botSearchCount;
+        // A truncated search below an upper-floor objective must not keep
+        // returning to the same XY point. Discover a reachable exit when the
+        // partial route made no meaningful progress toward that floor.
+        qboolean below=desired && destination[2]>ps->origin[2]+80 &&
+            closestDistance>=Bot_DistanceSq(s_botNav[start].origin,destination)-32*32;
+        qboolean exploring=frontier>=0 && (!s_botSearchCount || below);
         if(exploring) {
             Bot_ExpandFrontier(frontier);
             ai->goal=frontier; ai->failedPaths=ai->stuckCount=0;
@@ -1323,7 +1343,8 @@ static void SV_BotPlanFrame(void)
         if(!ai->enabled || !ai->pathPending) continue;
         ai->pathPending=0;
         if(!g_entities[index].client || g_entities[index].health<=0 ||
-           g_entities[index].client->sess.sessionState!=SESS_STATE_PLAYING) continue;
+           g_entities[index].client->sess.sessionState!=SESS_STATE_PLAYING ||
+           ai->spawnCount!=SV_GameClientNum(index)->stats[5]) continue;
         ai->nextPath=svs.time+1200;
         Bot_FindPath(ai,SV_GameClientNum(index));
         if(s_botWorkPathMs>=BOT_PATH_TIME_MS) break;
@@ -1698,6 +1719,9 @@ static void SV_BotRunAI(int clientNum, playerState_t *ps)
     if(!ai->enabled || !client) return;
     cmd->buttons=0; cmd->forwardmove=cmd->rightmove=0; cmd->hasWeapon=0;
     if(client->sess.sessionState!=SESS_STATE_PLAYING || g_entities[clientNum].health<=0) {
+        // Also reset after an observed inactive phase; do not depend only
+        // on spawn-counter continuity when restoring spectator state.
+        ai->spawnCount=-1;
         ai->target=-1; ai->acquiredAt=svs.time; ai->wantsMove=ai->routeMove=0;
         ai->memoryUntil=ai->coverUntil=ai->objectiveUntil=0;
         ai->burstUntil=ai->nextBurst=ai->alertUntil=ai->perchUntil=0;
@@ -1707,11 +1731,20 @@ static void SV_BotRunAI(int clientNum, playerState_t *ps)
         ai->stuckCount=ai->failedPaths=0; ai->patrolGoal=ai->progressNode=-1;
         ai->rejectedGoal=-1; ai->rejectedUntil=ai->sniperRepositionAt=0;
         ai->lastHealth=g_entities[clientNum].health;
-        // Original gametype respawn/round logic consumes use, not a forced spawn.
-        if(client->sess.sessionState==SESS_STATE_DEAD) cmd->buttons=0x8;
+        // CTF/HQ wait for use in spectator state after their respawn timer.
+        // Only original callbacks can admit the player: this also respects
+        // HQ defender lockout and S&D's prohibition on mid-round respawns.
+        if(client->sess.sessionState==SESS_STATE_DEAD ||
+           (client->sess.sessionState==SESS_STATE_SPECTATOR &&
+            client->sess.cs.team!=TEAM_SPECTATOR)) cmd->buttons=0x8;
         memcpy(ai->aim,ps->viewangles,sizeof(vec3_t));
         ai->lastFrame=svs.time;
         return;
+    }
+    if(ai->spawnCount!=ps->stats[5]) {
+        Bot_ResetLife(ai,ps);
+        if(Dvar_GetInt("scr_bot_debug"))
+            Com_Printf("[bots] respawn client=%d spawn=%d\n",clientNum,ai->spawnCount);
     }
     Bot_NavFrame();
     if (svs.time >= s_botDebugAt) {
@@ -1799,7 +1832,9 @@ static void SV_BotRunAI(int clientNum, playerState_t *ps)
             ai->nextApproach=svs.time+400; ai->approachUntil=0;
             memcpy(ai->approachGoal,ai->objective,sizeof(vec3_t));
             memcpy(ai->approachOrigin,ps->origin,sizeof(vec3_t));
-            if(Bot_GroundDepth(ai->objective,ai->approach,192) && Bot_WalkEdge(ps->origin,ai->approach))
+            if(Bot_GroundDepth(ai->objective,ai->approach,192) &&
+               (ai->objectiveEntity>=0 || fabsf(ai->approach[2]-ai->objective[2])<80) &&
+               Bot_WalkEdge(ps->origin,ai->approach))
                 ai->approachUntil=svs.time+400;
         }
         if(ai->approachUntil>svs.time) {

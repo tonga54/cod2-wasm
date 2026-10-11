@@ -708,3 +708,143 @@ Reports and logs are under `out/bot-pi-truth/`; `suite-results.json` summarizes
 the final suite. Test containers are removed after each case. The results
 support the navigation improvement but do not certify a numerical intelligence
 rating or universal freedom from stalls.
+
+## Life transitions, carrier replacements and deathmatch scheduling — 2026-10-11
+
+AI life state now follows the original spawn counter and observed inactive
+phases. A new life clears old routes, temporary blocked edges, cached sightings,
+movement timers and ladder/drop cooldowns, and anchors progress checks at the
+new spawn. The planner rejects obsolete pending work before spending a search.
+Navigation remains shared across lives; the independent RNG and cumulative
+recovery diagnostic survive. Storage increases by one integer per bot (256
+bytes for 64 slots), without extra traces, allocations or larger work budgets.
+
+Native use input now also covers active-team bots waiting as spectators. The
+original CTF/HQ scripts wait in that state when `scr_forcerespawn=0`; pressing
+use only while dead left bots unable to return. Real spectators and intermission
+receive no input. The original mode still controls timers, HQ defender lockout
+and S&D round admission. No spawn callback or spawn location is overridden.
+
+CTF chooses one living interceptor/escort per stable rank-parity squad using
+the existing shared actor cache and leases. Death can no longer permanently
+empty these duties merely because ranks 0/1 died. There are at most two elected
+responders for each duty, with scoped support's existing distance penalty.
+Other survivor ranks do not change.
+
+TDM and DM use native patrol/contact decisions, so their GSC scheduler now
+wakes at 2 Hz for the shared roster/debug refresh instead of 20 Hz for empty
+objective work. Native movement, aim, perception and plan cadences are unchanged.
+Normal reaction/accuracy settings remain unchanged.
+
+The controller regression fails against the previous controller when it spends
+a path search on a new body's obsolete request. Updated ASan/UBSan tests cover
+that case, a spawn between ticks, repeated inactive/live transitions, manual
+respawn input and spectator/intermission exclusions.
+
+The casualty fixture also reproduced a script VM error: after a native death
+callback yielded, an outer loop counter became the string `MOD_SUICIDE`.
+Reused external-call boundary frames retained an unrelated local-variable
+count; builtin calls also failed to publish their current count before native
+reentry. The fix publishes that count and clears the two newly entered frame
+counts. It adds scalar stores, not arrays, allocations or scans. The same Pi
+scenario subsequently completed both interceptor elections and the escort
+election. `test-script-native-callbacks.py` exercises dirty reused frames and
+caller-cache preservation under ASan/UBSan and is part of the static test list.
+
+Reproduce controlled respawns with `python3 scripts/prepare-bot-respawn-qa.py`,
+then use `test-bot-runtime.py --policy out/bot-respawns-controlled.gsc
+--config out/bot-respawns.cfg --expect-passes 4 --stop-after-passes` for TDM, DM,
+CTF or HQ. S&D expects one pass (no mid-round respawn). The fixture arranges
+deaths and disables weapons; it never calls spawn callbacks, teleports a
+respawn or re-enables AI between lives. CTF casualty/escort scenarios use
+`prepare-bot-objective-qa.py --carrier-roles`, 12 bots, the same manual-respawn
+config and three expected passes. Standard objective CTF now expects six passes, including the upper-floor
+handoff regression. HQ expects four, including defender lockout and release
+after radio neutralization.
+
+Validation also passed targeted notification ownership/continuation, variable
+collisions, string restart and 32-round script reuse tests, plus native i386
+and WebAssembly builds. The broad local static run reached the new callback
+check successfully, then stopped at the pre-existing archive harness's i386
+layout assertion on the 64-bit Mac (`15 != 11`). A 32-bit Docker attempt timed
+out under emulation; neither is reported as a passing full static suite.
+
+An autonomous Carentan/HQ run exposed an additional lease problem at an upper
+floor radio: proximity alone renewed the actor lease even when the bot stayed
+on the floor below. Near-trigger lease protection now also requires vertical
+distance under 64 units; real interaction timers retain their exemption. A
+fixture with an actor stalled 180 units below its objective fails with the old
+criterion and hands off correctly with the new one. This corrects election
+behavior, not the geometry or reachability of every upper-floor radio.
+
+The follow-up trace exposed the routing cause as well: projecting an announced
+objective down by up to 192 units could select a lower floor outside the native
+80-unit arrival tolerance. The exact-approach shortcut then steered toward that
+lower floor even when a route pointed elsewhere. Non-trigger objectives now
+accept projected floors only within their arrival height tolerance, both for
+route selection and final approach. Existing trigger-volume handling is
+unchanged. This adds height comparisons and avoids invalid approach traces;
+it does not add collision probes or expand path budgets. The production
+controller test rejects the old projection under an overhanging upper landing,
+while retaining the existing valid 64-unit model-to-floor projection case.
+
+A bounded search can still terminate on the lower floor directly underneath
+the desired objective. When an upper objective makes no meaningful progress
+within that search, the controller now uses an already-reached unexplored
+frontier instead of repeatedly returning to that lower cell. Frontier scoring
+also favors ascending progress toward elevated destinations. The existing
+2-search / 2-ms / 2,048-node path budget and shared navigation budget remain
+unchanged. A 2,306-node synthetic graph verifies frontier selection after
+exactly 2,048 expansions without adding work; the old partial-route policy
+fails that assertion.
+
+The focused Carentan upper-radio test starts under the radio on the lower
+floor and uses only normal movement after placement. Projection correction
+alone timed out at 120 seconds. The frontier correction reached the upper
+floor in 94.5 seconds in its first cold run; this is still slow and should not
+be described as instantaneous or universally reliable. The optional
+`prepare-bot-navigation-qa.py --upper-objective` fixture now also repeats the
+approach with the learned navigation retained (two expected passes).
+
+A repeat with the same controller failed to reach that upper objective within
+120 seconds, so the ascent is explicitly **not resolved reliably**. The warm
+repeat could not run because its cold setup failed. That failing diagnostic
+is retained in `verified-upper/` and `upper-repeat-result.json`; it is not
+counted as a passing test. The synthetic floor/frontier regressions verify
+the corrected decisions, but they do not prove complete map connectivity or
+fast traversal on this geometry.
+
+Direct Raspberry Pi 5 validation used the same tested i386 executable through
+the deployed QEMU runtime, one isolated match at a time. The final five
+32-Normal-bot autonomous runs used the same final controller and policy and
+completed at approximately 20 ticks/s:
+
+| Map / mode | Duration | Ticks/s | CPU, one core | Max single-bot AI | Max game frame | Max game after 30 s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Dawnville / TDM | 60 s | 20.00 | 42.53% | 3 ms | 64 ms | 64 ms |
+| Toujane / CTF | 90 s | 19.99 | 46.19% | 5 ms | 64 ms | 64 ms |
+| Carentan / HQ | 120 s | 20.02 | 48.79% | 5 ms | 609 ms | 41 ms |
+| Dawnville / SD | 90 s | 20.00 | 46.88% | 5 ms | 179 ms | 179 ms |
+| Carentan / DM | 60 s | 20.00 | 41.87% | 3 ms | 47 ms | 43 ms |
+
+These are stochastic matches, not a demonstrated CPU speedup; startup is
+included and no human/browser/network workload is added.
+All five modes retain the existing navigation/path/tactical work budgets.
+
+Controlled checks passed original respawn and resumed movement twice in TDM,
+DM, CTF and HQ with manual respawn enabled; S&D remained out of play while the
+round and living teammates continued. HQ defenders waited for neutralization
+and then returned. Carrier replacements, same-floor-sensitive actor handoff,
+flag capture, bomb plant/defuse and three safe Dawnville roof exits passed.
+The final roof exits took 3.5, 7 and 34.5 seconds. The last remains a visible
+delay (an earlier run took 19 seconds), and the change does not establish
+universal freedom from stalls. The Carentan upper-radio repeat failed as
+described above. HQ also retains a large startup game-frame spike; the mean
+tick rate must not be interpreted as hitch-free performance.
+
+Executable SHA-256: `874b3fb52b70e7ef06aa70662f672713085e8bff5469ce72a92b1cc5fb1b3258`.
+Final default policy SHA-256: `1a3aeadc48bbeb217a16d24568f7583c403e7524d65fe50e5662e4210bf7a9d5`.
+Raw reports/logs are in `out/bot-lifecycle/`; the intermediate and final
+matrices are `suite-results.json`, `final-results.json` and
+`verified-results.json`. The earlier
+reference failures and diagnostic runs are kept separately.

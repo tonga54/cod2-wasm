@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Generate first-party controlled objective scenarios for an isolated native server."""
 from pathlib import Path
+import argparse
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--carrier-roles', action='store_true', help='CTF casualty/replacement scenarios (12 bots)')
+args = parser.parse_args()
 root=Path(__file__).resolve().parents[1]
 source=(root/'downstream/server/browser_bots.gsc').read_text().replace(
     '    level thread objectiveState();','    level thread objectiveState();\n    level thread qaScenario();',1)
@@ -32,8 +36,14 @@ qaScenario()
     }
     if(mode == "ctf")
     {
+        if(CARRIER_ROLES)
+        {
+            qaCarrierRoles(players, other);
+            return;
+        }
         selfTest = actor qaStableRoles();
         actor qaActorElection();
+        actor qaActorBelowObjective();
         own = getEnt("allied_flag", "targetname");
         enemy = getEnt("axis_flag", "targetname");
         before = getTeamScore(team);
@@ -90,8 +100,15 @@ qaScenario()
         }
         println("[bot-qa] PASS original_hq_capture ms=" + (getTime()-started));
         actor.bot_difficulty = undefined;
-        actor botStop();
-        actor setOrigin(park);
+        actor suicide();
+        wait 8;
+        if(!isAlive(actor) || actor.sessionstate != "playing")
+            println("[bot-qa] PASS hq_defender_waits_for_neutralize");
+        else
+        {
+            println("[bot-qa] FAIL hq_defender_early_respawn");
+            return;
+        }
         other enableWeapon();
         other botAI(1);
         other.bot_difficulty = 1;
@@ -99,7 +116,13 @@ qaScenario()
         started = getTime();
         for(t = 0; t < 180 && !radio.hidden; t++) wait .5;
         if(radio.hidden && radio.team == "none")
+        {
             println("[bot-qa] PASS original_hq_destroy ms=" + (getTime()-started));
+            for(t = 0; t < 120 && (!isAlive(actor) || actor.sessionstate != "playing"); t++) wait .25;
+            if(isAlive(actor) && actor.sessionstate == "playing")
+                println("[bot-qa] PASS hq_defender_respawns_after_neutralize");
+            else println("[bot-qa] FAIL hq_defender_missing_respawn");
+        }
         else println("[bot-qa] FAIL radio_destroy");
     }
     if(mode == "sd")
@@ -176,6 +199,93 @@ qaStableRoles()
     return true;
 }
 
+qaCarrierRoles(players, enemyCarrier)
+{
+    own = getEnt("allied_flag", "targetname");
+    enemy = getEnt("axis_flag", "targetname");
+    // Stop low ranks after death so they cannot return during the election.
+    for(i = 0; i < players.size; i++)
+        if(players[i].pers["team"] == "allies" && players[i].bot_rank < 2)
+            players[i] suicide();
+    wait 1.2;
+    if(level.bot_team_size["allies"] < 4)
+    {
+        println("[bot-qa] FAIL carrier_roles_require_12_bots");
+        return;
+    }
+    enemyCarrier setOrigin(own.origin + (0,0,4));
+    wait 1;
+    if(!isDefined(enemyCarrier.flag))
+    {
+        println("[bot-qa] FAIL carrier_roles_flag_pickup");
+        return;
+    }
+    for(phase = 0; phase < 2; phase++)
+    {
+        count = 0;
+        chosen = undefined;
+        for(i = 0; i < players.size; i++)
+        {
+            player = players[i];
+            if(player.pers["team"] != "allies" || !isAlive(player) || player.sessionstate != "playing") continue;
+            player botAI(1);
+            player ctfObjective();
+            if(player.bot_intent == "intercept_flag_carrier")
+            {
+                count++;
+                chosen = player;
+            }
+            player botStop();
+        }
+        if(count != 2)
+        {
+            println("[bot-qa] FAIL surviving_interceptors phase=" + phase + " count=" + count);
+            return;
+        }
+        println("[bot-qa] PASS surviving_interceptors phase=" + phase + " count=" + count);
+        if(!phase)
+        {
+            chosen suicide();
+            wait 1.2;
+        }
+    }
+    // Keep the enemy carrier alive; the two teams can carry flags at once.
+    // Recovering the enemy flag should still receive a surviving escort.
+    carrier = undefined;
+    for(i = 0; i < players.size; i++)
+        if(players[i].pers["team"] == "allies" && isAlive(players[i]) && !isDefined(carrier)) carrier = players[i];
+    carrier setOrigin(enemy.origin + (0,0,4));
+    wait 1;
+    if(!isDefined(carrier.flag))
+    {
+        println("[bot-qa] FAIL escort_flag_pickup");
+        return;
+    }
+    // End interception first: deliver our own flag back through original rules.
+    enemyCarrier setOrigin(enemy.home_origin + (0,0,4));
+    // Both flags away prevents a capture; instead drop and let a teammate return ours.
+    enemyCarrier suicide();
+    wait .5;
+    helper = undefined;
+    for(i = 0; i < players.size; i++)
+        if(players[i] != carrier && players[i].pers["team"] == "allies" && isAlive(players[i])) helper = players[i];
+    helper setOrigin(own.origin + (0,0,4));
+    wait 1;
+    count = 0;
+    for(i = 0; i < players.size; i++)
+    {
+        player = players[i];
+        if(player == carrier || player.pers["team"] != "allies" || !isAlive(player)) continue;
+        player botAI(1);
+        player ctfObjective();
+        if(player.bot_intent == "escort_flag_carrier") count++;
+        player botStop();
+    }
+    if(count > 0 && count <= 2)
+        println("[bot-qa] PASS surviving_escorts count=" + count);
+    else println("[bot-qa] FAIL surviving_escorts count=" + count);
+}
+
 qaActorElection()
 {
     point = self.origin + (10000,0,0);
@@ -223,6 +333,27 @@ qaActorElection()
     first.bot_actor_until = 0;
 }
 
+qaActorBelowObjective()
+{
+    duty = "qa_upper_floor";
+    first = self selectActor(self.origin, 0, 1, duty);
+    point = first.origin + (0,0,180);
+    key = self.pers["team"] + "_" + duty + "_1_0";
+    cache = level.bot_actor_cache[key];
+    cache.point = point;
+    cache.until = 0;
+    cache.remaining = 180;
+    cache.progressAt = getTime() - 13000;
+    first.bot_actor_point = point;
+    first.bot_actor_until = getTime() + 2500;
+    replacement = self selectActor(point, 0, 1, duty);
+    if(isDefined(replacement) && replacement != first)
+        println("[bot-qa] PASS stalled_actor_below_objective_handoff");
+    else println("[bot-qa] FAIL stalled_actor_below_objective_retained");
+    first.bot_actor_until = 0;
+    if(isDefined(replacement)) replacement.bot_actor_until = 0;
+}
+
 qaPlaceAtTrigger(trigger)
 {
     offsets[0] = (0,0,64);
@@ -260,7 +391,8 @@ qaPlaceAtTrigger(trigger)
     return false;
 }
 '''
-output=root/'out/bot-objectives-controlled.gsc'
+scenario=scenario.replace('CARRIER_ROLES', 'true' if args.carrier_roles else 'false')
+output=root/('out/bot-carriers-controlled.gsc' if args.carrier_roles else 'out/bot-objectives-controlled.gsc')
 output.parent.mkdir(parents=True, exist_ok=True)
 output.write_text(source+scenario)
 print(output)

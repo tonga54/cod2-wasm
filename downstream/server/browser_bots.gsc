@@ -165,6 +165,14 @@ objectiveState()
                 println("[bots] match " + status);
             }
         }
+        // Deathmatch patrols and observed team contacts run in native AI.
+        // There is no scripted objective needing a 20 Hz scheduler; retain
+        // only the shared roster/debug refresh in these two modes.
+        if(level.bot_mode == "tdm" || level.bot_mode == "dm")
+        {
+            wait .5;
+            continue;
+        }
         // One shared scheduler replaces a sleeping policy and two endon
         // listeners per bot. Numbers and deadlines carry no entity references.
         for(i = 0; i < level.bot_player_numbers.size; i++)
@@ -245,8 +253,12 @@ selectActor(point, group, groups, duty)
         if(isDefined(previous) && isAlive(previous))
         {
             remaining = distance(previous.origin, point);
+            // XY proximity below a balcony is not arrival at the trigger.
+            // Keep the lease near the correct floor or during original use;
+            // otherwise the normal stall handoff must remain possible.
+            nearTrigger = remaining < 192 && previous.origin[2] > point[2] - 64 && previous.origin[2] < point[2] + 64;
             if(!isDefined(cache.remaining) || remaining < cache.remaining - 48 ||
-               remaining < 192 || isDefined(previous.progressbackground))
+               nearTrigger || isDefined(previous.progressbackground))
             {
                 cache.remaining = remaining;
                 cache.progressAt = getTime();
@@ -373,14 +385,21 @@ ctfObjective()
     }
     // Carriers are publicly marked on the original compass. This supplies a
     // movement objective, never permission to shoot an unseen player.
-    if(isDefined(enemyCarrier) && (self.bot_rank < 2 || level.bot_team_size[self.pers["team"]] <= 2))
+    if(isDefined(enemyCarrier))
     {
-        self setObjective(enemyCarrier.origin, 96, 0, undefined, "intercept_flag_carrier");
-        return;
+        // Elect one living responder per stable squad. Fixed ranks 0/1 left
+        // the carrier unchallenged after those two teammates died.
+        actor = self selectActor(enemyCarrier.origin, self.bot_rank % 2, 2, "intercept");
+        if(isDefined(actor) && actor == self)
+        {
+            self setObjective(enemyCarrier.origin, 96, 0, undefined, "intercept_flag_carrier");
+            return;
+        }
     }
     if(isDefined(friendlyCarrier))
     {
-        if(self.bot_rank < 2)
+        actor = self selectActor(friendlyCarrier.origin, self.bot_rank % 2, 2, "escort");
+        if(isDefined(actor) && actor == self)
             self setObjective(friendlyCarrier.origin, 140, 1, undefined, "escort_flag_carrier");
         else if(self.bot_rank % 4 == 2)
             self setObjective(own.home_origin, 160, 1, undefined, "defend_flag_base");

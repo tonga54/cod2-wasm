@@ -87,7 +87,7 @@ def main():
             while time.monotonic() < deadline:
                 time.sleep(min(5, max(0, deadline - time.monotonic())))
                 log = docker('logs', name)
-                if re.search(r'\[bot(?:-nav)?-qa\] FAIL ', log) or len(re.findall(
+                if re.search(r'\[bot(?:-nav)?-qa\] FAIL |script compile error|script runtime error|ERROR:', log, re.I) or len(re.findall(
                         r'\[bot(?:-nav)?-qa\] PASS ', log)) >= args.expect_passes:
                     break
         else:
@@ -122,6 +122,7 @@ def main():
             'sampled256UnitCellsPerBot': cells,
             'lastMatchState': re.findall(r'\[bots\] match (.+)', log)[-1:],
             'matchStates': list(dict.fromkeys(re.findall(r'\[bots\] match (.+)', log))),
+            'respawnResets': len(re.findall(r'\[bots\] respawn client=', log)),
             'lastWorkCounters': re.findall(r'\[bots\] work (.+)', log)[-1:],
             'simulationFps': round(sum(p['frames'] for p in windows) * 1000 / sum(p['wall'] for p in windows), 2) if windows else None,
             'maxGameFrameMs': max((p['maxGame'] for p in windows), default=None),
