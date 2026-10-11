@@ -182,7 +182,7 @@ weapon slot from its `"none"` value, without raising an invalid-weapon error.
 The normal static suite includes the production bot controller and regression
 tests for route progress, blocked-route alternatives, guard spacing, ladder
 links/input, frontier fairness, offset doorways, tight arrival radii, shared
-16-bot work limits and fair admission, stable routes, moving destinations,
+32-bot work limits and fair admission, stable routes, moving destinations,
 circular-motion recovery, expiring team contact reports, bounded A* searches,
 directed roof exits and fall rejection, warm-up time limits, jump tracking,
 scoped ADS and weapon-range pursuit. It also tests vector order, objective contact/use, linked-player
@@ -277,3 +277,44 @@ benchmark (1,000 searches on approximately 9,200 nodes, with ASan/UBSan) took
 about 0.03 ms per search and expanded 96 nodes per diagonal route. Native CPU,
 synthetic path time and browser latency are different measurements. This
 pre-integration revision was not load-tested with human browser clients on the Pi.
+
+
+## Raspberry Pi deployment validation
+
+Run the same isolated match on the Pi with its ARM64 server image and i386
+engine closure (the runner invokes the image's QEMU interpreter):
+
+```sh
+python3 scripts/test-bot-runtime.py --runtime pi \
+  --image local/cod2-pi-server:dev \
+  --binary out/pi-runtime/usr/local/bin/cod2_lnxded \
+  --map mp_carentan --mode tdm --bots 32 --difficulty 2 --seconds 90
+```
+
+`--assets` and `--config` can point to an existing private installation. Results
+also include simulation ticks per second and the highest sampled bot/game work
+from the engine's aggregate profiler. These are server simulation measurements;
+they do not measure browser FPS or network latency with human clients.
+
+
+On October 11, 2026 the integrated controller was exercised on the Raspberry Pi
+at `192.168.1.28`, with 32 Hard bots per isolated TDM match:
+
+| Map | Measurement | Simulation ticks/s | CPU, one core | Final score |
+| --- | ---: | ---: | ---: | --- |
+| Carentan | 90 s | 20.0 | 48.11% | 8–7 |
+| Toujane | 60 s | 20.0 | 45.42% | 17–15 |
+| Dawnville | 60 s | 20.0 | 51.63% | 10–5 |
+
+The existing `ed9f47c` engine used 53.26% of one core in a separate 90-second
+Carentan reference match. Combat and spawn evolution differ between runs, so
+this is not a fixed percentage performance guarantee. The Pi reported no
+thermal/voltage throttling during these checks. Existing web/gateway services
+and their sessions remained active while isolated QA containers ran.
+
+
+Controlled Pi checks passed original CTF pickup/capture, HQ capture and
+neutralization (9.5 seconds each), and two successive S&D rounds with plant
+(5.5 seconds) and defuse (10.5 seconds). No engine/script errors were reported.
+These scenarios arrange actors near the objective and verify interaction rules
+and round lifecycle, not autonomous route completion from every spawn.
