@@ -448,17 +448,27 @@ hqObjective()
         self botClearGoal();
         return;
     }
+    size = level.bot_team_size[self.pers["team"]];
+    // Large teams need mobile infantry as well as a fixed defense. Support
+    // weapons and snipers cover the radio; rifle/SMG patrols contest approaches
+    // and respond to observed contacts instead of all parking at one point.
+    mobile = size > 4 && self.bot_rank % 4 < 2;
     if(radio.team == self.pers["team"])
-        self setObjective(radio.origin, 160, 1, undefined, "defend_headquarters");
+    {
+        if(mobile) self botClearGoal();
+        else self setObjective(radio.origin, 160, 1, undefined, "defend_headquarters");
+    }
     else
     {
-        // Keep a capture element inside the radius and a security element
-        // watching entrances. Small teams commit everyone to the capture.
-        size = level.bot_team_size[self.pers["team"]];
+        // Elect capture/destroy actors before assigning mobile duties. Even
+        // mobile infantry must perform an interaction when selected for it.
         actor = undefined;
         if(size > 2) actor = self selectActor(radio.origin, self.bot_rank % 2, 2, "radio");
         if(size > 2 && (!isDefined(actor) || actor != self))
-            self setObjective(radio.origin, 144, 1, undefined, "cover_headquarters_capture");
+        {
+            if(mobile) self botClearGoal();
+            else self setObjective(radio.origin, 144, 1, undefined, "cover_headquarters_capture");
+        }
         else if(radio.team == "none")
             self setObjective(radio.origin, 48, 0, undefined, "capture_headquarters");
         else self setObjective(radio.origin, 48, 0, undefined, "destroy_headquarters");

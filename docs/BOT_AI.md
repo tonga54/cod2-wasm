@@ -930,3 +930,131 @@ Final policy SHA-256: `fdc9bfa226dcf396d3c07266dfebfa82857180eb77c90651598e8cb68
 Raw diagnostics, candidate runs, final logs and `final-results.json` are retained
 under `out/bot-fixes/` (ignored test output). The old failing upper-radio runs
 remain under `out/bot-lifecycle/` for comparison.
+
+## Corridor distribution and cold-spawn retries — 2026-10-11
+
+Carentan TDM exposed a limitation that successful objective/roof tests did not
+cover: teammates could reserve different 32-unit cells in the same passage,
+then concentrate at the same gate. Patrol reservations also referred to the
+end of a partial search rather than its persistent destination, stopped after
+finding one nearby teammate and favored the center of the map.
+
+Patrol choices now reserve persistent destinations, accumulate the influence
+of all nearby assignments and no longer receive an artificial center bonus.
+Team routes reserve corridor-width sectors, sampled across their next 48 nodes,
+plus current living teammate positions. A peer contributes once per sector;
+cost saturates at four peers and remains soft, so the only available passage
+stays usable. Reachable exploration frontiers also account for this traffic
+while the map is still being discovered. DM does not share enemy route data.
+Existing objective assignments, scoped-rifle balance, collision validation and
+route commitment remain in force.
+
+Reservations use a fixed 4,096-entry, generation-stamped spatial table (48 KiB
+additional shared storage), bounded eight-probe lookup and cached per-node
+costs. There are no added collision traces, allocations or roster scans in
+A*'s inner loop. Navigation still shares 128 attempts / 4 ms per frame; planning
+shares two searches / 2 ms and at most 2,048 expanded nodes per search. A cold
+spawn with an empty unfinished route retries after 200 ms instead of waiting
+1.2 seconds; successful objective arrival keeps the slower interval.
+
+Controller regressions distinguish an adjacent grid row in the same corridor
+from a separate street, permit an unavoidable crowded passage, verify
+per-peer counting and persistent destination spacing, and cover cold-start
+retry versus completed arrival. Mutants removing corridor costs or restoring
+partial-goal reservations are rejected by the behavioral tests. The existing
+ASan/UBSan suite continues to cover normal aiming, elevated navigation,
+objective priority, life resets, human courtesy and shared work budgets.
+
+`scripts/prepare-bot-flow-qa.py` creates an ignored policy that measures the
+first 256 units of departure from original spawns, at 250-ms intervals, without
+assigning positions, movement or goals. `scripts/bot_flow_metrics.py` summarizes
+living-teammate proximity in the existing five-second debug snapshots; the
+runtime runner includes these results. Crowding means at least three teammates
+within 192 horizontal and 64 vertical units. These samples are diagnostics,
+not proof that every route is accessible or that every combat decision is good.
+
+Two reference Carentan runs had 41.8–50.2% crowded samples in the first minute;
+the corridor candidate's two runs had 9.6–17.1%. After the first minute the
+180-second reference had 20.5%, versus 3.3–3.7% in the candidate runs. These are
+independent stochastic matches, not identical spawn replays. The candidate runs
+still produced 100 and 116 combined TDM kills over their measurement windows.
+As a separate spatial diagnostic, interpolating five-second position segments
+across Carentan's Y=1600 line placed 10 of 12 initial reference crossings in the
+X=512..1023 sector. Candidate runs spread 13 and 25 crossings over four 512-unit
+sectors, including west of X=0. Interpolation is not an exact record of the
+streets taken between samples; the synthetic corridor regression separately
+checks actual path selection.
+
+The instrumented original-spawn comparison recorded all 32 departures in each
+run: median 2.5 seconds before and 2.25 seconds after. The slowest departure was
+12.5 seconds before and 15.5 seconds after, so this does **not** establish an
+improvement in worst-case spawn escape. Departure measures distance from the
+spawn, not continuous inactivity. Local cold-navigation/courtyard delays remain
+possible even though empty unfinished paths now retry sooner.
+
+
+The wider mode sweep then exposed another concentration point: objective guards
+all used a small escort-sized ring. With more than four nearby reserved guard
+positions, that ring now expands by 16 units per additional reservation, capped
+at 384 units. It retains 32 infantry candidates, existing cached sniper perches
+and the shared tactical trace limit. Small escorts stay close; the designated
+capture, plant, defuse and destroy actors keep their original interaction
+radii. A regression checks wide full-squad coverage and the compact small
+escort with unchanged trace counts. Uninitialized guard positions are not
+used as patrol reservations; the announced objective anchors them until their
+first position is selected.
+
+The initial corridor comparison above used executable
+`b5aa0e01aa21579aae551eb104adfed45e511789c060d7c2f1b1cac4ad874a8c`,
+before this guard-ring follow-up; its TDM patrol/routing logic is unchanged in
+the final build. Raw comparisons are under `out/bot-routes/`.
+
+HQ's larger teams also split duties: support/sniper slots keep fixed radio
+coverage while rifle/SMG slots patrol and respond to observed contacts. Actor
+election happens first, so selected capture/destroy players retain their task
+regardless of weapon role. Teams with four or fewer living bots keep their
+existing concentrated behavior. The policy change uses existing rank/roster
+state and adds no polling thread or map search. The controlled objective
+fixture has a `--headquarters-roles` option to check neutral, friendly and enemy
+radio duties with 16 teammates, plus the four-player fallback. This checks
+policy assignments; the separate original HQ capture/destroy fixture verifies
+the engine's interaction and respawn rules.
+
+Final native executable, Raspberry Pi 5, 32 Normal bots:
+
+| Map / mode | Duration | Ticks/s | CPU, one core | Max game frame | Max single-bot AI |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Carentan / TDM | 120 s | 20.00 | 43.98% | 32 ms | 4 ms |
+| Toujane / CTF | 90 s | 20.00 | 46.91% | 40 ms | 6 ms |
+| Carentan / HQ | 120 s | 19.99 | 52.65% | 114 ms | 4 ms |
+| Dawnville / SD | 90 s | 20.00 | 44.76% | 171 ms | 4 ms |
+| Carentan / DM | 60 s | 20.00 | 42.70% | 52 ms | 4 ms |
+
+The final Carentan TDM repeat had 19.6% crowded first-minute samples and 0.6% afterward. HQ with mobile duties had 19.9% and 10.5%; objective modes legitimately concentrate some players, so their values are not directly comparable with TDM.
+
+The final native engine completed five-mode autonomous tests and 17 controlled
+assertions: Carentan upper arrival (20 s cold / 6 s warm), Dawnville safe roof
+exits (3 / 7 / 12.5 s), CTF election/handoff and original flag pickup/capture,
+HQ capture/destruction/defender respawn, and S&D plant/defuse. The final HQ-only
+policy follow-up was then checked in another autonomous match, four original
+HQ interaction/respawn assertions and four controlled role assignments. The
+other modes' policy branches were unchanged. Dawnville and Toujane TDM were
+also exercised for 90 s with the corridor candidate, at 20 ticks/s and 42.92% /
+40.60% of one core, before the objective-guard follow-up.
+
+CPU sampling begins after bots join; timing includes navigation warm-up and
+diagnostics, without human/browser/network load. CTF and S&D's short autonomous
+matches did not capture/plant; controlled interaction checks do not establish
+complete long-distance tactics. S&D retained its original initial-round restart
+spike. HQ's 114-ms frame coincided with radio neutralization and several
+defender respawns (maximum single-bot AI was 2 ms in that profile window);
+that correlation does not isolate the individual game-frame cost.
+These checks demonstrate improved distribution and preserved operating
+limits, not universal freedom from stalls or hitch-free frames. The full static
+suite is not claimed green: its previously observed host-ABI archive assertion
+is outside this change. Controller sanitizers, frame cadence, foundation,
+private assets, native/WASM builds and browser package checks passed.
+
+Final executable SHA-256: `38af065c1709fe4c91c53f78120081a118edec26c5db4dd833b991a181c21001`.
+Final policy SHA-256: `4af82a0f98a96ecb2c0f28a145814a5381ea3da9c0a5753989ad7c5266424706`.
+Final reports: `out/bot-routes/v3-results.json`, `v4-results.json` and `hq-roles-results.json`; earlier comparisons and raw logs remain alongside them.

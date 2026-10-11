@@ -266,6 +266,17 @@ int main(void){
  Bot_FindPath(&s_botAI[0],&clients[0].ps);
  assert(s_botAI[0].routeCount>0&&s_botNav[s_botAI[0].waypoint].origin[0]>0);
 
+ // A cold spawn with no known exit retries promptly without increasing the
+ // shared search budget. Arrival at an objective retains the slower interval.
+ SV_BotResetNavigation();svs.time+=1000;Bot_NavAdd((float[3]){0,0,1});
+ SV_BotEnableAI(0,1);SV_BotSetGoal(0,(float[3]){512,0,1},12,0,-1);
+ Bot_WorkFrame();s_botWorkEdges=BOT_NAV_EDGES_PER_FRAME;
+ s_botAI[0].nextPath=svs.time+1200;Bot_FindPath(&s_botAI[0],&clients[0].ps);
+ assert(!s_botAI[0].routeCount && s_botAI[0].nextPath==svs.time+200);
+ svs.time+=50;SV_BotSetGoal(0,clients[0].ps.origin,12,0,-1);
+ s_botAI[0].nextPath=svs.time+1200;Bot_FindPath(&s_botAI[0],&clients[0].ps);
+ assert(!s_botAI[0].routeCount && s_botAI[0].nextPath==svs.time+1200);
+
  // A local branch must go away from its objective to find a doorway around
  // a wall. Refusing every temporary detour trapped bots in small components.
  SV_BotResetNavigation();Bot_NavAdd((float[3]){224,0,1});
@@ -749,8 +760,8 @@ int main(void){
  assert(s_botAI[2].lastSeen[0]==400 && s_botAI[2].memoryUntil<=svs.time);wall=0;
 
 
- // A teammate's reserved lane is a soft cost: choose another short route,
- // but use the only passage if there is no alternative. Enemies/DM do not
+ // Moving one grid cell sideways stays in the same reserved corridor: do
+ // not take a pointless tiny detour. Enemies/DM do not
  // leak route information into the planner.
  SV_BotResetNavigation();svs.time+=5000;level.maxclients=3;
  for(i=0;i<3;i++) {
@@ -766,7 +777,7 @@ int main(void){
  s_botAI[1].routeCount=2;s_botAI[1].route[0]=1;s_botAI[1].route[1]=3;
  Bot_WorkFrame();s_botWorkEdges=BOT_NAV_EDGES_PER_FRAME;
  traceCount=0;Bot_RouteTraffic(&s_botAI[0]);assert(traceCount==0);
- Bot_FindPath(&s_botAI[0],&clients[0].ps);assert(s_botAI[0].route[0]==2);
+ Bot_FindPath(&s_botAI[0],&clients[0].ps);assert(s_botAI[0].route[0]==1);
  s_botNav[0].edge[1]=-1;s_botAI[0].routeCount=0;
  Bot_FindPath(&s_botAI[0],&clients[0].ps);assert(s_botAI[0].route[0]==1);
  svs.time+=50;Bot_WorkFrame();s_botWorkEdges=BOT_NAV_EDGES_PER_FRAME;
@@ -776,6 +787,52 @@ int main(void){
  s_botAI[0].routeCount=0;Bot_FindPath(&s_botAI[0],&clients[0].ps);
  assert(s_botAI[0].route[0]==1);
  s_botTrafficGeneration=~0u;Bot_RouteTraffic(&s_botAI[0]);assert(s_botTrafficGeneration==1);
+
+ // A wide main corridor has two adjacent rows. Four peers occupying it
+ // must send the next bot down the actual alternate street, not the adjacent
+ // grid row in that same crowd. The alternate rejoins the same objective.
+ SV_BotResetNavigation();svs.time+=5000;level.maxclients=5;
+ for(i=0;i<5;i++) {
+  g_entities[i].client=&clients[i];g_entities[i].health=100;
+  clients[i].sess.connected=2;clients[i].sess.sessionState=SESS_STATE_PLAYING;
+  clients[i].sess.cs.team=TEAM_ALLIES;clients[i].ps.origin[0]=0;
+  clients[i].ps.origin[1]=0;clients[i].ps.origin[2]=1;SV_BotEnableAI(i,1);
+ }
+ for(int x=0;x<33;x++)for(int y=0;y<13;y++)Bot_NavAdd((float[3]){x*32,y*32,1});
+ for(int x=0;x<33;x++)for(int y=0;y<13;y++) {
+  int n=x*13+y;
+  for(int d=0;d<8;d++)s_botNav[n].edge[d]=-2;
+  if(x<32 && (y<2 || y==12))s_botNav[n].edge[0]=(x+1)*13+y;
+  if(x>0 && (y<2 || y==12))s_botNav[n].edge[4]=(x-1)*13+y;
+  if(y<12 && (x==0 || x==32 || y==0))s_botNav[n].edge[2]=n+1;
+  if(y>0 && (x==0 || x==32 || y==1))s_botNav[n].edge[6]=n-1;
+ }
+ for(int peer=1;peer<5;peer++) {
+  s_botAI[peer].routeCount=32;
+  for(i=0;i<32;i++)s_botAI[peer].route[i]=(i+1)*13;
+ }
+ SV_BotSetGoal(0,(float[3]){1024,0,1},12,0,-1);
+ Bot_FindPath(&s_botAI[0],&clients[0].ps);
+ int alternate=0;for(i=0;i<s_botAI[0].routeCount;i++)
+  if(s_botNav[s_botAI[0].route[i]].origin[1]==384)alternate=1;
+ assert(alternate && s_botAI[0].goal==32*13);
+ // Removing the alternate exit still permits the crowded main street.
+ s_botNav[0].edge[2]=-2;svs.time+=50;s_botAI[0].routeCount=0;
+ Bot_FindPath(&s_botAI[0],&clients[0].ps);assert(s_botAI[0].goal==32*13);
+ assert(s_botAI[0].route[0]==13);
+ // Reservation counts are per peer, not per sampled route cell.
+ Bot_RouteTraffic(&s_botAI[0]);assert(Bot_TrafficCost(13*16)==48);
+ // Two strategic patrol goals sharing a partial frontier still reserve two
+ // separate destinations. Even a large unexplored region cannot attract all.
+ s_botAI[1].patrolGoal=13*8;s_botAI[2].patrolGoal=13*32;
+ s_botAI[1].patrolUntil=s_botAI[2].patrolUntil=svs.time+20000;
+ s_botAI[1].goal=s_botAI[2].goal=0;s_botAI[0].goal=-1;
+ short choices[3]={13*8,13*32,13*16+12};
+ for(unsigned seed=1;seed<=32;seed++) {
+  s_botAI[0].random=seed*7919;
+  assert(Bot_PatrolGoal(&s_botAI[0],&clients[0].ps,choices,3)==13*16+12);
+ }
+ puts("PASS: spatial corridor reservations, real alternate street, unavoidable passage, per-peer counts, persistent patrol destination spacing");
 
  // A useful firing lane beats a nominal guard slot facing straight into a
  // wall. Holding the assignment uses no new traces; ALL 32 bots and sniper
@@ -802,6 +859,26 @@ int main(void){
  s_botAI[0].guardUntil=svs.time;s_botAI[0].nextPath=svs.time+1000;
  Bot_GuardPoint(0,&s_botAI[0],&clients[0].ps);
  assert(!memcmp(guardSaved,s_botAI[0].guardPoint,sizeof(vec3_t)) && s_botAI[0].nextPath>svs.time);
+
+ // A full defense squad spreads beyond the small escort ring. A small
+ // escort stays close; both use the same candidate count and ray budget.
+ SV_BotResetNavigation();svs.time+=5000;level.maxclients=16;
+ for(int x=-384;x<=384;x+=32)for(int y=-384;y<=384;y+=32)
+  Bot_NavAdd((float[3]){x,y,1});
+ for(i=0;i<16;i++) {
+  clients[i].sess.cs.team=TEAM_ALLIES;clients[i].sess.sessionState=SESS_STATE_PLAYING;
+  g_entities[i].health=100;SV_BotEnableAI(i,1);
+  s_botAI[i].objectiveUntil=svs.time+1000;s_botAI[i].objectiveBehavior=1;
+  s_botAI[i].objectiveRadius=160;s_botAI[i].objective[2]=1;
+  s_botAI[i].guardUntil=svs.time+1000;s_botAI[i].guardPoint[2]=1;
+ }
+ s_botAI[0].guardUntil=0;traceCount=0;
+ Bot_GuardPoint(0,&s_botAI[0],&clients[0].ps);
+ assert(s_botAI[0].guardPoint[0]>=256 && traceCount<=6);
+ level.maxclients=3;svs.time+=50;s_botAI[0].guardUntil=0;traceCount=0;
+ Bot_GuardPoint(0,&s_botAI[0],&clients[0].ps);
+ assert(Bot_DistanceSq(s_botAI[0].guardPoint,s_botAI[0].objective)<=160*160 && traceCount<=6);
+ puts("PASS: large objective squads expand coverage while small escorts keep the close ring and shared trace budget");
 
  // At most two reinforcements pursue a reported contact. Death or a new
  // strategic duty releases that slot immediately; leases also expire.
@@ -954,12 +1031,13 @@ int main(void){
  clock_t measured=clock();int runs=1000;
  for(i=0;i<runs;i++) {
   svs.time+=50;s_botAI[0].objectiveUntil=svs.time+1600;
+  s_botAI[0].detourUntil=s_botAI[0].failedPaths=0;
   s_botAI[0].routeCount=0;Bot_FindPath(&s_botAI[0],&clients[0].ps);
  }
  printf("BENCH: %d searches on %d nodes: %.3f ms/search, %.1f expanded/search; caps=%d searches + %d nav attempts/frame\n",
   runs,s_botNavCount,(double)(clock()-measured)*1000/CLOCKS_PER_SEC/runs,
   (double)s_botPathExpanded/s_botPathSearches,BOT_PATHS_PER_FRAME,BOT_NAV_EDGES_PER_FRAME);
- // Dense traffic benchmark: all 31 peers reserve the same 24 cells. Route
+ // Dense traffic benchmark: all 31 peers reserve the same 48 cells. Route
  // costs remain one O(1) lookup per edge, even with every bot in one lane.
  level.maxclients=32;
  for(int peer=1;peer<32;peer++) {
@@ -971,14 +1049,17 @@ int main(void){
  measured=clock();int trafficExpanded=s_botPathExpanded;
  for(i=0;i<runs;i++) {
   svs.time+=50;s_botAI[0].objectiveUntil=svs.time+1600;
+  s_botAI[0].detourUntil=s_botAI[0].failedPaths=0;
   s_botAI[0].routeCount=0;Bot_FindPath(&s_botAI[0],&clients[0].ps);
  }
  printf("BENCH: 32 bots reserving one lane: %.3f ms/search, %.1f expanded/search; reservation storage=%zu KiB\n",
   (double)(clock()-measured)*1000/CLOCKS_PER_SEC/runs,
-  (double)(s_botPathExpanded-trafficExpanded)/runs,(sizeof(s_botTrafficStamp)+sizeof(s_botTraffic))/1024);
+  (double)(s_botPathExpanded-trafficExpanded)/runs,(sizeof(s_botTrafficStamp)+sizeof(s_botTraffic)+sizeof(s_botTrafficSectors))/1024);
  level.maxclients=2;clients[1].sess.cs.team=TEAM_AXIS;
 #endif
  // A disconnected destination cannot turn A* back into an unbounded flood.
+ // Reinitialize after the stationary benchmark; it may enter a detour.
+ SV_BotEnableAI(0,1);
  svs.time+=50;s_botAI[0].routeCount=0;
  SV_BotSetGoal(0,(float[3]){9000,9000,1},12,0,-1);
  int expandedBefore=s_botPathExpanded;

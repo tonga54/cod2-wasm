@@ -4,7 +4,10 @@ from pathlib import Path
 import argparse
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--carrier-roles', action='store_true', help='CTF casualty/replacement scenarios (12 bots)')
+parser.add_argument('--headquarters-roles', action='store_true', help='HQ mobile/guard/actor duties (32 bots)')
 args = parser.parse_args()
+if args.carrier_roles and args.headquarters_roles:
+    parser.error('select only one controlled role scenario')
 root=Path(__file__).resolve().parents[1]
 source=(root/'downstream/server/browser_bots.gsc').read_text().replace(
     '    level thread objectiveState();','    level thread objectiveState();\n    level thread qaScenario();',1)
@@ -13,7 +16,8 @@ scenario=r'''
 qaScenario()
 {
     level endon("intermission");
-    wait 12;
+    if(HEADQUARTERS_ROLES) wait 18;
+    else wait 12;
     players = getEntArray("player", "classname");
     actor = undefined;
     other = undefined;
@@ -32,6 +36,11 @@ qaScenario()
     if(!isDefined(actor) || !isDefined(other))
     {
         println("[bot-qa] FAIL actors_not_alive mode=" + mode);
+        return;
+    }
+    if(mode == "hq" && HEADQUARTERS_ROLES)
+    {
+        qaHeadquartersRoles(players);
         return;
     }
     if(mode == "ctf")
@@ -286,6 +295,67 @@ qaCarrierRoles(players, enemyCarrier)
     else println("[bot-qa] FAIL surviving_escorts count=" + count);
 }
 
+qaHeadquartersRoles(players)
+{
+    radio = undefined;
+    for(t = 0; t < 100 && !isDefined(radio); t++)
+    {
+        for(i = 0; i < level.radio.size; i++)
+            if(isDefined(level.radio[i].hidden) && !level.radio[i].hidden) radio = level.radio[i];
+        wait .5;
+    }
+    if(!isDefined(radio) || level.bot_team_size["allies"] != 16)
+    {
+        println("[bot-qa] FAIL hq_roles_requires_32_bots_and_active_radio");
+        return;
+    }
+    owner = radio.team;
+    roster = level.bot_player_numbers;
+    size = level.bot_team_size["allies"];
+    for(phase = 0; phase < 4; phase++)
+    {
+        // Policy-only fixture: restore the original radio state before the
+        // VM yields. No scoring, capture timers or movement are simulated.
+        radio.team = "none";
+        if(phase == 1) radio.team = "allies";
+        if(phase == 2) radio.team = "axis";
+        if(phase == 3)
+        {
+            level.bot_team_size["allies"] = 4;
+            level.bot_player_numbers = [];
+            for(i = 0; i < players.size; i++)
+                if(players[i].bot_rank < 4)
+                    level.bot_player_numbers[level.bot_player_numbers.size] = players[i] getEntityNumber();
+        }
+        level.bot_actor_cache = [];
+        actors = 0;
+        mobile = 0;
+        guards = 0;
+        for(i = 0; i < players.size; i++)
+        {
+            player = players[i];
+            if(player.pers["team"] != "allies" || (phase == 3 && player.bot_rank >= 4)) continue;
+            player.bot_actor_until = 0;
+            player.bot_intent = "qa_mobile";
+            player botAI(1);
+            player hqObjective();
+            player botStop();
+            if(player.bot_intent == "qa_mobile") mobile++;
+            else if(player.bot_intent == "capture_headquarters" || player.bot_intent == "destroy_headquarters") actors++;
+            else guards++;
+        }
+        good = actors == 2 && mobile >= 6 && guards >= 6;
+        if(phase == 1) good = actors == 0 && mobile == 8 && guards == 8;
+        if(phase == 3) good = actors == 2 && mobile == 0 && guards == 2;
+        if(good) println("[bot-qa] PASS hq_roles phase=" + phase + " actors=" + actors + " mobile=" + mobile + " guards=" + guards);
+        else println("[bot-qa] FAIL hq_roles phase=" + phase + " actors=" + actors + " mobile=" + mobile + " guards=" + guards);
+    }
+    radio.team = owner;
+    level.bot_player_numbers = roster;
+    level.bot_team_size["allies"] = size;
+    level.bot_actor_cache = [];
+}
+
 qaActorElection()
 {
     point = self.origin + (10000,0,0);
@@ -391,8 +461,9 @@ qaPlaceAtTrigger(trigger)
     return false;
 }
 '''
+scenario=scenario.replace('HEADQUARTERS_ROLES', 'true' if args.headquarters_roles else 'false')
 scenario=scenario.replace('CARRIER_ROLES', 'true' if args.carrier_roles else 'false')
-output=root/('out/bot-carriers-controlled.gsc' if args.carrier_roles else 'out/bot-objectives-controlled.gsc')
+output=root/('out/bot-hq-roles-controlled.gsc' if args.headquarters_roles else 'out/bot-carriers-controlled.gsc' if args.carrier_roles else 'out/bot-objectives-controlled.gsc')
 output.parent.mkdir(parents=True, exist_ok=True)
 output.write_text(source+scenario)
 print(output)

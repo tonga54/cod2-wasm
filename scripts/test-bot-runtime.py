@@ -11,6 +11,8 @@ import subprocess
 import time
 import uuid
 
+from bot_flow_metrics import summarize_flow
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -134,6 +136,7 @@ def main():
                 'maxHoldingHeightAboveAnchor': max(held_heights, default=None),
                 'scope': '5s samples; height is relative to the guarded objective or lowest spawn for patrols'
             },
+            'flow': summarize_flow(log),
             'intents': sorted(set(re.findall(r'intent=(\w+)', log))),
             'controlledPasses': re.findall(r'\[bot(?:-nav)?-qa\] PASS (.+)', log),
             'controlledFailures': re.findall(r'\[bot(?:-nav)?-qa\] FAIL (.+)', log),

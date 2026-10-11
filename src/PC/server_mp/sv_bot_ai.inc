@@ -25,7 +25,9 @@ extern qboolean SV_EntityContact(const vec_t *, const vec_t *, const gentity_t *
 #define BOT_PATHS_PER_FRAME 2
 #define BOT_PATH_TIME_MS 2
 #define BOT_TACTICAL_TRACES_PER_FRAME 12
-#define BOT_TRAFFIC_ROUTE_NODES 24
+#define BOT_TRAFFIC_ROUTE_NODES 48
+#define BOT_TRAFFIC_SECTORS 4096
+#define BOT_TRAFFIC_STEP 128.0f
 #define BOT_PERCH_MAX 96
 #define BOT_RECENT_AREAS 8
 #define BOT_NAV_DIRECTIONS 8
@@ -977,7 +979,19 @@ static int Bot_PatrolGoal(botAIState_t *ai, playerState_t *ps, const short *node
     int i,j,best=-1, candidates[3]={-1,-1,-1};
     float scores[3]={-1e30f,-1e30f,-1e30f};
     qboolean sniper=Bot_IsSniper(ps);
+    const vec_t *reservations[COD2_BOT_MAX_CLIENTS];
+    int reserved=0;
     if(!count) return -1;
+    // Reserve the persistent destination, not the end of a partial A* route.
+    // Filter the roster once rather than repeating team checks per candidate.
+    for(j=0;j<level.maxclients;++j) {
+        botAIState_t *other=&s_botAI[j];
+        if(!other->enabled || !Bot_Teammate(ai->clientNum,j)) continue;
+        int goal=other->planKind==0 && other->patrolUntil>svs.time?other->patrolGoal:other->goal;
+        if(other->objectiveUntil>svs.time) reservations[reserved++]=
+            other->objectiveBehavior==1 && other->guardUntil?other->guardPoint:other->objective;
+        else if(goal>=0 && goal<s_botNavCount) reservations[reserved++]=s_botNav[goal].origin;
+    }
     for(i=0;i<(sniper && !nodes && s_botPerchCount?48:32);++i) {
         int node=i>=32?s_botPerches[Bot_Random(ai)%BOT_PERCH_MAX]:nodes?nodes[Bot_Random(ai)%(unsigned int)count]:(int)(Bot_Random(ai)%(unsigned int)count);
         if(node<0) continue;
@@ -990,18 +1004,12 @@ static int Bot_PatrolGoal(botAIState_t *ai, playerState_t *ps, const short *node
            Bot_DistanceSq(s_botNav[ai->rejectedGoal].origin,s_botNav[node].origin)<192*192) score-=2000;
         for(j=0;j<ai->recentCount;++j)
             if(Bot_DistanceSq(ai->recent[j],s_botNav[node].origin)<384*384) score-=180;
-        // Reserve destinations, not player positions. Teammates search separate
-        // areas without learning anything about an unseen enemy.
-        for(j=0;j<level.maxclients;++j) {
-            botAIState_t *other=&s_botAI[j];
-            if(!other->enabled || other->goal<0 || other->goal>=s_botNavCount ||
-               !Bot_Teammate(ai->clientNum,j)) continue;
-            if(Bot_DistanceSq(s_botNav[other->goal].origin,s_botNav[node].origin)<384*384) { score-=400; break; }
-        }
-        if(s_botNavBounded) {
-            vec3_t center={(s_botNavMin[0]+s_botNavMax[0])*.5f,
-                           (s_botNavMin[1]+s_botNavMax[1])*.5f,s_botNav[node].origin[2]};
-            score-=sqrtf(Bot_DistanceSq(center,s_botNav[node].origin))*.08f;
+        // Add every nearby assignment: once an area is occupied it must not
+        // become a free destination for the rest of the team. No center bias;
+        // peripheral lanes are as useful to patrol as the central courtyard.
+        for(j=0;j<reserved;++j) {
+            float separation=Bot_DistanceSq(reservations[j],s_botNav[node].origin);
+            if(separation<512*512) score-=480*(1-separation/(512*512));
         }
         if(sniper) score+=fmaxf(-128,fminf(256,s_botNav[node].origin[2]-ps->origin[2]))*2;
         for(j=0;j<3;++j) if(score>scores[j]) {
@@ -1033,25 +1041,76 @@ static float s_botSearchCost[BOT_NAV_MAX], s_botSearchScore[BOT_NAV_MAX];
 static unsigned int s_botTrafficStamp[BOT_NAV_MAX], s_botTrafficGeneration;
 static unsigned char s_botTraffic[BOT_NAV_MAX];
 
+typedef struct {
+    unsigned int stamp;
+    short x,y,z;
+    unsigned char count, client;
+} botTrafficSector_t;
+static botTrafficSector_t s_botTrafficSectors[BOT_TRAFFIC_SECTORS];
+
+static botTrafficSector_t *Bot_TrafficSector(int x, int y, int z, qboolean create)
+{
+    unsigned int hash=((unsigned int)x*73856093u ^ (unsigned int)y*19349663u ^
+        (unsigned int)z*83492791u)&(BOT_TRAFFIC_SECTORS-1);
+    int probe;
+    // Bounded even when a very large map produces hash collisions. Missing a
+    // soft reservation is preferable to unbounded work or forbidding a route.
+    for(probe=0;probe<8;++probe,hash=(hash+1)&(BOT_TRAFFIC_SECTORS-1)) {
+        botTrafficSector_t *sector=&s_botTrafficSectors[hash];
+        if(sector->stamp!=s_botTrafficGeneration) {
+            if(!create) return NULL;
+            sector->stamp=s_botTrafficGeneration;
+            sector->x=x; sector->y=y; sector->z=z; sector->count=0; sector->client=255;
+            return sector;
+        }
+        if(sector->x==x && sector->y==y && sector->z==z) return sector;
+    }
+    return NULL;
+}
+
+static void Bot_ReserveTraffic(const vec_t *point, int clientNum)
+{
+    int x=(int)floorf(point[0]/BOT_TRAFFIC_STEP), y=(int)floorf(point[1]/BOT_TRAFFIC_STEP);
+    int z=(int)floorf((point[2]+64)/128), dx,dy;
+    // Reserve the corridor's width, including across cell boundaries. Each
+    // peer contributes once per sector, regardless of its route node density.
+    for(dx=-1;dx<=1;++dx) for(dy=-1;dy<=1;++dy) {
+        botTrafficSector_t *sector=Bot_TrafficSector(x+dx,y+dy,z,1);
+        if(!sector || sector->client==clientNum) continue;
+        sector->client=(unsigned char)clientNum;
+        if(sector->count<4) ++sector->count;
+    }
+}
+
+static int Bot_TrafficCost(int node)
+{
+    if(s_botTrafficStamp[node]!=s_botTrafficGeneration) {
+        const vec_t *point=s_botNav[node].origin;
+        botTrafficSector_t *sector=Bot_TrafficSector((int)floorf(point[0]/BOT_TRAFFIC_STEP),
+            (int)floorf(point[1]/BOT_TRAFFIC_STEP),(int)floorf((point[2]+64)/128),0);
+        s_botTrafficStamp[node]=s_botTrafficGeneration;
+        s_botTraffic[node]=(unsigned char)(sector?sector->count*12:0);
+    }
+    return s_botTraffic[node];
+}
+
 static void Bot_RouteTraffic(botAIState_t *ai)
 {
     int i,j;
     if(++s_botTrafficGeneration==0) {
-        memset(s_botTrafficStamp,0,sizeof(s_botTrafficStamp)); s_botTrafficGeneration=1;
+        memset(s_botTrafficStamp,0,sizeof(s_botTrafficStamp));
+        memset(s_botTrafficSectors,0,sizeof(s_botTrafficSectors)); s_botTrafficGeneration=1;
     }
     if(g_entities[ai->clientNum].client->sess.cs.team==TEAM_FREE) return;
-    // Sparse reservations, built once per admitted search. No client scan in
-    // A*'s inner loop, no collision queries and no graph-wide clearing.
+    // Built once per admitted search; A* caches one integer cost per visited
+    // node. No collision queries, allocations, graph clear or inner roster scan.
     for(i=0;i<level.maxclients;++i) {
         botAIState_t *other=&s_botAI[i];
         if(!other->enabled || !Bot_Teammate(ai->clientNum,i)) continue;
-        for(j=other->routeIndex;j<other->routeCount && j<other->routeIndex+BOT_TRAFFIC_ROUTE_NODES;++j) {
+        Bot_ReserveTraffic(SV_GameClientNum(i)->origin,i);
+        for(j=other->routeIndex;j<other->routeCount && j<other->routeIndex+BOT_TRAFFIC_ROUTE_NODES;j+=3) {
             int node=other->route[j];
-            if(node<0 || node>=s_botNavCount) continue;
-            if(s_botTrafficStamp[node]!=s_botTrafficGeneration) {
-                s_botTrafficStamp[node]=s_botTrafficGeneration; s_botTraffic[node]=0;
-            }
-            if(s_botTraffic[node]<3) ++s_botTraffic[node];
+            if(node>=0 && node<s_botNavCount) Bot_ReserveTraffic(s_botNav[node].origin,i);
         }
     }
 }
@@ -1098,7 +1157,7 @@ static void Bot_GuardPoint(int clientNum, botAIState_t *ai, playerState_t *ps)
     if(!evaluate && ai->guardUntil && Bot_DistanceSq(ai->guardAnchor,ai->objective)<96*96) return;
     float angle=(clientNum*.618034f-floorf(clientNum*.618034f))*6.2831853f;
     float radius=fminf(160,ai->objectiveRadius*.8f);
-    vec3_t desired={ai->objective[0]+cosf(angle)*radius,ai->objective[1]+sinf(angle)*radius,ai->objective[2]};
+    vec3_t desired;
     // Filter the roster once, outside the candidate loop.
     for(j=0;j<level.maxclients;++j) {
         botAIState_t *other=&s_botAI[j];
@@ -1107,6 +1166,15 @@ static void Bot_GuardPoint(int clientNum, botAIState_t *ai, playerState_t *ps)
         else if(other->enabled && other->objectiveUntil>svs.time && other->objectiveBehavior==1 &&
            other->guardUntil) reservations[reserved++]=other->guardPoint;
     }
+    // A full defending team cannot fit in the same escort-sized ring.
+    // Expand coverage around crowded objectives without changing the actor's
+    // capture/use radius or adding candidates, traces, or another roster scan.
+    int nearby=0;
+    for(j=0;j<reserved;++j)
+        if(Bot_DistanceSq(reservations[j],ai->objective)<768*768) ++nearby;
+    if(nearby>4) radius=fminf(384,radius+(nearby-4)*16);
+    desired[0]=ai->objective[0]+cosf(angle)*radius;
+    desired[1]=ai->objective[1]+sinf(angle)*radius; desired[2]=ai->objective[2];
     for(i=0;i<(sniper?32+BOT_PERCH_MAX:32);++i) {
         float a=angle+(i%16)*6.2831853f/16;
         float r=radius*(i<16?1:.5f);
@@ -1275,7 +1343,7 @@ static void Bot_BuildPath(botAIState_t *ai, playerState_t *ps)
             // Stable ordering across replans; aiming's RNG cannot change lanes.
             next=s_botNav[current].edge[i>=BOT_NAV_DIRECTIONS?i:(i+ai->clientNum*3)%BOT_NAV_DIRECTIONS];
             if(next==-1 && i<BOT_NAV_DIRECTIONS) {
-                float score=sqrtf(distance)+s_botSearchCost[current]*.3f;
+                float score=sqrtf(distance)+s_botSearchCost[current]*.3f+Bot_TrafficCost(current)*8;
                 // When escaping an elevated component, keep discovering its
                 // descending side even if it initially leads away from the
                 // objective. Horizontal proximity alone revisits the roof.
@@ -1287,7 +1355,7 @@ static void Bot_BuildPath(botAIState_t *ai, playerState_t *ps)
             }
             if(next<0 || Bot_EdgeBlocked(ai,current,next)) continue;
             float cost=s_botSearchCost[current]+sqrtf(Bot_DistanceSq(s_botNav[current].origin,s_botNav[next].origin));
-            if(s_botTrafficStamp[next]==s_botTrafficGeneration) cost+=s_botTraffic[next]*32;
+            cost+=Bot_TrafficCost(next);
             if(i>=BOT_NAV_DIRECTIONS) cost+=48; // Prefer walking over special traversals.
             if(s_botSearchStamp[next]==s_botSearchGeneration && cost>=s_botSearchCost[next]) continue;
             if(s_botSearchStamp[next]!=s_botSearchGeneration) s_botSearchPosition[next]=-1;
@@ -1349,6 +1417,9 @@ static void Bot_BuildPath(botAIState_t *ai, playerState_t *ps)
     if(ai->routeCount) ai->waypoint=ai->route[0];
     ai->progressNode=-1;
 done:
+    // An empty cold-start route waits only for the next shared planning turn,
+    // not a full 1.2-second patrol interval while its local exits are discovered.
+    if(!ai->routeCount && !found && ai->perchUntil<=svs.time) ai->nextPath=svs.time+200;
     s_botWorkPathMs+=Sys_Milliseconds()-started;
 }
 
