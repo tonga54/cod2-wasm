@@ -13,6 +13,7 @@ extern void G_TraceCapsule(trace_t *, const vec_t *, const vec_t *, const vec_t 
 extern float SV_FX_GetVisibility(const vec_t *, const vec_t *);
 extern WeaponDef *BG_GetWeaponDef(int weapon);
 extern qboolean SV_EntityContact(const vec_t *, const vec_t *, const gentity_t *);
+extern float Dvar_GetFloat(const char *dvarName);
 
 #define BOT_NAV_MAX 32768
 #define BOT_NAV_HASH 65536

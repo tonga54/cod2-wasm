@@ -66,6 +66,8 @@ spawn = sources['g_spawn_mp.c']
 assert ('if ((void *)spawns[i].spawn == (void *)G_FreeEntity)\n                G_FreeEntity(ent);\n'
         '            else\n                ((void (*)(gentity_t *))spawns[i].spawn)(ent);') in spawn
 assert '(void (*)(gentity_t *))spawn->spawn != (void (*)(gentity_t *))imp_G_FreeEntity' in spawn
+bots = (root / 'src/PC/server_mp/sv_bot_ai.inc').read_text()
+assert bots.index('extern float Dvar_GetFloat(const char *dvarName);') < bots.index('Dvar_GetFloat("')
 
 if len(sys.argv) > 1:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
