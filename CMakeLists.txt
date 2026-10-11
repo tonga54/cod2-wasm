@@ -277,8 +277,8 @@ set(COD2_WWWDL_LIBS "-l:libcurl.so.4" CACHE STRING "1.3 redirected-download back
 
 # Architecture seam (COD2_X64): the original build is ILP32/x86 (-m32, /usr/lib32,
 # 4-byte-stack-boundary). The x64 port uses the native LP64 ABI instead. Every
-# value below defaults to the original 32-bit one so existing builds are byte-for-
-# byte unchanged when COD2_X64=OFF.
+# value below preserves the original 32-bit ABI when COD2_X64=OFF.
+# Floating-point instruction selection is independent of the ABI.
 if(COD2_X64)
   set(COD2_ARCH_CFLAGS "")                                 # native x86_64
   set(COD2_ARCH_LDFLAGS "")
@@ -289,6 +289,13 @@ else()
   set(COD2_ARCH_LDFLAGS -m32)
   set(COD2_LIBSTDCPP "/usr/lib32/libstdc++.so.6" CACHE STRING "32-bit libstdc++")
   set(COD2_ARCH_LIBDIRS -L/usr/lib32 -L/usr/lib/i386-linux-gnu)
+endif()
+
+# Standard float math matches the wasm client and avoids QEMU's expensive
+# x87 extended-precision arithmetic. No fast-math or approximate operations.
+option(COD2_SSE2_MATH "Use standard SSE2 float math in the native x86 build" ON)
+if(COD2_SSE2_MATH AND NOT COD2_X64)
+  list(APPEND COD2_ARCH_CFLAGS -msse2 -mfpmath=sse)
 endif()
 
 find_package(PkgConfig QUIET)

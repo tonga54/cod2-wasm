@@ -34,7 +34,7 @@ load-tested.
 
 ## Bots
 
-In **Start New Server**, choose **Bots** (None or 1–16) and **Bot Difficulty**
+In **Start New Server**, choose **Bots** (None, 1–16, 20, 24, 28 or 32) and **Bot Difficulty**
 (Easy, Normal or Hard), alongside the room name, map and Game Type. Left-click
 cycles forward; right-click cycles backward. The default is **None**. Settings
 belong to that room and survive map rotation.
@@ -78,10 +78,10 @@ and tactical coordination can still need improvements.
 See [Bot behavior and validation](docs/BOT_AI.md) for the implementation and
 the distinction between autonomous matches and controlled interaction tests.
 
-Bots occupy ordinary player slots: eight bots leave 56 human slots. They do not
+Bots occupy ordinary player slots: eight bots leave 56 human slots, and 32 bots leave 32. They do not
 keep a room alive after its last human leaves; the usual five-minute idle
 cleanup still applies. No browser or rendering process is needed for each bot.
-For a custom room creator, POST `/servers` with `botCount` (integer 0–16) and
+For a custom room creator, POST `/servers` with `botCount` (integer 0–32) and
 `botDifficulty` (`easy`, `normal`, `hard`); omitted fields retain the defaults.
 
 ## Additions beyond the original game
@@ -315,6 +315,25 @@ The eight renderers shared one development Mac and sent approximately 10–27
 input packets/s each, so this is not eight independent PCs at 60 inputs/s or
 eight players continuously firing. See the [Pi load-test instructions](docs/RASPBERRY_PI.md#repeat-a-connected-player-load-test)
 for the measurement scope and a reproducible command.
+
+A subsequent 60-second Carentan run sustained **32 Hard bots plus eight spawned
+browser clients** at **20 game packets/s per client**, using **57.4% of one CPU
+core**. Local status p95 was **18.1 ms**, server-reported ping p95 **45 ms**, and
+the maximum server packet gap **112.6 ms**. Explicit realtime/capture checks
+passed. This is a LAN load sample with eight renderers sharing one development
+Mac; it does not guarantee minimum FPS or latency on every client/network.
+
+Bot planning shares bounded work across the entire room. A* searches prioritize
+routes toward objectives, retain usable routes and rotate pending requests
+between clients. Nearby doors and short stair steps get collision-checked local
+half cells; the rest of the map keeps its normal grid. Patrol destinations
+penalize recently visited areas and teammates' destinations. Movement runs on
+every original 50 ms simulation tick, including catch-up ticks. Bot-only HUD
+name/crosshair queries are omitted because test clients have no renderer;
+human labels, scripted look-at triggers, bullet hitboxes and graphics remain.
+The native x86 build uses standard SSE2 float math to avoid expensive emulated
+x87 arithmetic on the Pi, without fast-math. See [bot scaling and validation](docs/BOT_AI.md)
+for the work limits and measurement scope.
 
 The optional **`?perfDebug=1`** overlay reports actual submitted frames and
 frame-time percentiles. Building/smoke tests in Carentan and sustained MG fire

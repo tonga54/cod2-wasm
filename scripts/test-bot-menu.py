@@ -3,6 +3,8 @@
 from pathlib import Path
 import subprocess
 import tempfile
+import re
+from browser_bot_menu import apply_bot_menu
 root=Path(__file__).resolve().parent.parent
 source=(root/'src/PC/ui_mp/ui_shared_mp.c').read_text()
 a=source.index('static void UI_ConfigureBrowserMenu(')
@@ -39,3 +41,12 @@ with tempfile.TemporaryDirectory(prefix='cod2-bot-menu-') as directory:
  subprocess.run(['cc','-std=c99','-Wall','-Wextra',str(p/'test.c'),'-o',str(p/'test')],check=True)
  subprocess.run([str(p/'test')],check=True)
 print('PASS: bot count/difficulty labels and native multi controls survive browser filtering, fixed slots and repeated configuration')
+
+# The original native MULTI control stores at most 32 entries. Keep every small
+# count and practical large presets without overflowing its fixed list.
+menu = b'"@MENU_DEDICATED" "ui_dedicated" dvarFloatList { "@MENU_NO" 0 "@MENU_LAN" 1 "@MENU_INTERNET" 2 } "@MENU_PURE" type ITEM_TYPE_YESNO text " " dvar "sv_pure"'
+converted = apply_bot_menu(menu)
+entries = re.findall(rb'"([^"\n]+)" (\d+)', converted.split(b'dvarFloatList { ', 1)[1].split(b'}', 1)[0])
+assert len(entries) <= 32
+assert [int(value) for _, value in entries] == [*range(17), 20, 24, 28, 32]
+print('PASS: maximum bot preset fits the original native MULTI capacity')

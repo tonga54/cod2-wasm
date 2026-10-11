@@ -46,10 +46,10 @@ int main(void){
  assert(visibilityCalls==7 && selectionCalls==7 && map.current.integer==1);
  for(int i=0;i<5;i++)for(int m=0;m<2;m++){gt.current.integer=i;map.current.integer=m;createRoom();assert(createdMap==sharedUiInfo.mapList[m].mapLoadName);assert(createdType==modes[i]);}
  assert(creates==10);
- for(botCount=0;botCount<=16;botCount++)for(botDifficulty=0;botDifficulty<3;botDifficulty++)createRoom();
- assert(creates==61);
+ for(botCount=0;botCount<=32;botCount++)for(botDifficulty=0;botDifficulty<3;botDifficulty++)createRoom();
+ assert(creates==109);
  gt.current.integer=5;createRoom();gt.current.integer=-1;createRoom();
- gt.current.integer=1;map.current.integer=2;createRoom();map.current.integer=-1;createRoom();assert(creates==61);
+ gt.current.integer=1;map.current.integer=2;createRoom();map.current.integer=-1;createRoom();assert(creates==109);
  return 0;
 }
 '''

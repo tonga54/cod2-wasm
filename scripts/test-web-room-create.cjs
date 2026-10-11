@@ -40,6 +40,7 @@ async function check(map, reply, expected, gametype = 'tdm', botCount = 0, diffi
       await check(map, {ok: true, value: {id: 0}}, [0, 0], gametype);
   for (const difficulty of [0,1,2])
     await check('mp_carentan', {ok: true, value: {id: 1}}, [1, 0], 'tdm', 8, difficulty);
+  await check('mp_carentan', {ok: true, value: {id: 1}}, [1, 0], 'tdm', 32, 2);
   await check('mp_toujane', {ok: true, value: {id: 2}}, [2, 0]);
   await check('mp_carentan', {ok: false, value: {error: 'Server unavailable'}}, [-1, 'Server unavailable']);
   await check('mp_carentan', {ok: true, value: {id: 8}}, [-1, 'Invalid server response.']);

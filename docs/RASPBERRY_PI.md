@@ -273,7 +273,8 @@ From the build computer, observe the running room for 60 seconds:
 python3 scripts/benchmark-connected-server.py \
   --ssh USER@PI_LAN_IP \
   --container cod2-wasm-pi-cod2-server-1 \
-  --seconds 60 --expected-clients 8 --port 28960 \
+  --seconds 60 --expected-clients 8 --expected-bots 32 --port 28960 \
+  --require-realtime \
   --output out/eight-player-server.json
 ```
 
@@ -283,15 +284,40 @@ The script uses the container's existing raw-packet capability via `docker exec`
 as root; it does not expose UDP, change privileges or create clients. Reports
 contain counts/timings, not packet payloads, player names or addresses. It fails
 if the requested number of players is not observed throughout, status queries
-fail, or the capture drops packets. It does not impose a latency acceptance
-threshold: inspect the timing distributions, not only `passed`.
+fail, or the capture drops packets. With `--require-realtime`, it also requires
+at least 18 game packets/s per client, no server packet gap above 150 ms, and a
+container-local status p95 at or below 75 ms. Without that flag, `passed` checks
+capture/population only. Inspect the distributions and their measurement scope.
 
 The report measures container CPU, server-interface game packet cadence,
 server-reported pings and snapshot acknowledgement RTT. ACK RTT includes LAN,
 gateway and client scheduling; the status-query RTT is container-local. Capture
 drops concern the observer and do not measure player packet loss. It does not
-measure browser FPS. Use `?perfDebug=1` on each client for frame percentiles and
+measure browser FPS. Change `--expected-bots` to the room's actual bot count.
+Use `?perfDebug=1` on each client for frame percentiles and
 run `vcgencmd measure_temp` / `vcgencmd get_throttled` on the Pi separately.
+
+A later 60-second Carentan run kept **32 Hard bots plus eight spawned browser
+clients** connected, with all 40 players present throughout. Each client received
+1,200–1,201 game packets (20/s). The server container used **57.36% of one core**,
+including its supervisor and observer, with no CPU quota throttling. Local status
+RTT p95 was **18.12 ms**; server-reported ping p95 was **45 ms**. The worst client
+packet-gap p95/max were **59.67/112.57 ms**, and worst ACK RTT p95 was **107.96 ms**.
+All status queries returned and the capture dropped no packets; the explicit
+realtime checks passed. One client exercised sprint/fire; the other seven stayed
+spawned. A separate regression runner used another Pi CPU core during this sample.
+
+Before these bot changes, 16 Hard bots plus one browser client on the same Pi
+used about **100.2% of one core**, delivered only **4.1 game packets/s**, and had
+container-local status p95 **259.7 ms**. After shared planning and removing unused
+bot HUD queries, the same 16-bot case delivered **20/s** with **28.6 ms** local
+status p95. Standard SSE2 math and guided routes then made the 32+8 sample above
+possible. These observations do not establish an unlimited bot/player capacity.
+
+With seven load-test renderers closed, a single browser client in that 32-bot
+Carentan match displayed **123 FPS at 1280×720**, with frame p95 **10.9 ms** on the
+development Mac. This is a sampled client observation, not a minimum FPS promise
+or a low-end hardware result. Render quality, map geometry and effects were retained.
 
 On October 10, 2026, a Pi 5 running the Release i386 engine under QEMU sustained
 eight spawned Carentan players for 60 seconds. Four joined each team; three
@@ -329,7 +355,7 @@ latency or a universal FPS floor.
 ## Rooms with bots
 
 In **Start New Server**, set **Bots** and **Bot Difficulty** before creating the
-room. The default is no bots; the supported range is 0–16. Start with eight for
+room. The default is no bots; the supported range is 0–32. Start with eight for
 practice and measure your host before increasing the count or running several
 active rooms. Bots consume native server CPU and player slots but do not need
 additional browser clients or GPU rendering on the Pi. Clients render bot
@@ -345,3 +371,17 @@ normal five-minute room cleanup.
 See [Bots](../README.md#bots) for difficulty settings, behavior in all five game
 modes and navigation limitations. The same native server AI runs on the Pi;
 objective interactions use the original capture, plant and defuse rules.
+
+The native engine uses standard SSE2 float instructions rather than x87
+extended-precision arithmetic, which is costly under QEMU on the Pi. This does
+not enable fast-math or lower texture, model, effect or rendering quality.
+Bot navigation shares fixed planning/scout budgets across the whole room;
+movement, combat and snapshots retain the original 20 Hz server simulation.
+Slot limits still describe configuration, not a guarantee for every Pi model,
+number of active rooms or network.
+
+When cross-compiling and validating on the Pi, `COD2_VERIFY_BUILD=0` defers the
+build script's static checks. Run `scripts/test-static.sh` against the generated
+site and pinned framework on the target before deploying that build. The normal
+build keeps validation enabled. Compiler sanitizers also depend on the target
+kernel's address-space layout; an unavailable sanitizer is not a passing test.

@@ -160,6 +160,16 @@ qaPlaceAtTrigger(trigger)
     offsets[8] = (-128,0,64);
     offsets[9] = (0,128,64);
     offsets[10] = (0,-128,64);
+    // Sloped/brush-bound sites such as Dawnville need a grounded point inside
+    // their volume; the model origin alone may be on a steep rubble face.
+    offsets[11] = (64,64,64);
+    offsets[12] = (64,-64,64);
+    offsets[13] = (-64,64,64);
+    offsets[14] = (-64,-64,64);
+    offsets[15] = (96,32,64);
+    offsets[16] = (-96,32,64);
+    offsets[17] = (32,96,64);
+    offsets[18] = (32,-96,64);
     for(i = 0; i < offsets.size; i++)
     {
         at = trigger.origin + offsets[i] - (0,0,48);

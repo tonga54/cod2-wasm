@@ -19,7 +19,7 @@ BASE_PORT = 28960
 IDLE_SECONDS = 300
 SUPPORTED_MAPS = ('mp_toujane', 'mp_carentan', 'mp_dawnville')
 SUPPORTED_GAMETYPES = ('dm', 'tdm', 'ctf', 'hq', 'sd')
-MAX_BOTS = 16
+MAX_BOTS = 32
 BOT_DIFFICULTIES = ('easy', 'normal', 'hard')
 DEFAULT_NAME = 'Toujane - Carentan'
 rooms = {}
@@ -63,7 +63,7 @@ def start_room(room_id, name, mapname='mp_toujane', gametype='tdm', bot_count=0,
     if gametype not in SUPPORTED_GAMETYPES:
         raise ValueError('Unsupported game mode')
     if type(bot_count) is not int or not 0 <= bot_count <= MAX_BOTS:
-        raise ValueError('Choose between 0 and 16 bots.')
+        raise ValueError('Choose between 0 and 32 bots.')
     if bot_difficulty not in BOT_DIFFICULTIES:
         raise ValueError('Choose Easy, Normal or Hard bots.')
     profile = Path('/profile') / f'room-{room_id}'
@@ -159,7 +159,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.reply(400, {'error': 'Choose a supported game mode.'})
         bot_count = body.get('botCount', 0)
         if type(bot_count) is not int or not 0 <= bot_count <= MAX_BOTS:
-            return self.reply(400, {'error': 'Choose between 0 and 16 bots.'})
+            return self.reply(400, {'error': 'Choose between 0 and 32 bots.'})
         bot_difficulty = body.get('botDifficulty', 'normal')
         if not isinstance(bot_difficulty, str) or bot_difficulty not in BOT_DIFFICULTIES:
             return self.reply(400, {'error': 'Choose Easy, Normal or Hard bots.'})

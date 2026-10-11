@@ -10,7 +10,7 @@ def apply_bot_menu(data):
     data = data.replace(b'"@MENU_DEDICATED"', b'"Bots"')
     data = data.replace(b'"@MENU_PURE"', b'"Bot Difficulty"')
     data = data.replace(b'"ui_dedicated"', b'"ui_botCount"')
-    choices = ' '.join('"' + (str(n) if n else 'None') + '" ' + str(n) for n in range(17))
+    choices = ' '.join('"' + (str(n) if n else 'None') + '" ' + str(n) for n in [*range(17), 20, 24, 28, 32])
     data, count = re.subn(rb'dvarFloatList\s*\{ "@MENU_NO" 0 "@MENU_LAN" 1 "@MENU_INTERNET" 2 \}',
                           ('dvarFloatList { ' + choices + ' }').encode(), data)
     assert count == 1

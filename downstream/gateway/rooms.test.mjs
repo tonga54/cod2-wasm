@@ -74,7 +74,7 @@ try {
     response=await fetch(origin+'/servers',{method:'POST',headers:{Origin:origin},body:JSON.stringify({name:'Second room',gametype})});
     assert.equal(response.status,400); assert.equal(creates,8);
   }
-  for (const botCount of [-1,17,1.5,true,null,'8',{}]) {
+  for (const botCount of [-1,33,1.5,true,null,'8',{}]) {
     response=await fetch(origin+'/servers',{method:'POST',headers:{Origin:origin},body:JSON.stringify({name:'Second room',botCount})});
     assert.equal(response.status,400); assert.equal(creates,8);
   }
@@ -87,6 +87,9 @@ try {
     response=await fetch(origin+'/servers',{method:'POST',headers:{Origin:origin},body:JSON.stringify({name:'Second room',map:'mp_carentan',botCount:8,botDifficulty})});
     assert.equal(response.status,201);
   }
+  requestedBots=32; requestedDifficulty='hard';
+  response=await fetch(origin+'/servers',{method:'POST',headers:{Origin:origin},body:JSON.stringify({name:'Second room',map:'mp_carentan',botCount:32,botDifficulty:'hard'})});
+  assert.equal(response.status,201);
   const first=await open(0); await Promise.all(Array.from({length:63},()=>open(0)));
   response=await fetch(origin+'/servers');
   const occupied = (await response.json()).rooms;
@@ -94,10 +97,10 @@ try {
   assert.equal(occupied.find(room=>room.id===0).maxPlayers,64);
   assert.equal(occupied.find(room=>room.id===1).connections,0);
   await rejected(0,503);
-  roomBots=8;
-  await Promise.all(Array.from({length:56},()=>open(1))); await rejected(1,503);
+  roomBots=32;
+  await Promise.all(Array.from({length:32},()=>open(1))); await rejected(1,503);
   response=await fetch(origin+'/servers');
-  assert.equal((await response.json()).rooms.find(room=>room.id===1).maxHumans,56);
+  assert.equal((await response.json()).rooms.find(room=>room.id===1).maxHumans,32);
   await rejected(2,503); await rejected('8',404);
   const reply=once(first,'message'); first.send(Buffer.from('room-zero'));
   assert.equal((await reply)[0].toString(),'room-zero');

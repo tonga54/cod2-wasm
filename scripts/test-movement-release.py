@@ -92,39 +92,7 @@ static void legacy_coast(float speed) {
 }
 int main(void) {
     legacy_coast(190);legacy_coast(190*SPRINT_SPEED_SCALE);
-    /* Replay the actual acceleration and view basis, comparing every step to
-     * level aim. Pitch must not shorten forward/backward travel or change the
-     * direction and speed of diagonals, including at vertical aim. */
-    int aimCases=0;
-    for(int ms=1;ms<=66;ms+=5)for(int yaw=0;yaw<360;yaw+=45)
-    for(int pitch=-90;pitch<=90;pitch+=15)for(int mode=0;mode<5;mode++)
-    for(int f=-127;f<=127;f+=127)for(int r=-127;r<=127;r+=127)if(f||r) {
-        playerState_t flat=player(0,mode==1?PMF_SPRINT:mode==2?2:mode==3?1:0,0);
-        flat.viewangles[1]=yaw;
-        playerState_t aimed=flat;
-        aimed.viewangles[0]=pitch;aimed.viewangles[2]=16;
-        int move=mode==4?64:127;
-        usercmd_t cmd={.forwardmove=f*move/127,.rightmove=r*move/127};
-        for(int t=0;t<1000;t+=ms) {
-            pml_t a=ground(ms),b=a;
-            AngleVectors(flat.viewangles,a.forward,a.right,NULL);
-            AngleVectors(aimed.viewangles,b.forward,b.right,NULL);
-            vec3_t savedForward,savedRight;
-            memcpy(savedForward,b.forward,sizeof(vec3_t));memcpy(savedRight,b.right,sizeof(vec3_t));
-            pmove_t pa={.ps=&flat,.cmd=cmd},pb={.ps=&aimed,.cmd=cmd};
-            PM_WalkMove(&pa,&a);PM_WalkMove(&pb,&b);
-            for(int i=0;i<3;i++) {
-                assert(fabsf(flat.velocity[i]-aimed.velocity[i])<.0001f);
-                assert(fabsf(flat.origin[i]-aimed.origin[i])<.001f);
-            }
-            assert(!memcmp(savedForward,b.forward,sizeof(vec3_t))&&!memcmp(savedRight,b.right,sizeof(vec3_t)));
-        }
-        float expected=PM_CmdScale(&flat,&cmd)*hypotf(cmd.forwardmove,cmd.rightmove);
-        assert(hypotf(flat.velocity[0],flat.velocity[1])>0);
-        assert(hypotf(flat.velocity[0],flat.velocity[1])<=expected+.001f);
-        aimCases++;
-    }
-    printf("PASS: %d pitch/roll movement replays, vertical aim, eight directions, walk/run/sprint/crouch/prone; full view basis preserved\n",aimCases);
+    // Reject release mutants before the expensive, unchanged aim replay matrix.
     int cases=0;
     for(int msec=1;msec<=66;msec++)for(int angle=0;angle<360;angle+=15)
     for(int stance=0;stance<4;stance++)for(int slope=-1;slope<=1;slope++) {
@@ -176,6 +144,40 @@ int main(void) {
         assert(fabsf(hypotf(p.velocity[0],p.velocity[1])-190)<.001f);
         assert(p.velocity[2]==(jumping?240:200));
     }
+    jumpRequested=0; // Restore the aim matrix's original non-jumping fixture.
+    /* Replay the actual acceleration and view basis, comparing every step to
+     * level aim. Pitch must not shorten forward/backward travel or change the
+     * direction and speed of diagonals, including at vertical aim. */
+    int aimCases=0;
+    for(int ms=1;ms<=66;ms+=5)for(int yaw=0;yaw<360;yaw+=45)
+    for(int pitch=-90;pitch<=90;pitch+=15)for(int mode=0;mode<5;mode++)
+    for(int f=-127;f<=127;f+=127)for(int r=-127;r<=127;r+=127)if(f||r) {
+        playerState_t flat=player(0,mode==1?PMF_SPRINT:mode==2?2:mode==3?1:0,0);
+        flat.viewangles[1]=yaw;
+        playerState_t aimed=flat;
+        aimed.viewangles[0]=pitch;aimed.viewangles[2]=16;
+        int move=mode==4?64:127;
+        usercmd_t cmd={.forwardmove=f*move/127,.rightmove=r*move/127};
+        for(int t=0;t<1000;t+=ms) {
+            pml_t a=ground(ms),b=a;
+            AngleVectors(flat.viewangles,a.forward,a.right,NULL);
+            AngleVectors(aimed.viewangles,b.forward,b.right,NULL);
+            vec3_t savedForward,savedRight;
+            memcpy(savedForward,b.forward,sizeof(vec3_t));memcpy(savedRight,b.right,sizeof(vec3_t));
+            pmove_t pa={.ps=&flat,.cmd=cmd},pb={.ps=&aimed,.cmd=cmd};
+            PM_WalkMove(&pa,&a);PM_WalkMove(&pb,&b);
+            for(int i=0;i<3;i++) {
+                assert(fabsf(flat.velocity[i]-aimed.velocity[i])<.0001f);
+                assert(fabsf(flat.origin[i]-aimed.origin[i])<.001f);
+            }
+            assert(!memcmp(savedForward,b.forward,sizeof(vec3_t))&&!memcmp(savedRight,b.right,sizeof(vec3_t)));
+        }
+        float expected=PM_CmdScale(&flat,&cmd)*hypotf(cmd.forwardmove,cmd.rightmove);
+        assert(hypotf(flat.velocity[0],flat.velocity[1])>0);
+        assert(hypotf(flat.velocity[0],flat.velocity[1])<=expected+.001f);
+        aimCases++;
+    }
+    printf("PASS: %d pitch/roll movement replays, vertical aim, eight directions, walk/run/sprint/crouch/prone; full view basis preserved\n",aimCases);
     printf("PASS: %d release schedules, 24 directions, walk/crouch/prone/sprint, slopes, held keys, air/jump/slick/landing/push exclusions and client/server parity\n",cases);
 }
 '''

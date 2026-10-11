@@ -5,6 +5,7 @@
 extern void G_GetPlayerViewOrigin(gentity_t *ent, vec3_t origin);
 extern void G_GetPlayerViewDirection(gentity_t *ent, vec3_t forward, vec3_t right, vec3_t up);
 extern void G_TraceCapsule(trace_t *trace, vec3_t start, vec3_t mins, vec3_t maxs, vec3_t end, int passEntityNum, int contentMask);
+extern qboolean SV_BotIsTestClient(int clientNum);
 extern int G_IsPlaying(gentity_t *ent);
 
 extern gentity_t g_entities[];
@@ -57,6 +58,13 @@ void TeamplayInfoMessage(gentity_t *ent)
     gclient_t *identClient;
 
     client = ent->client;
+    // These two fields only draw a name/health label for the receiving client.
+    // Headless bots have no HUD; teammate collision and damage are unchanged.
+    if(SV_BotIsTestClient(ent->s.number)) {
+        client->ps.stats[STAT_IDENT_CLIENT_NUM]=-1;
+        client->ps.stats[STAT_IDENT_CLIENT_HEALTH]=0;
+        return;
+    }
 
     if (client->sess.sessionState != SESS_STATE_PLAYING) {
 

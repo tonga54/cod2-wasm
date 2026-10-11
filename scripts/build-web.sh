@@ -67,8 +67,14 @@ metadata_dir="$(mktemp -d -t cod2-wasm-framework-metadata.XXXXXX)"
 install -m 0644 "${metadata_dir}/wasm-game-framework.json" "${site_dir}/wasm-game-framework.json"
 python3 "${repo_root}/scripts/write-build-info.py" "${site_dir}"
 
-node "${framework_dir}/scripts/check-game-package.js" "${site_dir}"
-"${repo_root}/scripts/test-static.sh" "${site_dir}" "${framework_dir}"
+if [[ "${COD2_VERIFY_BUILD:-1}" == "1" ]]; then
+    node "${framework_dir}/scripts/check-game-package.js" "${site_dir}"
+    "${repo_root}/scripts/test-static.sh" "${site_dir}" "${framework_dir}"
+elif [[ "${COD2_VERIFY_BUILD}" == "0" ]]; then
+    echo "Validation deferred: run scripts/test-static.sh on the target before deployment."
+else
+    echo "COD2_VERIFY_BUILD must be 0 or 1." >&2; exit 2
+fi
 
 echo "Built the reconstructed browser client and framework package."
 echo "Gameplay remains unverified; a successful build is not a playable match."

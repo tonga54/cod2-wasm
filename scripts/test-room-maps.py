@@ -127,12 +127,14 @@ try:
         for difficulty in rooms.BOT_DIFFICULTIES:
             assert post({'name': 'Bots', 'botCount': 8, 'botDifficulty': difficulty}) == 201
             assert start.call_args.args == (0, 'Bots', 'mp_toujane', 'tdm', 8, difficulty)
+        assert post({'name': 'Maximum bots', 'botCount': 32, 'botDifficulty': 'hard'}) == 201
+        assert start.call_args.args == (0, 'Maximum bots', 'mp_toujane', 'tdm', 32, 'hard')
         before = start.call_count
         for mapname in ('mp_burgundy', 'mp_carentan;quit', [], None, 1):
             assert post({'name': 'Invalid', 'map': mapname}) == 400
         for gametype in ('sw', 'ctf;quit', '', [], None, 1):
             assert post({'name':'Invalid', 'gametype':gametype}) == 400
-        for count in (-1, 17, 1.5, True, None, '8', []):
+        for count in (-1, 33, 1.5, True, None, '8', []):
             assert post({'name':'Invalid', 'botCount':count}) == 400
         for difficulty in ('expert', 'hard;quit', '', None, [], 1):
             assert post({'name':'Invalid', 'botDifficulty':difficulty}) == 400

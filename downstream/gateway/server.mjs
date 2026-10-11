@@ -94,8 +94,8 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
             }
             const botCount = body.botCount === undefined ? 0 : body.botCount;
             const botDifficulty = body.botDifficulty === undefined ? 'normal' : body.botDifficulty;
-            if (!Number.isInteger(botCount) || botCount < 0 || botCount > 16) {
-              json(response, 400, {error:'Choose between 0 and 16 bots.'}); return;
+            if (!Number.isInteger(botCount) || botCount < 0 || botCount > 32) {
+              json(response, 400, {error:'Choose between 0 and 32 bots.'}); return;
             }
             if (!['easy', 'normal', 'hard'].includes(botDifficulty)) {
               json(response, 400, {error:'Choose Easy, Normal or Hard bots.'}); return;

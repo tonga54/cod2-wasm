@@ -1,6 +1,7 @@
 # Multiplayer bot behavior
 
-Configure 0–16 bots and Easy, Normal or Hard difficulty when creating a room.
+Configure 0–32 bots and Easy, Normal or Hard difficulty when creating a room.
+The menu offers None, 1–16 and 20/24/28/32 presets; the room API accepts every integer in the range.
 The default remains no bots. Bot population and difficulty belong to the room
 and persist across its map rotation. All UI and bot labels are in English.
 
@@ -66,8 +67,8 @@ reverse climb. General obstacle/gap jumps and mantle routes remain unsupported.
 
 A shared priority queue favors central combat lanes while weighting insertion
 order so continuous central growth cannot starve older spawn/roof frontiers.
-Each path decision also scouts up to six nearby cells toward
-the objective or shared fighting area, with its own four-millisecond budget.
+Path decisions scout up to six nearby cells toward the objective or shared
+fighting area, sharing one two-millisecond allowance across all bots in the tick.
 This keeps distant spawn nodes connected as the shared graph warms up. Local
 branches can initially go away from their destination to reach a doorway around
 a wall, reject repeated scout cells and avoid choosing an idle patrol cell.
@@ -76,8 +77,21 @@ checked after each attempt. A single collision attempt can exceed that budget
 on a slow host; it is a work bound, not a latency guarantee. The spawn envelope
 plus a 512-unit margin bounds exploration so exterior ground planes do not
 consume the graph. Failed static edges are cached so nearby walls do not
-repeatedly consume collision traces. Searches share fixed buffers and bots cache up to 64 route
-nodes. Flat, collinear sections reuse their sampled floor checks and need just
+repeatedly consume collision traces. Narrow doorways and short stair lips can
+add validated half-cell links that rejoin the ordinary grid as soon as possible.
+Walking arrivals tolerate the sampled step-height difference; ladder and drop
+landings retain their three-dimensional checks. Crowded-spawn steering uses
+the original pmove retry for an existing player-body overlap, while native
+movement still owns collision and rejects walls.
+
+A* searches use Euclidean edge costs and a shared fixed heap, with at most
+2,048 expanded nodes and a two-millisecond limit checked every 32 expansions.
+At most two queued paths run per simulation tick, in round-robin client order.
+An incomplete search retains a usable route toward its closest explored point.
+Valid routes survive a replan while their intent and destination remain stable.
+Patrol goals penalize the last eight visited areas and nearby teammates' claimed
+destinations, with capped penalties so a large team is not pushed outside the
+fighting area. Searches share fixed buffers and bots cache up to 64 route nodes. Flat, collinear sections reuse their sampled floor checks and need just
 one shortcut capsule trace; turns and stairs retain their individual nodes. Replanning
 does not force a bot to walk backward to a grid center.
 
@@ -92,6 +106,26 @@ Announced model objectives such as radios are projected onto their walking
 floor; their model center cannot silently choose an unreachable roof instead.
 Path decisions run every 1.2 seconds, with prompt advancement between cached
 waypoints. Navigation and command generation allocate no per-frame heap memory.
+
+Movement and aim commands run once per original 50 ms simulation tick,
+including each tick of a delayed-frame catch-up. Objective script threads start
+at staggered phases and reuse the shared mode state. Perception preserves the
+difficulty view cone and smoke checks; a rotating third sightline candidate
+prevents blocked nearby opponents from permanently hiding the next visible
+one. A visibility result is reused only within the same tick.
+
+Test clients skip HUD-only teammate name/health queries and graphical crosshair
+hitbox rays. Human clients retain those original queries. Collision-linked
+scripted look-at brushes still use the original occlusion/hitbox trace when
+the bot's view ray can intersect their current bounds. Combat visibility,
+bullet collision, damage, weapon cadence, models, animations, effects and
+render settings are retained.
+
+Opt-in `scr_bot_profile 1` reports aggregate five-second timings for planning,
+AI, movement, game scripts and snapshots. It defaults off. The native x86 build
+uses `-msse2 -mfpmath=sse`, with standard floating-point semantics and no
+fast-math. Set `-DCOD2_SSE2_MATH=OFF` when building for older x86 CPUs that lack
+SSE2; the 32-bit ABI is unchanged.
 
 This is multiplayer AI written for this project. It does not reuse campaign
 scripts or promise campaign-level tactical behavior. It has no authored navmesh,
@@ -122,7 +156,9 @@ and bots:
 The normal static suite includes the production bot controller and regression
 tests for route progress, blocked-route alternatives, guard spacing, ladder
 links/input, frontier fairness,
-directed roof exits and fall rejection, warm-up time limits, jump tracking,
+directed roof exits and fall rejection, shared warm-up/scout time limits,
+bounded guided paths, fair planning queues, route reuse, sparse doorways,
+crowded-spawn escape, fine-step arrival and jump tracking,
 scoped ADS and weapon-range pursuit. It also tests vector order, objective contact/use, linked-player
 transforms and trigger/field dispatch. The vector and linked-player tests run under ASan/UBSan.
 The tests reject variants with the old reversed vectors, outside-only flag
@@ -148,8 +184,8 @@ Successful actions print `[bot-qa] PASS`; a missed action prints `FAIL`.
 
 Controlled tests establish interaction correctness, not navigation quality.
 Native tests on the Raspberry Pi with eight Normal bots per room completed
-flag pickup/capture, HQ capture/neutralization and bomb plant/defuse on both
-Toujane and Carentan. HQ actions took 9.5 seconds; plant and defuse checks
+flag pickup/capture, HQ capture/neutralization and bomb plant/defuse on
+Toujane, Carentan and Dawnville. HQ actions took 9.5 seconds; plant and defuse checks
 completed after 5.5 and 10.5 seconds, preserving their original hold timers.
 Autonomous matches also produced flag captures, contested HQ ownership and
 bomb planting with subsequent round transitions. These are reproducible test

@@ -22,7 +22,7 @@ typedef int qboolean; typedef unsigned char byte; typedef float vec_t; typedef f
 #define TEAM_ALLIES 2
 #define WEAPCLASS_SMG 2
 #define WEAPCLASS_MG 1
-typedef struct { float fraction; vec3_t normal; unsigned short entityNum; int startsolid,allsolid,surfaceFlags; } trace_t;
+typedef struct { float fraction; vec3_t normal; unsigned short entityNum; int startsolid,allsolid,surfaceFlags,contents; } trace_t;
 typedef struct { vec3_t origin,viewangles,velocity; float viewHeightCurrent,fWeaponPosFrac; int pm_type,weapon,weaponTime,pm_flags,groundEntityNum,cursorHintEntIndex,ammoclip[128],ammo[128];char weaponslots[8]; } playerState_t;
 typedef struct { playerState_t ps; vec3_t damage_from; int damage_fromWorld; struct {int connected,sessionState; struct {int team;}cs;}sess;} gclient_t;
 typedef struct {gclient_t *client; int health; unsigned classname; struct {int inuse;vec3_t currentOrigin,absmin,absmax;}r;} gentity_t;
@@ -33,7 +33,7 @@ static struct {int time;}svs;
 static cod2BotCommandState_t s_botCmdState[64];
 level_locals_t level={3,3}; gentity_t g_entities[64];
 static gclient_t clients[64]; static WeaponDef weapon={"test",0,0,0,0,0},secondary={"secondary",1,1,0,0,0};
-static int traceCount, wall, wallDoor, smoke, friendly,stairs,ladderWorld,navClock,dropWorld;
+static int traceCount, wall, wallDoor, smoke, friendly,crowd,stairs,ladderWorld,navClock,dropWorld;
 static float fallMin=256;
 int Sys_Milliseconds(void){return navClock?navClock++:0;}
 static int Dvar_GetInt(const char *name){(void)name;return 0;}
@@ -49,7 +49,8 @@ qboolean SV_EntityContact(const vec_t *mins,const vec_t *maxs,const gentity_t *e
  return 1;
 }
 void G_TraceCapsule(trace_t *t,const vec_t *a,const vec_t *mi,const vec_t *ma,const vec_t *b,int pass,int mask){
- (void)mi;(void)ma;(void)pass;(void)mask;traceCount++;t->fraction=1;t->normal[2]=1;
+ (void)mi;(void)ma;(void)pass;(void)mask;traceCount++;t->fraction=1;t->normal[2]=1;t->startsolid=t->allsolid=t->contents=0;
+ if(crowd && (mask&0x02000000)){t->startsolid=1;t->contents=0x02000000;t->fraction=0;return;}
  float floor=stairs?floorf(b[0]/16.0f)*12.0f:ladderWorld&&b[0]>=32?152:0;
  if(dropWorld)floor=b[0]<32?160:dropWorld==2?-200:0;
  if((dropWorld==3||dropWorld==4)&&a[0]<32&&b[0]>=32&&a[2]<192&&b[2]>=a[2]){
@@ -89,6 +90,10 @@ int main(void){
  // A legal first stair must not be rejected by looking across several risers.
  stairs=1;assert(Bot_CanMove(0,(float[3]){8,0,1},0,127,0));stairs=0;
  wall=1;assert(!Bot_CanMove(0,(float[3]){250,0,1},0,127,0));wall=0;
+ // Crowded-spawn overlap uses the same player-body retry as native pmove;
+ // the retry retains world collision rather than walking through a wall.
+ crowd=1;assert(Bot_CanMove(0,(float[3]){8,0,1},0,127,0));
+ wall=1;assert(!Bot_CanMove(0,(float[3]){250,0,1},0,127,0));wall=0;crowd=0;
  SV_BotResetNavigation();s_botNavSeeded=1;Bot_NavAdd(zero);
  for(i=0;i<100;i++){svs.time=i*50;traceCount=0;Bot_NavFrame();assert(traceCount<=BOT_NAV_EDGES_PER_FRAME*15);}
  assert(s_botNavCount>100&&s_botNavCount<=BOT_NAV_MAX);
@@ -223,6 +228,16 @@ int main(void){
  clients[0].ps.origin[0]=224;clients[0].ps.origin[1]=0;
  SV_BotEnableAI(0,1);SV_BotSetGoal(0,(float[3]){384,0,1},12,0,-1);
  Bot_FindPath(&s_botAI[0],&clients[0].ps);assert(s_botAI[0].routeCount>0);
+ // A local half-cell repair reaches a doorway whose center lies between
+ // regular grid lines. The nearest-node hash must include those portal cells.
+ SV_BotResetNavigation();wall=1;wallDoor=2;
+ int portalStart=Bot_NavAdd((float[3]){224,0,1});
+ int portal=Bot_NavEdge(portalStart,1);
+ assert(portal>=0&&s_botNav[portal].origin[0]==240&&s_botNav[portal].origin[1]==16);
+ int crossing=Bot_NavEdge(portal,0);
+ assert(crossing>=0&&s_botNav[crossing].origin[0]>=256&&s_botNav[crossing].origin[1]==16);
+ assert(Bot_NearestNode(s_botNav[crossing].origin,0)==crossing);
+ wall=wallDoor=0;
  // The priority queue must preserve every node and expand central geometry first.
  SV_BotResetNavigation();s_botNavBounded=1;
  s_botNavMin[0]=s_botNavMin[1]=-512;s_botNavMax[0]=s_botNavMax[1]=512;
@@ -312,6 +327,7 @@ int main(void){
  memcpy(clients[0].ps.origin,s_botNav[roof].origin,sizeof(vec3_t));
  clients[0].ps.groundEntityNum=1022;svs.time+=2000;SV_BotEnableAI(0,1);
  SV_BotSetGoal(0,s_botNav[landing].origin,12,3,-1);
+ Bot_RequestPath(&s_botAI[0]);SV_BotPlanFrame();
  s_botNavSeeded=1;s_botNavFrame=svs.time;SV_BotRunAI(0,&clients[0].ps);
  assert(s_botCmdState[0].buttons&0x400);
  svs.time+=50;s_botNavFrame=svs.time;SV_BotRunAI(0,&clients[0].ps);
@@ -356,6 +372,79 @@ int main(void){
  SV_BotResetNavigation();s_botNavSeeded=1;Bot_NavAdd((float[3]){0,0,1});
  svs.time+=50;navClock=1;traceCount=0;Bot_NavFrame();navClock=0;
  assert(s_botNavWorkEdges<=32);
+ // A large connected map yields a useful partial route within the visit
+ // budget instead of scanning every cell in one server frame.
+ SV_BotResetNavigation();s_botNavSeeded=1;
+ for(i=0;i<3000;i++){int n=Bot_NavAdd((float[3]){i*32,0,1});if(i)s_botNav[n-1].edge[0]=n;}
+ clients[0].ps.origin[0]=clients[0].ps.origin[1]=0;clients[0].ps.origin[2]=1;
+ SV_BotEnableAI(0,1);SV_BotSetGoal(0,(float[3]){2999*32,0,1},12,0,-1);
+ s_botProfile.enabled=1;s_botProfile.visited=0;Bot_FindPath(&s_botAI[0],&clients[0].ps);
+ assert(s_botProfile.visited<=BOT_PATH_VISITS&&s_botAI[0].routeCount>0);
+ s_botProfile.enabled=0;
+ // Guided search crosses a wide connected floor within the visit budget;
+ // breadth-first expansion would exhaust the budget before the far corner.
+ SV_BotResetNavigation();s_botNavSeeded=1;
+ for(int y=0;y<64;y++)for(int x=0;x<64;x++)Bot_NavAdd((float[3]){x*32,y*32,1});
+ for(int y=0;y<64;y++)for(int x=0;x<64;x++)for(int d=0;d<8;d++){
+  int nx=x+s_botDirections[d][0],ny=y+s_botDirections[d][1];
+  if(nx>=0&&nx<64&&ny>=0&&ny<64)s_botNav[y*64+x].edge[d]=(short)(ny*64+nx);
+ }
+ memcpy(clients[0].ps.origin,(float[3]){0,0,1},sizeof(vec3_t));
+ SV_BotEnableAI(0,1);SV_BotSetGoal(0,(float[3]){2016,2016,1},12,0,-1);
+ s_botProfile.enabled=1;s_botProfile.visited=0;Bot_FindPath(&s_botAI[0],&clients[0].ps);
+ assert(s_botAI[0].goal==4095&&s_botAI[0].routeCount==63&&s_botProfile.visited<100);
+ s_botProfile.enabled=0;
+ // Three blocked near contacts cannot permanently mask the next visible
+ // enemy. Rotating perception finds it without extra traces or hidden memory.
+ SV_BotResetNavigation();level.maxclients=5;svs.time+=1000;SV_BotEnableAI(0,2);
+ for(i=1;i<5;i++){
+  g_entities[i].client=&clients[i];g_entities[i].health=100;
+  clients[i].sess.connected=2;clients[i].sess.sessionState=0;clients[i].sess.cs.team=TEAM_AXIS;
+  clients[i].ps.origin[0]=400;clients[i].ps.origin[1]=i<4?i*10:200;
+  clients[i].ps.origin[2]=1;clients[i].ps.viewHeightCurrent=60;
+ }
+ wall=wallDoor=1;
+ assert(Bot_AcquireTarget(0,&s_botAI[0],&clients[0].ps)==-1);
+ svs.time+=200;assert(Bot_AcquireTarget(0,&s_botAI[0],&clients[0].ps)==4);
+ traceCount=0;assert(Bot_ObserveTarget(0,&s_botAI[0],4)&&traceCount==0);
+ wall=wallDoor=0;level.maxclients=3;
+ // A live route is reused without a BFS, nearest-node scan or scout work.
+ SV_BotResetNavigation();s_botNavSeeded=1;
+ for(i=0;i<8;i++){int n=Bot_NavAdd((float[3]){i*32,0,1});if(i)s_botNav[n-1].edge[0]=n;}
+ clients[0].ps.origin[0]=clients[0].ps.origin[1]=0;clients[0].ps.origin[2]=1;
+ SV_BotEnableAI(0,1);SV_BotSetGoal(0,(float[3]){224,0,1},12,0,-1);
+ Bot_FindPath(&s_botAI[0],&clients[0].ps);assert(s_botAI[0].routeCount>0);
+ traceCount=0;s_botProfile.enabled=1;s_botProfile.visited=0;
+ Bot_FindPath(&s_botAI[0],&clients[0].ps);
+ assert(traceCount==0&&s_botProfile.visited==0);s_botProfile.enabled=0;
+ // Planning is bounded across ALL clients and rotates fairly between ticks.
+ for(i=0;i<3;i++) {
+  g_entities[i].health=100;clients[i].sess.sessionState=SESS_STATE_PLAYING;
+  memcpy(clients[i].ps.origin,clients[0].ps.origin,sizeof(vec3_t));
+  SV_BotEnableAI(i,1);Bot_RequestPath(&s_botAI[i]);
+ }
+ s_botNavFrame=svs.time;SV_BotPlanFrame();
+ assert(!s_botAI[0].pathPending&&!s_botAI[1].pathPending&&s_botAI[2].pathPending);
+ svs.time+=50;s_botNavFrame=svs.time;Bot_RequestPath(&s_botAI[0]);Bot_RequestPath(&s_botAI[1]);
+ SV_BotPlanFrame();assert(!s_botAI[2].pathPending&&!s_botAI[0].pathPending&&s_botAI[1].pathPending);
+ // Multiple scouts share one wall-time allowance, rather than adding a
+ // separate allowance for every bot. Cached links are still available.
+ SV_BotResetNavigation();Bot_NavAdd((float[3]){0,0,1});navClock=1;
+ Bot_NavScout(0,(float[3]){224,0,1});int firstCount=s_botNavCount;
+ Bot_NavScout(0,(float[3]){-224,0,1});navClock=0;
+ assert(s_botNavCount==firstCount);
+ // A half-cell waypoint has an eight-unit arrival radius. At nine units
+ // the bot must continue walking rather than idle forever outside arrival.
+ SV_BotResetNavigation();s_botNavSeeded=1;svs.time+=1000;
+ for(i=1;i<3;i++)clients[i].sess.sessionState=SESS_STATE_DEAD;
+ Bot_NavAdd((float[3]){0,0,1});Bot_NavAdd((float[3]){16,0,1});
+ clients[0].ps.origin[0]=7;clients[0].ps.origin[1]=0;clients[0].ps.origin[2]=1;
+ SV_BotEnableAI(0,1);s_botAI[0].routeFrom=0;s_botAI[0].route[0]=1;
+ s_botAI[0].routeCount=1;s_botAI[0].goal=s_botAI[0].waypoint=1;
+ s_botAI[0].nextThink=s_botAI[0].nextPath=svs.time+1000;s_botNavFrame=svs.time;
+ SV_BotRunAI(0,&clients[0].ps);assert(s_botCmdState[0].forwardmove>0);
+ clients[0].ps.origin[0]=10;clients[0].ps.origin[2]=10;Bot_AdvanceRoute(&s_botAI[0],&clients[0].ps);
+ assert(s_botAI[0].waypoint<0);
  // No navigation growth across the authored playable envelope.
  s_botNavBounded=1;s_botNavMin[0]=s_botNavMin[1]=-160;s_botNavMax[0]=s_botNavMax[1]=160;
  assert(Bot_NavAdd((float[3]){192,0,1})==-1);

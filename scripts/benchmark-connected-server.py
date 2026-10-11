@@ -142,12 +142,19 @@ def observe(args):
                            'snapshotAckRttMs': distribution(item['acks'])} for item in connected],
               'limits': 'Server-interface cadence; ack RTT includes LAN, gateway and client scheduling. '
                         'Status RTT is container-local. This is not client FPS or a packet-loss measurement.'}
-    report['passed'] = (len(connected) == args.expected_clients and
+    report['capturePassed'] = (len(connected) == args.expected_clients and
                         min(counts, default=0) == args.expected_clients + args.expected_bots and
                         max(counts, default=0) == args.expected_clients + args.expected_bots and
                         min(bot_counts, default=0) == args.expected_bots and
                         max(bot_counts, default=0) == args.expected_bots and
                         not lost_queries and not packet_stats[1])
+    report['realtimeThresholds'] = {'minServerPacketsPerSecond': 18,
+                                    'maxServerPacketGapMs': 150, 'maxLocalStatusP95Ms': 75}
+    report['realtimePassed'] = (bool(report['localStatusRttMs']) and
+        report['localStatusRttMs']['p95'] <= 75 and bool(connected) and all(
+        item['out'] / seconds >= 18 and item['gaps'] and max(item['gaps']) <= 150
+        for item in connected))
+    report['passed'] = report['capturePassed'] and (report['realtimePassed'] or not args.require_realtime)
     return report
 
 
@@ -159,12 +166,14 @@ def main():
     parser.add_argument('--expected-clients', type=int, default=8)
     parser.add_argument('--expected-bots', type=int, default=0)
     parser.add_argument('--output', type=Path)
+    parser.add_argument('--require-realtime', action='store_true',
+                        help='Require >=18 packets/s per player, <=150 ms maximum gap and <=75 ms local status p95')
     parser.add_argument('--ssh')
     parser.add_argument('--ssh-control')
     parser.add_argument('--in-container', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     assert 5 <= args.seconds <= 3600 and 1 <= args.expected_clients <= 64
-    assert 0 <= args.expected_bots <= 16 and args.expected_clients + args.expected_bots <= 64
+    assert 0 <= args.expected_bots <= 63 and args.expected_clients + args.expected_bots <= 64
     assert 1 <= args.port <= 65535
     if args.in_container:
         report = observe(args)
@@ -172,6 +181,8 @@ def main():
         command = ['docker', 'exec', '-u', '0', '-i', args.container, 'python3', '-', '--in-container',
                    '--seconds', str(args.seconds), '--port', str(args.port),
                    '--expected-clients', str(args.expected_clients), '--expected-bots', str(args.expected_bots)]
+        if args.require_realtime:
+            command.append('--require-realtime')
         if args.ssh:
             command = ['ssh'] + (['-S', args.ssh_control] if args.ssh_control else []) + [args.ssh, shlex.join(command)]
         report = json.loads(subprocess.check_output(command, input=Path(__file__).read_bytes()))
@@ -179,7 +190,7 @@ def main():
         args.output.write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report))
     if not report['passed'] and not args.in_container:
-        raise SystemExit('Connected-player/capture checks failed; do not claim a complete load test.')
+        raise SystemExit('Connected-player, capture or requested realtime checks failed; inspect the report.')
 
 
 if __name__ == '__main__':

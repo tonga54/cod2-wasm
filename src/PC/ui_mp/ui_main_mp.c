@@ -1268,7 +1268,7 @@ void UI_Init(void)
     ui_joinGameType = Dvar_RegisterInt("ui_joinGametype", 0, 0, 0x7fffffff, 0x1001);
     ui_netGameTypeName = Dvar_RegisterString_mac("ui_netGametypeName", "", 0x1001);
     ui_dedicated = Dvar_RegisterInt("ui_dedicated", 0, 0, 2, 0x1001);
-    Dvar_RegisterInt("ui_botCount", 0, 0, 16, 0x1001);
+    Dvar_RegisterInt("ui_botCount", 0, 0, 32, 0x1001);
     Dvar_RegisterInt("ui_botDifficulty", 1, 0, 2, 0x1001);
     ui_currentNetMap = Dvar_RegisterInt("ui_currentNetMap", 0, 0, 0x7fffffff, 0x1001);
     ui_browserShowFull = Dvar_RegisterBool_mac("ui_browserShowFull", 1, 0x1001);
@@ -4990,7 +4990,7 @@ void UI_Init(void)
     ui_joinGameType = Dvar_RegisterInt("ui_joinGametype", 0, 0, 0x7fffffff, 0x1001);
     ui_netGameTypeName = Dvar_RegisterString_mac("ui_netGametypeName", "", 0x1001);
     ui_dedicated = Dvar_RegisterInt("ui_dedicated", 0, 0, 2, 0x1001);
-    Dvar_RegisterInt("ui_botCount", 0, 0, 16, 0x1001);
+    Dvar_RegisterInt("ui_botCount", 0, 0, 32, 0x1001);
     Dvar_RegisterInt("ui_botDifficulty", 1, 0, 2, 0x1001);
     ui_currentNetMap = Dvar_RegisterInt("ui_currentNetMap", 0, 0, 0x7fffffff, 0x1001);
     ui_browserShowFull = Dvar_RegisterBool_mac("ui_browserShowFull", 1, 0x1001);

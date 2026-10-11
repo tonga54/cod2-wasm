@@ -2,6 +2,7 @@
 #include "imports.h"
 #include "bytematch.h"
 #include <stdlib.h>
+#include <math.h>
 extern level_locals_t level;
 
 extern qboolean Scr_IsSystemActive(int localClientNum);
@@ -17,6 +18,7 @@ extern qboolean BG_CanItemBeGrabbed(const entityState_t *ent, const playerState_
 extern int G_TraceCapsuleComplete(vec3_t start, vec3_t mins, vec3_t maxs, vec3_t end, int passEntityNum, int contentMask);
 extern int G_DObjGetWorldTagPos(gentity_t *ent, unsigned int tagName, vec_t *pos);
 extern void G_LocationalTrace(trace_t *trace, vec3_t start, vec3_t end, int passEntityNum, int contentMask, unsigned char *priorityMap);
+extern qboolean SV_BotIsTestClient(int clientNum);
 extern float SV_FX_GetVisibility(vec3_t start, vec3_t end);
 extern void G_Trigger(gentity_t *self, gentity_t *other);
 extern void *BG_GetWeaponDef(int weapon);
@@ -502,6 +504,42 @@ void Player_UpdateCursorHints(gentity_t *ent)
     }
 }
 
+static qboolean Player_BotNeedsLookAtTrace(const vec_t *start, const vec_t *forward)
+{
+    static int checkedTime=-1, count;
+    static unsigned short triggers[1024];
+    int i,j;
+    if(checkedTime!=level.time) {
+        checkedTime=level.time; count=0;
+        // Preserve original scripted interactions, including newly linked
+        // look-at brushes, while avoiding rendered crosshair/name queries.
+        for(i=level.maxclients;i<level.num_entities;++i)
+            if(g_entities[i].r.inuse && g_entities[i].r.linked &&
+               g_entities[i].classname==SCR_CONST()->trigger_lookat &&
+               (g_entities[i].r.contents&0x22802801)) triggers[count++]=(unsigned short)i;
+    }
+    for(i=0;i<count;++i) {
+        gentity_t *trigger=&g_entities[triggers[i]];
+        if(!trigger->r.inuse || !trigger->r.linked ||
+           trigger->classname!=SCR_CONST()->trigger_lookat ||
+           !(trigger->r.contents&0x22802801)) continue;
+        float near=0,far=15000;
+        for(j=0;j<3;++j) {
+            if(forward[j]==0) {
+                if(start[j]<trigger->r.absmin[j] || start[j]>trigger->r.absmax[j]) break;
+            } else {
+                float a=(trigger->r.absmin[j]-start[j])/forward[j];
+                float b=(trigger->r.absmax[j]-start[j])/forward[j];
+                float lo=fminf(a,b),hi=fmaxf(a,b);
+                near=fmaxf(near,lo);far=fminf(far,hi);
+                if(near>far) break;
+            }
+        }
+        if(j==3) return 1; // The original trace still checks occlusion/smoke.
+    }
+    return 0;
+}
+
 void Player_UpdateLookAtEntity(gentity_t *ent)
 {
     playerState_t *ps;
@@ -527,6 +565,7 @@ void Player_UpdateLookAtEntity(gentity_t *ent)
 
     G_GetPlayerViewOrigin(ent, start);
     G_GetPlayerViewDirection(ent, forward, NULL, NULL);
+    if(SV_BotIsTestClient(ent->s.number) && !Player_BotNeedsLookAtTrace(start,forward)) return;
 
     if (ps->eFlags & 0x300) {
 

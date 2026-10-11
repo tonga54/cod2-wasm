@@ -1004,7 +1004,13 @@ void SV_BotUserMove(client_t *cl)
     ps = SV_GameClientNum(clientNum);
     if (!ps)
         return;
+    int profileStart=s_botProfile.enabled?Sys_Milliseconds():0;
     SV_BotRunAI(clientNum, ps);
+    if(s_botProfile.enabled) {
+        int elapsed=Sys_Milliseconds()-profileStart;
+        s_botProfile.aiMs+=elapsed;
+        if(elapsed>s_botProfile.maxAiMs) s_botProfile.maxAiMs=elapsed;
+    }
 
     memset(&cmd, 0, sizeof(cmd));
     cmd.serverTime = svs.time;
@@ -1020,7 +1026,9 @@ void SV_BotUserMove(client_t *cl)
     }
 
     cl->deltaMessage = cl->netchan.outgoingSequence - 1;
+    profileStart=s_botProfile.enabled?Sys_Milliseconds():0;
     SV_ClientThink(cl, &cmd);
+    if(s_botProfile.enabled) s_botProfile.moveMs+=Sys_Milliseconds()-profileStart;
 }
 
 void SV_SendServerCommand(client_t *cl, svscmd_type type, const char *fmt, ...)
@@ -1199,14 +1207,8 @@ void SV_Frame(int msec)
         *(int *)imp_dvar_modifiedFlags &= ~0x100;
     }
 
+    s_botProfile.enabled=Dvar_GetInt("scr_bot_profile");
     SV_ResetSkeletonCache();
-
-    cl = svs.clients;
-    for (i = 0; i < sv_maxclients->current.integer; ++i, ++cl) {
-        if (cl->state && cl->netchan.remoteAddress.type == NA_BOT) {
-            SV_BotUserMove(cl);
-        }
-    }
 
     cl = svs.clients;
     for (i = 0; i < sv_maxclients->current.integer; ++i, ++cl) {
@@ -1252,7 +1254,19 @@ void SV_Frame(int msec)
 
         CL_FlushDebugData(1);
         SV_ResetSkeletonCache();
+        int profileStart=s_botProfile.enabled?Sys_Milliseconds():0;
+        SV_BotPlanFrame();
+        if(s_botProfile.enabled) s_botProfile.planMs+=Sys_Milliseconds()-profileStart;
+        cl = svs.clients;
+        for (i = 0; i < sv_maxclients->current.integer; ++i, ++cl)
+            if (cl->state && cl->netchan.remoteAddress.type == NA_BOT) SV_BotUserMove(cl);
+        profileStart=s_botProfile.enabled?Sys_Milliseconds():0;
         G_RunFrame(svs.time);
+        if(s_botProfile.enabled) {
+            int elapsed=Sys_Milliseconds()-profileStart;
+            ++s_botProfile.frames; s_botProfile.gameMs+=elapsed;
+            if(elapsed>s_botProfile.maxGameMs) s_botProfile.maxGameMs=elapsed;
+        }
         Scr_SetLoading(0);
 
         if (frameMsec <= sv.timeResidual) {
@@ -1291,8 +1305,20 @@ void SV_Frame(int msec)
         cl->timeoutCount = 0;
     }
 
+    int profileStart=s_botProfile.enabled?Sys_Milliseconds():0;
     SV_SendClientMessages();
     SV_ArchiveSnapshot();
+    if(s_botProfile.enabled) {
+        int now=Sys_Milliseconds();
+        s_botProfile.snapshotMs+=now-profileStart;
+        if(now-s_botProfile.at>=5000) {
+            Com_Printf("[bots] profile wall=%d frames=%d ai=%d move=%d game=%d plans=%d snapshot=%d maxAI=%d maxGame=%d paths=%d pathMs=%d visits=%d nodes=%d\n",
+                now-s_botProfile.at,s_botProfile.frames,s_botProfile.aiMs,s_botProfile.moveMs,
+                s_botProfile.gameMs,s_botProfile.planMs,s_botProfile.snapshotMs,s_botProfile.maxAiMs,s_botProfile.maxGameMs,
+                s_botProfile.paths,s_botProfile.pathMs,s_botProfile.visited,s_botNavCount);
+            memset(&s_botProfile,0,sizeof(s_botProfile)); s_botProfile.at=now; s_botProfile.enabled=1;
+        }
+    }
     SV_MasterHeartbeat("COD-2");
     return;
 }

@@ -13,7 +13,7 @@ populate()
     count = getCvarInt("scr_bot_count");
     difficulty = getCvarInt("scr_bot_difficulty");
     if(count < 0) count = 0;
-    if(count > 16) count = 16;
+    if(count > 32) count = 32;
     if(difficulty < 0 || difficulty > 2) difficulty = 1;
 
     // map_restart and map rotation can retain connected test clients.
@@ -105,6 +105,7 @@ objectiveState()
     level endon("intermission");
     for(;;)
     {
+        level.bot_mode = getCvar("g_gametype");
         level.bot_players = getEntArray("player", "classname");
         counts["allies"] = 0;
         counts["axis"] = 0;
@@ -142,11 +143,12 @@ objectiveThink(difficulty)
     self endon("bot_objectives_stop");
     self endon("disconnect");
     level endon("intermission");
+    wait ((self getEntityNumber()) % 16) * .025;
     for(;;)
     {
         if(isAlive(self) && self.sessionstate == "playing" && isDefined(self.bot_rank))
         {
-            mode = getCvar("g_gametype");
+            mode = level.bot_mode;
             if(mode == "ctf") self ctfObjective();
             else if(mode == "hq") self hqObjective();
             else if(mode == "sd") self sdObjective();
