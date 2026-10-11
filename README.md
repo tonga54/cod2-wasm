@@ -380,7 +380,7 @@ python3 scripts/update-local.py          # Check without installing
 python3 scripts/update-local.py --apply  # Fast-forward, build, and restart an empty standard host
 ```
 
-Installation requires a clean `master` checkout and no active players. Players
+Installation requires a clean `main` checkout and no active players. Players
 see update notices after leaving a match and choose when to reload. Pi hosts
 use the Pi deployment procedure instead of the standard rebuild command. See
 [updates and asset delivery](docs/UPDATES.md) for cache/version behavior.

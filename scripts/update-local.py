@@ -9,7 +9,7 @@ import sys
 import urllib.request
 
 ROOT = Path(__file__).resolve().parent.parent
-REMOTE = 'refs/remotes/origin/master'
+REMOTE = 'refs/remotes/origin/main'
 
 
 def git(*args, root=ROOT, check=True):
@@ -67,8 +67,8 @@ def main():
     args = parser.parse_args()
     branch, dirty = source_status()
     if args.apply:
-        if branch != 'master':
-            raise RuntimeError('Automatic updates require the master branch.')
+        if branch != 'main':
+            raise RuntimeError('Automatic updates require the main branch.')
         if dirty:
             raise RuntimeError('Local changes found. Save or commit them before updating; nothing was overwritten.')
         framework = Path(os.environ.get('COD2_WASM_FRAMEWORK_DIR', ROOT.parent / 'wasm-game-framework'))
@@ -78,12 +78,12 @@ def main():
             raise RuntimeError('The original files are missing from data/main/. See docs/UPDATES.md.')
         ensure_idle()
     # A failed/forced/non-fast-forward fetch never changes the working tree.
-    run('git', 'fetch', '--no-tags', 'origin', f'refs/heads/master:{REMOTE}')
+    run('git', 'fetch', '--no-tags', 'origin', f'refs/heads/main:{REMOTE}')
     status, count = comparison()
     if status in ('local-ahead', 'diverged'):
         raise RuntimeError('Your history contains local commits. Review the update manually; no merge or reset was performed.')
     if status == 'available':
-        print(f'A new version is available: {count} commit(s) in origin/master.', flush=True)
+        print(f'A new version is available: {count} commit(s) in origin/main.', flush=True)
         if dirty:
             print('Your checkout has local changes; save them before updating.', flush=True)
         if not args.apply:
@@ -93,7 +93,7 @@ def main():
         print('The local code is up to date.', flush=True)
     if args.apply:
         # Check again after network access and before changing source/assets.
-        if source_status() != ('master', False):
+        if source_status() != ('main', False):
             raise RuntimeError('The checkout changed during the check. No update was applied.')
         ensure_idle()
         run('git', 'merge', '--ff-only', REMOTE)

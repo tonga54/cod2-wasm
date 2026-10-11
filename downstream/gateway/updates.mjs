@@ -48,7 +48,7 @@ export function createUpdateChecker({ readBuild, fetchImpl = fetch, now = Date.n
   }
   async function compare(revision) {
     try {
-      const ref = await github('/git/ref/heads/master');
+      const ref = await github('/git/ref/heads/main');
       const latest = ref.object?.sha;
       if (!sha.test(latest)) throw new Error('Invalid repository revision');
       if (latest === revision) return { status: 'current', available: false, revision: latest };

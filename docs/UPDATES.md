@@ -1,7 +1,7 @@
 # Updating the game
 
 The public repository is [tonga54/cod2-wasm](https://github.com/tonga54/cod2-wasm).
-Update checks follow `master`. Pushing another branch does not announce a game
+Update checks follow `main`. Pushing another branch does not announce a game
 update.
 
 ## Browser players
@@ -32,7 +32,7 @@ To install and rebuild an empty host:
 python3 scripts/update-local.py --apply
 ```
 
-The installer requires `origin` to point to this repository, branch `master`,
+The installer requires `origin` to point to this repository, branch `main`,
 a clean working tree, and a fast-forward update. It does not reset, stash or
 merge local history. It checks for active players before changing files and
 before restarting. It preserves `data/main/`, regenerates the private subset,

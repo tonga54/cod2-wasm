@@ -19,7 +19,7 @@ class UpdateTests(unittest.TestCase):
             root = Path(directory)
             def git(*args):
                 return updater.git(*args, root=root).stdout.strip()
-            git('init', '-b', 'master')
+            git('init', '-b', 'main')
             git('config', 'user.name', 'Fixture')
             git('config', 'user.email', 'fixture@example.invalid')
             git('remote', 'add', 'origin', 'https://github.com/tonga54/cod2-wasm.git')
@@ -34,17 +34,17 @@ class UpdateTests(unittest.TestCase):
             self.assertEqual(updater.comparison(root), ('available', 1))
             git('commit', '--allow-empty', '-m', 'local')
             self.assertEqual(updater.comparison(root), ('diverged', 0))
-            git('checkout', 'master')
+            git('checkout', 'main')
             git('commit', '--allow-empty', '-m', 'ahead')
             self.assertEqual(updater.comparison(root), ('local-ahead', 0))
-            self.assertEqual(updater.source_status(root), ('master', False))
+            self.assertEqual(updater.source_status(root), ('main', False))
             (root / 'local.txt').write_text('do not overwrite')
-            self.assertEqual(updater.source_status(root), ('master', True))
+            self.assertEqual(updater.source_status(root), ('main', True))
             git('remote', 'set-url', 'origin', 'https://github.com/elsewhere/other.git')
             with self.assertRaises(RuntimeError): updater.source_status(root)
 
     def test_changes_and_wrong_branch_block_before_fetch(self):
-        for status in [('master', True), ('my-work', False)]:
+        for status in [('main', True), ('my-work', False)]:
             with patch.object(sys, 'argv', ['update-local.py', '--apply']), \
                     patch.object(updater, 'source_status', return_value=status), \
                     patch.object(updater, 'run') as run:
@@ -61,7 +61,7 @@ class UpdateTests(unittest.TestCase):
 
     def test_check_only_never_builds_or_merges(self):
         with patch.object(sys, 'argv', ['update-local.py']), \
-                patch.object(updater, 'source_status', return_value=('master', False)), \
+                patch.object(updater, 'source_status', return_value=('main', False)), \
                 patch.object(updater, 'comparison', return_value=('available', 3)), \
                 patch.object(updater, 'run') as run:
             self.assertEqual(updater.main(), 1)
@@ -75,7 +75,7 @@ class UpdateTests(unittest.TestCase):
             if args == ('bash', 'scripts/build-docker.sh'):
                 raise subprocess.CalledProcessError(1, args)
         with patch.object(sys, 'argv', ['update-local.py', '--apply']), \
-                patch.object(updater, 'source_status', return_value=('master', False)), \
+                patch.object(updater, 'source_status', return_value=('main', False)), \
                 patch.object(updater, 'comparison', return_value=('available', 1)), \
                 patch.object(updater, 'ensure_idle'), patch.object(updater.Path, 'exists', return_value=True), \
                 patch.object(updater.Path, 'is_file', return_value=True), patch.object(updater, 'run', side_effect=run):

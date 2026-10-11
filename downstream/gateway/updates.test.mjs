@@ -16,7 +16,7 @@ test('GitHub checks are shared, cached, and refreshed after deployment', async (
       ++calls;
       assert.equal(options.redirect, 'error');
       assert.ok(!options.headers.Authorization);
-      if (url.endsWith('/git/ref/heads/master')) return reply({ object: { sha: latest } });
+      if (url.endsWith('/git/ref/heads/main')) return reply({ object: { sha: latest } });
       assert.equal(url, `https://api.github.com/repos/tonga54/cod2-wasm/compare/${old}...${latest}?per_page=1&page=2`);
       return reply({ status: 'ahead' });
     } });
