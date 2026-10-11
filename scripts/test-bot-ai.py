@@ -2,8 +2,13 @@
 """Run production bot navigation and combat decisions against a small world."""
 from pathlib import Path
 import subprocess
+import argparse
 import tempfile
 
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--sanitize', action='store_true')
+parser.add_argument('--benchmark', action='store_true')
+args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
 source = (root / 'src/PC/server_mp/sv_bot_ai.inc').read_text()
 source = source.replace('#include "cod2_sprint.h"', '#define BUTTON_SPRINT 2')
@@ -13,6 +18,7 @@ support = r'''
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
+#include <time.h>
 typedef int qboolean; typedef unsigned char byte; typedef float vec_t; typedef float vec3_t[3];
 #define COD2_BOT_MAX_CLIENTS 64
 #define SESS_STATE_PLAYING 0
@@ -39,7 +45,7 @@ int Sys_Milliseconds(void){return navClock?navClock++:0;}
 static int Dvar_GetInt(const char *name){(void)name;return 0;}
 static float Dvar_GetFloat(const char *name){return !strcmp(name,"jump_height")?39:fallMin;}
 static playerState_t *SV_GameClientNum(int num){return &clients[num].ps;}
-static int SV_BotIsTestClient(int num){return num>=0&&num<16;}
+static int SV_BotIsTestClient(int num){return num>=0&&num<level.maxclients;}
 static void Com_Printf(const char *fmt,...){(void)fmt;}
 const char *SL_ConvertToString(unsigned int value){(void)value;return "mp_tdm_spawn";}
 WeaponDef *BG_GetWeaponDef(int index){return index==2?&secondary:&weapon;}
@@ -346,7 +352,7 @@ int main(void){
  clients[0].ps.origin[0]=250;clients[0].ps.origin[1]=0;clients[0].ps.origin[2]=1;
  svs.time+=1000;SV_BotEnableAI(0,1);wall=1;
  SV_BotSetGoal(0,(float[3]){512,0,1},12,3,-1);
- for(i=0;i<4;i++){Bot_FindPath(&s_botAI[0],&clients[0].ps);Bot_AdvanceRoute(&s_botAI[0],&clients[0].ps);}
+ for(i=0;i<4;i++){svs.time+=200;s_botAI[0].routeCount=0;Bot_FindPath(&s_botAI[0],&clients[0].ps);Bot_AdvanceRoute(&s_botAI[0],&clients[0].ps);}
  assert(s_botAI[0].detourUntil>svs.time&&s_botAI[0].goal!=1);
  // Incomplete routes during graph warm-up must not abandon an objective when
  // the actor is actually approaching it. Stagnant projections still recover.
@@ -379,7 +385,7 @@ int main(void){
  clients[0].ps.origin[0]=clients[0].ps.origin[1]=0;clients[0].ps.origin[2]=1;
  SV_BotEnableAI(0,1);SV_BotSetGoal(0,(float[3]){2999*32,0,1},12,0,-1);
  s_botProfile.enabled=1;s_botProfile.visited=0;Bot_FindPath(&s_botAI[0],&clients[0].ps);
- assert(s_botProfile.visited<=BOT_PATH_VISITS&&s_botAI[0].routeCount>0);
+ assert(s_botProfile.visited<=BOT_PATH_NODES&&s_botAI[0].routeCount>0);
  s_botProfile.enabled=0;
  // Guided search crosses a wide connected floor within the visit budget;
  // breadth-first expansion would exhaust the budget before the far corner.
@@ -448,6 +454,145 @@ int main(void){
  // No navigation growth across the authored playable envelope.
  s_botNavBounded=1;s_botNavMin[0]=s_botNavMin[1]=-160;s_botNavMax[0]=s_botNavMax[1]=160;
  assert(Bot_NavAdd((float[3]){192,0,1})==-1);
+
+ // Flat link batching retains every floor probe and uses a single body
+ // sweep; stairs still use piecewise clearance.
+ traceCount=0;assert(Bot_WalkEdge((float[3]){0,0,1},(float[3]){32,0,1}));
+ assert(traceCount==5);
+ stairs=1;traceCount=0;assert(Bot_WalkEdge((float[3]){0,0,1},(float[3]){32,0,25}));
+ assert(traceCount>5);stairs=0;
+
+ // An offset narrow doorway must be connected, then merge back into the
+ // ordinary grid. Nearest-node lookup must include the refined cells.
+ SV_BotResetNavigation();wall=1;wallDoor=2;
+ int doorStart=Bot_NavAdd((float[3]){224,0,1});
+ int doorSide=Bot_NavEdge(doorStart,1);
+ assert(doorSide>=0 && s_botNav[doorSide].origin[1]==16);
+ int doorEntry=Bot_NavEdge(doorSide,0);
+ assert(doorEntry>=0 && s_botNav[doorEntry].origin[0]==256 && s_botNav[doorEntry].origin[1]==16);
+ assert(Bot_NearestNode((float[3]){256,16,1},1)==doorEntry);
+ int doorExit=Bot_NavEdge(doorEntry,0);
+ assert(doorExit>=0 && s_botNav[doorExit].origin[0]==288 && s_botNav[doorExit].origin[1]==32);
+ wall=wallDoor=0;
+
+ // Tight links cannot stop in the gap between movement and arrival radii.
+ SV_BotResetNavigation();svs.time+=5000;
+ Bot_NavAdd((float[3]){0,0,1});Bot_NavAdd((float[3]){16,0,1});
+ s_botNav[0].edge[0]=1;s_botNav[1].edge[4]=0;
+ for(i=1;i<3;i++)clients[i].sess.sessionState=SESS_STATE_DEAD;
+ clients[0].ps.origin[0]=7;clients[0].ps.origin[1]=0;clients[0].ps.origin[2]=1;
+ SV_BotEnableAI(0,1);SV_BotSetGoal(0,(float[3]){1000,0,1},12,0,-1);
+ s_botAI[0].route[0]=1;s_botAI[0].routeCount=1;s_botAI[0].routeFrom=0;s_botAI[0].waypoint=1;
+ s_botAI[0].nextThink=s_botAI[0].nextPath=svs.time+1000;
+ s_botNavSeeded=1;s_botNavFrame=svs.time;
+ SV_BotRunAI(0,&clients[0].ps);
+ assert(s_botCmdState[0].forwardmove || s_botCmdState[0].rightmove);
+ // Ordinary 32-unit links retain running speed; only tight entries brake.
+ s_botNav[1].origin[0]=32;int distant=Bot_NavAdd((float[3]){512,0,1});
+ s_botAI[0].goal=distant;svs.time+=50;s_botNavFrame=svs.time;
+ SV_BotRunAI(0,&clients[0].ps);
+ assert(s_botCmdState[0].forwardmove==127 && (s_botCmdState[0].buttons&BUTTON_SPRINT));
+
+ // Complete navigation workload is shared, including repeated local scouts
+ // and seed requests from all 32 bots in the SAME server frame.
+ SV_BotResetNavigation();svs.time+=5000;s_botNavSeeded=1;
+ Bot_NavAdd((float[3]){0,0,1});Bot_NavFrame();
+ for(i=0;i<32;i++) {
+  Bot_NavScout(0,(float[3]){1000,(i-8)*100,1});
+  Bot_NavSeedPoint((float[3]){i*32,0,1});
+ }
+ assert(s_botWorkEdges<=BOT_NAV_EDGES_PER_FRAME);
+
+ // Replanning a valid route is free and cannot change its first corner when
+ // aim error consumes the bot RNG. Shared A* admission eventually serves all.
+ SV_BotResetNavigation();svs.time+=5000;level.maxclients=32;level.num_entities=32;
+ for(i=0;i<33;i++) {
+  int n=Bot_NavAdd((float[3]){i*32,0,1});
+  if(i){s_botNav[n-1].edge[0]=n;s_botNav[n].edge[4]=n-1;}
+ }
+ for(i=0;i<32;i++) {
+  memset(&clients[i],0,sizeof(clients[i]));g_entities[i].client=&clients[i];g_entities[i].health=100;
+  clients[i].sess.connected=2;clients[i].sess.cs.team=TEAM_ALLIES;
+  clients[i].ps.origin[2]=1;clients[i].ps.weapon=1;
+  SV_BotEnableAI(i,1);SV_BotSetGoal(i,(float[3]){1024,0,1},12,0,-1);
+ }
+ for(int tick=0;tick<16;tick++) {
+  svs.time+=50;
+  for(i=0;i<32;i++) Bot_FindPath(&s_botAI[i],&clients[i].ps);
+  assert(s_botWorkPaths<=BOT_PATHS_PER_FRAME);
+ }
+ for(i=0;i<32;i++) assert(s_botAI[i].routeCount>0);
+ svs.time+=50;
+ int searches=s_botPathSearches, first=s_botAI[0].waypoint;
+ for(i=0;i<20;i++){Bot_Random(&s_botAI[0]);Bot_FindPath(&s_botAI[0],&clients[0].ps);}
+ assert(s_botPathSearches==searches && s_botAI[0].waypoint==first);
+ // A drifting carrier/goal invalidates against the planned destination, not
+ // only the difference between successive small script updates.
+ svs.time+=50;SV_BotSetGoal(0,(float[3]){1080,0,1},12,0,-1);
+ SV_BotSetGoal(0,(float[3]){1140,0,1},12,0,-1);
+ Bot_FindPath(&s_botAI[0],&clients[0].ps);assert(s_botPathSearches==searches+1);
+
+ // Movement around a small circuit is not useful route progress. It must
+ // reject the blocked route even with >12 units of displacement per check.
+ botAIState_t *actor=&s_botAI[0];
+ actor->objectiveUntil=svs.time+10000;actor->nextPath=svs.time+10000;
+ actor->progressNode=actor->waypoint;actor->progressDistance=0;actor->progressAt=svs.time-2500;
+ actor->wantsMove=1;actor->lastMoveCheck=svs.time;actor->target=-1;
+ int recovered=actor->recoveries;
+ Bot_Think(0,actor,&clients[0].ps);
+ assert(actor->recoveries==recovered+1);
+
+ // Local team contact reports contain only a prior visible position, expire,
+ // and never become fire permission or reach an opposing/DM player.
+ SV_BotResetNavigation();svs.time+=5000;level.maxclients=3;
+ for(i=0;i<3;i++) SV_BotEnableAI(i,1);
+ clients[0].ps.origin[0]=0;clients[1].ps.origin[0]=400;clients[2].ps.origin[0]=600;
+ clients[1].sess.cs.team=TEAM_AXIS;clients[2].sess.cs.team=TEAM_ALLIES;
+ clients[2].ps.viewangles[1]=180;
+ Bot_Think(0,&s_botAI[0],&clients[0].ps);assert(s_botAI[0].target==1);
+ wall=1;s_botAI[2].aim[1]=180;clients[2].ps.origin[0]=32;
+ s_botAI[2].nextPath=svs.time+10000;
+ Bot_Think(2,&s_botAI[2],&clients[2].ps);
+ assert(s_botAI[2].target<0 && s_botAI[2].lastSeen[0]==400 && s_botAI[2].memoryUntil>svs.time);
+ clients[1].ps.origin[0]=800;svs.time+=1800;Bot_Think(2,&s_botAI[2],&clients[2].ps);
+ assert(s_botAI[2].lastSeen[0]==400 && s_botAI[2].memoryUntil<=svs.time);wall=0;
+
+ // On a fully connected 9,216-node map, A* takes the diagonal corridor;
+ // breadth-first search used to visit essentially the whole arena.
+ SV_BotResetNavigation();svs.time+=5000;clients[0].ps.origin[0]=0;
+ for(int x=0;x<96;x++)for(int y=0;y<96;y++)Bot_NavAdd((float[3]){x*32,y*32,1});
+ for(int x=0;x<96;x++)for(int y=0;y<96;y++)for(int d=0;d<8;d++) {
+  int nx=x+s_botDirections[d][0],ny=y+s_botDirections[d][1];
+  if(nx>=0&&nx<96&&ny>=0&&ny<96)s_botNav[x*96+y].edge[d]=nx*96+ny;
+ }
+ SV_BotEnableAI(0,1);SV_BotSetGoal(0,(float[3]){3040,3040,1},12,0,-1);
+ Bot_FindPath(&s_botAI[0],&clients[0].ps);
+ assert(s_botAI[0].goal==9215 && s_botPathExpanded<256 && s_botAI[0].routeCount==BOT_ROUTE_MAX);
+#ifdef BOT_BENCHMARK
+ clock_t measured=clock();int runs=1000;
+ for(i=0;i<runs;i++) {
+  svs.time+=50;s_botAI[0].objectiveUntil=svs.time+1600;
+  s_botAI[0].routeCount=0;Bot_FindPath(&s_botAI[0],&clients[0].ps);
+ }
+ printf("BENCH: %d searches on %d nodes: %.3f ms/search, %.1f expanded/search; caps=%d searches + %d nav attempts/frame\n",
+  runs,s_botNavCount,(double)(clock()-measured)*1000/CLOCKS_PER_SEC/runs,
+  (double)s_botPathExpanded/s_botPathSearches,BOT_PATHS_PER_FRAME,BOT_NAV_EDGES_PER_FRAME);
+#endif
+ // A disconnected destination cannot turn A* back into an unbounded flood.
+ svs.time+=50;s_botAI[0].routeCount=0;
+ SV_BotSetGoal(0,(float[3]){9000,9000,1},12,0,-1);
+ int expandedBefore=s_botPathExpanded;
+ Bot_FindPath(&s_botAI[0],&clients[0].ps);
+ assert(s_botPathExpanded-expandedBefore<=BOT_PATH_NODES);
+ assert(s_botPathExpanded-expandedBefore>1000);
+ // Wall-time exhaustion also defers later bots without erasing their route.
+ svs.time+=50;s_botAI[0].routeCount=0;navClock=1;
+ Bot_FindPath(&s_botAI[0],&clients[0].ps);navClock=0;
+ assert(s_botWorkPathMs>=BOT_PATH_TIME_MS);
+ int count=s_botWorkPaths;s_botAI[1].routeCount=0;
+ Bot_FindPath(&s_botAI[1],&clients[1].ps);assert(s_botWorkPaths==count);
+ puts("PASS: offset doors, shared 32-bot budgets/fair admission, stable routes, moving goals, circular-motion recovery, observed team reports, bounded A* map search");
+
  SV_BotResetAIClient(0);assert(!s_botAI[0].enabled);
  puts("PASS: bounded/hash navigation, enemy teams, fair perception/memory, difficulty, route progress/recovery, guard spacing, ladders/safe directed drops/time budget, jump tracking/scoped ADS, weapon-range pursuit, friendly-fire avoidance, objective priority/expiry, original use holds, reload/cadence, death/reset");
  return 0;
@@ -456,5 +601,6 @@ int main(void){
 with tempfile.TemporaryDirectory(prefix='cod2-bot-ai-') as directory:
     path = Path(directory)
     (path/'test.c').write_text(support + source + checks)
-    subprocess.run(['cc','-std=c99','-Wall','-Wextra','-O2',str(path/'test.c'),'-lm','-o',str(path/'test')],check=True)
-    subprocess.run([str(path/'test')],check=True,timeout=10)
+    flags = (['-fsanitize=address,undefined','-fno-omit-frame-pointer','-g'] if args.sanitize else []) + (['-DBOT_BENCHMARK'] if args.benchmark else [])
+    subprocess.run(['cc','-std=c99','-Wall','-Wextra','-O2',*flags,str(path/'test.c'),'-lm','-o',str(path/'test')],check=True)
+    subprocess.run([str(path/'test')],check=True,timeout=60)

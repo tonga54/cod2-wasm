@@ -124,8 +124,15 @@ objectiveState()
             {
                 player = players[i];
                 numbers[i] = player getEntityNumber();
+                player.bot_rank = undefined;
                 if(!(player isBot()) || !isDefined(player.pers["team"]) || player.pers["team"] == "spectator")
                     continue;
+                // Only surviving players reserve tactical duties.
+                if(!isAlive(player) || player.sessionstate != "playing")
+                {
+                    player.bot_actor_until = 0;
+                    continue;
+                }
                 team = player.pers["team"];
                 if(!isDefined(counts[team])) counts[team] = 0;
                 player.bot_rank = counts[team];
@@ -204,6 +211,7 @@ selectActor(point, group, groups)
 {
     actor = undefined;
     best = 1000000;
+    leaseActor = undefined;
     for(i = 0; i < level.bot_player_numbers.size; i++)
     {
         player = botPlayer(level.bot_player_numbers[i]);
@@ -211,15 +219,34 @@ selectActor(point, group, groups)
            !isDefined(player.pers["team"]) || player.pers["team"] != self.pers["team"]) continue;
         // Cover a human or bot already interacting instead of competing for
         // the trigger and resetting their original progress timer.
-        if(isDefined(player.progressbackground) && distance(player.origin, point) < 256) return player;
+        if(isDefined(player.progressbackground) && distance(player.origin, point) < 256)
+        {
+            actor = player;
+            break;
+        }
         if(!(player isBot()) || !isDefined(player.bot_rank)) continue;
         if(groups > 1 && player.bot_rank % groups != group) continue;
+        if(isDefined(player.bot_actor_until) && getTime() < player.bot_actor_until &&
+           player.bot_actor_group == group && player.bot_actor_groups == groups &&
+           distance(player.bot_actor_point, point) < 64) leaseActor = player;
         d = distance(player.origin, point);
         if(d < best)
         {
             best = d;
             actor = player;
         }
+    }
+    // Keep one actor approaching the trigger. Reelecting the nearest on every
+    // update made teammates exchange jobs at corners before either arrived.
+    if(isDefined(leaseActor) && (!isDefined(actor) || !isDefined(actor.progressbackground))) return leaseActor;
+    if(isDefined(actor) && (actor isBot()))
+    {
+        // Store only scalars/vectors on the actor. No cross-entity references
+        // or per-decision structs survive a round teardown.
+        actor.bot_actor_point = point;
+        actor.bot_actor_group = group;
+        actor.bot_actor_groups = groups;
+        actor.bot_actor_until = getTime() + 2500;
     }
     return actor;
 }
@@ -264,17 +291,18 @@ ctfObjective()
     }
     // Carriers are publicly marked on the original compass. This supplies a
     // movement objective, never permission to shoot an unseen player.
-    if(isDefined(enemyCarrier) && (self.bot_rank % 3 == 0 || !isDefined(friendlyCarrier)))
+    if(isDefined(enemyCarrier) && (self.bot_rank < 2 || level.bot_team_size[self.pers["team"]] <= 2))
     {
         self setObjective(enemyCarrier.origin, 96, 0, undefined, "intercept_flag_carrier");
         return;
     }
     if(isDefined(friendlyCarrier))
     {
-        if(self.bot_rank % 3 != 0)
+        if(self.bot_rank < 2)
             self setObjective(friendlyCarrier.origin, 140, 1, undefined, "escort_flag_carrier");
-        else
+        else if(self.bot_rank % 4 == 2)
             self setObjective(own.home_origin, 160, 1, undefined, "defend_flag_base");
+        else self botClearGoal(); // Scout the return lanes instead of a carrier pile-up.
         return;
     }
     if(level.bot_team_size[self.pers["team"]] > 2 && self.bot_rank % 4 == 0 && own.atbase)
@@ -306,10 +334,17 @@ hqObjective()
     }
     if(radio.team == self.pers["team"])
         self setObjective(radio.origin, 160, 1, undefined, "defend_headquarters");
-    else if(radio.team == "none")
-        self setObjective(radio.origin, 48, 0, undefined, "capture_headquarters");
     else
-        self setObjective(radio.origin, 48, 0, undefined, "destroy_headquarters");
+    {
+        // Keep a capture element inside the radius and a security element
+        // watching entrances. Small teams commit everyone to the capture.
+        size = level.bot_team_size[self.pers["team"]];
+        if(size > 2 && self.bot_rank >= 2)
+            self setObjective(radio.origin, 144, 1, undefined, "cover_headquarters_capture");
+        else if(radio.team == "none")
+            self setObjective(radio.origin, 48, 0, undefined, "capture_headquarters");
+        else self setObjective(radio.origin, 48, 0, undefined, "destroy_headquarters");
+    }
 }
 
 sdObjective()

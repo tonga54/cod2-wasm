@@ -55,7 +55,7 @@ use the same gameplay rules as human players.
 | Game Type | Bot objectives |
 | --- | --- |
 | Deathmatch | Patrol and fight other players, including other bots. |
-| Team Deathmatch | Search independent attack lanes and engage enemies at weapon-appropriate ranges. |
+| Team Deathmatch | Spread across patrol areas, share recent visible contacts, flank and engage at weapon-appropriate ranges. |
 | Capture the Flag | Attack the enemy flag, return it home, recover dropped friendly flags, intercept enemy carriers, escort friendly carriers and guard the base. |
 | Headquarters | Approach the announced radio, capture or neutralize it, then defend it under the original respawn rules. |
 | Search and Destroy | Split between bomb sites, select a planter or defuser and have teammates cover them; defend sites and planted bombs. |
@@ -69,8 +69,9 @@ reloading. Lost enemies are remembered only at their last visible position.
 
 Navigation is built from map collision, spawn locations and announced
 objectives, with bounded work per server frame and shared spatial lookups.
-Cached routes, corner steering and temporary blocked-edge exclusions improve
-progress. Guards spread out, and original ladder materials connect accessible
+Cached A* routes, local doorway refinement, route-progress checks and temporary
+blocked-edge exclusions improve progress. Navigation and search budgets are
+shared across all bots; patrols remember visited areas and spread their destinations. Guards spread out, and original ladder materials connect accessible
 rooftops. Directed, collision-checked drops and low-parapet jumps provide
 exits from supported elevated areas; scoped bots seek lookout positions and wait to finish aiming.
 This is first-party multiplayer AI, not the retail campaign AI. Complex routes

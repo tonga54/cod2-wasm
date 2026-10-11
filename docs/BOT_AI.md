@@ -14,7 +14,9 @@ spawning, faction weapons, ammunition, damage, scoring and round transitions.
 ## Perception, combat and difficulty
 
 New targets must pass the difficulty's view cone and collision/smoke visibility
-checks. A close visible enemy can alert the bot. An enemy that disappears is
+checks. A close visible enemy can alert the bot. Nearby teammates can share a
+contact that a bot actually saw, for at most 1.6 seconds. Reports neither
+propagate between teams nor authorize shooting. An enemy that disappears is
 remembered at its last visible position for a limited time; its hidden live
 position does not update that memory or authorize firing. Incoming damage can
 turn the bot toward the impact direction.
@@ -23,8 +25,9 @@ Easy, Normal and Hard use 700, 400 and 200 ms reaction delays, respectively,
 with progressively faster turns, smaller aiming error and longer bursts with
 shorter pauses. Tracking includes a small difficulty-dependent correction for
 visible movement, including jumping. Briefly losing and regaining the same
-opponent does not repeatedly restart the reaction delay. Objective decisions run every 750, 500 and 250 ms. Difficulty
-does not change health, weapon damage, ammunition, recoil or firing cadence.
+opponent does not repeatedly restart the reaction delay. Objective decisions run
+every 750, 500 and 250 ms. Difficulty does not change health, weapon damage,
+ammunition, recoil or firing cadence.
 
 Normal and Hard bots search nearby reachable cover when wounded or reloading.
 Bots avoid firing into a teammate along their actual aim. SMGs close to a
@@ -38,74 +41,89 @@ empty magazines and switch to an owned loaded weapon when out of ammunition.
 
 CTF uses public flag/base/carrier positions for movement. HQ uses only the
 currently announced radio. S&D uses the active bomb sites and planted bomb.
-These positions do not bypass combat visibility checks. A human already using
-an objective, or the currently interacting bot, retains that interaction while
-other bots cover it. Bots wait to land before starting a bomb interaction, then
-hold ordinary use through the original plant or defuse timer.
+These positions do not bypass combat visibility checks. A human already using an
+objective, or the currently interacting bot, retains that interaction while
+other bots cover it. Actor selection has a 2.5-second lease during approach, so
+small distance changes do not make two bots repeatedly exchange the task. Dead
+players release their roles; survivors are ranked again every half second. CTF
+limits the escort/intercept group and retains base security. HQ assigns up to
+two bots to capture/neutralize while larger teams cover the entrances. Bots wait
+to land before starting a bomb interaction, then hold ordinary use through the
+original plant or defuse timer.
 
 Teams receive a mix of SMGs, rifles, automatic support weapons and an original
 scoped rifle for every four bots. Faction weapon callbacks still enforce the
-server's restrictions. Snipers favor elevated positions and long sight lines,
-relocate between bounded observation periods and wait for the normal scope
-transition before firing. They use crouching and short breath-hold requests.
-TDM patrols independently search lanes toward the shared fighting area. Guards
-and escorts select separate reachable positions around their objective and
-pause between scans instead of spinning continuously.
+server's restrictions. Weapon roles are assault (SMG), flanking (rifle), support
+(automatic) and marksman (scope). Rifles approach a contact from an offset lane;
+nearby assault and support bots can investigate a teammate's recent sighting.
+Objectives and use holds take priority over these combat roles. Snipers favor
+elevated, connected positions, relocate between bounded observation periods and
+wait for the normal scope transition before firing. They use crouching and short
+breath-hold requests. DM/TDM patrols remember eight recently occupied areas and
+penalize destinations already reserved by teammates. The map center has only a
+small preference, so exploration does not continually collapse onto the same
+central cells. Guards and escorts select separate reachable positions around
+their objective and pause between scans instead of spinning continuously.
 
 Navigation grows from actual collision, spawn points and objective positions.
-The grid distinguishes floors and uses eight horizontal neighbors, allowing
-safe diagonal routes through buildings and stairways. Ground sampling starts
-within step height to avoid accidentally selecting the ceiling or roof above
-a room. Walk checks combine sampled floor height with standing-body clearance.
-Original ladder collision materials create climb/descend links to
+The grid distinguishes floors and uses eight horizontal neighbors, allowing safe
+diagonal routes through buildings and stairways. Failed links can refine locally
+to 16-unit spacing to enter doors between the ordinary 32-unit grid lines.
+Refined links merge back into the ordinary grid in open space. Arrival and
+movement thresholds allow bots to finish these tighter links. Ground sampling
+starts within step height to avoid accidentally selecting the ceiling or roof
+above a room. Walk checks combine sampled floor height with standing-body
+clearance. Original ladder collision materials create climb/descend links to
 accessible upper floors and rooftops. Ordinary movement owns ladder attachment,
 collision, climbing and falling; AI does not teleport or write player velocity.
 Directed drop links let bots leave roofs and elevated rooms. They check a full
-standing capsule at departure and landing, reject damaging falls, and can use
-a normal jump pulse over a low parapet when headroom permits. These links use the configured original jump height and never invent a
-reverse climb. General obstacle/gap jumps and mantle routes remain unsupported.
+standing capsule at departure and landing, reject damaging falls, and can use a
+normal jump pulse over a low parapet when headroom permits. These links use the
+configured original jump height and never invent a reverse climb. General
+obstacle/gap jumps and mantle routes remain unsupported.
 
 A shared priority queue favors central combat lanes while weighting insertion
 order so continuous central growth cannot starve older spawn/roof frontiers.
-Path decisions scout up to six nearby cells toward the objective or shared
-fighting area, sharing one two-millisecond allowance across all bots in the tick.
-This keeps distant spawn nodes connected as the shared graph warms up. Local
-branches can initially go away from their destination to reach a doorway around
-a wall, reject repeated scout cells and avoid choosing an idle patrol cell.
-Warm-up uses at most 128 edge attempts and a four-millisecond time budget,
-checked after each attempt. A single collision attempt can exceed that budget
-on a slow host; it is a work bound, not a latency guarantee. The spawn envelope
-plus a 512-unit margin bounds exploration so exterior ground planes do not
-consume the graph. Failed static edges are cached so nearby walls do not
-repeatedly consume collision traces. Narrow doorways and short stair lips can
-add validated half-cell links that rejoin the ordinary grid as soon as possible.
-Walking arrivals tolerate the sampled step-height difference; ladder and drop
-landings retain their three-dimensional checks. Crowded-spawn steering uses
-the original pmove retry for an existing player-body overlap, while native
-movement still owns collision and rejects walls.
+Local scouting can extend up to six cells toward an objective, including a short
+detour around a wall. Spawn seeding, map expansion and all bots' scouts share at
+most 128 attempts and a four-millisecond work budget per server frame. Spawn
+collision checks are incremental too. Background growth reserves part of that
+budget for local work. Time is checked between operations, so one collision
+operation may exceed it on a slow host; this is not a latency guarantee. The
+spawn envelope plus a 512-unit margin bounds exploration. Failed static links
+are cached rather than repeatedly tracing the same wall.
 
-A* searches use Euclidean edge costs and a shared fixed heap, with at most
-2,048 expanded nodes and a two-millisecond limit checked every 32 expansions.
-At most two queued paths run per simulation tick, in round-robin client order.
-An incomplete search retains a usable route toward its closest explored point.
-Valid routes survive a replan while their intent and destination remain stable.
-Patrol goals penalize the last eight visited areas and nearby teammates' claimed
-destinations, with capped penalties so a large team is not pushed outside the
-fighting area. Searches share fixed buffers and bots cache up to 64 route nodes. Flat, collinear sections reuse their sampled floor checks and need just
-one shortcut capsule trace; turns and stairs retain their individual nodes. Replanning
-does not force a bot to walk backward to a grid center.
+Routing uses A* with geometric movement costs and a fixed binary heap.
+Generation stamps avoid clearing the entire graph for each search. All bots
+share a maximum of two searches and a two-millisecond search budget per frame,
+checked every 32 node expansions; each search expands at most 2,048 nodes.
+Requests are serviced in round-robin client order. Deferred bots keep their
+current route and retry on a later frame. Searches
+share fixed buffers, and bots cache up to 64 route nodes. Valid routes survive
+the next decision tick: only a changed purpose, a destination that moved at
+least 96 units, exhaustion or a blocked route requires a new search. Flat
+collinear links reuse floor checks and need one shortcut capsule trace. Turns,
+stairs and special traversals retain their individual nodes. Flat link
+construction batches collinear body sweeps into one trace while retaining every
+ground sample; stairs keep piecewise body traces. Patrol destinations survive
+partial routes for up to 20 seconds, allowing bots to leave spawn components as
+the graph grows.
 
 Immediate collision checks and local steering help bots pass corners and
-teammates. A blocked route receives a per-bot eight-second edge exclusion;
-repeated failures trigger a six-second exploration detour before retrying the
-strategic objective. Disconnected objective projections also trigger recovery,
-including repeated arrivals at the same nearby cell outside a reachable route.
-Partial routes that still approach the objective during graph warm-up keep
-their objective; only consecutive decisions without progress count as failures.
-Announced model objectives such as radios are projected onto their walking
-floor; their model center cannot silently choose an unreachable roof instead.
-Path decisions run every 1.2 seconds, with prompt advancement between cached
-waypoints. Navigation and command generation allocate no per-frame heap memory.
+teammates. Progress toward the active waypoint is checked separately from
+displacement, so moving in a small circle still triggers recovery. A blocked
+route receives a per-bot eight-second edge exclusion; repeated failures trigger
+a six-second exploration detour before retrying the strategic objective.
+Disconnected objective projections also trigger recovery, including repeated
+arrivals at the same nearby cell outside a reachable route. Partial routes that
+still approach the objective during graph warm-up keep their objective; only
+consecutive decisions without progress count as failures. Announced model
+objectives such as radios are projected onto their walking floor; their model
+center cannot silently choose an unreachable roof instead. Path decisions are
+revisited every 1.2 seconds, with prompt advancement between cached waypoints
+and earlier replanning when the route fails. Final objective approach checks are
+cached for 400 ms; immediate movement collision remains checked every tick.
+Navigation and command generation allocate no per-frame heap memory.
 
 Movement and aim commands run once per original 50 ms simulation tick,
 including each tick of a delayed-frame catch-up. One shared objective scheduler
@@ -131,8 +149,8 @@ SSE2; the 32-bit ABI is unchanged.
 
 This is multiplayer AI written for this project. It does not reuse campaign
 scripts or promise campaign-level tactical behavior. It has no authored navmesh,
-general jump/mantle route planner, tactical grenade planner or mounted-gun strategy.
-Complex routes, coordination and stalemates still warrant playtesting.
+general jump/mantle route planner, tactical grenade planner or mounted-gun
+strategy. Complex routes, coordination and stalemates still warrant playtesting.
 
 ## Objective engine corrections
 
@@ -163,10 +181,10 @@ weapon slot from its `"none"` value, without raising an invalid-weapon error.
 
 The normal static suite includes the production bot controller and regression
 tests for route progress, blocked-route alternatives, guard spacing, ladder
-links/input, frontier fairness,
-directed roof exits and fall rejection, shared warm-up/scout time limits,
-bounded guided paths, fair planning queues, route reuse, sparse doorways,
-crowded-spawn escape, fine-step arrival and jump tracking,
+links/input, frontier fairness, offset doorways, tight arrival radii, shared
+16-bot work limits and fair admission, stable routes, moving destinations,
+circular-motion recovery, expiring team contact reports, bounded A* searches,
+directed roof exits and fall rejection, warm-up time limits, jump tracking,
 scoped ADS and weapon-range pursuit. It also tests vector order, objective contact/use, linked-player
 transforms and trigger/field dispatch. The vector and linked-player tests run under ASan/UBSan.
 The tests reject variants with the old reversed vectors, outside-only flag
@@ -221,3 +239,41 @@ Separately observe autonomous matches on Toujane, Carentan and Dawnville: check 
 reach objectives, score, change roles, obey round transitions and fight under
 the selected difficulty. Include a real browser client when measuring network
 latency; bots do not consume browser snapshot traffic or client rendering.
+
+## Reproduce routing and runtime measurements
+
+```sh
+# Production C controller, large-graph routing benchmark and sanitizers
+python3 scripts/test-bot-ai.py --benchmark --sanitize
+
+# Build the current native server, then run an isolated 16-bot match
+bash scripts/build-server.sh
+python3 scripts/test-bot-runtime.py --map mp_carentan --mode tdm --bots 16 --seconds 120
+```
+
+The runtime check creates and removes its own network-isolated Docker container.
+It does not alter running rooms. JSON and full logs go to `out/bot-runtime/`.
+The report includes CPU as a percentage of one core, sampled map coverage per
+bot, objective intents and cumulative routing work. CPU includes navigation
+warm-up and normal combat; this has no human browser, snapshot-stream or
+rendering load. Five-second position samples are diagnostic, not a guarantee
+that every map route is reachable. Use `--binary`, `--policy` and `--output` for
+before/after runs or the generated controlled objective scenarios.
+
+Before integration with the Pi server performance changes, October 11, 2026
+local validation ran autonomous 16-bot TDM matches on
+Carentan, Toujane and Dawnville, plus a DM smoke match. Controlled CTF checks
+completed pickup/capture; HQ capture and neutralization each took 9.5 seconds;
+S&D plant and defuse took 5.5 and 10.5 seconds and the next round started.
+These interaction scenarios arrange initial positions, so they do not certify
+autonomous objective completion from every spawn.
+
+That Carentan build ran for 120 seconds with 16 Normal bots, using 73.1%
+of one CPU core in the local amd64 Docker runtime. Position samples covered
+1–12 coarse areas per bot and the teams scored 4–3. A prior-version comparison
+used 90.8% of one core, but had different movement and combat activity; this
+is not a controlled claim of a fixed CPU improvement. The synthetic routing
+benchmark (1,000 searches on approximately 9,200 nodes, with ASan/UBSan) took
+about 0.03 ms per search and expanded 96 nodes per diagonal route. Native CPU,
+synthetic path time and browser latency are different measurements. This
+pre-integration revision was not load-tested with human browser clients on the Pi.
