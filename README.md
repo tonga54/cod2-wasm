@@ -320,7 +320,10 @@ limits and server load. The higher tick rate increases simulation work; validate
 CPU and packet cadence with the intended player count before deployment. Remote motion
 interpolation uses
 sample timestamps/velocities, smooths sample boundaries and allows bounded
-50 ms extrapolation across short gaps. Command time stays monotonic after
+50 ms extrapolation across short gaps. The server preserves fractional player
+positions so integer rounding does not introduce small speed changes between
+rendered frames; the existing snapshot format carries these coordinates.
+Command time stays monotonic after
 stalls. Local shot effects are predicted once, avoiding duplicate sound/recoil. Local
 prediction finds the first unacknowledged command in at most eight lookups
 instead of scanning the full 128-command history each frame; it still replays
@@ -341,7 +344,17 @@ storage, and excludes moving entities and temporary/transformed models. Replayed
 prediction commands and repeated sightline checks can reuse their complete
 results without rounding positions or skipping entity collisions.
 
-A 60-second Carentan test on a Raspberry Pi 5 kept **eight real browser players**
+The [30 versus 50 Hz Pi benchmark](docs/TICKRATE_BENCHMARK_2026-10-12.md)
+keeps **30 Hz** as the default. With two automated protocol clients and no bots,
+both rates were sustained (about 21% versus 27% of one core). With eight
+automated clients sending about 58 inputs/s each and 16 Hard bots, 50 Hz
+saturated a core and delivered snapshots in bursts separated by seconds.
+High client FPS and low average ping do not rule out interpolation jitter or
+irregular snapshot delivery. These tests measure server/network work, not
+browser FPS; the report includes the fractional-position correction and its
+validation limits.
+
+An earlier 60-second Carentan test on a Raspberry Pi 5 kept **eight real browser players**
 connected throughout, with sprint, automatic fire, smoke and frags exercised.
 Each player received 1,200 game packets (**20/s**); the server container used
 **34.0% of one CPU core**, with no CPU throttling or container restarts. The

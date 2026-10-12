@@ -3281,3 +3281,48 @@ bots through four successive three-second checks. Foundation, roster lifetime
 and simulation-cadence regressions pass. The temporary VM diagnostic changes
 were removed. Logs and reports are under `out/bot-scheduler-*` and
 `out/bot-opcode-*`; original assets are unchanged.
+
+
+## Remote-position precision and Pi 30/50 Hz load test (2026-10-12)
+
+The reported small remote-player judder also occurred with two humans and no
+bots. Isolated Pi measurements showed that two protocol clients sustain both
+30 and 50 Hz (20.5% and 27.1% of one core before the change). This distinguishes
+that light case from the multi-second snapshot stalls reproduced with high
+bot/client counts. The complete method, measurements and limitations are in
+`docs/TICKRATE_BENCHMARK_2026-10-12.md`; 30 Hz remains the production default.
+
+The server's extrapolated player-state export now retains fractional origins
+instead of truncating them each command. Existing snapshot float encoding and
+browser interpolation consume them directly. Angle snapping, local prediction,
+physics and timing are unchanged. The production-code replay at 125 FPS/30 Hz
+reduced steady-run step-error RMS from 0.191644 to 0.000153 units in its numeric
+fixture. The regression covers both directions at 20/30/50 Hz and rejects a
+mutant restoring integer origins; this is not a subjective gameplay percentage.
+
+Native Release compilation and the focused motion, clock, packet pose,
+stance-animation, event, antilag, bit-field, snapshot and native file-listing
+checks pass. The 32-bit snapshot-layout fixture passes in the native Docker
+builder (it cannot compile against macOS system headers). The production
+browser accepts the candidate's snapshots and advances remote movement each
+render frame without observed decode/script errors.
+
+On the Pi, the corrected two-client sample used 21.0% of one core at 30.31
+messages/s; whole-session received traffic rose approximately 6%. Eight clients
+plus eight Hard bots passed capture/realtime checks at 81.9% CPU and 30.13
+messages/s/client. Eight clients plus 16 Hard bots remain beyond the smooth
+operating range, particularly at 50 Hz. An image-export-overlapping sample was
+excluded and repeated without a concurrent build.
+
+Final native artifact SHA-256:
+`fb5a527c493d8c22f20f680ca8ebebed6bb9d78d653b7b1c6540eb21aac0ce56`.
+Raw evidence and rollback files are under `out/tickrate-pi/`.
+
+The verified candidate is deployed on the Pi at 30 Hz. Only `cod2-server`
+was recreated; web, gateway and HTTPS edge container identities are unchanged.
+Post-deploy checks pass for protected assets, authenticated room creation, two
+live bots and a secure WebSocket native challenge. The temporary verification
+room was removed. `out/tickrate-pi/deployed.json` records the artifact and
+container identities. Recovery image:
+`local/cod2-pi-server:before-motion-precision-20261012`; the previous runtime
+binary is preserved in local rollback files and Pi `out/tickrate-qa/previous-engine`.

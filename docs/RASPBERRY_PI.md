@@ -404,6 +404,13 @@ requesting 30 snapshots/s subject to bandwidth limits.
 Slot limits still describe configuration, not a guarantee for every Pi model,
 number of active rooms or network.
 
+See the [30/50 Hz load comparison](TICKRATE_BENCHMARK_2026-10-12.md) before
+raising the tick rate. Two protocol clients sustained 50 Hz, but eight clients
+plus 16 Hard bots saturated a core at 50 Hz; even 30 Hz was near its limit at
+that load. Earlier 20 Hz browser tests are not capacity guarantees at 30 Hz.
+Fractional player positions remove a source of high-FPS movement jitter at
+30 Hz, with a small additional network cost.
+
 When cross-compiling and validating on the Pi, `COD2_VERIFY_BUILD=0` defers the
 build script's static checks. Run `scripts/test-static.sh` against the generated
 site and pinned framework on the target before deploying that build. The normal

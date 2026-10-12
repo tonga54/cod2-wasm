@@ -816,9 +816,11 @@ static void __attribute_regparm__(3)
     s->groundEntityNum = (unsigned short)ps->groundEntityNum;
     s->eType = (ps->pm_flags & 0x00c00000) ? 1 : 5;
 
+    /* Preserve sub-unit movement for remote interpolation. Rounding every
+     * command origin creates periodic speed changes at high render rates;
+     * the existing trajectory codec supports floats. Only snap angles. */
     if (snap) {
         for (i = 0; i < 3; ++i) {
-            s->pos.trBase[i] = (float)(int)s->pos.trBase[i];
             s->apos.trBase[i] = (float)(int)s->apos.trBase[i];
         }
     }

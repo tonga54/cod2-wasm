@@ -8,6 +8,7 @@ import tempfile
 root = Path(__file__).resolve().parent.parent
 source = (root / 'src/PC/cgame_mp/cg_ents_mp.c').read_text()
 trajectory = (root / 'src/PC/bgame/bg_misc.c').read_text()
+active = (root / 'src/PC/game_mp/g_active_mp.c').read_text()
 
 
 def function(text, name):
@@ -38,6 +39,7 @@ typedef struct {
     vec3_t angles2;
     float leanf;
 } entityState_t;
+typedef struct { vec3_t origin, velocity, viewangles; } playerState_t;
 typedef struct { entityState_t currentState, nextState; vec3_t lerpOrigin, lerpAngles; } centity_t;
 typedef struct { float lerpMoveDir, lerpLean; vec3_t playerAngles; } clientInfo_t;
 typedef struct { int serverTime; struct { int clientNum; } ps; } snapshot_t;
@@ -98,6 +100,31 @@ static void Fallback(void) {
     for(int i=0;i<3;i++) assert(fabsf(player.lerpOrigin[i]-old[i])<.001f);
 }
 int main(void) {
+    /* Use the production trajectory export, including its snap=true path.
+     * On a steady run integer origins created a new speed error at each
+     * snapshot even when packets and frame times were perfectly regular. */
+    const int intervals[]={20,33,50};
+    for(int k=0;k<3;k++) for(int sign=-1;sign<=1;sign+=2) {
+        float previous=0;
+        for(int time=1000;time<31000;time+=8) {
+            int interval=intervals[k],s0=time/interval*interval,s1=s0+interval;
+            int c0=s0-(s0/interval%2?80:65),c1=s1-(s1/interval%2?80:65);
+            float speed=sign*190.0f;
+            Setup(s0,s1,c0,c1,time,speed,0);
+            playerState_t ps={0}; ps.velocity[0]=speed;
+            ps.viewangles[1]=350.75f;
+            ps.origin[0]=100+speed*c0*.001f;
+            ExportTrajectory(&ps,&player.currentState,c0,1);
+            ps.origin[0]=100+speed*c1*.001f;
+            ExportTrajectory(&ps,&player.nextState,c1,1);
+            Evaluate();
+            assert(fabsf(player.lerpOrigin[0]-(100+speed*time*.001f))<.002f);
+            if(time>1000) assert(fabsf(player.lerpOrigin[0]-previous-speed*.008f)<.002f);
+            assert(player.nextState.apos.trBase[1]==350.0f);
+            previous=player.lerpOrigin[0];
+        }
+    }
+    puts("PASS: fractional server positions retain steady per-frame motion at 20, 30 and 50 Hz; angle snapping preserved");
     const int frames[]={7,8,16,17,33};
     const float speeds[]={100,190,250};
     double oldError=0,newError=0;
@@ -204,8 +231,16 @@ code = support + function(trajectory, 'BG_EvaluateTrajectory')
 for name in ('CG_PlayerTrajectorySampleTime', 'CG_PlayerMotionBlend',
              'CG_InterpolateRemotePlayerPosition', 'CG_InterpolateEntityPosition'):
     code += function(source, name)
+# Include the actual trajectory assignments and snap block without unrelated
+# event/stance exports. Both production fragments are exercised above.
+export = function(active, 'G_PlayerStateToEntityStateExtrapolate')
+assignments = export[export.index('    s->pos.trType'):export.index('    s->angles2[1]')]
+snap = export[export.index('    if (snap) {'):export.index('    s->legsAnim =')]
+code += 'static void ExportTrajectory(playerState_t *ps,entityState_t *s,int time,int snap){int i;\n' + assignments + snap + '}\n'
 code += checks
 mutants = [
+    code.replace('s->apos.trBase[i] = (float)(int)s->apos.trBase[i];',
+                 's->pos.trBase[i] = (float)(int)s->pos.trBase[i]; s->apos.trBase[i] = (float)(int)s->apos.trBase[i];'),
     code.replace('CG_PlayerTrajectorySampleTime(a, cg->snap->serverTime)', 'cg->snap->serverTime')
         .replace('CG_PlayerTrajectorySampleTime(b, cg->nextSnap->serverTime)', 'cg->nextSnap->serverTime'),
     code.replace('if (ahead > 50) ahead = 50;', ''),
@@ -223,4 +258,4 @@ with tempfile.TemporaryDirectory(prefix='cod2-remote-motion-') as directory:
         assert (result.returncode == 0) == (index == 0), result.stderr
         if not index:
             print(result.stdout, end='')
-print('PASS: timestamp, unbounded extrapolation, local-prediction and teleport regressions are detected')
+print('PASS: integer-position rounding, timestamp, unbounded extrapolation, local-prediction and teleport regressions are detected')
