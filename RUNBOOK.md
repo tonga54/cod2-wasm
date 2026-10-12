@@ -3251,3 +3251,33 @@ regressions also pass. Native and WebAssembly builds pass; logs are
 `out/stance-ledge-native-build.log` and `out/stance-ledge-web-build.log`.
 
 No deployment or live map verification was performed for this follow-up.
+
+## DM/TDM bot startup at 30 Hz (2026-10-12)
+
+The native and Pi room probes reproduced an `InvalidOpcode 0x9d` shutdown
+before bots could join. Enabling script source diagnostics identified the
+underlying error: `level.bot_phases[phase]` was undefined in `objectiveState`.
+The legacy VM encodes `wait .5` as ten script ticks and advances its clock once
+per server frame. At 30 Hz that wait resumes before the policy's 500 ms
+`getTime()` roster deadline. The DM/TDM bypass was inside that deadline check,
+so the next iteration skipped it and accessed an objective roster that these
+modes deliberately never build. The old policy passes the same startup at
+20 Hz and fails at 30 Hz.
+
+The mode bypass now runs on every scheduler iteration before the roster
+refresh check. Objective modes retain their 500 ms roster refresh and five
+work buckets. `test-bot-scheduler.cjs` executes the production entry path with
+20/30/40/60 Hz clocks, delayed wakeups, and debug output enabled/disabled. All
+16 schedules pass; the previous policy fails on the early-wakeup path. This
+check is included in `test-static.sh`. The native runtime harness now accepts
+`--fps` and records the requested rate in its result.
+
+Validation: production-policy native matches pass on Carentan, Toujane and
+Dawnville in TDM, plus Carentan DM/CTF/HQ/SD at 30 Hz. A 60-second Carentan TDM
+run with 32 bots maintained 30.30 simulation ticks/s, recorded 40 respawn
+resets and advancing team scores, and logged no script/engine errors. A Pi
+room using the normal supervisor and the corrected policy retained two live
+bots through four successive three-second checks. Foundation, roster lifetime
+and simulation-cadence regressions pass. The temporary VM diagnostic changes
+were removed. Logs and reports are under `out/bot-scheduler-*` and
+`out/bot-opcode-*`; original assets are unchanged.

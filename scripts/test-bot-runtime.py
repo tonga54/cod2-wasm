@@ -22,6 +22,8 @@ def main():
     parser.add_argument('--mode', choices=['dm', 'tdm', 'ctf', 'hq', 'sd'], default='tdm')
     parser.add_argument('--bots', type=int, choices=range(1, 33), default=16)
     parser.add_argument('--seconds', type=int, default=90)
+    parser.add_argument('--fps', type=int, choices=[20, 30, 40, 60], default=30,
+                        help='Server simulation rate; exercise script scheduling beyond the original 20 Hz')
     parser.add_argument('--expect-passes', type=int, default=0, help='Minimum completed controlled scenarios')
     parser.add_argument('--stop-after-passes', action='store_true', help='End a controlled scenario once all expected passes arrive')
     parser.add_argument('--image', default='local/cod2-native-server:dev')
@@ -68,6 +70,7 @@ def main():
                f'cp /qa-server.cfg /profile/raw/server.cfg; exec {engine} '
                '+set dedicated 1 +set fs_basepath /game +set fs_homepath /profile '
                '+set net_ip 127.0.0.1 +set sv_maxclients 64 +exec server.cfg '
+               f'+set sv_fps {args.fps} '
                f'+set scr_bot_count {args.bots} +set scr_bot_difficulty {args.difficulty} +set scr_bot_debug 1 +set scr_bot_profile 1 '
                '+set scr_tdm_scorelimit 0 +set scr_tdm_timelimit 0 '
                f'+set g_gametype {args.mode} +map {args.map}')
@@ -116,6 +119,7 @@ def main():
         held_heights = [height for _, _, perched, guarding, height in sniper_samples if perched or guarding]
         result = {
             'map': args.map, 'mode': args.mode, 'bots': args.bots, 'seconds': round(elapsed, 2),
+            'requestedServerFps': args.fps,
             'runtime': args.runtime, 'difficulty': args.difficulty,
             'host': host,
             'engineSha256': hashlib.sha256(args.binary.read_bytes()).hexdigest(),

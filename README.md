@@ -51,6 +51,9 @@ SMGs, rifles, automatic weapons and scoped sniper rifles, patrol navigable route
 shoot, reload and respawn under the mode's rules. Walls, other players and
 smoke block target visibility. Health, ammunition, recoil and weapon cadence
 use the same gameplay rules as human players.
+DM/TDM bot scheduling is independent of the objective-roster refresh deadline,
+so the 30 Hz server cannot enter an uninitialized objective list when a script
+wait finishes early.
 
 | Game Type | Bot objectives |
 | --- | --- |

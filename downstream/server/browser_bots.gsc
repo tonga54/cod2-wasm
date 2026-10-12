@@ -123,22 +123,22 @@ objectiveState()
     nextRoster = 0;
     for(;;)
     {
+        level.bot_mode = getCvar("g_gametype");
+        // DM/TDM have no scripted objective roster. Check every iteration:
+        // wait .5 may resume before a 500 ms deadline at non-20 Hz tick rates.
+        if(level.bot_mode == "tdm" || level.bot_mode == "dm")
+        {
+            if(getCvarInt("scr_bot_debug") && (!isDefined(level.bot_match_debug_at) || getTime() >= level.bot_match_debug_at))
+            {
+                level.bot_match_debug_at = getTime() + 5000;
+                println("[bots] match mode=" + level.bot_mode + " allies=" + getTeamScore("allies") + " axis=" + getTeamScore("axis"));
+            }
+            wait .5;
+            continue;
+        }
         if(getTime() >= nextRoster)
         {
             nextRoster = getTime() + 500;
-            level.bot_mode = getCvar("g_gametype");
-            // Native DM/TDM patrols do not consume the scripted objective
-            // roster. Avoid rebuilding arrays/ranks for every living bot.
-            if(level.bot_mode == "tdm" || level.bot_mode == "dm")
-            {
-                if(getCvarInt("scr_bot_debug") && (!isDefined(level.bot_match_debug_at) || getTime() >= level.bot_match_debug_at))
-                {
-                    level.bot_match_debug_at = getTime() + 5000;
-                    println("[bots] match mode=" + level.bot_mode + " allies=" + getTeamScore("allies") + " axis=" + getTeamScore("axis"));
-                }
-                wait .5;
-                continue;
-            }
             // Keep the shared cache independent of entity lifetimes across rounds.
             players = getEntArray("player", "classname");
             numbers = [];
