@@ -4,6 +4,11 @@ A WebAssembly / WebGL 2 port of the reconstructed CoD2 IW 2.0 engine, with a
 native dedicated server and a WebSocket-to-UDP gateway. Each browser runs its
 own game client; the host runs the authoritative multiplayer simulation.
 
+`main` is the sole maintained branch and the GitHub default. Updates and the
+Raspberry Pi deployment follow `origin/main`. Production runs at **30 ticks per
+second**; see the [Pi tick-rate measurements](docs/TICKRATE_BENCHMARK_2026-10-12.md)
+for the tested loads and limits.
+
 Play on a LAN using the original maps, models, textures, animations, sounds and
 menus. The project is under active development. Combat, respawn, room creation
 and map rotation have been exercised on the supported maps. An eight-client Carentan session has also been measured on a
