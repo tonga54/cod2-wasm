@@ -292,8 +292,12 @@ and alpha byte. Texture bindings and common uniform calls avoid temporary
 strings/argument arrays. Four-light uniform updates preserve unrelated material
 caches; all authored light values still reach the GPU.
 
-The authoritative simulation runs at the original **20 Hz**, with up to **60
-input packets/s** and a 25 KB/s client rate. Remote motion interpolation uses
+The authoritative simulation is configured at **30 Hz** (33 ms simulation
+steps), with clients requesting **30 snapshots/s**, up to **60 input packets/s**
+and a 25 KB/s client rate. Actual snapshot delivery remains subject to bandwidth
+limits and server load. The higher tick rate increases simulation work; validate
+CPU and packet cadence with the intended player count before deployment. Remote motion
+interpolation uses
 sample timestamps/velocities, smooths sample boundaries and allows bounded
 50 ms extrapolation across short gaps. Command time stays monotonic after
 stalls. Local shot effects are predicted once, avoiding duplicate sound/recoil. Local

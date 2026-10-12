@@ -248,7 +248,9 @@ Commit and push any intended source changes before building. Use this procedure
 instead of `update-local.py --apply`, which builds the standard server layout.
 
 Client rendering quality and assets remain identical to the standard deployment.
-The server retains the original 20 Hz simulation. Long sightlines use
+The server is configured for 30 Hz simulation (33 ms steps) and browser clients
+request 30 snapshots/s. This increases simulation work compared with 20 Hz;
+measure CPU and packet cadence with your intended player count. Long sightlines use
 segment/nearest-hit rejection and shared-brush deduplication
 to avoid repeatedly solving collisions across the map. This also applies to
 the browser client and keeps the original geometry and contact margins.
@@ -376,7 +378,8 @@ The native engine uses standard SSE2 float instructions rather than x87
 extended-precision arithmetic, which is costly under QEMU on the Pi. This does
 not enable fast-math or lower texture, model, effect or rendering quality.
 Bot navigation shares fixed planning/scout budgets across the whole room;
-movement, combat and snapshots retain the original 20 Hz server simulation.
+movement and combat use the configured 30 Hz server simulation, with clients
+requesting 30 snapshots/s subject to bandwidth limits.
 Slot limits still describe configuration, not a guarantee for every Pi model,
 number of active rooms or network.
 

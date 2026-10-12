@@ -1120,7 +1120,7 @@ void CL_InitOnceForAllClients(void)
     Dvar_RegisterInt("cl_maxPing", 800, 20, 2000, 0x1001);
     name = Dvar_RegisterString_mac("name", "Unknown Soldier", 0x1003);
     Dvar_RegisterInt("rate", 5000, 1000, 25000, 0x1003);
-    Dvar_RegisterInt("snaps", 20, 1, 30, 0x1003);
+    Dvar_RegisterInt("snaps", 30, 1, 30, 0x1003);
     Dvar_RegisterString_mac("password", "", 0x1002);
 
     fx_enable = Dvar_RegisterBool_mac("fx_enable", 1, 0x1080);

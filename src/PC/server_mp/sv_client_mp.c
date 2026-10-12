@@ -522,7 +522,7 @@ void SV_UserinfoChanged(client_t *cl)
             cl->snapshotMsec = 1000 / snaps;
         }
     } else {
-        cl->snapshotMsec = 50;
+        cl->snapshotMsec = 1000 / 30;
     }
 
     cl->sendVoice = atoi(Info_ValueForKey(cl->userinfo, "cl_voice")) > 0;

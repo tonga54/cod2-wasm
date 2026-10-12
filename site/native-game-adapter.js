@@ -735,6 +735,7 @@
           '+set', 'r_aaSamples', '4',
           '+set', 'r_picmip_manual', '1', '+set', 'r_picmip', '0',
           '+set', 'cl_maxpackets', '60', '+set', 'rate', '25000',
+          '+set', 'snaps', '30',
           '+set', 'g_gametype', 'tdm', '+set', 'ui_mapname', 'mp_toujane',
           '+set', 'ui_netSource', '0', '+set', 'ui_browserShowEmpty', '1',
           '+set', 'ui_browserShowFull', '1', '+set', 'ui_browserShowPure', '0',

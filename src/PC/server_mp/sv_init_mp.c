@@ -381,7 +381,7 @@ void SV_Init(void)
     *(dvar_t **)imp_sv_referencedIwdNames = Dvar_RegisterString("sv_referencedIwdNames", "", 0x1048);
     *(dvar_t **)imp_rcon_password = Dvar_RegisterString("rcon_password", "", 0x1000);
     *(dvar_t **)imp_sv_privatePassword = Dvar_RegisterString("sv_privatePassword", "", 0x1000);
-    *(dvar_t **)imp_sv_fps = Dvar_RegisterInt("sv_fps", 20, 10, 1000, 0x1000);
+    *(dvar_t **)imp_sv_fps = Dvar_RegisterInt("sv_fps", 30, 10, 1000, 0x1000);
     *(dvar_t **)imp_sv_timeout = Dvar_RegisterInt("sv_timeout", 240, 0, 1800, 0x1000);
     *(dvar_t **)imp_sv_zombietime = Dvar_RegisterInt("sv_zombietime", 2, 0, 1800, 0x1000);
     *(dvar_t **)imp_sv_allowDownload = Dvar_RegisterBool("sv_allowDownload", 1, 0x1001);

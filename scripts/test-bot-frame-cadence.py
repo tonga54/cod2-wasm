@@ -23,11 +23,11 @@ static struct {struct {int integer;}current;}maxClients={ {3} };
 static const void *unused;
 #define sv_maxclients (&maxClients)
 static struct {int enabled,planMs,frames,gameMs,maxGameMs;}s_botProfile;
-static int gameCalls,planCalls,moves,archives,lastMoveTime;
+static int gameCalls,planCalls,moves,archives,lastMoveTime,tickMsec;
 static int Sys_Milliseconds(void){return 0;}
 static void CL_FlushDebugData(int value){assert(value==1);}
 static void SV_ResetSkeletonCache(void){}
-static void SV_BotPlanFrame(void){assert(svs.time==50*(planCalls+1));planCalls++;}
+static void SV_BotPlanFrame(void){assert(svs.time==tickMsec*(planCalls+1));planCalls++;}
 static void SV_BotUserMove(client_t *cl){assert(cl!=&clients[1]);assert(svs.time>=lastMoveTime);lastMoveTime=svs.time;moves++;}
 static void G_RunFrame(int time){assert(time==svs.time&&moves==2*(gameCalls+1));gameCalls++;}
 static void Scr_SetLoading(int value){assert(!value);}
@@ -37,7 +37,7 @@ static void SV_ArchiveSnapshot(void){archives++;}
 support = support.replace('static struct {int time;}svs;', '')
 support = support.replace('static client_t clients[3];', 'static client_t clients[3];\nstatic struct {int time;client_t *clients;}svs={0,clients};')
 checks = r'''
-static void run(int residual){int frameMsec=50,i;client_t *cl;
+static void run(int residual){int frameMsec=tickMsec,i;client_t *cl;
  sv.timeResidual=residual;
 LOOP
 }
@@ -45,13 +45,16 @@ int main(void){
  clients[0].state=clients[2].state=4;
  clients[0].netchan.remoteAddress.type=clients[2].netchan.remoteAddress.type=NA_BOT;
  clients[1].state=4;
- for(int residual=50;residual<=275;residual+=25){
+ for(int rate=20;rate<=30;rate+=10){
+ tickMsec=1000/rate;
+ for(int residual=tickMsec;residual<=tickMsec*5+tickMsec/2;residual+=tickMsec/2){
   gameCalls=planCalls=moves=archives=lastMoveTime=svs.time=0;
   run(residual);
-  assert(gameCalls==residual/50&&planCalls==gameCalls&&moves==gameCalls*2);
-  assert(sv.timeResidual==residual%50&&archives==gameCalls-1);
+  assert(gameCalls==residual/tickMsec&&planCalls==gameCalls&&moves==gameCalls*2);
+  assert(sv.timeResidual==residual%tickMsec&&archives==gameCalls-1);
  }
- puts("PASS: each bot moves once per 50ms simulation tick, including 2..5 catch-up ticks; human commands are untouched and archive order is preserved");
+ }
+ puts("PASS: each bot moves once per simulation tick at 20/30 Hz, including 2..5 catch-up ticks; human commands are untouched and archive order is preserved");
 }
 '''.replace('LOOP', loop)
 with tempfile.TemporaryDirectory(prefix='cod2-bot-cadence-') as directory:
