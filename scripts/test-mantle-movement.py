@@ -73,9 +73,9 @@ static dvar_t on={.current.enabled=1},off,range={.current.value=20};
 static dvar_t radius={.current.value=.1f},angle={.current.value=60};
 static dvar_t *mantle_enable=&on,*mantle_debug=&off,*mantle_check_range=&range;
 static dvar_t *mantle_check_radius=&radius,*mantle_check_angle=&angle;
-static int wallFlags=0x2000000,solid,headroom=1,overClear=1;
+static int wallFlags=0x2000000,solid,headroom=1,overClear=1,blockedMotion,zeroLength;
 static float wallFraction=.5f,ledgeHeight=139,normalZ=1,heading;
-static int XAnimGetLengthMsec(void *anims,int index) {assert(anims);return index<8?200:100;}
+static int XAnimGetLengthMsec(void *anims,int index) {assert(anims);return zeroLength?0:(index<8?200:100);}
 static void XAnimGetAbsDelta(void *anims,int index,float *rot,float *delta,float frac) {
     assert(anims&&frac>=0&&frac<=1);
     delta[0]=(index<8?16:31)*frac;delta[1]=0;
@@ -84,6 +84,10 @@ static void XAnimGetAbsDelta(void *anims,int index,float *rot,float *delta,float
 static void PM_trace(pmove_t *pm,void *raw,float *start,float *mins,float *maxs,
     float *end,int client,int mask) {
     trace_t *tr=raw;memset(tr,0,sizeof(*tr));tr->fraction=1;
+    if(pm->ps->pm_flags&4) {
+        if(blockedMotion){tr->fraction=.25f;tr->startsolid=blockedMotion==2;tr->allsolid=blockedMotion==3;}
+        return;
+    }
     if(mask==0x1000000) {
         tr->fraction=wallFraction;tr->surfaceFlags=wallFlags;
         tr->allsolid=(solid==1);tr->startsolid=(solid==2);
@@ -95,13 +99,15 @@ static void PM_trace(pmove_t *pm,void *raw,float *start,float *mins,float *maxs,
         }
     } else if(!memcmp(start,end,sizeof(vec3_t))) {
         tr->startsolid=!headroom;
+    } else if(fabsf(end[0]-start[0])+fabsf(end[1]-start[1])+fabsf(end[2]-start[2])<.001f) {
+        return;
     } else if(end[2]==start[2]) {
         if(start[2]<ledgeHeight)tr->fraction=.5f;
     } else if(!overClear)tr->fraction=.5f;
 }
 '''
 mantle_body = ''.join(function('src/PC/bgame/bg_mantle.c', name) for name in [
-    'Mantle_GetAnimDelta', 'Mantle_Move', 'Mantle_CheckLedge', 'Mantle_Check'])
+    'Mantle_GetAnimDelta', 'Mantle_Cancel', 'Mantle_Move', 'Mantle_CheckLedge', 'Mantle_Check'])
 mantle_checks = r'''
 static playerState_t player(void) {
     playerState_t ps={.origin={20,30,100},.mins={-15,-15,0},.maxs={15,15,72}};
@@ -129,6 +135,27 @@ int main(void) {
         assert(fabsf(ps.origin[1]-(30+distance*sinf(heading)))<.001f);
         assert(fabsf(ps.origin[2]-(ledgeHeight-(over?18:0)))<.001f);
         assert(ps.mantleState.timer==total&&!pm.mantleStarted);
+        if(!over)assert(ps.velocity[2]==0);
+        pm.oldcmd=pm.cmd;ledgeHeight=ps.origin[2]+39;
+        Mantle_Check(&pm,&pml);assert(!(ps.pm_flags&4)); // Held key cannot restart on the next ledge.
+
+    }
+    for(int blocked=1;blocked<=3;blocked++) {
+        playerState_t ps=player();pmove_t pm={.ps=&ps,.tracemask=1,.cmd.buttons=0x400};
+        pml_t pml={.msec=17,.forward={1,0,0}};heading=0;ledgeHeight=139;wallFlags=0x2000000;
+        Mantle_Check(&pm,&pml);assert(ps.pm_flags&4);float z=ps.origin[2];
+        blockedMotion=blocked;Mantle_Move(&pm,&ps,&pml);blockedMotion=0;
+        assert(!(ps.pm_flags&4)&&!(ps.eFlags&0x4000)&&!pm.mantleStarted&&ps.velocity[2]==0);
+        assert(ps.origin[2]>=z&&ps.origin[2]<z+39*.085f);
+        pm.oldcmd=pm.cmd;for(int i=0;i<300;i++){Mantle_Check(&pm,&pml);assert(!(ps.pm_flags&4));}
+    }
+    for(int invalid=0;invalid<4;invalid++) {
+        playerState_t ps=player();ps.pm_flags=4;ps.eFlags=0x4000;
+        pmove_t pm={.ps=&ps};pml_t pml={.msec=17};
+        zeroLength=invalid==0;if(invalid==1)ps.mantleState.timer=200;
+        if(invalid==2)ps.mantleState.transIndex=7;if(invalid==3)pml.msec=0;
+        Mantle_Move(&pm,&ps,&pml);assert(!(ps.pm_flags&4)&&isfinite(ps.velocity[2])&&ps.velocity[2]==0);
+        zeroLength=0;
     }
     for(int reason=0;reason<9;reason++) {
         playerState_t ps=player();pmove_t pm={.ps=&ps,.tracemask=1,.cmd.buttons=0x400};
@@ -255,4 +282,4 @@ with tempfile.TemporaryDirectory(prefix='cod2-mantle-') as directory:
                             str(source), '-lm', '-o', str(binary)], check=True)
             result = subprocess.run([str(binary)], capture_output=True, text=True)
             assert (result.returncode == 0) == (index == 0), (name, index, result.stderr)
-print('PASS: 168 ledge/root-motion paths, 9 invalid ledges, 219 movement schedules with one ADS integration before firing, original jump height and 4 failing regression mutants')
+print('PASS: 168 ledge/root-motion paths, held-key/blocked-path cancellation, finite animation timers, 9 invalid ledges, 219 movement schedules with one ADS integration before firing, original jump height and 4 failing regression mutants')

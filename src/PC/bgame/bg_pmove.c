@@ -365,7 +365,9 @@ static float PM_CmdScale(const playerState_t *ps, const usercmd_t *cmd)
     if (ps->pm_flags & PMF_SPRINT)
         scale *= SPRINT_SPEED_SCALE;
 
-    if ((ps->pm_flags & 0x1) || ps->leanf != 0.0f)
+    /* Prone already has its own speed below; applying the lean penalty a
+     * second time reduces crawling to six percent of standing speed. */
+    if (ps->leanf != 0.0f)
         scale *= 0.40f;
 
     if (ps->pm_type == 2)
@@ -1771,6 +1773,7 @@ static void PM_REGPARM2_ABI PM_GroundTrace(pmove_t *pm, pml_t *pml)
     vec3_t point;
     trace_t trace;
     int i;
+    qboolean correctedSolid = 0;
     float frac;
 
     start[0] = ps->origin[0];
@@ -1830,10 +1833,13 @@ static void PM_REGPARM2_ABI PM_GroundTrace(pmove_t *pm, pml_t *pml)
         ps->origin[0] += (point[0] - ps->origin[0]) * frac;
         ps->origin[1] += (point[1] - ps->origin[1]) * frac;
         ps->origin[2] += (point[2] - ps->origin[2]) * frac;
+        correctedSolid = 1;
     }
 
     if (trace.startsolid) {
 
+        start[0] = ps->origin[0];
+        start[1] = ps->origin[1];
         start[2] = ps->origin[2] - 0.001f;
 
         PM_playerTrace(pm, &trace, start, pm->mins, pm->maxs, point,
@@ -1911,20 +1917,21 @@ static void PM_REGPARM2_ABI PM_GroundTrace(pmove_t *pm, pml_t *pml)
     pml->almostGroundPlane = 1;
     pml->walking = 1;
 
-    if (ps->groundEntityNum == ENTITYNUM_NONE) {
+    /* Depenetration is a collision correction, not a physical fall. */
+    if (ps->groundEntityNum == ENTITYNUM_NONE && !correctedSolid) {
 
         float vz = pml->previous_velocity[2];
         float grav = (float)ps->gravity;
-        float halfg = grav * 0.5f;
+        /* v_impact^2 = v_start^2 + 2*g*distance fallen. The opposite
+         * sign undercounts real falls and adds energy when stepping up. */
         float disc = vz * vz +
-                     (pml->previous_origin[2] - ps->origin[2]) * (halfg * -4.0f);
+                     (pml->previous_origin[2] - ps->origin[2]) * (2.0f * grav);
         float fallHeight = 0.0f;
         int damage = 0;
         int impactEvent = 0;
 
-        if (disc >= 0.0f) {
-            float fallVel = vz + (-vz - sqrtf(disc)) / (halfg + halfg) * grav;
-            fallHeight = fallVel * fallVel / (grav + grav);
+        if (disc >= 0.0f && grav > 0.0f && vz < 0.0f) {
+            fallHeight = disc / (2.0f * grav);
         }
 
         if (disc >= 0.0f) {

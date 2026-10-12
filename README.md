@@ -129,8 +129,20 @@ retail CoD2:
   an eight-body pool, dropped weapons/ammunition expire after twenty seconds,
   and TDM uses a three-second respawn countdown.
 - **Movement conveniences:** C toggles crouch. Space first stands up from crouch
-  or prone; another press while standing jumps. Ordinary ground movement stops
-  promptly when movement keys are released.
+  or prone, including when the stance key is held; another press while standing
+  jumps. Ordinary ground movement stops
+  promptly when movement keys are released. Holding Space does not automatically
+  jump again on landing. Steps require a clear path and a walkable landing;
+  recovery from a small collision overlap does not inflict fall damage.
+  Prone movement crawls at 15% of standing speed with the original forward
+  and backward crawling animations. Mantling requires a fresh press, checks its
+  path for obstacles, and stops safely if that path becomes blocked.
+- **Fall damage and blood feedback:** falls above 256 game units progressively
+  deal damage, reaching a lethal fall at 480 units. The thresholds are controlled
+  by `bg_fallDamageMinHeight` and `bg_fallDamageMaxHeight`. Damage scales from
+  maximum health, so the same fall remains dangerous when already wounded.
+  Damaging falls and other hits briefly flash the original blood overlay, fading
+  over 650 ms, with the existing low-health pulse retained.
 
 ## Original behavior restored in the port
 
@@ -138,6 +150,9 @@ retail CoD2:
   bypass fire, bolt, raise or reload timers. Original magazines and weapon-specific
   ADS/reload timing are preserved. The M1 Garand reloads only after its eight-round
   clip is empty; the Lee-Enfield needs space for a complete five-round charger.
+- Stale weapon selections after a respawn or loadout change recover to an owned
+  gun, preferring the primary slots. Removed weapons, grenades and binoculars
+  cannot leave a newly armed player waiting on an invalid weapon selection.
 - Reloading returns to held/toggled aiming unless the player cancels aim.
   Scoped Hold Breath lasts at most 4.5 seconds, with 5.5 seconds of recovery
   after exhaustion.
@@ -252,6 +267,9 @@ the Pi 5 kernel requirement, building on your computer, deployment over SSH,
 updates and troubleshooting. The repository includes a dedicated
 [`Dockerfile.pi`](downstream/server/Dockerfile.pi),
 [`compose.pi.yaml`](compose.pi.yaml), and deployment/runtime preparation scripts.
+Deployments preserve an existing `~/cod2-edge/compose.security.yaml` overlay for
+HTTPS, password protection and request limits. Use the configured HTTPS address
+on secured installations; credentials and certificates stay outside the repository.
 The tested host is a Pi 5 with 8 GB RAM and 64-bit Debian; the required host page
 size is 4 KiB. The web/gateway/supervisor run as ARM64 processes;
 only the 32-bit x86 game executable uses QEMU. This preserves the engine's

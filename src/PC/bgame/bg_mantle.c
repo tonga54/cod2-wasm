@@ -252,6 +252,15 @@ static void __attribute_regparm__(3) Mantle_GetAnimDelta(MantleState *mstate, in
     VectorAngleMultiply(delta, mstate->yaw);
 }
 
+static void Mantle_Cancel(pmove_t *pm, playerState_t *ps)
+{
+    ps->pm_flags &= ~4;
+    ps->eFlags &= ~0x4000;
+    ps->mantleState.flags &= ~8;
+    pm->mantleStarted = 0;
+    ps->velocity[0] = ps->velocity[1] = ps->velocity[2] = 0.0f;
+}
+
 void Mantle_Move(pmove_t *pm, playerState_t *ps, pml_t *pml)
 {
     MantleState *mstate;
@@ -263,8 +272,11 @@ void Mantle_Move(pmove_t *pm, playerState_t *ps, pml_t *pml)
     float prevTrans[3];
     float scale;
 
-    if (!mantle_enable->current.enabled)
+    if (!mantle_enable->current.enabled || !s_mantleAnims ||
+        (unsigned)ps->mantleState.transIndex >= 7 || pml->msec <= 0) {
+        Mantle_Cancel(pm, ps);
         return;
+    }
 
     mstate = &ps->mantleState;
 
@@ -284,11 +296,19 @@ void Mantle_Move(pmove_t *pm, playerState_t *ps, pml_t *pml)
         if (mstate->flags & 1) {
             int idx = mstate->transIndex;
             overLen = XAnimGetLengthMsec(s_mantleAnims, s_mantleTrans[idx].overAnimIndex);
+            if (overLen <= 0) {
+                Mantle_Cancel(pm, ps);
+                return;
+            }
         }
         mantleLength = upLen + overLen;
     }
 
     prevTime = mstate->timer;
+    if (upLen <= 0 || prevTime < 0 || prevTime >= mantleLength) {
+        Mantle_Cancel(pm, ps);
+        return;
+    }
 
     {
         int newTime = prevTime + pml->msec;
@@ -324,9 +344,30 @@ void Mantle_Move(pmove_t *pm, playerState_t *ps, pml_t *pml)
     trans[1] -= prevTrans[1];
     trans[2] -= prevTrans[2];
 
-    ps->origin[0] += trans[0];
-    ps->origin[1] += trans[1];
-    ps->origin[2] += trans[2];
+    /* The ledge was clear when selected, but the animated route can meet
+     * a car roof, wall, or another player. Never push root motion through
+     * that collision and leave the next movement step embedded. */
+    {
+        trace_t trace;
+        float end[3], maxs[3];
+        int axis;
+        for (axis = 0; axis < 3; axis++) {
+            end[axis] = ps->origin[axis] + trans[axis];
+            maxs[axis] = pm->maxs[axis];
+        }
+        if ((mstate->flags & 2) && maxs[2] > 50.0f)
+            maxs[2] = 50.0f;
+        PM_trace(pm, &trace, ps->origin, pm->mins, maxs, end,
+                 ps->clientNum, pm->tracemask);
+        if (!trace.startsolid && !trace.allsolid) {
+            for (axis = 0; axis < 3; axis++)
+                ps->origin[axis] += trans[axis] * trace.fraction;
+        }
+        if (trace.startsolid || trace.allsolid || trace.fraction < 1.0f) {
+            Mantle_Cancel(pm, ps);
+            return;
+        }
+    }
 
     scale = 1.0f / ((float)deltaTime * 0.001f);
     ps->velocity[0] = trans[0] * scale;
@@ -335,10 +376,15 @@ void Mantle_Move(pmove_t *pm, playerState_t *ps, pml_t *pml)
 
     if (mantleLength == mstate->timer) {
         ps->pm_flags &= ~4;
+        ps->eFlags &= ~0x4000;
         pm->mantleStarted = 0;
 
         if (mstate->flags & 1) {
             BG_AnimScriptEvent(ps, 3, 0, 1);
+        } else {
+            /* Climbing onto a ledge ends at rest, not with the upward
+             * velocity of the last animation sample launching another hop. */
+            ps->velocity[0] = ps->velocity[1] = ps->velocity[2] = 0.0f;
         }
 
         if (mstate->flags & 4) {
@@ -430,7 +476,7 @@ static Bool __attribute_regparm__(3) Mantle_CheckLedge(pmove_t *pm, pml_t *pml, 
     if (mantle_debug->current.enabled)
         Com_Printf("%s\n", "Mantle: Found ledge");
 
-    if (!(pm->cmd.buttons & 0x400))
+    if (!(pm->cmd.buttons & 0x400) || (pm->oldcmd.buttons & 0x400))
         return 1;
 
     if (mr->flags & 1) {
@@ -523,13 +569,22 @@ static Bool __attribute_regparm__(3) Mantle_CheckLedge(pmove_t *pm, pml_t *pml, 
                 overAnimLen = XAnimGetLengthMsec(s_mantleAnims, s_mantleTrans[idx].overAnimIndex);
             }
             mantleTime = upAnimLen + overAnimLen;
+            if (upAnimLen <= 0 || ((mantleState->flags & 1) && overAnimLen <= 0))
+                return 0;
         }
 
         Mantle_GetAnimDelta(mantleState, mantleTime, animDelta);
         {
-            ps->origin[0] = mr->endPos[0] - animDelta[0];
-            ps->origin[1] = mr->endPos[1] - animDelta[1];
-            ps->origin[2] = mr->endPos[2] - animDelta[2];
+            float alignedStart[3];
+            int axis;
+            for (axis = 0; axis < 3; axis++)
+                alignedStart[axis] = mr->endPos[axis] - animDelta[axis];
+            PM_trace(pm, &tr, ps->origin, mins, maxs, alignedStart,
+                     ps->clientNum, pm->tracemask);
+            if (tr.startsolid || tr.allsolid || tr.fraction < 1.0f)
+                return 0;
+            for (axis = 0; axis < 3; axis++)
+                ps->origin[axis] = alignedStart[axis];
         }
 
         ps->pm_flags |= 4;

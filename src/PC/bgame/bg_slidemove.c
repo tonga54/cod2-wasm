@@ -357,22 +357,22 @@ static void PM_ApplyStepEvent(pmove_t *pm, pml_t *pml, playerState_t *ps,
     }
 }
 
-static qboolean PM_StepCheckProne(pmove_t *pm, playerState_t *ps,
+static qboolean PM_StepCheckProne(pmove_t *pm, pml_t *pml, playerState_t *ps,
                                   const vec_t *start_o, const vec_t *start_v)
 {
     if (ps->pm_flags & 1) {
         if (!BG_CheckProne(
                 ps->clientNum,
                 ps->origin,
-                30.0f,
-                ps->maxs[2],
+                pm->maxs[0],
+                pm->maxs[2],
                 ps->proneDirection,
                 &ps->fTorsoHeight,
                 &ps->fTorsoPitch,
                 &ps->fWaistPitch,
                 1,
                 1,
-                ps->vLadderVec,
+                pml->groundTrace.normal,
                 pm->handler,
                 0,
                 66.0f)) {
@@ -495,6 +495,9 @@ do_step:
 
         PM_playerTrace(pm, &trace, start_o, pm->mins, pm->maxs, up, ps->clientNum, pm->tracemask);
 
+        if (trace.startsolid || trace.allsolid)
+            return; /* Keep the ordinary slide; there is no clear step up. */
+
         stepSize = (1.0f + fStepSize) * trace.fraction - 1.0f;
 
         if (stepSize <= 1.0f) {
@@ -531,7 +534,7 @@ do_step:
     PM_playerTrace(pm, &trace, ps->origin, pm->mins, pm->maxs, down, ps->clientNum, pm->tracemask);
 
     /* Reject stepping onto a player; world geometry is ENTITYNUM_WORLD. */
-    if (trace.entityNum < 64) {
+    if (trace.entityNum < 64 || trace.startsolid || trace.allsolid) {
 
         ps->origin[0] = down_o[0];
         ps->origin[1] = down_o[1];
@@ -546,7 +549,7 @@ do_step:
 
     if (trace.fraction < 1.0f) {
 
-        if (trace.normal[2] < 0.3f) {
+        if (trace.normal[2] < 0.7f) {
 
             ps->origin[0] = down_o[0];
             ps->origin[1] = down_o[1];
@@ -615,7 +618,8 @@ restore_down:
 
         PM_playerTrace(pm, &trace, ps->origin, pm->mins, pm->maxs, down, ps->clientNum, pm->tracemask);
 
-        if (trace.fraction < 1.0f) {
+        if (!trace.startsolid && !trace.allsolid && trace.fraction < 1.0f &&
+            trace.normal[2] >= 0.7f && trace.entityNum >= 64) {
             ps->origin[0] += (down[0] - ps->origin[0]) * trace.fraction;
             ps->origin[1] += (down[1] - ps->origin[1]) * trace.fraction;
             ps->origin[2] += (down[2] - ps->origin[2]) * trace.fraction;
@@ -636,7 +640,7 @@ check_landing:
         return;
     }
 
-    if (!PM_StepCheckProne(pm, ps, start_o, start_v)) {
+    if (!PM_StepCheckProne(pm, pml, ps, start_o, start_v)) {
         return;
     }
 

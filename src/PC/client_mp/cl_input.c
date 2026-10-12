@@ -406,25 +406,7 @@ void IN_KeyUp(kbutton_t *b)
 
 void IN_UpDown(void)
 {
-    int *stance;
-
-    IN_KeyDown(&kb[12]);
-    if (kb[25].active || kb[11].active ) {
-        return;
-    }
-
-    stance = &(*(LegacyHacks **)imp_legacyHacks)->cl_stance;
-    if (*stance > 1) {
-        *stance = 1;
-        return;
-    }
-
-    if (*stance == 1) {
-        *stance = 0;
-        return;
-    }
-
-    IN_KeyDown(&kb[10]);
+    IN_GoStandDown();
 }
 
 void IN_UpUp(void)
@@ -781,18 +763,28 @@ void IN_GoCrouch(void)
 void IN_GoStandDown(void)
 {
     int *stance;
+    clientActive_t *cl = *(clientActive_t **)imp_cl;
+    qboolean alreadyHeld = kb[12].active;
 
     IN_KeyDown(&kb[12]);
+    if (alreadyHeld)
+        return;
+
     stance = &(*(LegacyHacks **)imp_legacyHacks)->cl_stance;
-    if (!*stance) {
+    if (!*stance && !kb[25].active && !kb[26].active && !kb[11].active &&
+        !(cl->snap.ps.pm_flags & 3) &&
+        cl->snap.ps.viewHeightTarget != 11 && cl->snap.ps.viewHeightTarget != 40) {
         IN_KeyDown(&kb[10]);
         return;
     }
 
-    if (kb[25].active || kb[11].active ) {
-        return;
-    }
-
+    /* Stand overrides a held stance as well as a toggled one. Cancel the
+     * old stance press until its next keydown, without also jumping. */
+    memset(&kb[25], 0, sizeof(kb[25]));
+    memset(&kb[26], 0, sizeof(kb[26]));
+    memset(&kb[11], 0, sizeof(kb[11]));
+    (*(LegacyHacks **)imp_legacyHacks)->cl_stanceTemp = 0;
+    cl->stanceHeld = 0;
     *stance = 0;
 }
 

@@ -70,8 +70,17 @@ if path.exists():
     assert not subprocess.check_output(['git', '-C', str(path), 'status', '--porcelain']), 'Pi source has local changes'
     assert subprocess.check_output(['git', '-C', str(path), 'branch', '--show-current'], text=True).strip() == 'main', 'Pi checkout must use main'
 try:
-    with urllib.request.urlopen('http://127.0.0.1:8088/gateway/health', timeout=2) as reply:
-        health = json.load(reply)
+    if (pathlib.Path.home() / 'cod2-edge/compose.security.yaml').is_file():
+        # The public endpoint requires TLS/auth; inspect the private gateway.
+        health = json.loads(subprocess.check_output([
+            'docker', 'exec', 'cod2-wasm-pi-cod2-gateway-1', 'node', '-e',
+            "require('http').get('http://127.0.0.1:8088/gateway/health', r => {"
+            "if (r.statusCode !== 200) process.exit(1); r.pipe(process.stdout);"
+            "}).on('error', () => process.exit(1));"
+        ], text=True, timeout=5))
+    else:
+        with urllib.request.urlopen('http://127.0.0.1:8088/gateway/health', timeout=2) as reply:
+            health = json.load(reply)
     assert health.get('clients', 0) == 0, 'Players are connected; leave matches before updating'
 except OSError:
     pass
@@ -83,5 +92,5 @@ docker save "${web_image}" "${gateway_image}" | gzip -1 > "${images_file}"
 rsync -az -e "${rsync_ssh}" "${repo_root}/out/pi-runtime/" "${target}:${remote_dir}/out/pi-runtime/"
 rsync -az -e "${rsync_ssh}" "${repo_root}/data/browser/" "${target}:${remote_dir}/data/browser/"
 rsync -az -e "${rsync_ssh}" "${images_file}" "${target}:${remote_dir}/out/pi-images.tar.gz"
-ssh "${ssh_options[@]}" "${target}" "set -eu; cd '${remote_dir}'; docker load < out/pi-images.tar.gz; rm out/pi-images.tar.gz; docker tag '${web_image}' local/cod2-wasm:pi; docker tag '${gateway_image}' local/cod2-gateway:pi; docker compose -p cod2-wasm-pi -f compose.yaml -f compose.pi.yaml build cod2-server; docker compose -p cod2-wasm-pi -f compose.yaml -f compose.pi.yaml up -d --no-build; docker compose -p cod2-wasm-pi -f compose.yaml -f compose.pi.yaml ps"
-echo 'Pi services started. Open http://PI_LAN_IP:8088/ and create a room.'
+ssh "${ssh_options[@]}" "${target}" "set -eu; cd '${remote_dir}'; docker load < out/pi-images.tar.gz; rm out/pi-images.tar.gz; docker tag '${web_image}' local/cod2-wasm:pi; docker tag '${gateway_image}' local/cod2-gateway:pi; compose() { if test -f \"\$HOME/cod2-edge/compose.security.yaml\"; then docker compose -p cod2-wasm-pi -f compose.yaml -f compose.pi.yaml -f \"\$HOME/cod2-edge/compose.security.yaml\" \"\$@\"; else docker compose -p cod2-wasm-pi -f compose.yaml -f compose.pi.yaml \"\$@\"; fi; }; compose build cod2-server; compose up -d --no-build; compose ps"
+echo 'Pi services started. Use the configured HTTPS hostname if secured; otherwise open http://PI_LAN_IP:8088/.'

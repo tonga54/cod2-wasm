@@ -237,6 +237,7 @@ float CG_CalcPlayerHealth(void)
 
 void CG_ResetLowHealthOverlay(void)
 {
+    cg->damageValue = 0.0f;
     cg->healthOverlayHurt = 0;
     cg->healthOverlayToAlpha = hud_healthOverlay_phaseEnd_toAlpha->current.value;
     cg->healthOverlayPulseDuration = 0;
@@ -1430,6 +1431,13 @@ static inline __attribute__((always_inline)) void CG_DrawLowHealthOverlay(const 
             float frac = (float)elapsed / (float)cg->healthOverlayPulseDuration;
             alpha = cg->healthOverlayFromAlpha + (cg->healthOverlayToAlpha - cg->healthOverlayFromAlpha) * frac;
         }
+    }
+
+    elapsed = cg->time - cg->damageTime;
+    if (elapsed >= 0 && elapsed < 650) {
+        float hitAlpha = cg->damageValue * (1.0f - (float)elapsed / 650.0f);
+        if (hitAlpha > alpha)
+            alpha = hitAlpha;
     }
 
     if (alpha <= 0.0f) {

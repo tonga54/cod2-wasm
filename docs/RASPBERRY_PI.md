@@ -234,6 +234,27 @@ matches.
 
 ## Updates and performance
 
+### Direct HTTPS with dynamic DNS
+
+A private installation may keep an Nginx HTTPS/authentication/rate-limit overlay
+at `~/cod2-edge/compose.security.yaml`. The deployment helper detects this file,
+includes it when building/starting services, and checks connected players inside
+the private gateway container. It does not publish the gateway's HTTP port again.
+Keep this overlay, certificates, and secrets outside the Git checkout and back
+them up privately. Use `~/cod2-edge/manage.sh` to manage the secured stack.
+
+The configured installation uses `https://tonga-cod2.duckdns.org`, TCP port 443,
+and a router DHCP reservation for the Pi. DuckDNS refreshes every two minutes and
+after boot; a daily certificate-renewal job uses DNS validation and reloads Nginx.
+The proxy, game services, Docker, and cron start at boot. Rooms remain transient.
+HTTP on local port 8088 only redirects to HTTPS; the router no longer forwards it.
+The credentials live in the private `~/cod2-edge/access.json` file.
+
+Rate limits apply to HTTP requests and room creation/deletion, not messages inside
+an established game WebSocket. Authentication applies to downloads and WebSocket
+handshakes as well as the main page. This protects application access; it cannot
+prevent an attack from saturating the home's Internet connection.
+
 On the build computer, fetch the published version, rebuild it, and deploy
 while no players are connected:
 

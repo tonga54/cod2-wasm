@@ -533,7 +533,9 @@ void ClientEvents(gentity_t *ent, int oldEventSequence)
             } else {
                 float damageFrac = (float)eventParm * 0.009999999776482582f;
                 if (damageFrac != 0.0f) {
-                    G_Damage(ent, NULL, NULL, NULL, NULL, (int)(client->ps.stats[0] * damageFrac), 0, 11, 0, 0);
+                    /* Height determines damage, even if already wounded. */
+                    int damage = (int)(client->ps.stats[2] * damageFrac);
+                    G_Damage(ent, NULL, NULL, NULL, NULL, damage > 0 ? damage : 1, 0, 11, 0, 0);
                 }
             }
             continue;

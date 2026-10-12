@@ -27,6 +27,8 @@ support = r'''
 #include <string.h>
 typedef int qboolean;typedef float vec_t,vec3_t[3];
 typedef struct {float start[3],end[3],invDelta[3];} TraceExtents;
+#define PM_REGPARM2_ABI
+#define ENTITYNUM_NONE 1023
 #define PM_SLIDEMOVE_ABI
 #define MAX_CLIP_PLANES 5
 typedef struct {float fraction,normal[3];int startsolid,allsolid,contents,entityNum,surfaceFlags;const char *material;} trace_t;
@@ -36,9 +38,9 @@ typedef struct {TraceExtents extents;
 typedef struct {float normal[3],dist;} cplane_t;
 typedef struct {cplane_t *plane;int materialNum;} cbrushside_t;
 typedef struct {float mins[3],maxs[3];int contents,numsides,axialMaterialNum[2][3];cbrushside_t *sides;} cbrush_t;
-typedef struct {float origin[3],velocity[3];int gravity,clientNum,pm_time,pm_flags,groundEntityNum,pm_type;} playerState_t;
-typedef struct {playerState_t *ps;vec3_t mins,maxs;int tracemask;} pmove_t;
-typedef struct {float frametime,impactSpeed;int groundPlane;trace_t groundTrace;} pml_t;
+typedef struct {float origin[3],velocity[3];int gravity,clientNum,pm_time,pm_flags,groundEntityNum,pm_type,eFlags;float proneDirection,fTorsoHeight,fTorsoPitch,fWaistPitch;vec3_t vLadderVec;} playerState_t;
+typedef struct {playerState_t *ps;vec3_t mins,maxs;int tracemask,handler,numtouch,touchents[32];struct {int forwardmove;}cmd;} pmove_t;
+typedef struct {float frametime,impactSpeed;int groundPlane,almostGroundPlane,walking;vec3_t previous_origin,previous_velocity;trace_t groundTrace;} pml_t;
 static cbrush_t wall,floorBrush;
 static cplane_t face,back;
 static cbrushside_t sides[2];
@@ -53,11 +55,11 @@ static void Vec3Cross(const float *a,const float *b,float *o) {
  o[0]=a[1]*b[2]-a[2]*b[1];o[1]=a[2]*b[0]-a[0]*b[2];o[2]=a[0]*b[1]-a[1]*b[0];
 }
 static void PM_AddTouchEnt(pmove_t *pm,int ent) {assert(ent==1022);}
-static void Jump_ClearState(playerState_t *ps) {}
+static void Jump_ClearState(playerState_t *ps) {ps->pm_flags&=~0x80000;}
 static int Jump_GetStepHeight(playerState_t *ps,const float *p,float *h) {return 0;}
 static int Jump_IsPlayerAboveMax(playerState_t *ps) {return 0;}
 static void Jump_ClampVelocity(playerState_t *ps,const float *p) {}
-static int PM_StepCheckProne(pmove_t *pm,playerState_t *ps,const float *o,const float *v) {return 1;}
+
 static void PM_ApplyStepEvent(pmove_t *pm,pml_t *pml,playerState_t *ps,const float *o,float h) {}
 '''
 brush_code = ''.join(function(trace, n) for n in (
@@ -76,6 +78,36 @@ static void PM_playerTrace(pmove_t *pm,trace_t *t,const float *start,
  if(t->fraction<1||t->startsolid)t->entityNum=1022;
 }
 '''
+prone_support = r'''
+#define PCT_ACTOR 1
+typedef int proneCheckType_t;
+typedef struct {void (*trace)(trace_t *,const float *,const float *,const float *,const float *,int,int);}pmoveHandler_t;
+static pmove_t *pronePm;
+static void proneTrace(trace_t *t,const float *s,const float *mi,const float *ma,const float *e,int cl,int mask){PM_playerTrace(pronePm,t,s,mi,ma,e,cl,mask);}
+static pmoveHandler_t proneHandlers[]={{proneTrace}};static void *imp_pmoveHandlers=proneHandlers;
+static void AngleVectors(const float *a,float *f,float *r,float *u){
+ float yaw=a[1]*.01745329252f;
+ if(f){f[0]=cosf(yaw);f[1]=sinf(yaw);f[2]=0;}
+ if(r){r[0]=sinf(yaw);r[1]=-cosf(yaw);r[2]=0;}
+ if(u){u[0]=u[1]=0;u[2]=1;}
+}
+static float vectopitch(const float *v){return -atan2f(v[2],hypotf(v[0],v[1]))*57.295779513f;}
+static float AngleNormalize180(float x){while(x>180)x-=360;while(x<-180)x+=360;return x;}
+static float AngleSubtract(float a,float b){return AngleNormalize180(a-b);}
+'''
+prone_source=(root/'src/PC/bgame/bg_misc.c').read_text()
+prone_support += function(prone_source,'BG_CheckProneValid') + function(prone_source,'BG_CheckProne')
+prone_support += function(slide,'PM_StepCheckProne')
+ground_support = r'''
+typedef struct {struct {float value;}current;}dvar_t;
+static dvar_t minFall={{256}},maxFall={{480}},*bg_fallDamageMinHeight=&minFall,*bg_fallDamageMaxHeight=&maxFall;
+static int fallHits;
+static void BG_AnimScriptEvent(playerState_t *ps,int a,int b,int c){}
+static void BG_AddPredictableEventToPlayerstate(int event,int parm,playerState_t *ps){if(event>=116&&event<=138)fallHits++;}
+static void Com_Printf(const char *s){}
+'''
+ground_support += re.search(r'static const vec3_t CorrectSolidDeltas\[26\] = \{.*?\n\};',move,re.S)[0]
+ground_support += function(move,'PM_GroundTrace')
 movement = function(move, 'PM_ClipVelocity')
 movement += function(slide, 'PM_SlideMove') + function(slide, 'PM_StepSlideMove')
 checks = r'''
@@ -116,6 +148,45 @@ int main(void) {
   assert(t.startsolid&&t.allsolid);
   cases++;
  }
+ /* Real prone support traces, with a zero ladder vector, must permit
+  * crawling over flat ground in every direction at all command steps. */
+ geometry(0);
+ for(int yaw=0;yaw<360;yaw+=45)for(int dt=4;dt<=66;dt++) {
+  float angle=yaw*.01745329252f;
+  playerState_t ps={.origin={200,200,.125f},.groundEntityNum=1022,.pm_flags=1,.proneDirection=yaw};
+  pmove_t pm={.ps=&ps,.mins={-15,-15,0},.maxs={15,15,30},.tracemask=1};pronePm=&pm;
+  pml_t pml={.frametime=dt*.001f,.groundPlane=1,.groundTrace={.normal={0,0,1}}};
+  float duration=0;
+  for(int time=0;time<2000;time+=dt) {
+   ps.velocity[0]=28.5f*cosf(angle);ps.velocity[1]=28.5f*sinf(angle);ps.velocity[2]=0;
+   PM_StepSlideMove(&pm,&pml,0);duration+=pml.frametime;
+   assert(fabsf(ps.origin[2]-.125f)<.01f);
+  }
+  assert(hypotf(ps.origin[0]-200,ps.origin[1]-200)>28.5f*duration*.98f);
+ }
+ /* Repeated real gravity/ground/slide sweeps against a car-height box
+  * and a narrow elevated sill: no oscillation may accumulate lethal energy. */
+ for(int object=0;object<2;object++)for(int dt=4;dt<=66;dt++) {
+  geometry(0);
+  wall=(cbrush_t){.mins={-50,-100,-100},.maxs={50,100,36},.contents=1};
+  if(object)wall=(cbrush_t){.mins={-8,-300,-100},.maxs={8,300,128},.contents=1};
+  playerState_t ps={.origin={-65.25f,0,.125f},.groundEntityNum=1023,.gravity=800};
+  if(object){ps.origin[0]=7.9f;ps.origin[1]=-150;ps.origin[2]=128.125f;}
+  pmove_t pm={.ps=&ps,.mins={-15,-15,0},.maxs={15,15,70},.tracemask=1};
+  pml_t pml={.frametime=dt*.001f};fallHits=0;
+  for(int time=0;time<6000;time+=dt) {
+   memcpy(pml.previous_origin,ps.origin,sizeof(vec3_t));memcpy(pml.previous_velocity,ps.velocity,sizeof(vec3_t));
+   PM_GroundTrace(&pm,&pml);
+   if(!time&&!object){ps.velocity[2]=sqrtf(2*800*39);ps.groundEntityNum=1023;pml.walking=pml.groundPlane=0;}
+   ps.velocity[0]=object?0:75;ps.velocity[1]=object?50:0;
+   if(pml.walking)ps.velocity[2]=0;
+   PM_StepSlideMove(&pm,&pml,!pml.walking);PM_GroundTrace(&pm,&pml);
+   for(int a=0;a<3;a++){assert(isfinite(ps.origin[a]));assert(isfinite(ps.velocity[a]));}
+   assert(!fallHits&&ps.origin[2]>-.01f&&ps.origin[2]<(object?129:40)&&fabsf(ps.velocity[2])<700);
+  }
+  if(object)assert(ps.origin[1]>100&&fabsf(ps.origin[2]-128.125f)<.5f);
+  else assert(ps.origin[0]>200&&ps.origin[2]<.3f); // Crosses the car and lands normally.
+ }
  /* Slanted slopes/walls use capsule support; zero-sized bullet traces and
   * axial wall/floor boundaries retain the same hit distances. */
  for(int z=0;z<=10;z++) {
@@ -130,7 +201,7 @@ int main(void) {
   CM_InitTraceWork(&tw,start,end,zero,zero,1);t=(trace_t){.fraction=1};
   CM_TraceThroughBrush(&tw,&wall,&t);assert(fabsf(t.fraction-.49375f)<.0001f);
  }
- printf("PASS: %d wall-slide schedules, 24 rotations, three heights, walk/sprint, overlaps and slope/point boundaries\n",cases);
+ printf("PASS: %d wall-slide schedules, 504 real prone-support crawls, 126 car/sill gravity replays, overlaps and slope/point boundaries\n",cases);
 }
 '''
 old_support = '''support = CM_AbsFloat(normal[0]) * CM_AbsFloat(tw->size[0]) +
@@ -140,7 +211,7 @@ with tempfile.TemporaryDirectory(prefix='cod2-corners-') as directory:
     d = Path(directory)
     for index, variant in enumerate((brush_code, brush_code.replace(
             'support = tw->radius + CM_AbsFloat(normal[2]) * tw->offsetZ;', old_support))):
-        (d / 'test.c').write_text(support + variant + player_trace + movement + checks)
+        (d / 'test.c').write_text(support + variant + player_trace + prone_support + ground_support + movement + checks)
         subprocess.run(['cc', '-std=c99', '-O1', '-g', '-fsanitize=address,undefined',
                         str(d / 'test.c'), '-o', str(d / 'test'), '-lm'], check=True)
         result = subprocess.run([str(d / 'test')], capture_output=True, text=True)

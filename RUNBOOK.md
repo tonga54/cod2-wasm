@@ -3176,3 +3176,78 @@ all three indices. The isolated native rotation check now cycles through
 Dawnville as well as Toujane and Carentan. Deployment must use the web,
 gateway and native-server images built for this change, together with the
 regenerated private archives.
+
+## Weapon recovery, landing and blood feedback (2026-10-12)
+
+Shared weapon selection now resolves stale commands against the current
+inventory, retaining an owned gun or preferring primary slots. Grenades and
+binoculars are excluded from the automatic fallback. If a removed gun leaves
+its action state behind, that state is released before selecting the new gun;
+this fixes the weapon-zero reload path that otherwise returns forever. Valid
+weapon actions and live offhand grenade states retain their existing timing.
+
+Holding jump no longer erases its own input bit: command subdivision and later
+landings cannot synthesize another press. Step attempts reject embedded traces
+and require the same 0.7 walkable normal as ground movement. Small-overlap
+recovery cannot generate a landing-damage event, and its follow-up trace uses
+the corrected horizontal position.
+
+Landing energy uses v² + 2*g*drop instead of subtracting the drop. Upward motion
+and zero gravity do not produce falling energy. The existing default thresholds
+remain 256/480 game units; nonlethal damage uses maximum health, with at least
+one point for a nonzero damage event. The original blood material now also
+flashes on ordinary damage feedback, including world/fall damage, and fades
+within 650 ms. It respects cg_blood, keeps the low-health pulse, and clears on
+respawn without changing player-state or network layouts.
+
+Validation: `test-respawn-fall-jump.py` executes production selection/action
+recovery, held-input jump, landing calculation/event, server damage and overlay
+code with ASan/UBSan. `test-step-move.py` adds embedded and steep-step rejection.
+Existing corner, ladder, movement release, weapon timing and fire-mode checks
+pass. Native i386 and WebAssembly builds pass. The static suite passed through
+its local-archives check, which cannot compile under the Mac's 64-bit ABI; that
+unchanged test passes with the existing `out/qa-cc` i386 compiler wrapper in
+`local/cod2-native-build:dev`. All remaining static checks and the final browser
+package contract pass separately. Logs: `out/respawn-fall-{native-build,
+web-build,static,archives-i386,static-tail}.log`.
+
+These builds were not deployed or exercised in a live multiplayer match.
+Map-specific collision locations and the rendered blood overlay still need
+in-game verification. No private asset archives were modified.
+
+### Follow-up: vehicle/window loops and prone movement
+
+The reported issue includes Carentan vehicles and window edges, and similar
+locations across all maps. Mantle entry now requires a fresh jump press. Root
+alignment and every mantle animation step trace their path; a blocked step
+cancels mantle flags and momentum instead of carrying the player into geometry.
+Invalid/finished animation timers exit without division by zero, and climbing
+onto a ledge ends without residual upward velocity. The existing geometry is
+unchanged. Successful original animation paths still reach their endpoints.
+
+The prone movement rollback passed `vLadderVec` as the ground normal, so a zero
+ladder vector rejected movement on flat ground. It now uses the actual ground
+trace and the prone capsule dimensions. Prone speed applies its 15% multiplier
+once, instead of also applying the 40% lean penalty. The existing movement
+animation selector consequently receives actual crawl speed and selects the
+original forward/backward prone clips, returning to idle when input stops.
+
+Stand/jump input now considers the server posture as well as the local stance
+selection. Space cancels held prone/crouch inputs and requests standing without
+also jumping. Key repeat cannot convert that same press into a jump. The legacy
+`+moveup` binding follows the same rule. Collision clearance still controls
+whether standing can finish beneath a ceiling.
+
+ASan/UBSan checks pass for real timed prone/crouch-to-stand transitions,
+held-stance cancellation, 504 crawl direction/speed/animation schedules,
+504 prone movements using the production prone support and brush collision
+functions, and 126 gravity/slide/ground replays over a car-height box and along
+an elevated window-sill box. Those fixtures require successful traversal,
+bounded height/velocity, normal landing and no damaging fall event. They are
+synthetic collision fixtures, not extracted Carentan geometry. Mantle checks
+cover 168 successful routes, blocked/embedded paths, held-key retries and invalid
+animation timing. Existing ladder, footstep, weapon-recovery and fall-feedback
+regressions also pass. Native and WebAssembly builds pass; logs are
+`out/stance-ledge-native-build.log` and `out/stance-ledge-web-build.log`.
+
+No deployment or live map verification was performed for this follow-up.

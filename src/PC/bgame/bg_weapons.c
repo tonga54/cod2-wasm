@@ -1142,14 +1142,14 @@ static BM_NOINLINE void __attribute_regparm__(2) PM_BeginWeaponChange(playerStat
     qboolean altSwitch;
     qboolean ammoAvailable;
 
-    if (newweapon && !(ps->weapons[newweapon >> 5] & (1 << (newweapon & 0x1f))))
+    if (newweapon && !(ps->weapons[newweapon >> 5] & (1u << (newweapon & 0x1f))))
         return;
     if (ps->weaponstate == 2)
         return;
 
     ps->weaponDelay = 0;
     oldWeapon = ps->weapon;
-    if (!oldWeapon || !(ps->weapons[oldWeapon >> 5] & (1 << (oldWeapon & 0x1f))) || ps->grenadeTimeLeft > 0) {
+    if (!oldWeapon || !(ps->weapons[oldWeapon >> 5] & (1u << (oldWeapon & 0x1f))) || ps->grenadeTimeLeft > 0) {
         ps->weaponTime = 0;
         ps->weaponstate = 2;
         ps->grenadeTimeLeft = 0;
@@ -1187,11 +1187,11 @@ static BM_NOINLINE void __attribute_regparm__(2) PM_BeginWeaponChange(playerStat
     }
 
     ps->weaponTime = oldWeapDef->iAltDropTime;
-    if (ps->weapons[oldWeapon >> 5] & (1 << (oldWeapon & 0x1f))) {
+    if (ps->weapons[oldWeapon >> 5] & (1u << (oldWeapon & 0x1f))) {
         int slot = BG_IsPlayerWeaponInSlot_core(ps, oldWeapon, 1);
 
         if ((unsigned int)(slot - 1) <= 1 &&
-            (ps->weapons[newweapon >> 5] & (1 << (newweapon & 0x1f))) &&
+            (ps->weapons[newweapon >> 5] & (1u << (newweapon & 0x1f))) &&
             (unsigned int)(bg_weaponDefs[newweapon]->weapSlot - 1) <= 1) {
             if ((int)ps->weaponslots[slot] != newweapon && ps->weapon != newweapon)
                 ps->weapon = 0;
@@ -1457,7 +1457,7 @@ static qboolean PM_WeaponHasInventoryWeapon(const playerState_t *ps, int weapon)
     if (weapon <= 0 || weapon > bg_iNumWeapons)
         return 0;
 
-    return (ps->weapons[weapon >> 5] & (1 << (weapon & 0x1f))) != 0;
+    return (ps->weapons[weapon >> 5] & (1u << (weapon & 0x1f))) != 0;
 }
 
 static void PM_WeaponSetAnim(playerState_t *ps, int anim)
@@ -1515,11 +1515,21 @@ static qboolean PM_WeaponStateBlocksChange(int weaponstate)
 static int PM_FindFirstSelectableWeapon(const playerState_t *ps)
 {
     int weapon;
+    int slot;
+
+    for (slot = 1; slot <= 2; slot++) {
+        weapon = (unsigned char)ps->weaponslots[slot];
+        if (PM_WeaponHasInventoryWeapon(ps, weapon) &&
+            !bg_weaponDefs[weapon]->offhandClass &&
+            bg_weaponDefs[weapon]->weapType != WEAPTYPE_BINOCULARS)
+            return weapon;
+    }
 
     for (weapon = 1; weapon <= bg_iNumWeapons; weapon++) {
         if (!PM_WeaponHasInventoryWeapon(ps, weapon))
             continue;
-        if (bg_weaponDefs[weapon]->offhandClass)
+        if (bg_weaponDefs[weapon]->offhandClass ||
+            bg_weaponDefs[weapon]->weapType == WEAPTYPE_BINOCULARS)
             continue;
         return weapon;
     }
@@ -1676,16 +1686,32 @@ static void PM_UpdateWeaponConditions(playerState_t *ps, WeaponDef *weapDef)
     BG_UpdateConditionValue(ps->clientNum, 1, weapDef->weapClass, 1);
 }
 
+static int PM_ResolveWeaponSelection(pmove_t *pm)
+{
+    playerState_t *ps = pm->ps;
+    int weapon = pm->cmd.weapon;
+
+    if (PM_WeaponHasInventoryWeapon(ps, weapon) &&
+        !bg_weaponDefs[weapon]->offhandClass &&
+        bg_weaponDefs[weapon]->weapType != WEAPTYPE_BINOCULARS)
+        return weapon;
+
+    /* Commands can still name the previous life/loadout while the server
+     * grants the new one. Keep an owned gun, or raise one from the new slots. */
+    if (PM_WeaponHasInventoryWeapon(ps, ps->weapon) &&
+        !bg_weaponDefs[ps->weapon]->offhandClass &&
+        bg_weaponDefs[ps->weapon]->weapType != WEAPTYPE_BINOCULARS)
+        return ps->weapon;
+    return PM_FindFirstSelectableWeapon(ps);
+}
+
 static void PM_FinishWeaponChange(pmove_t *pm)
 {
     playerState_t *ps = pm->ps;
     int oldWeapon = ps->weapon;
-    int newWeapon = pm->cmd.weapon;
+    int newWeapon = PM_ResolveWeaponSelection(pm);
     WeaponDef *weapDef;
     qboolean altSwitch = 0;
-
-    if (!PM_WeaponHasInventoryWeapon(ps, newWeapon))
-        newWeapon = PM_FindFirstSelectableWeapon(ps);
 
     ps->weapon = (unsigned char)newWeapon;
 
@@ -1728,7 +1754,7 @@ static void PM_FinishWeaponChange(pmove_t *pm)
 static qboolean PM_ShouldChangeWeapon(pmove_t *pm)
 {
     playerState_t *ps = pm->ps;
-    int newWeapon = pm->cmd.weapon;
+    int newWeapon = PM_ResolveWeaponSelection(pm);
 
     if (!newWeapon || newWeapon == ps->weapon)
         return 0;
@@ -1751,10 +1777,19 @@ static void PM_CheckWeaponChange(pmove_t *pm)
     if (ps->weaponstate == WEAPON_DROPPING)
         return;
 
+    /* A removed gun cannot complete its reload (the reload runner returns
+     * immediately for weapon zero). Release that stale action so recovery
+     * can raise the new loadout, without interrupting a live grenade. */
+    if (ps->weaponstate != WEAPON_READY &&
+        !PM_WeaponHasInventoryWeapon(ps, ps->weapon) &&
+        !PM_WeaponStateIsOffhand(ps->weaponstate) &&
+        !PM_WeaponStateIsBinoculars(ps->weaponstate))
+        PM_WeaponSetIdle(ps);
+
     if (PM_ShouldChangeWeapon(pm)) {
         if (PM_WeaponStateIsBinoculars(ps->weaponstate))
             PM_ResetWeaponState(ps);
-        PM_BeginWeaponChange(ps, pm->cmd.weapon);
+        PM_BeginWeaponChange(ps, PM_ResolveWeaponSelection(pm));
     }
 }
 

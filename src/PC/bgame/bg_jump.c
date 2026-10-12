@@ -135,7 +135,8 @@ Bool Jump_Check(pmove_t *pm, pml_t *pml)
         return qfalse;
 
     if (pm->oldcmd.buttons & 0x400) {
-        pm->cmd.buttons &= ~0x400;
+        /* Pmove copies cmd to oldcmd after each substep. Clearing this bit
+         * invents a release and lets a held key jump again on landing. */
         return qfalse;
     }
 

@@ -151,6 +151,11 @@ void CG_DamageFeedback(int yawByte, int pitchByte, int damage)
     char *snap;
 
     CG_INT(cg, CG_OFF_2BE48) = CG_INT(cg, CG_OFF_25BB0);
+    /* Also flash the blood material for modest hits and non-directional
+     * fall damage, before the low-health pulse threshold is reached. */
+    cg->damageValue = damage > 0 ? 0.18f + (float)damage * 0.006f : 0.0f;
+    if (cg->damageValue > 0.75f)
+        cg->damageValue = 0.75f;
 
     count = (float)damage * 0.2f;
 

@@ -41,10 +41,10 @@ typedef int qboolean;
 typedef struct {int down[2],downtime,msec;byte active,wasPressed,padding[2];} kbutton_t;
 static kbutton_t kb[28],sprintButton;
 typedef struct {int buttons,forwardmove,rightmove;} usercmd_t;
-typedef struct {int cl_stance;} LegacyHacks;
+typedef struct {int cl_stance,cl_stanceTemp;} LegacyHacks;
 static LegacyHacks legacy,*legacyPtr=&legacy;
 static void *imp_legacyHacks=&legacyPtr;
-typedef struct {int keyCatchers,cgameInShellshock;struct {struct {int pm_type;}ps;}snap;} clientActive_t;
+typedef struct {int keyCatchers,cgameInShellshock,stanceHeld;struct {struct {int pm_type,pm_flags,viewHeightTarget;}ps;}snap;} clientActive_t;
 static clientActive_t client,*clientPtr=&client;
 static void *imp_cl=&clientPtr;
 static struct {struct {int enabled;}current;} bypass,*cl_bypassMouseInput=&bypass;
@@ -71,6 +71,18 @@ int main(void) {
             IN_GoStandDown();usercmd_t cmd={0};CL_CmdButtons(&cmd);
             assert(cmd.buttons&0x400);IN_GoStandUp();
         }
+    }
+    // Space cancels both held and toggled stance inputs, including a low
+    // server posture while the local toggle already says standing.
+    for(int key=0;key<4;key++) {
+        memset(kb,0,sizeof(kb));client.snap.ps.pm_type=0;
+        client.snap.ps.pm_flags=key==3?1:0;legacy.cl_stance=0;
+        if(key<3)kb[key==0?11:key==1?25:26].active=1;
+        IN_GoStandDown();assert(!kb[10].active&&!kb[25].active&&!kb[26].active&&!kb[11].active);
+        assert(!legacy.cl_stance&&!legacy.cl_stanceTemp);
+        IN_GoStandDown();assert(!kb[10].active); // Key repeat cannot turn stand into jump.
+        IN_GoStandUp();client.snap.ps.pm_flags=0;client.snap.ps.viewHeightTarget=60;
+        IN_GoStandDown();assert(kb[10].active);IN_GoStandUp();
     }
     legacy.cl_stance=0;IN_ToggleCrouch();assert(legacy.cl_stance==1);
     IN_ToggleCrouch();assert(legacy.cl_stance==0);
@@ -169,6 +181,50 @@ int main(void) {
 movement_source = movement_support.replace('#include <string.h>', '#include <string.h>\n#include <stdlib.h>') + movement_body + movement_checks
 check(movement_source, (movement_source.replace('BG_AnimScriptEvent(ps, event, 0, 0);', ''),
                         movement_source.replace('ps->movementDir = (int)yaw;', 'ps->movementDir = 7;')))
+
+# Replay the real view-height timer, rather than completing camera transitions
+# manually, through both crouch->stand and prone->crouch->stand.
+move_source = (root / 'src/PC/bgame/bg_pmove.c').read_text()
+timed_support = movement_support.replace('viewHeightLerpTime,movementDir;',
+    'viewHeightLerpTime,viewHeightLerpTarget,viewHeightLerpDown,movementDir;')
+timed_support = timed_support.replace('vec3_t origin,mins,maxs,viewangles;',
+    'vec3_t origin,mins,maxs,viewangles,velocity;')
+timed_support = timed_support.replace('proneDirectionPitch,proneTorsoPitch;',
+    'proneDirectionPitch,proneTorsoPitch,viewHeightLerpPosAdj;')
+timed_support = timed_support.replace('typedef struct {int unused;} pml_t;',
+    'typedef struct {float frametime;vec3_t forward;} pml_t;')
+start = timed_support.index('/* Pause/resume the camera lerp explicitly:')
+timed_support = timed_support[:start] + r'''
+typedef struct {int iFrac;float fViewHeight;int iOffset;} viewLerpWaypoint_t;
+static void Vec3Normalize(float *v){}
+static void PM_StepSlideMove(pmove_t *pm,pml_t *pml,int gravity){assert(0);}
+'''
+tables = move_source[move_source.index('viewLerpWaypoint_t viewLerp_CrouchProne[13] ='):]
+timed_body = ''.join(function('src/PC/bgame/bg_pmove.c', n) for n in (
+    'PM_GetViewHeightLerp', 'PM_ViewHeightAdjust', 'PM_CheckDuck'))
+timed_checks = r'''
+int main(void){
+ for(int posture=1;posture<=2;posture++)for(int dt=4;dt<=66;dt++){
+  playerState_t ps={.groundEntityNum=1022,.pm_flags=posture==1?2:1,
+    .viewHeightTarget=posture==1?40:11,.viewHeightCurrent=posture==1?40:11,
+    .mins={-15,-15,0},.maxs={15,15,70}};
+  pmove_t pm={.ps=&ps};pml_t pml={.frametime=dt*.001f};eventCount=blockedHeight=0;
+  for(int t=1000;t<2500;t+=dt){pm.cmd.serverTime=t;PM_CheckDuck(&pm,&pml);}
+  assert(ps.viewHeightTarget==60&&ps.viewHeightCurrent==60&&!(ps.pm_flags&3));
+  assert(eventCount==(posture==1?1:2));
+ }
+ playerState_t ps={.groundEntityNum=1022,.pm_flags=1,.viewHeightTarget=11,.viewHeightCurrent=11,
+    .mins={-15,-15,0},.maxs={15,15,70}};
+ pmove_t pm={.ps=&ps};pml_t pml={.frametime=.016f};eventCount=0;blockedHeight=60;
+ for(int t=1000;t<2000;t+=16){pm.cmd.serverTime=t;PM_CheckDuck(&pm,&pml);}
+ assert(ps.viewHeightTarget==40&&ps.viewHeightCurrent==40); // Low ceiling still blocks standing.
+ blockedHeight=0;
+ for(int t=2000;t<3000;t+=16){pm.cmd.serverTime=t;PM_CheckDuck(&pm,&pml);}
+ assert(ps.viewHeightTarget==60&&ps.viewHeightCurrent==60);
+ return 0;
+}
+'''
+check(timed_support + tables + timed_body + timed_checks)
 
 anim_support = r'''
 #include <assert.h>

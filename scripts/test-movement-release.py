@@ -34,10 +34,10 @@ typedef int qboolean; typedef float vec_t,vec2_t[2],vec3_t[3];
 #define ENTITYNUM_NONE 1023
 typedef struct {struct {float value;int enabled;} current;} dvar_t;
 typedef struct {int surfaceFlags;vec3_t normal;} trace_t;
-typedef struct {int pm_type,pm_flags,groundEntityNum,eFlags,weaponstate,speed,movementDir;
-    float leanf,fWeaponPosFrac;vec3_t origin,velocity,viewangles;float oldVelocity[2];} playerState_t;
+typedef struct {int pm_type,pm_flags,groundEntityNum,eFlags,weaponstate,speed,movementDir,bobCycle;
+    float leanf,fWeaponPosFrac;vec3_t origin,velocity,viewangles,vLadderVec;float oldVelocity[2];} playerState_t;
 typedef struct {int buttons,forwardmove,rightmove;} usercmd_t;
-typedef struct {playerState_t *ps;usercmd_t cmd;} pmove_t;
+typedef struct {playerState_t *ps;usercmd_t cmd;float xyspeed;} pmove_t;
 typedef struct {int walking,groundPlane;float frametime;vec3_t forward,right;trace_t groundTrace;} pml_t;
 static dvar_t frictionD={.current.value=5.5f},stopD={.current.value=100},inertiaD={.current.value=50},zeroD,spectateD={.current.value=2};
 static const dvar_t *friction=&frictionD,*stopspeed=&stopD,*inertiaMax=&inertiaD,
@@ -72,6 +72,19 @@ math_start = math_source.index('void AngleVectors(const vec_t *angles, vec_t *fo
 body = math_source[math_start:math_source.index('\nvoid AnglesToAxis(', math_start)] + body
 walk = function('PM_WalkMove')
 stop = re.search(r'    /\* Releasing movement.*?\n    }\n', walk, re.S)[0]
+types=(root/'src/headers/common_types.h').read_text()
+support += re.search(r'enum scriptAnimMoveTypes_t \{.*?\n\};',types,re.S)[0]
+support += r'''
+typedef enum scriptAnimMoveTypes_t scriptAnimMoveTypes_t;
+#define AISTATE_COMBAT 3
+static int selectedAnim;
+static int BG_AnimScriptAnimation(playerState_t *ps,int state,int move,int force){selectedAnim=move;return 0;}
+static float AngleDelta(float a,float b){return AngleNormalize180Accurate(a-b);}
+static float vectoyaw(float *v){return atan2f(v[1],v[0])*57.295779513f;}
+static int PM_ShouldMakeFootsteps(pmove_t *pm){return 0;}
+static void PM_FootstepEvent(pmove_t *pm,pml_t *pml,int a,int b,int c){}
+'''
+body += function('PM_Footsteps')
 checks = r'''
 static pml_t ground(int msec) {
     return (pml_t){.walking=1,.groundPlane=1,.frametime=msec*.001f,
@@ -177,6 +190,22 @@ int main(void) {
         assert(hypotf(flat.velocity[0],flat.velocity[1])<=expected+.001f);
         aimCases++;
     }
+    jumpRequested=0;
+    for(int dt=4;dt<=66;dt++)for(int f=-127;f<=127;f+=127)
+    for(int r=-127;r<=127;r+=127)if(f||r){
+        playerState_t ps=player(0,1,0);pmove_t pm={.ps=&ps,.cmd={.forwardmove=f,.rightmove=r}};
+        pml_t pml=ground(dt);float x=ps.origin[0],y=ps.origin[1],duration=0;
+        for(int t=0;t<2000;t+=dt){
+            PM_WalkMove(&pm,&pml);duration+=pml.frametime;
+            pm.xyspeed=hypotf(ps.velocity[0],ps.velocity[1]);PM_Footsteps(&pm,&pml);
+            assert(selectedAnim==(f<0?ANIM_MT_WALKPRONEBK:ANIM_MT_WALKPRONE));
+        }
+        float travel=hypotf(ps.origin[0]-x,ps.origin[1]-y);
+        assert(travel>27*duration&&travel<30*duration);
+        pm.cmd.forwardmove=pm.cmd.rightmove=0;PM_WalkMove(&pm,&pml);pm.xyspeed=0;PM_Footsteps(&pm,&pml);
+        assert(selectedAnim==ANIM_MT_IDLEPRONE);
+    }
+    printf("PASS: crawl speed and forward/backward/sideways animation selection across 504 command schedules\n");
     printf("PASS: %d pitch/roll movement replays, vertical aim, eight directions, walk/run/sprint/crouch/prone; full view basis preserved\n",aimCases);
     printf("PASS: %d release schedules, 24 directions, walk/crouch/prone/sprint, slopes, held keys, air/jump/slick/landing/push exclusions and client/server parity\n",cases);
 }

@@ -12,26 +12,29 @@ support = r'''
 #include <assert.h>
 typedef int qboolean;
 typedef float vec3_t[3];
-typedef struct { float fraction; int entityNum; vec3_t normal; } trace_t;
+typedef struct { float fraction; int entityNum,startsolid,allsolid; vec3_t normal; } trace_t;
 typedef struct { vec3_t origin,velocity; int pm_flags,pm_time,groundEntityNum,clientNum,pm_type; } playerState_t;
 typedef struct { playerState_t *ps; vec3_t mins,maxs; int tracemask; } pmove_t;
 typedef struct { int groundPlane; } pml_t;
-static int slideCalls,traceCalls,entity;
+static int slideCalls,traceCalls,entity,upBlocked,downBlocked;
+static float slope=1;
 static int PM_SlideMove(pmove_t *pm,pml_t *pml,int gravity) {
     pm->ps->origin[0]=++slideCalls;
     return 1;
 }
 static void PM_playerTrace(pmove_t *pm,trace_t *t,const float *start,const float *mins,
     const float *maxs,const float *end,int client,int mask) {
-    t->fraction=traceCalls++ ? 0.5f : 1.0f;
-    t->entityNum=entity;t->normal[0]=t->normal[1]=0;t->normal[2]=1;
+    int down=traceCalls++ != 0;
+    t->startsolid=t->allsolid=down?downBlocked:upBlocked;
+    t->fraction=down ? 0.5f : 1.0f;
+    t->entityNum=entity;t->normal[0]=t->normal[1]=0;t->normal[2]=slope;
 }
 static void Jump_ClearState(playerState_t *ps) {}
 static int Jump_GetStepHeight(playerState_t *ps,const float *o,float *step) { *step=18;return 1; }
 static int Jump_IsPlayerAboveMax(playerState_t *ps) { return 0; }
 static void Jump_ClampVelocity(playerState_t *ps,const float *o) {}
 static void PM_ClipVelocity(const float *v,const float *n,float *out) {}
-static int PM_StepCheckProne(pmove_t *pm,playerState_t *ps,const float *o,const float *v) { return 1; }
+static int PM_StepCheckProne(pmove_t *pm,pml_t *pml,playerState_t *ps,const float *o,const float *v) { return 1; }
 static void PM_ApplyStepEvent(pmove_t *pm,pml_t *pml,playerState_t *ps,const float *o,float height) {}
 '''
 checks = r'''
@@ -42,6 +45,14 @@ int main(void) {
         slideCalls=traceCalls=0;
         PM_StepSlideMove(&pm,&pml,0);
         if(ps.origin[0] != (entity<64 ? 1 : 2)) return 1;
+    }
+    entity=1022;
+    for(int mode=0;mode<3;mode++) {
+        playerState_t ps={.velocity={10,0,0},.groundEntityNum=1022};
+        pmove_t pm={.ps=&ps};pml_t pml={.groundPlane=1};
+        slideCalls=traceCalls=0;upBlocked=mode==0;downBlocked=mode==1;slope=mode==2?.6f:1;
+        PM_StepSlideMove(&pm,&pml,0);
+        assert(ps.origin[0]==1 && ps.origin[2]==0);
     }
     return 0;
 }
