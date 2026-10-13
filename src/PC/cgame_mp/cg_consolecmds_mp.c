@@ -169,6 +169,9 @@ static void CG_Viewpos_f(void)
                            entity->number, cent->currentState.pos.trDelta[0], cent->currentState.pos.trDelta[1],
                            cent->currentState.pos.trDelta[2], cent->nextState.pos.trDelta[0],
                            cent->nextState.pos.trDelta[1], cent->nextState.pos.trDelta[2]);
+                Com_Printf("[viewpos] aim player=%d pitch=%.2f yaw=%.2f lean=%.3f torsoPitch=%.2f\n",
+                           entity->number, info->playerAngles[0], info->playerAngles[1],
+                           info->lerpLean, info->torso.pitchAngle);
                 {
                     DObj *obj = Com_GetClientDObj(entity->number, 0);
                     extern void DObjDisplayAnim(DObj *obj);

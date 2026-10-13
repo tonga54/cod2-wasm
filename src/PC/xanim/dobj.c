@@ -150,7 +150,9 @@ void DObjFree(DObj_s *obj)
 
 int DObjGetAllocSkelSize(const DObj *obj)
 {
-    return (obj->numBones << 5) + 0x30;
+    /* Keep controller rotations separate from sampled parent-local poses.
+     * The extra quaternions follow mat[] without changing its legacy offset. */
+    return obj->numBones * (sizeof(DObjAnimMat) + 4 * sizeof(float)) + 0x30;
 }
 
 qboolean DObjSkelExists(const DObj *obj, int timeStamp)
@@ -817,15 +819,12 @@ qboolean DObjSetControlTagAngles(const DObj *obj, int *partBits, unsigned int ta
         if (!(skel->animPartBits[boneIndexHigh] & boneIndexLow)) {
             DObjCalcAnim(obj, partBits);
         }
-        DObjAnimMat *mat = &skel->mat[boneIndex];
-        float control[4];
-        float animated[4];
+        /* Aim/lean deltas are in entity model axes, not the rotated axes of
+         * the parent joint. Apply them after hierarchy composition in CalcSkel.
+         * Multiplying them into the local pose reverses pitch and turns a
+         * lateral lean into a twist on the retail player skeletons. */
+        float *control = (float *)&skel->mat[obj->numBones] + boneIndex * 4;
         DObjAnglesToQuatLocal(angles, control);
-        memcpy(animated, mat->quat, sizeof(animated));
-        mat->quat[0] = control[3] * animated[0] + control[0] * animated[3] + control[1] * animated[2] - control[2] * animated[1];
-        mat->quat[1] = control[3] * animated[1] - control[0] * animated[2] + control[1] * animated[3] + control[2] * animated[0];
-        mat->quat[2] = control[3] * animated[2] + control[0] * animated[1] - control[1] * animated[0] + control[2] * animated[3];
-        mat->quat[3] = control[3] * animated[3] - control[0] * animated[0] - control[1] * animated[1] - control[2] * animated[2];
         skel->controlPartBits[boneIndexHigh] |= boneIndexLow;
         skel->animPartBits[boneIndexHigh] |= boneIndexLow;
     }
@@ -1103,6 +1102,23 @@ static inline __attribute__((always_inline)) void DObjComposeAnimMatLocal(DObjAn
     DObjFinalizeQuatWeightLocal(child);
 }
 
+static void DObjApplyControlLocal(const DObj *obj, int boneIndex)
+{
+    DSkel *skel = obj->skel;
+    if (!DObjPartBitTestLocal(skel->controlPartBits, boneIndex))
+        return;
+
+    const float *control = (const float *)&skel->mat[obj->numBones] + boneIndex * 4;
+    DObjAnimMat *mat = &skel->mat[boneIndex];
+    float animated[4];
+    memcpy(animated, mat->quat, sizeof(animated));
+    mat->quat[0] = control[3] * animated[0] + control[0] * animated[3] + control[1] * animated[2] - control[2] * animated[1];
+    mat->quat[1] = control[3] * animated[1] - control[0] * animated[2] + control[1] * animated[3] + control[2] * animated[0];
+    mat->quat[2] = control[3] * animated[2] + control[0] * animated[1] - control[1] * animated[0] + control[2] * animated[3];
+    mat->quat[3] = control[3] * animated[3] - control[0] * animated[0] - control[1] * animated[1] - control[2] * animated[2];
+    DObjFinalizeQuatWeightLocal(mat);
+}
+
 static inline __attribute__((always_inline)) void DObjApplyDuplicatePartLocal(DObjAnimMat *mat, const unsigned char *duplicateParts, int boneIndex)
 {
     const unsigned char *pos = duplicateParts;
@@ -1189,6 +1205,7 @@ void DObjCalcSkel(const DObj *obj, int *partBits)
                 } else {
                     DObjFinalizeQuatWeightLocal(&mat[globalBoneIndex]);
                 }
+                DObjApplyControlLocal(obj, globalBoneIndex);
                 DObjApplyDuplicatePartLocal(mat, duplicateParts, globalBoneIndex);
                 DObjPartBitSetLocal(skel->skelPartBits, globalBoneIndex);
             }
@@ -1214,6 +1231,7 @@ void DObjCalcSkel(const DObj *obj, int *partBits)
                     DObjFinalizeQuatWeightLocal(&mat[globalBoneIndex]);
                 }
 
+                DObjApplyControlLocal(obj, globalBoneIndex);
                 DObjApplyDuplicatePartLocal(mat, duplicateParts, globalBoneIndex);
                 DObjPartBitSetLocal(skel->skelPartBits, globalBoneIndex);
             }

@@ -374,7 +374,8 @@ void BG_Player_DoControllers(const struct DObj_s *pDObj, const entityState_t *es
     float maxAngleChange;
     int i;
 
-    if ((es->eFlags & 0x3) != 0) {
+    /* Bit 1 is the respawn/teleport toggle, not a dead-player flag. */
+    if ((es->eFlags & 0x1) != 0) {
         memset(goals, 0, sizeof(goals));
     } else {
         tagOriginAngles[0] = 0.0f;
@@ -861,7 +862,7 @@ void BG_PlayerAnimation(const struct DObj_s *pDObj, entityState_t *es, clientInf
     playerYaw = AngleMod(ci->playerAngles[1]);
     eFlags = es->eFlags;
 
-    if ((eFlags & 0x3) != 0) {
+    if ((eFlags & 0x1) != 0) {
         ci->torso.yawing = 1;
         ci->torso.pitching = 1;
         ci->legs.yawing = 1;
@@ -931,7 +932,7 @@ void BG_PlayerAnimation(const struct DObj_s *pDObj, entityState_t *es, clientInf
         BG_SwingAngles(&ci->legs.yawAngle, &ci->legs.yawing, legsSwingTolerance, legsYawDest, 150.0f, swingSpeed);
     }
 
-    if ((eFlags & 0x3) != 0) {
+    if ((eFlags & 0x1) != 0) {
         ci->torso.yawAngle = playerYaw;
         ci->legs.yawAngle = playerYaw;
     }
@@ -941,7 +942,7 @@ void BG_PlayerAnimation(const struct DObj_s *pDObj, entityState_t *es, clientInf
         ci->legs.yawAngle = moveYaw;
     }
 
-    if ((eFlags & 0x20000) != 0 || (eFlags & 0x3) != 0 || (ci->clientConditions[3][0] & 0xc0000) != 0 || eFlags == 0x4000) {
+    if ((eFlags & 0x20000) != 0 || (eFlags & 0x1) != 0 || (ci->clientConditions[3][0] & 0xc0000) != 0 || eFlags == 0x4000) {
         torsoPitchDest = 0.0f;
     } else {
         torsoPitchDest = playerPitch;

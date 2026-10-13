@@ -3358,3 +3358,27 @@ script-local-archives fixture assumes i386: run it using the native builder's
 `cc -m32` with UBSan (excluding alignment for the packed VM records). ASan's
 32-bit process timed out under local emulation; the i386 UBSan run passes.
 The remaining static checks run with the pinned Emscripten image.
+
+
+## Remote aim and lean axes (2026-10-13)
+
+Two local browser clients reproduced vertical aim going the wrong way. Player
+controllers were premultiplied into parent-local bone rotations; retail joint
+axes turn a model-space pitch/roll into an inverted pitch or twist. Controllers
+now queue their rotations after the sampled matrices and apply them in model
+space during hierarchy evaluation, before evaluating descendants. Neutral
+controls retain the animation and all bone translations. The additional
+quaternions use 16 bytes per bone in the existing frame skeleton allocation;
+legacy matrix offsets, object layouts and snapshot protocol stay unchanged.
+
+BG_PlayerAnimation and BG_Player_DoControllers also treated eFlags bit 2 as a
+dead-player flag, although spawn and teleport toggle that bit. Only bit 1 now
+suppresses living-player controllers, so pose behavior is independent of
+respawn parity. Movement diagnostics report remote pitch, yaw, lean and torso
+pitch when movementDebug is enabled and viewpos is requested.
+
+Regression coverage includes 120 moving skeletons, 288 controls across rotated
+parents and attached models, pivot/descendant positions, repeated evaluation,
+the 127-bone allocation boundary, and 99 stance/pitch/lean combinations with
+both teleport states. The former local-space multiplication and dead mask fail
+the regressions. Browser evidence and build/test logs are in out/remote-pose/.

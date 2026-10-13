@@ -145,6 +145,10 @@ retail CoD2:
   flashes, brass and tracers. BAR muzzle tails transform to world space once;
   ADS raise/lower poses follow the predicted aiming fraction without an extra
   half-second crossfade that can leave sights tilted during transitions.
+- **Remote player poses:** other players see vertical aim in the correct
+  direction and Q/E as a lateral lean. Controllers rotate in model axes after
+  skeletal composition, preserving movement animations. The respawn/teleport
+  toggle no longer suppresses a living player's aim or lean.
 - **Bounded cleanup and respawn feedback:** bodies remain for eight seconds in
   an eight-body pool, dropped weapons/ammunition expire after twenty seconds,
   and TDM uses a three-second respawn countdown.
