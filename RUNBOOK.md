@@ -3326,3 +3326,35 @@ room was removed. `out/tickrate-pi/deployed.json` records the artifact and
 container identities. Recovery image:
 `local/cod2-pi-server:before-motion-precision-20261012`; the previous runtime
 binary is preserved in local rollback files and Pi `out/tickrate-qa/previous-engine`.
+
+## Browser settings, video restart and viewmodel fixes (2026-10-12)
+
+The browser now restores and saves the native default profile through local
+storage (`cod2-wasm-profile-v1`). Defaults precede saved dvars and bindings;
+legacy browser gametags migrate to the native name field in Options → Game
+Options. The home/main directory participates in filesystem lookup, and desktop
+hardware autodetection no longer overwrites the browser profile. Password dvars
+are excluded from the persisted preferences. Clearing site storage resets them.
+
+Private menu generation removes profile selection, Multiplayer Options, voice
+chat settings and the online-play notice. The displayed Browser version uses
+the deployed Git revision. Retail source assets remain untouched.
+
+Applying graphics settings previously trapped in R_SafeRelease with a WASM
+function-signature mismatch. Release now uses the COM ULONG return type, and
+video restart resizes the reused SDL window. In-browser checks applied 1600×900,
+reloaded the page, verified the saved resolution/name/crosshair setting, and
+restarted video during a connected Carentan match without a runtime error.
+
+BAR tails no longer apply the muzzle transform twice. Ordinary first-person
+players now select viewmodel effects instead of requiring spectator flags.
+ADS animation weights use the already interpolated aiming fraction without a
+second half-second blend. Browser firing and aiming checks cover BAR and MP40;
+production-function regressions cover transformed tails, local/remote effect
+selection and ADS direction reversals. The server remains at 30 Hz.
+
+Validation logs are in `out/settings-qa/`. The static sequence's pre-existing
+script-local-archives fixture assumes i386: run it using the native builder's
+`cc -m32` with UBSan (excluding alignment for the packed VM records). ASan's
+32-bit process timed out under local emulation; the i386 UBSan run passes.
+The remaining static checks run with the pinned Emscripten image.

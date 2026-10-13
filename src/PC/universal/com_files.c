@@ -2394,6 +2394,13 @@ void FS_Startup(const char *gameName)
         FS_AddGameDirectoryAllLanguages(path, gameName);
     }
 
+    /* Configs are written to home/gameName. Search that directory as well,
+     * especially when the browser separates /profile from read-only assets. */
+    path = fs_homepath->current.string;
+    if (*path && I_stricmp(path, fs_basepath->current.string)) {
+        FS_AddGameDirectoryAllLanguages(path, gameName);
+    }
+
     dir = fs_basegame->current.string;
     if (*dir && !I_stricmp(gameName, "main") && I_stricmp(dir, gameName)) {
         path = fs_cdpath->current.string;

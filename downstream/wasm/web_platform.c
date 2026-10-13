@@ -6,6 +6,24 @@ extern clientConnection_t clientConnections[1];
 extern int CL_GetKeyCatchers(void);
 extern void Com_Frame(void);
 extern void Key_ClearStates(void);
+extern int FS_ReadFile(const char *path, void **buffer);
+extern void FS_FreeFile(void *buffer);
+
+EM_JS(void, Web_StoreProfile, (const char *data, int length), {
+    if (Module.cod2SaveProfile) Module.cod2SaveProfile(UTF8ToString(data, length));
+});
+
+void Web_SaveProfile(const char *filename) {
+    void *data;
+    /* Only the browser's own settings; never cache arbitrary writeconfig
+     * outputs, server downloads, passwords or game assets. */
+    if (strcmp(filename, "players/default/config_mp.cfg")) return;
+    int length = FS_ReadFile(filename, &data);
+    if (length >= 0) {
+        Web_StoreProfile(data, length);
+        FS_FreeFile(data);
+    }
+}
 extern void Sys_QueEvent(int time, sysEventType_t type, int value, int value2,
                          int ptrLength, void *ptr);
 

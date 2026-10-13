@@ -666,6 +666,9 @@ ContextRef MacDisplay_CreateScreenContext(int inDepthSize, int inUseStencil,
         SDL_WarpMouseInWindow(sdl_gl_window, sdl_gl_width / 2, sdl_gl_height / 2);
     }
 
+    /* A video restart reuses the window. Resize its drawing buffer before
+     * rebuilding the context so viewport and UI coordinates agree. */
+    SDL_SetWindowSize(sdl_gl_window, sdl_gl_width, sdl_gl_height);
     sdl_gl_context = SDL_GL_CreateContext(sdl_gl_window);
     if (!sdl_gl_context)
         return (ContextRef)0;

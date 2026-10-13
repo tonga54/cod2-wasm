@@ -2151,9 +2151,8 @@ Bool Tail_Update(const Tail *_this)
     (((Tail *)(self))->tailLength) = tailLen;
 
     Tail_CalcNewEndpoint(_this, (const orientation_t *)orient);
-
-    if (orient)
-        OrientationPosToWorldPos(orient, (vec_t *)&((Tail *)self)->base.base.mRefEnt.endpos[0], (vec_t *)&((Tail *)self)->base.base.mRefEnt.endpos[0]);
+    /* Tail_CalcNewEndpoint already produces a world-space endpoint. Applying
+     * the muzzle transform again stretches the flash across the map. */
 
     float radius;
     if ((*(short *)&((Effect *)self)->mFlags) < 0) {

@@ -240,14 +240,16 @@ static void CG_PlayADSAnim_impl(void *pAnimTree, int animIndex)
 
     if (animIndex == 0x15) {
 
-        XAnimSetGoalWeight(pAnimTree, 0x15, 1.0f, 0.5f, 0.0f, 0, 1, 0);
-        XAnimSetGoalWeight(pAnimTree, 0x16, 0.0f, 0.5f, 0.0f, 0, 0, 0);
+        XAnimSetGoalWeight(pAnimTree, 0x15, 1.0f, 0.0f, 0.0f, 0, 1, 0);
+        XAnimSetGoalWeight(pAnimTree, 0x16, 0.0f, 0.0f, 0.0f, 0, 0, 0);
     } else {
 
-        XAnimSetGoalWeight(pAnimTree, 0x15, 0.0f, 0.5f, 0.0f, 0, 0, 0);
-        XAnimSetGoalWeight(pAnimTree, 0x16, 1.0f, 0.5f, 0.0f, 0, 1, 0);
+        XAnimSetGoalWeight(pAnimTree, 0x15, 0.0f, 0.0f, 0.0f, 0, 0, 0);
+        XAnimSetGoalWeight(pAnimTree, 0x16, 1.0f, 0.0f, 0.0f, 0, 1, 0);
     }
 
+    /* The predicted ADS fraction already supplies the transition. A second
+     * half-second blend mixes different raise/lower poses and cants sights. */
     adsProgress = cg->predictedPlayerState.fWeaponPosFrac;
     XAnimSetTime(pAnimTree, 0x15, adsProgress);
     XAnimSetTime(pAnimTree, 0x16, 1.0f - adsProgress);
@@ -529,7 +531,7 @@ static qboolean __attribute_regparm__(3) CG_CalcMuzzlePoint(int entityNum, vec_t
     if (!snap || (unsigned int)entityNum >= 1024)
         return 0;
 
-    if (!cg->renderingThirdPerson && (snap->ps.pm_flags & 0xc00000) && snap->ps.clientNum == entityNum) {
+    if (!cg->renderingThirdPerson && snap->ps.clientNum == entityNum) {
         int weapon = BG_GetViewmodelWeaponIndex(&cg->predictedPlayerState);
         struct DObj_s *viewModel = (*(weaponInfo_t **)imp_cg_weapons)[weapon].viewModelDObj;
         if (viewModel && CG_DObjGetViewModelTagPos(viewModel, flashTag, muzzle))
@@ -604,7 +606,7 @@ void CG_EjectWeaponBrass(entityState_t *ent, int event)
     }
 
     snap = cg->nextSnap;
-    if ((snap->ps.pm_flags & 0xc00000) && ent->number == snap->ps.clientNum)
+    if (!cg->renderingThirdPerson && ent->number == snap->ps.clientNum)
         bolt[0] = weaponNum + 0x400;
     else
         bolt[0] = ent->number;
@@ -621,14 +623,14 @@ static qboolean CG_IsLocalClientEntity(cg_t *cg, entityState_t *ent)
 {
     snapshot_t *snap = cg->nextSnap;
 
-    return (snap->ps.pm_flags & 0xc00000) && ent->number == snap->ps.clientNum;
+    /* Follow/interpolation flags do not identify the local player. Ordinary
+     * live players also use the first-person muzzle, sound and recoil. */
+    return snap && !cg->renderingThirdPerson && ent->number == snap->ps.clientNum;
 }
 
 static inline __attribute__((always_inline)) qboolean CG_IsLocalClientEntity_inl(cg_t *cg, entityState_t *ent)
 {
-    snapshot_t *snap = cg->nextSnap;
-
-    return (snap->ps.pm_flags & 0xc00000) && ent->number == snap->ps.clientNum;
+    return CG_IsLocalClientEntity(cg, ent);
 }
 
 static inline __attribute__((always_inline)) void CG_GetFireWeaponSoundOrigin(centity_t *cent, entityState_t *ent, weaponInfo_t *weapInfo, vec_t *origin)

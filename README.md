@@ -131,8 +131,20 @@ retail CoD2:
   with the same uploaded texture size and no additional gameplay render passes.
 - **Browser hosting and controls:** create/delete rooms without a desktop game
   installation on each client, cached asset downloads with actual byte progress,
-  saved gametags, English interface text, update notices, compact chat, and an
-  explicit fullscreen button/F10.
+  English interface text, update notices, compact chat, and an explicit
+  fullscreen button/F10. Change your gametag in **Options → Game Options**.
+  The native profile saves the name, key bindings, mouse, sound and graphics
+  settings in this browser, including across reloads and game updates. Browser
+  storage must be enabled; clearing site data removes the saved profile.
+- **Browser menus and video settings:** the main menu omits profile selection,
+  Multiplayer Options and the online-play notice; settings omit voice chat.
+  The menu version follows the deployed Git revision. Applying graphics
+  settings releases renderer resources with the correct WebAssembly signature
+  and resizes the canvas, including while connected to a match.
+- **First-person weapon effects:** live players use the viewmodel muzzle for
+  flashes, brass and tracers. BAR muzzle tails transform to world space once;
+  ADS raise/lower poses follow the predicted aiming fraction without an extra
+  half-second crossfade that can leave sights tilted during transitions.
 - **Bounded cleanup and respawn feedback:** bodies remain for eight seconds in
   an eight-body pool, dropped weapons/ammunition expire after twenty seconds,
   and TDM uses a three-second respawn countdown.

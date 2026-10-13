@@ -9,6 +9,7 @@ import struct
 import zipfile
 from browser_sound_assets import collect_sound_assets
 from browser_bot_menu import apply_bot_menu
+from browser_settings_menu import apply_settings_menu
 from browser_objective_assets import objective_asset_roots
 from weapon_balance import apply_weapon_balance, load_profile
 
@@ -155,6 +156,7 @@ try:
         path, original_name = asset_index[name]
         data = originals[path].read(original_name)
         data = apply_weapon_balance(name, data, balance_profile)
+        data = apply_settings_menu(name, data)
         if name == "default_mp.cfg":
             data = default_cfg
         if name == "ui/options_shoot.menu":

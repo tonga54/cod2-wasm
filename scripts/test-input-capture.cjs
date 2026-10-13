@@ -56,13 +56,15 @@ const document = {
     listeners.get(name).push(fn);
   }
 };
+const profileFiles = new Map();
 const native = {
-  FS: { mkdirTree() {}, chdir() {} },
+  FS: { mkdirTree() {}, chdir() {}, writeFile(name, data) { profileFiles.set(name, data); } },
   callMain(args) {
     ++starts;
     assert.ok(!args.includes('+connect'), 'automatic launch stops at the native main menu');
-    assert.ok(args.includes('ui_netSource'), 'Join Game defaults to LAN discovery');
-    assert.equal(args[args.indexOf('name') + 1], '"Test"', 'gametag reaches the native player name');
+    const profile = profileFiles.get('/profile/main/players/default/config_mp.cfg');
+    assert.match(profile, /seta ui_netSource "0"/, 'Join Game defaults to LAN discovery');
+    assert.match(profile, /seta name "Test"/, 'gametag reaches the native player profile');
   },
   _web_client_state: () => nativeState,
   _web_chat_char: code => chatCharacters.push(code),

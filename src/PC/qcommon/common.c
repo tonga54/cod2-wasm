@@ -714,6 +714,10 @@ static void Com_WriteConfigToFile(const char *filename)
     Key_WriteBindings(f);
     Dvar_WriteVariables(f);
     FS_FCloseFile(f);
+#ifdef __EMSCRIPTEN__
+    extern void Web_SaveProfile(const char *filename);
+    Web_SaveProfile(filename);
+#endif
 }
 
 void Com_WriteConfig_f(void)
@@ -1087,6 +1091,11 @@ void Com_SetRecommended(qboolean restart)
 
 void Com_CheckSetRecommended(void)
 {
+#ifdef __EMSCRIPTEN__
+    /* Desktop hardware detection cannot choose WebGL defaults. The browser
+     * seeds defaults before the saved profile; don't overwrite user choices. */
+    return;
+#endif
     extern int FS_ReadFile(const char *path, void **buffer);
     extern void FS_FreeFile(void *buffer);
     extern qboolean Sys_HasConfigureChecksumChanged(int checksum);

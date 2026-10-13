@@ -150,7 +150,9 @@ static inline void R_SafeRelease(void **objPtr)
     if (*objPtr) {
         do {
             void *obj = *objPtr;
-            ((void (*)(void *))((*(void ***)obj)[2]))(obj);
+            /* COM Release returns ULONG; WebAssembly checks the return type
+             * even when the caller ignores the reference count. */
+            ((ULONG (*)(void *))((*(void ***)obj)[2]))(obj);
             *objPtr = NULL;
         } while (*(int *)&alwaysfails);
     }

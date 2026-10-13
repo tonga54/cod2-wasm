@@ -24,64 +24,39 @@
         /[\x00-\x1f\x7f";+\\]/.test(name) || new TextEncoder().encode(name).length > 31) return '';
     return name;
   }
-  async function requireGametag(context) {
-    if (gametag) return gametag;
-    let saved;
-    try { saved = localStorage.getItem(gametagStorageKey); } catch {}
-    gametag = validGametag(saved) || validGametag(context.preferences?.values().playerName);
-    if (gametag) return gametag;
-    context.setLoading('Choose your player name to join', '', 0);
-    return new Promise(resolve => {
-      const panel = document.createElement('section');
-      panel.id = 'cod2-gametag';
-      panel.setAttribute('role', 'dialog');
-      panel.setAttribute('aria-modal', 'true');
-      panel.setAttribute('aria-labelledby', 'cod2-gametag-title');
-      const form = document.createElement('form');
-      const logo = document.createElement('img');
-      logo.src = '/game-data/files/cod2-startup/original.png';
-      logo.alt = 'Call of Duty 2';
-      const title = document.createElement('h1');
-      title.id = 'cod2-gametag-title';
-      title.textContent = 'Choose your player name';
-      const description = document.createElement('p');
-      description.textContent = 'This name is visible to other players and saved in this browser.';
-      const label = document.createElement('label');
-      label.htmlFor = 'cod2-gametag-input';
-      label.textContent = 'Gametag';
-      const input = document.createElement('input');
-      input.id = 'cod2-gametag-input';
-      input.name = 'gametag';
-      input.type = 'text';
-      input.maxLength = 31;
-      input.autocomplete = 'nickname';
-      input.required = true;
-      const error = document.createElement('p');
-      error.className = 'gametag-error';
-      error.setAttribute('role', 'alert');
-      error.hidden = true;
-      const button = document.createElement('button');
-      button.type = 'submit';
-      button.textContent = 'Play';
-      form.append(logo, title, description, label, input, error, button);
-      panel.appendChild(form);
-      document.body.appendChild(panel);
-      input.focus();
-      form.addEventListener('submit', event => {
-        event.preventDefault();
-        const name = validGametag(input.value);
-        if (!name) {
-          error.textContent = 'Choose a short player name without quotes, semicolons, plus signs, or backslashes.';
-          error.hidden = false;
-          input.focus();
-          return;
-        }
-        gametag = name;
-        try { localStorage.setItem(gametagStorageKey, name); } catch {}
-        panel.remove();
-        resolve(name);
-      });
-    });
+  const profileStorageKey = 'cod2-wasm-profile-v1';
+  let browserVersion = 'Browser dev';
+  function prepareProfile(context, fs) {
+    let saved = '';
+    let legacyName;
+    try {
+      saved = localStorage.getItem(profileStorageKey) || '';
+      legacyName = localStorage.getItem(gametagStorageKey);
+    } catch { /* Storage can be disabled; settings still work for this visit. */ }
+    gametag = validGametag(legacyName) || validGametag(context.preferences?.values().playerName) || 'Player';
+    const defaults = {
+      name: gametag, r_gpuSync: 'off', com_maxfps: '0', r_mode: '1280x720',
+      r_textureMode: 'anisotropic', r_anisotropy: '4', r_aaSamples: '4',
+      r_picmip_manual: '1', r_picmip: '0', cl_maxpackets: '60', rate: '25000',
+      snaps: '30', g_gametype: 'tdm', ui_mapname: 'mp_toujane', ui_netSource: '0',
+      ui_browserShowEmpty: '1', ui_browserShowFull: '1', ui_browserShowPure: '0',
+      ui_browserMod: '-1', ui_browserFriendlyfire: '-1', ui_browserKillcam: '-1'
+    };
+    // Defaults run first, then the native config (including key bindings).
+    // Saved latched graphics values therefore also survive a fresh engine.
+    const initial = Object.entries(defaults).map(([key, value]) => `seta ${key} "${value}"`).join('\n');
+    fs.mkdirTree('/profile/main/players/default');
+    fs.writeFile('/profile/main/players/active.txt', 'default');
+    fs.writeFile('/profile/main/players/default/config_mp.cfg', initial + '\n' + saved + '\n');
+  }
+  function saveProfile(context, config) {
+    try {
+      // Password dvars are not player preferences.
+      const clean = config.split('\n').filter(line => !/^seta\s+(?:password|rcon_password|cl_cdkey)\s/i.test(line)).join('\n');
+      localStorage.setItem(profileStorageKey, clean);
+    } catch {
+      context.log('Browser storage is unavailable; settings will last only for this visit.', 'error');
+    }
   }
   function showOriginalStartup(context) {
     const { loading, loadingTitle, loadingProgress, loadingStatus } = context.elements;
@@ -473,6 +448,8 @@
         const response = await fetch('/build-info.json', { cache: 'no-store', signal: AbortSignal.timeout(3000) });
         const build = response.ok && await response.json();
         if (/^[a-f0-9]{64}$/.test(build?.buildId)) buildId = build.buildId;
+        if (/^[a-f0-9]{40}$/.test(build?.revision))
+          browserVersion = `Browser ${build.revision.slice(0, 8)}${build.dirty ? ' dev' : ''}`;
       } catch { /* Hosts without metadata still load a fresh engine. */ }
       // A page reload revalidates scripts, but a WASM fetch can reuse an old
       // cached binary. Give the JS loader and binary the same build URL.
@@ -680,13 +657,13 @@
       if (native || failed) throw new Error('Reload the page to start a new instance.');
       context.setEngineState('loading');
       try {
-        await requireGametag(context);
         context.setLoading('Preparing the game…', '', 0);
         const factory = await loadFactory();
         const meter = performanceMeter(context);
         traceWebGl(context, meter);
         native = await factory({
           cod2Performance: meter,
+          cod2SaveProfile: config => saveProfile(context, config),
           canvas: context.elements.canvas, noInitialRun: true,
           // Emscripten's default terminal stdin opens window.prompt("Input:").
           // Browser gameplay receives keyboard events through SDL instead.
@@ -719,28 +696,14 @@
             context.setLoading(`Preparing the game… ${percent}%`, '', percent);
           }
         });
-        native.FS.mkdirTree('/profile');
+        prepareProfile(context, native.FS);
         native.FS.chdir('/game');
         context.setLoading('Starting the game…', '', 100);
         native.callMain([
           '+set', 'fs_basepath', '/game', '+set', 'fs_homepath', '/profile',
           '+set', 'dedicated', '0', '+set', 'r_rendererPreference', 'dx7',
-          '+set', 'name', `"${gametag}"`,
-          '+set', 'r_gpuSync', 'off', '+set', 'com_hunkMegs', '128',
-          // RAF already synchronizes rendering to the display. A desktop cap
-          // of 85 skips every other callback on a 120 Hz screen.
-          '+set', 'com_maxfps', '0',
-          '+set', 'r_fullscreen', '0', '+set', 'r_mode', '1280x720',
-          '+set', 'r_textureMode', 'anisotropic', '+set', 'r_anisotropy', '4',
-          '+set', 'r_aaSamples', '4',
-          '+set', 'r_picmip_manual', '1', '+set', 'r_picmip', '0',
-          '+set', 'cl_maxpackets', '60', '+set', 'rate', '25000',
-          '+set', 'snaps', '30',
-          '+set', 'g_gametype', 'tdm', '+set', 'ui_mapname', 'mp_toujane',
-          '+set', 'ui_netSource', '0', '+set', 'ui_browserShowEmpty', '1',
-          '+set', 'ui_browserShowFull', '1', '+set', 'ui_browserShowPure', '0',
-          '+set', 'ui_browserMod', '-1', '+set', 'ui_browserFriendlyfire', '-1',
-          '+set', 'ui_browserKillcam', '-1'
+          '+set', 'com_hunkMegs', '128', '+set', 'r_fullscreen', '0',
+          '+set', 'ui_browserVersion', `"${browserVersion}"`
         ]);
         const state = native._web_client_state();
         if (state === 1 || state === 2) context.showRuntime(state === 2 ? 'gameplay' : 'menu');
