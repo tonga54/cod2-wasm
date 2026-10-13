@@ -64,7 +64,7 @@ static void PM_ApplyStepEvent(pmove_t *pm,pml_t *pml,playerState_t *ps,const flo
 '''
 brush_code = ''.join(function(trace, n) for n in (
     'CM_DotProduct', 'CM_AbsFloat', 'CM_MinFloat', 'CM_InitTraceWork',
-    'CM_TraceMayHitBounds', 'CM_TraceBrushPlane', 'CM_TraceThroughBrush'))
+    'CM_TraceMayHitBounds', 'CM_ClipBrushPlaneDistances', 'CM_TraceBrushPlane', 'CM_TraceBrushAxialPlane', 'CM_TraceBoundsOverlap', 'CM_BrushBoundsOverlap', 'CM_TraceBrushPlanes', 'CM_TraceThroughBrush'))
 box_code = (root / 'src/PC/qcommon/cm_tracebox.c').read_text()
 brush_code = ''.join(function(box_code, n) for n in
                      ('CM_CalcTraceEntents', 'CM_TraceBox')) + brush_code

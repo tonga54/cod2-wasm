@@ -58,15 +58,29 @@ code = ''.join(function(box, n) for n in ('CM_CalcTraceEntents', 'CM_TraceBox'))
 code += trace[trace.index('#define CM_WORLD_TRACE_CACHE_SIZE'):trace.index('static float CM_DotProduct')]
 code += ''.join(function(trace, n) for n in ('CM_DotProduct', 'CM_AbsFloat',
     'CM_MinFloat', 'CM_InitTraceWork', 'CM_TraceMayHitBounds', 'CM_ClearTraceResult'))
+clip = function(trace, 'CM_ClipBrushPlaneDistances')
+axial = function(trace, 'CM_TraceBrushAxialPlane').replace('    vec3_t normal', '    planeTests++;\n    vec3_t normal')
 plane = function(trace, 'CM_TraceBrushPlane').replace('    float support;', '    planeTests++;\n    float support;')
-brush = function(trace, 'CM_TraceThroughBrush').replace('    int axis;', '    brushTests++;\n    int axis;')
-reference = brush.replace('CM_TraceThroughBrush(', 'CM_TraceThroughBrush_reference(')
+bounds = function(trace, 'CM_TraceBoundsOverlap') + function(trace, 'CM_BrushBoundsOverlap') + function(trace, 'CM_LeafBrushBlocks')
+planes = function(trace, 'CM_TraceBrushPlanes')
+brush = function(trace, 'CM_TraceThroughBrush').replace('    if (CM_BrushBoundsOverlap', '    brushTests++;\n    if (CM_BrushBoundsOverlap')
+reference = planes.replace('CM_TraceBrushPlanes(', 'CM_TraceThroughBrush_reference(')
+reference = reference.replace('    if (!CM_TraceMayHitBounds', '    if (!CM_BrushBoundsOverlap(tw, brush)) return;\n\n    if (!CM_TraceMayHitBounds')
+reference = reference.replace('CM_TraceBrushAxialPlane(', 'CM_TraceBrushAxialReference(')
 reference = reference.replace('''    if (!CM_TraceMayHitBounds(tw, brush->mins, brush->maxs, trace))
         return;''', '')
 assert reference != brush
 world = ''.join(function(trace, n) for n in ('CM_TraceLeafBrushNode_r',
     'CM_TraceLeafBrushes', 'CM_TraceLeafTerrain', 'CM_TraceLeaf', 'CM_Trace', 'CM_BoxTrace'))
 world = world.replace('    traceWork_t tw;', '    worldTraces++;\n    traceWork_t tw;')
+axialReference = r'''
+static void CM_TraceBrushAxialReference(const traceWork_t *tw,int axis,float sign,
+ float dist,int materialNum,float *enterFrac,float *leaveFrac,vec3_t enterNormal,
+ int *enterMaterial,int *startsOut,int *getOut) {
+ vec3_t normal={0};normal[axis]=sign;
+ CM_TraceBrushPlane(tw,normal,dist,materialNum,enterFrac,leaveFrac,enterNormal,enterMaterial,startsOut,getOut);
+}
+'''
 checks = r"""
 static uint32_t seed=123456;
 static float rnd(float scale) {seed=seed*1664525u+1013904223u;return (seed>>8)*(1.f/16777216.f)*scale;}
@@ -80,6 +94,46 @@ static void *cacheThread(void *unused) {
  for(int n=0;n<1000;n++)CM_BoxTrace(&result,a,b,zero,zero,0,1);
  assert(worldTraces==1);assert(result.fraction<1);
  return NULL;
+}
+static void checkBrushBlocks(void) {
+ cbrush_t brushes[1025]={0};unsigned short indices[1025];
+ cLeafBrushNode_t node={.contents=3,.data.leaf.brushes=indices};
+ cm.brushes=brushes;cm.numBrushes=1025;
+ for(int i=0;i<1025;i++) {
+  indices[i]=i;brushes[i].contents=1+(i%2);
+  for(int a=0;a<3;a++){brushes[i].mins[a]=rnd(4096)-2048;brushes[i].maxs[a]=brushes[i].mins[a]+rnd(128)+1;}
+ }
+ int counts[]={1,15,16,17,31,32,33,1023,1024,1025};
+ for(int run=0;run<4000;run++) {
+  node.leafBrushCount=counts[run%10];
+  if(run%20==0) { // Reload at the same addresses with changed geometry/masks.
+   int n=run%1025;brushes[n].mins[0]-=32;brushes[n].contents^=3;
+   CM_ClearWorldTraceCache();
+  }
+  if(run%50==0) { // Unordered duplicates and invalid indices, as in raw lists.
+   for(int i=0;i<1025;i++)indices[i]=(unsigned short)(rnd(1050));
+   CM_ClearWorldTraceCache();
+  }
+  vec3_t start,end,mins={-15,-15,-15},maxs={15,15,55};
+  for(int a=0;a<3;a++){start[a]=rnd(6000)-3000;end[a]=rnd(6000)-3000;}
+  if(run%3==0)memset(mins,0,sizeof(mins)),memset(maxs,0,sizeof(maxs));
+  if(run%5==0)memcpy(end,start,sizeof(end));
+  traceWork_t tw;CM_InitTraceWork(&tw,start,end,mins,maxs,1+run%3);
+  trace_t ref={.fraction=run%4==0?.25f:1},fast=ref;
+  CM_TraceLeafBrushNode_r(&tw,&node,&ref,0,NULL);
+  byte seen[8192]={0};CM_TraceLeafBrushNode_r(&tw,&node,&fast,0,seen);equal(ref,fast);
+ }
+ // Spatially separated consecutive groups must avoid visiting far brushes.
+ for(int i=0;i<1024;i++) {
+  indices[i]=i;brushes[i]=(cbrush_t){.contents=1,.mins={i*100.f,0,0},.maxs={i*100.f+20,20,20}};
+ }
+ node.leafBrushCount=1024;CM_ClearWorldTraceCache();
+ traceWork_t tw;vec3_t a={-10,10,10},b={21,10,10},z={0};CM_InitTraceWork(&tw,a,b,z,z,1);
+ trace_t ref={.fraction=1},fast=ref;brushTests=0;
+ CM_TraceLeafBrushNode_r(&tw,&node,&ref,0,NULL);unsigned long exhaustive=brushTests;
+ byte seen[8192]={0};brushTests=0;CM_TraceLeafBrushNode_r(&tw,&node,&fast,0,seen);equal(ref,fast);
+ assert(exhaustive==1024 && brushTests<=8);
+ printf("PASS: 4000 ordered brush-block comparisons, partial/max/uncached lists, masks, overlaps, duplicate/invalid entries and reloads; distant brush visits %lu -> %lu\n",exhaustive,brushTests);
 }
 int main(void) {
  cplane_t face; cbrushside_t side={.plane=&face,.materialNum=13};
@@ -183,6 +237,7 @@ int main(void) {
   pthread_t threads[8];for(int n=0;n<8;n++)assert(!pthread_create(&threads[n],NULL,cacheThread,NULL));
   for(int n=0;n<8;n++)assert(!pthread_join(threads[n],NULL));CM_ClearWorldTraceCache();
  }
+ checkBrushBlocks();
  printf("PASS: 100000 exhaustive/accelerated sweep comparisons; city planes %lu -> %lu with identical hit\n",oldPlanes,newPlanes);
  puts("PASS: 1024 shared BSP leaves, recursive shared nodes, independent traces, overlaps and masks");
  puts("PASS: 40000 cached/uncached exact-hit comparisons, 1000-to-1 repeated sweeps, dynamic box exclusion, map invalidation and independent thread caches");
@@ -190,7 +245,7 @@ int main(void) {
 """
 with tempfile.TemporaryDirectory(prefix='cod2-trace-pruning-') as directory:
     d = Path(directory)
-    (d / 'test.c').write_text(support + code + plane + brush + reference + world + checks)
+    (d / 'test.c').write_text(support + code + clip + plane + axial + axialReference + bounds + planes + brush + reference + world + checks)
     subprocess.run(['cc', '-std=c99', '-O1', '-g', '-fsanitize=address,undefined',
                     str(d / 'test.c'), '-o', str(d / 'test'), '-lm', '-pthread'], check=True)
     subprocess.run([str(d / 'test')], check=True)

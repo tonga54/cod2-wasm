@@ -1,0 +1,176 @@
+{
+  "date": "2026-10-13",
+  "hardware": "Raspberry Pi 5, Cortex-A76, 4 cores at up to 2.4 GHz, 8 GB RAM",
+  "baselineRevision": "9796539656ed7b6e007f90e99088459390469397",
+  "engine": "i386 Release under QEMU 10.0.13 in an ARM64 container",
+  "selectedVariant": "blocks",
+  "selectedEngineSha256": "592f81f39df68dd48dd6f3502cbcb7eab163e01675f88f39c57f7e29273e4ed1",
+  "limits": [
+    "Single 60-second samples after joining and 15-second warmup; bot combat/navigation varies between runs.",
+    "Protocol clients handshake, choose teams/weapons, move, turn, fire and acknowledge snapshots; they are not human/browser renderers.",
+    "Server packet gaps use kernel timestamps and omit fragments; not a client FPS or packet-loss measurement.",
+    "No new maximum capacity certification; higher rosters were not tested after the LAN SSH connection became unavailable."
+  ],
+  "measurements": [
+    {
+      "variant": "baseline",
+      "map": "mp_carentan",
+      "mode": "tdm",
+      "protocolClients": 8,
+      "hardBots": 16,
+      "requestedHz": 30,
+      "seconds": 60.00153534099809,
+      "cpuPercentOneCore": 93.88420592882608,
+      "meanGamePacketsPerSecondPerClient": 29.215919060027836,
+      "worstClientPacketGapP99Ms": 66.83206558227539,
+      "worstClientPacketGapMaxMs": 100.35347938537598,
+      "statusRttMs": {
+        "samples": 60,
+        "mean": 10.790702933445573,
+        "p95": 22.043000004487112,
+        "p99": 24.4457479857374,
+        "max": 25.138589000562206
+      },
+      "lostStatusQueries": 0,
+      "captureDrops": 0,
+      "capturePassed": true,
+      "realtimePassed": true,
+      "thermalBefore": [
+        "60600",
+        "throttled=0x0"
+      ],
+      "thermalAfter": [
+        "61150",
+        "throttled=0x0"
+      ]
+    },
+    {
+      "variant": "axial",
+      "map": "mp_carentan",
+      "mode": "tdm",
+      "protocolClients": 8,
+      "hardBots": 16,
+      "requestedHz": 30,
+      "seconds": 60.011706178978784,
+      "cpuPercentOneCore": 95.86828581146503,
+      "meanGamePacketsPerSecondPerClient": 27.41131863663325,
+      "worstClientPacketGapP99Ms": 96.99058532714844,
+      "worstClientPacketGapMaxMs": 200.95133781433105,
+      "statusRttMs": {
+        "samples": 60,
+        "mean": 12.624927517511727,
+        "p95": 37.63182298280299,
+        "p99": 42.862128000706434,
+        "max": 49.47929998161271
+      },
+      "lostStatusQueries": 0,
+      "captureDrops": 0,
+      "capturePassed": true,
+      "realtimePassed": false,
+      "thermalBefore": [
+        "62250",
+        "throttled=0x0"
+      ],
+      "thermalAfter": [
+        "62250",
+        "throttled=0x0"
+      ]
+    },
+    {
+      "variant": "inline",
+      "map": "mp_carentan",
+      "mode": "tdm",
+      "protocolClients": 8,
+      "hardBots": 16,
+      "requestedHz": 30,
+      "seconds": 60.007883132988354,
+      "cpuPercentOneCore": 96.36296929829781,
+      "meanGamePacketsPerSecondPerClient": 26.93604432633992,
+      "worstClientPacketGapP99Ms": 92.52691268920898,
+      "worstClientPacketGapMaxMs": 142.6248550415039,
+      "statusRttMs": {
+        "samples": 60,
+        "mean": 11.87698691743814,
+        "p95": 34.612588002346456,
+        "p99": 39.992191013880074,
+        "max": 42.65885299537331
+      },
+      "lostStatusQueries": 0,
+      "captureDrops": 0,
+      "capturePassed": true,
+      "realtimePassed": true,
+      "thermalBefore": [
+        "60600",
+        "throttled=0x0"
+      ],
+      "thermalAfter": [
+        "62250",
+        "throttled=0x0"
+      ]
+    },
+    {
+      "variant": "blocks",
+      "map": "mp_carentan",
+      "mode": "tdm",
+      "protocolClients": 8,
+      "hardBots": 16,
+      "requestedHz": 30,
+      "seconds": 60.00970303401118,
+      "cpuPercentOneCore": 86.81464224289415,
+      "meanGamePacketsPerSecondPerClient": 30.18261895036297,
+      "worstClientPacketGapP99Ms": 55.16552925109863,
+      "worstClientPacketGapMaxMs": 121.26350402832031,
+      "statusRttMs": {
+        "samples": 60,
+        "mean": 9.3360594852129,
+        "p95": 19.483739015413448,
+        "p99": 21.019626990891993,
+        "max": 45.75618900707923
+      },
+      "lostStatusQueries": 0,
+      "captureDrops": 0,
+      "capturePassed": true,
+      "realtimePassed": true,
+      "thermalBefore": [
+        "61700",
+        "throttled=0x0"
+      ],
+      "thermalAfter": [
+        "61700",
+        "throttled=0x0"
+      ]
+    },
+    {
+      "variant": "o3",
+      "map": "mp_carentan",
+      "mode": "tdm",
+      "protocolClients": 8,
+      "hardBots": 16,
+      "requestedHz": 30,
+      "seconds": 60.013005187007366,
+      "cpuPercentOneCore": 91.34506400600671,
+      "meanGamePacketsPerSecondPerClient": 29.851862849018836,
+      "worstClientPacketGapP99Ms": 62.97039985656738,
+      "worstClientPacketGapMaxMs": 130.71751594543457,
+      "statusRttMs": {
+        "samples": 60,
+        "mean": 9.037290852575097,
+        "p95": 19.714224006747827,
+        "p99": 22.01988099841401,
+        "max": 23.193895001895726
+      },
+      "lostStatusQueries": 0,
+      "captureDrops": 0,
+      "capturePassed": true,
+      "realtimePassed": true,
+      "thermalBefore": [
+        "61700",
+        "throttled=0x0"
+      ],
+      "thermalAfter": [
+        "63350",
+        "throttled=0x0"
+      ]
+    }
+  ]
+}

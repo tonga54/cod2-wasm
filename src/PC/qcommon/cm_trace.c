@@ -78,6 +78,29 @@ static __thread cmWorldTraceEntry_t cm_worldTraceCache[CM_WORLD_TRACE_CACHE_SIZE
 static __thread unsigned int cm_worldTraceCacheGeneration;
 #endif
 
+/* Exact, order-preserving broad phase for the loader's flat brush lists.
+ * Each eight consecutive entries has a conservative union bound. No sorting
+ * or contact skipping occurs inside a surviving block, including overlaps. */
+#define CM_BRUSH_BLOCK_WIDTH 8
+#define CM_BRUSH_BLOCK_MAX 1024
+#define CM_BRUSH_BLOCK_CACHE_SIZE 512
+typedef struct {
+    vec3_t mins, maxs;
+    int contents;
+} cmBrushBlock_t;
+typedef struct {
+    const cLeafBrushNode_t *node;
+    const unsigned short *brushes;
+    unsigned int generation;
+    int count;
+    cmBrushBlock_t blocks[CM_BRUSH_BLOCK_MAX / CM_BRUSH_BLOCK_WIDTH];
+} cmBrushBlockCache_t;
+#ifdef __EMSCRIPTEN__
+static cmBrushBlockCache_t cm_brushBlockCache[CM_BRUSH_BLOCK_CACHE_SIZE];
+#else
+static __thread cmBrushBlockCache_t cm_brushBlockCache[CM_BRUSH_BLOCK_CACHE_SIZE];
+#endif
+
 void CM_ClearWorldTraceCache(void)
 {
     if (++cm_worldTraceGeneration == 0)
@@ -261,28 +284,13 @@ static qboolean CM_TraceMayHitBounds(const traceWork_t *tw, const vec_t *mins,
     return !CM_TraceBox(&tw->extents, expandedMins, expandedMaxs, trace->fraction);
 }
 
-static void CM_TraceBrushPlane(const traceWork_t *tw, const vec_t *normal, float dist,
-                               int materialNum, float *enterFrac, float *leaveFrac,
-                               vec3_t enterNormal, int *enterMaterial, int *startsOut,
-                               int *getOut)
+static inline __attribute__((always_inline)) void CM_ClipBrushPlaneDistances(
+    float startDist, float endDist, const vec_t *normal, int materialNum,
+    float *enterFrac, float *leaveFrac, vec3_t enterNormal,
+    int *enterMaterial, int *startsOut, int *getOut)
 {
-    float support;
-    float expandedDist;
-    float startDist;
-    float endDist;
     float denominator;
     float fraction;
-
-    /* Map brushes and triangle meshes must sweep the same upright capsule.
-     * Expanding by AABB half sizes adds square shoulders on diagonal walls
-     * and slopes, making a clear corner overlap the player's box. BSP plane
-     * normals are unit length; the sphere radius plus the projected vertical
-     * segment is the capsule's support distance. */
-    support = tw->radius + CM_AbsFloat(normal[2]) * tw->offsetZ;
-    expandedDist = dist + support;
-
-    startDist = CM_DotProduct(tw->extents.start, normal) - expandedDist;
-    endDist = CM_DotProduct(tw->extents.end, normal) - expandedDist;
 
     if (startDist > 0.0f)
         *startsOut = 1;
@@ -318,7 +326,108 @@ static void CM_TraceBrushPlane(const traceWork_t *tw, const vec_t *normal, float
     }
 }
 
-static void CM_TraceThroughBrush(const traceWork_t *tw, cbrush_t *brush, trace_t *trace)
+static void CM_TraceBrushPlane(const traceWork_t *tw, const vec_t *normal, float dist,
+                               int materialNum, float *enterFrac, float *leaveFrac,
+                               vec3_t enterNormal, int *enterMaterial, int *startsOut,
+                               int *getOut)
+{
+    float support;
+    float expandedDist;
+    float startDist;
+    float endDist;
+
+    /* Map brushes and triangle meshes must sweep the same upright capsule.
+     * Expanding by AABB half sizes adds square shoulders on diagonal walls
+     * and slopes, making a clear corner overlap the player's box. BSP plane
+     * normals are unit length; the sphere radius plus the projected vertical
+     * segment is the capsule's support distance. */
+    support = tw->radius + CM_AbsFloat(normal[2]) * tw->offsetZ;
+    expandedDist = dist + support;
+
+    startDist = CM_DotProduct(tw->extents.start, normal) - expandedDist;
+    endDist = CM_DotProduct(tw->extents.end, normal) - expandedDist;
+
+    CM_ClipBrushPlaneDistances(startDist, endDist, normal, materialNum,
+        enterFrac, leaveFrac, enterNormal, enterMaterial, startsOut, getOut);
+}
+
+static void CM_TraceBrushAxialPlane(const traceWork_t *tw, int axis, float sign,
+    float dist, int materialNum, float *enterFrac, float *leaveFrac,
+    vec3_t enterNormal, int *enterMaterial, int *startsOut, int *getOut)
+{
+    vec3_t normal = {0.0f, 0.0f, 0.0f};
+    float support = tw->radius + (axis == 2 ? tw->offsetZ : 0.0f);
+    float expandedDist = dist + support;
+    float startDist = sign * tw->extents.start[axis] - expandedDist;
+    float endDist = sign * tw->extents.end[axis] - expandedDist;
+
+    /* These six normals are exactly +/- one coordinate axis. Preserve the
+     * capsule, contact epsilon and clipping order without dot products whose
+     * other two terms are zero. Sloped brush planes use the general solver. */
+    normal[axis] = sign;
+    CM_ClipBrushPlaneDistances(startDist, endDist, normal, materialNum,
+        enterFrac, leaveFrac, enterNormal, enterMaterial, startsOut, getOut);
+}
+
+static inline __attribute__((always_inline)) qboolean CM_TraceBoundsOverlap(
+    const traceWork_t *tw, const vec_t *mins, const vec_t *maxs, int contents)
+{
+    int axis;
+    if (!(contents & tw->contents))
+        return 0;
+    for (axis = 0; axis < 3; axis++) {
+        if (tw->bounds[0][axis] > maxs[axis] + 1.0f)
+            return 0;
+        if (tw->bounds[1][axis] < mins[axis] - 1.0f)
+            return 0;
+    }
+    return 1;
+}
+
+static inline __attribute__((always_inline)) qboolean CM_BrushBoundsOverlap(
+    const traceWork_t *tw, const cbrush_t *brush)
+{
+    return brush && CM_TraceBoundsOverlap(tw, brush->mins, brush->maxs, brush->contents);
+}
+
+static const cmBrushBlock_t *CM_LeafBrushBlocks(const cLeafBrushNode_t *node)
+{
+    cmBrushBlockCache_t *entry;
+    int i, axis;
+    if (node->leafBrushCount < 16 || node->leafBrushCount > CM_BRUSH_BLOCK_MAX)
+        return NULL;
+    entry = &cm_brushBlockCache[((size_t)node >> 4) & (CM_BRUSH_BLOCK_CACHE_SIZE - 1)];
+    if (entry->node == node && entry->brushes == node->data.leaf.brushes &&
+        entry->count == node->leafBrushCount && entry->generation == cm_worldTraceGeneration)
+        return entry->blocks;
+    for (i = 0; i < node->leafBrushCount; i++) {
+        cmBrushBlock_t *block = &entry->blocks[i / CM_BRUSH_BLOCK_WIDTH];
+        unsigned int index = node->data.leaf.brushes[i];
+        if (!(i % CM_BRUSH_BLOCK_WIDTH)) {
+            block->contents = 0;
+            for (axis = 0; axis < 3; axis++) {
+                block->mins[axis] = 3.402823466e+38f;
+                block->maxs[axis] = -3.402823466e+38f;
+            }
+        }
+        if (index >= (unsigned int)cm.numBrushes)
+            continue;
+        block->contents |= cm.brushes[index].contents;
+        for (axis = 0; axis < 3; axis++) {
+            if (cm.brushes[index].mins[axis] < block->mins[axis])
+                block->mins[axis] = cm.brushes[index].mins[axis];
+            if (cm.brushes[index].maxs[axis] > block->maxs[axis])
+                block->maxs[axis] = cm.brushes[index].maxs[axis];
+        }
+    }
+    entry->node = node;
+    entry->brushes = node->data.leaf.brushes;
+    entry->count = node->leafBrushCount;
+    entry->generation = cm_worldTraceGeneration;
+    return entry->blocks;
+}
+
+static void CM_TraceBrushPlanes(const traceWork_t *tw, cbrush_t *brush, trace_t *trace)
 {
     int axis;
     int sideIndex;
@@ -329,35 +438,18 @@ static void CM_TraceThroughBrush(const traceWork_t *tw, cbrush_t *brush, trace_t
     float leaveFrac = 1.0f;
     vec3_t enterNormal = { 0.0f, 0.0f, 0.0f };
 
-    if (!brush || !(brush->contents & tw->contents))
-        return;
-
-    for (axis = 0; axis < 3; axis++) {
-        if (tw->bounds[0][axis] > brush->maxs[axis] + 1.0f)
-            return;
-        if (tw->bounds[1][axis] < brush->mins[axis] - 1.0f)
-            return;
-    }
-
     if (!CM_TraceMayHitBounds(tw, brush->mins, brush->maxs, trace))
         return;
 
     for (axis = 0; axis < 3; axis++) {
-        vec3_t normal;
-
-        normal[0] = 0.0f;
-        normal[1] = 0.0f;
-        normal[2] = 0.0f;
-        normal[axis] = 1.0f;
-        CM_TraceBrushPlane(tw, normal, brush->maxs[axis],
+        CM_TraceBrushAxialPlane(tw, axis, 1.0f, brush->maxs[axis],
                            brush->axialMaterialNum[1][axis],
                            &enterFrac, &leaveFrac, enterNormal, &enterMaterial,
                            &startsOut, &getOut);
         if (enterFrac >= leaveFrac)
             return;
 
-        normal[axis] = -1.0f;
-        CM_TraceBrushPlane(tw, normal, -brush->mins[axis],
+        CM_TraceBrushAxialPlane(tw, axis, -1.0f, -brush->mins[axis],
                            brush->axialMaterialNum[0][axis],
                            &enterFrac, &leaveFrac, enterNormal, &enterMaterial,
                            &startsOut, &getOut);
@@ -399,6 +491,15 @@ static void CM_TraceThroughBrush(const traceWork_t *tw, cbrush_t *brush, trace_t
     }
 }
 
+static inline __attribute__((always_inline)) void CM_TraceThroughBrush(
+    const traceWork_t *tw, cbrush_t *brush, trace_t *trace)
+{
+    /* Most BSP leaf entries miss these cheap bounds. Inline the rejection so
+     * those entries never pay the full plane solver's call/register setup. */
+    if (CM_BrushBoundsOverlap(tw, brush))
+        CM_TraceBrushPlanes(tw, brush, trace);
+}
+
 static void CM_TraceLeafBrushNode_r(const traceWork_t *tw, cLeafBrushNode_t *node,
                                     trace_t *trace, int depth, byte *brushSeen)
 {
@@ -411,8 +512,19 @@ static void CM_TraceLeafBrushNode_r(const traceWork_t *tw, cLeafBrushNode_t *nod
         return;
 
     if (node->leafBrushCount > 0) {
+        /* Only immutable world lists use this cache; temporary/moving models
+         * pass no brushSeen bitmap and continue through the original path. */
+        const cmBrushBlock_t *blocks = brushSeen ? CM_LeafBrushBlocks(node) : NULL;
         for (i = 0; i < node->leafBrushCount; i++) {
-            unsigned short brushIndex = node->data.leaf.brushes[i];
+            unsigned short brushIndex;
+            if (blocks && !(i % CM_BRUSH_BLOCK_WIDTH)) {
+                const cmBrushBlock_t *block = &blocks[i / CM_BRUSH_BLOCK_WIDTH];
+                if (!CM_TraceBoundsOverlap(tw, block->mins, block->maxs, block->contents)) {
+                    i += CM_BRUSH_BLOCK_WIDTH - 1;
+                    continue;
+                }
+            }
+            brushIndex = node->data.leaf.brushes[i];
             if (brushIndex < cm.numBrushes) {
                 /* BSP leaves share brushes. A trace tests the full segment,
                  * so revisiting one cannot find an earlier collision. The

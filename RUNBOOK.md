@@ -3382,3 +3382,31 @@ parents and attached models, pivot/descendant positions, repeated evaluation,
 the 127-bone allocation boundary, and 99 stance/pitch/lean combinations with
 both teleport states. The former local-space multiplication and dead mask fail
 the regressions. Browser evidence and build/test logs are in out/remote-pose/.
+
+## Pi collision throughput (2026-10-13)
+
+World brush traces now reject missed consecutive eight-brush groups using exact
+cached union bounds and contents masks. Surviving brushes keep the original
+ordering and overlap/material semantics. Cheap individual rejection inlines
+before the plane solver; axial faces avoid zero-term dot products and share the
+same clipping logic as sloped faces. The bounded, per-thread cache invalidates
+on map load/shutdown and excludes temporary/moving models. No tick, AI budget,
+damage, capsule, contact epsilon, animation or packet-schema setting changes.
+
+On the actual Pi 5, the selected Release `-O2` engine with eight protocol clients
+and 16 Hard bots at 30 Hz used 86.8% of one core and sent 30.20 game packets/s per
+client. The baseline sample used 93.9% and sent 29.22/s. These are single
+60-second samples with varying bot combat/navigation, not a universal speedup
+or maximum capacity certificate. The experimental `-O3` sample was slower than
+the selected variant and was not adopted. Full methods, all variants, limits
+and aggregate evidence are in `docs/SERVER_PERFORMANCE_2026-10-13.md` and
+`docs/benchmarks/pi-server-2026-10-13.json`; raw evidence is `out/server-perf/`.
+
+Regression coverage adds 4,000 brush-group equivalence cases and a deterministic
+1,024-to-eight brush visit fixture, alongside the exhaustive collision,
+world-cache, overlap, movement, prone, car/sill, bot and loader checks. Further
+Pi load tests and production deployment are pending: the user left the Pi LAN
+and confirmed there is no remote SSH/VPN access. Prepare release images from the
+clean committed source and apply them with the existing security overlay once
+SSH is available. Do not infer higher supported player/bot counts from slot
+limits or from tests on the build computer.

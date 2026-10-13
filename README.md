@@ -149,6 +149,12 @@ retail CoD2:
   direction and Q/E as a lateral lean. Controllers rotate in model axes after
   skeletal composition, preserving movement animations. The respawn/teleport
   toggle no longer suppresses a living player's aim or lean.
+- **Pi server collision performance:** immutable map brushes use cached bounds
+  for consecutive groups, preserving collision order, capsule dimensions and
+  contact tolerances. A Pi 5 sample with eight protocol clients and 16 Hard bots
+  sustained 30.2 updates/s/client at 86.8% of one core, versus 29.2 updates/s and
+  93.9% before. This is a measured sample, not a maximum-player guarantee; see
+  [the performance report](docs/SERVER_PERFORMANCE_2026-10-13.md).
 - **Bounded cleanup and respawn feedback:** bodies remain for eight seconds in
   an eight-body pool, dropped weapons/ammunition expire after twenty seconds,
   and TDM uses a three-second respawn countdown.
