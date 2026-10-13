@@ -3410,3 +3410,42 @@ and confirmed there is no remote SSH/VPN access. Prepare release images from the
 clean committed source and apply them with the existing security overlay once
 SSH is available. Do not infer higher supported player/bot counts from slot
 limits or from tests on the build computer.
+
+## Enemy clearance at respawn (2026-10-13)
+
+Retail TDM bypasses `avoidDangerousSpawns` and ranks points using aggregate
+enemy/team distances, allowing nearby enemies to be hidden by distant players
+or teammate attraction. The weighted final selector now applies a first-party
+clearance constraint in DM/TDM/CTF/HQ before ranking with retail weights.
+Non-occupied points at least 850 units from every living enemy remain eligible;
+when none meet that radius, only points with the greatest nearest-enemy distance
+remain. Reusing a safe point is preferable to an unsafe alternative. If every
+point is occupied, the existing retail last resort remains available. Random
+spectator/S&D round selection and authored spawn sets remain unchanged.
+
+`scripts/browser_spawn_safety.py` inserts the call and appends
+`downstream/server/browser_spawn_safety.gsc` to the privately derived retail
+script. The original owner's archives are untouched. The updated public
+manifest invalidates cached private renderer archives on both server and client.
+The private-asset checker also recognizes the existing browser settings-menu
+adaptation, which its previous byte-comparison path omitted.
+
+Verified with the unchanged Release engine from parent `4e10c41`: ten
+deterministic production-GSC/VM assertions on each of Toujane, Carentan and
+Dawnville pass (30 total). They cover overriding unsafe weights, negative weights
+and safe reuse, all-threatened fallback, the 850-unit boundary, occupied points,
+spectators/dead players/teammates, DM same-team hostility, no enemies and the
+all-occupied fallback. Two real death/respawn/patrol cycles pass in each of DM,
+TDM, CTF and HQ. Room/map/mode, script-vector/native-callback, objective contact
+and respawn/weapon/movement regressions pass, as does private-archive validation.
+Evidence is under `out/spawn-safety/`; this is headless engine coverage, not a
+browser combat or Pi load measurement.
+
+Reproduce the selector scenarios after preparing the private assets:
+
+```sh
+python3 scripts/prepare-spawn-safety-qa.py
+python3 scripts/test-bot-runtime.py --bots 4 --seconds 40 \
+  --policy out/spawn-safety/controlled.gsc --expect-passes 10 \
+  --stop-after-passes --output out/spawn-safety/tdm
+```

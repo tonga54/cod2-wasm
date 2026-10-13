@@ -159,6 +159,11 @@ retail CoD2:
 - **Bounded cleanup and respawn feedback:** bodies remain for eight seconds in
   an eight-body pool, dropped weapons/ammunition expire after twenty seconds,
   and TDM uses a three-second respawn countdown.
+- **Safer respawns:** DM, TDM, CTF and HQ exclude occupied points and points
+  within 850 units of a living enemy when a free safe point exists. Retail team,
+  objective and recent-death weights rank the remaining points. If every free
+  point is threatened, the selector maximizes distance to the nearest enemy.
+  Spectator and S&D round spawns retain their original rules.
 - **Movement conveniences:** C toggles crouch. Space first stands up from crouch
   or prone, including when the stance key is held; another press while standing
   jumps. Ordinary ground movement stops

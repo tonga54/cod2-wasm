@@ -11,7 +11,9 @@ import csv
 import io
 from weapon_balance import apply_weapon_balance, load_profile
 from browser_bot_menu import apply_bot_menu
+from browser_settings_menu import apply_settings_menu
 from browser_objective_assets import objective_asset_roots
+from browser_spawn_safety import apply_spawn_safety
 
 root = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
@@ -44,6 +46,7 @@ try:
                     continue
                 source, original_name = index[name]
                 original = source.read(original_name)
+                original = apply_settings_menu(name, original)
                 if name == "default_mp.cfg":
                     expected = original.replace(b'bind SHIFT\t"+melee_breath"', b'bind SHIFT\t"+sprint"')
                     expected = expected.replace(b'bind v\t"mp_QuickMessage"',
@@ -57,6 +60,8 @@ try:
                     assert data == expected, name
                 elif name.startswith("weapons/mp/"):
                     assert data == apply_weapon_balance(name, original, balance_profile), name
+                elif name == "maps/mp/gametypes/_spawnlogic.gsc":
+                    assert data == apply_spawn_safety(name, original), name
                 elif name == "maps/mp/gametypes/tdm.gsc":
                     # Existing reviewed death/spawn UI deadline adaptation.
                     assert original.count(b"delay = 2;") == 1
