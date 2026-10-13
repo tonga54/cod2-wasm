@@ -44,19 +44,22 @@ typedef struct {int buttons,forwardmove,rightmove;} usercmd_t;
 typedef struct {int cl_stance,cl_stanceTemp;} LegacyHacks;
 static LegacyHacks legacy,*legacyPtr=&legacy;
 static void *imp_legacyHacks=&legacyPtr;
-typedef struct {int keyCatchers,cgameInShellshock,stanceHeld;struct {struct {int pm_type,pm_flags,viewHeightTarget;}ps;}snap;} clientActive_t;
+typedef struct {int keyCatchers,cgameInShellshock,stanceHeld,usingAds;struct {struct {int pm_type,pm_flags,viewHeightTarget;}ps;}snap;} clientActive_t;
 static clientActive_t client,*clientPtr=&client;
 static void *imp_cl=&clientPtr;
 static struct {struct {int enabled;}current;} bypass,*cl_bypassMouseInput=&bypass;
 static unsigned int frameMsec=16;
 static void *imp_frame_msec=&frameMsec;
 #define BUTTON_SPRINT 2
+static int CL_KeyMoveValue(kbutton_t *b){return b->active?127:0;}
+static int ClampChar(int n){return n>127?127:n<-127?-127:n;}
+static int PM_IsBinocularsADS(void *ps){return 0;}
 static const char *Cmd_Argv(int n) {return n==1 ? "32" : "1000";}
 #define Com_Printf(...) ((void)0)
 '''
 input_body = ''.join(function('src/PC/client_mp/cl_input.c', n) for n in (
     'IN_KeyDown', 'IN_KeyUp', 'IN_ToggleCrouch', 'IN_GoProne', 'IN_GoStandDown',
-    'IN_GoStandUp', 'CL_ConsumeButtonPress', 'CL_CmdButtons'))
+    'IN_GoStandUp', 'CL_ConsumeButtonPress', 'CL_CmdButtons', 'CL_KeyMove'))
 input_checks = r'''
 int main(void) {
     for(int posture=1;posture<=2;posture++) for(int type=0;type<8;type++) {
@@ -100,11 +103,31 @@ input_source = input_support + input_body + input_checks
 check(input_source, (input_source.replace('(unsigned int)((*clp)->snap.ps.pm_type - 2)',
                                          '(int)((*clp)->snap.ps.pm_type - 2)'),))
 
+sprint_checks = r'''
+int main(void){
+ for(int posture=1;posture<=2;posture++)for(int held=0;held<3;held++){
+  memset(kb,0,sizeof(kb));client=(clientActive_t){0};legacy=(LegacyHacks){posture,1};
+  client.stanceHeld=1;kb[(int[]){11,25,26}[held]].active=1;kb[2].active=1;
+  usercmd_t cmd={.buttons=BUTTON_SPRINT|0x300};CL_KeyMove(&cmd);
+  assert(cmd.forwardmove==127&&!(cmd.buttons&0x300)&&!legacy.cl_stance&&!legacy.cl_stanceTemp);
+  assert(!client.stanceHeld&&!kb[11].active&&!kb[25].active&&!kb[26].active);
+  cmd=(usercmd_t){0};CL_KeyMove(&cmd);assert(!(cmd.buttons&0x300));
+ }
+ /* Shift while aiming keeps the posture used for scoped Hold Breath. */
+ client.usingAds=1;legacy.cl_stance=2;usercmd_t cmd={.buttons=BUTTON_SPRINT};CL_KeyMove(&cmd);
+ assert((cmd.buttons&0x1000)&&(cmd.buttons&0x100)&&legacy.cl_stance==2);
+ return 0;
+}
+'''
+sprint_source = input_support + input_body + sprint_checks
+check(sprint_source, (sprint_source.replace('cl->snap.ps.pm_type == 0 && (cmd->buttons & BUTTON_SPRINT)', '0'),))
+
 movement_support = r'''
 #include <assert.h>
 #include <math.h>
 #include <string.h>
 #define PM_REGPARM2_ABI
+#define BUTTON_SPRINT 2
 #define ANIM_ET_CROUCH_TO_PRONE 11
 #define ANIM_ET_PRONE_TO_CROUCH 12
 #define ANIM_ET_STAND_TO_CROUCH 13
@@ -204,18 +227,22 @@ timed_body = ''.join(function('src/PC/bgame/bg_pmove.c', n) for n in (
     'PM_GetViewHeightLerp', 'PM_ViewHeightAdjust', 'PM_CheckDuck'))
 timed_checks = r'''
 int main(void){
- for(int posture=1;posture<=2;posture++)for(int dt=4;dt<=66;dt++){
+ for(int posture=1;posture<=2;posture++)for(int dt=4;dt<=66;dt++)for(int sprint=0;sprint<2;sprint++){
   playerState_t ps={.groundEntityNum=1022,.pm_flags=posture==1?2:1,
     .viewHeightTarget=posture==1?40:11,.viewHeightCurrent=posture==1?40:11,
     .mins={-15,-15,0},.maxs={15,15,70}};
   pmove_t pm={.ps=&ps};pml_t pml={.frametime=dt*.001f};eventCount=blockedHeight=0;
-  for(int t=1000;t<2500;t+=dt){pm.cmd.serverTime=t;PM_CheckDuck(&pm,&pml);}
+  for(int t=1000;t<2500;t+=dt){
+   pm.cmd.serverTime=t;pm.cmd.forwardmove=sprint?127:0;
+   pm.cmd.buttons=sprint?(BUTTON_SPRINT|(posture==1?0x200:0x100)):0;
+   PM_CheckDuck(&pm,&pml);
+  }
   assert(ps.viewHeightTarget==60&&ps.viewHeightCurrent==60&&!(ps.pm_flags&3));
   assert(eventCount==(posture==1?1:2));
  }
  playerState_t ps={.groundEntityNum=1022,.pm_flags=1,.viewHeightTarget=11,.viewHeightCurrent=11,
     .mins={-15,-15,0},.maxs={15,15,70}};
- pmove_t pm={.ps=&ps};pml_t pml={.frametime=.016f};eventCount=0;blockedHeight=60;
+ pmove_t pm={.ps=&ps,.cmd={.buttons=BUTTON_SPRINT,.forwardmove=127}};pml_t pml={.frametime=.016f};eventCount=0;blockedHeight=60;
  for(int t=1000;t<2000;t+=16){pm.cmd.serverTime=t;PM_CheckDuck(&pm,&pml);}
  assert(ps.viewHeightTarget==40&&ps.viewHeightCurrent==40); // Low ceiling still blocks standing.
  blockedHeight=0;

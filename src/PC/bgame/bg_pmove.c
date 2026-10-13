@@ -1025,6 +1025,12 @@ static void PM_REGPARM2_ABI PM_CheckDuck(pmove_t *pm, pml_t *pml)
         }
     }
 
+    /* Prediction and server movement agree on sprint's stance override.
+     * The standing/crouching branches below retain their collision checks. */
+    if (ps->pm_type == 0 && (pm->cmd.buttons & BUTTON_SPRINT) &&
+        pm->cmd.forwardmove > 0 && !(pm->cmd.buttons & 0x1000))
+        pm->cmd.buttons &= ~0x300;
+
     if (pm->cmd.buttons & 0x100) {
 
         if (ps->pm_flags & 0x1)
@@ -1795,10 +1801,26 @@ static void PM_REGPARM2_ABI PM_GroundTrace(pmove_t *pm, pml_t *pml)
 
     if (trace.allsolid) {
 
-        for (i = 0; i < 26; i++) {
-            point[0] = ps->origin[0] + CorrectSolidDeltas[i][0];
-            point[1] = ps->origin[1] + CorrectSolidDeltas[i][1];
-            point[2] = ps->origin[2] + CorrectSolidDeltas[i][2];
+        /* Two touching faces can need slightly more than the old one-unit
+         * correction. Try the nearest shell first and keep recovery bounded
+         * to tiny overlaps; ordinary walls still block the player. */
+        for (i = 0; i < 84; i++) {
+            if (i < 52) {
+                int direction = i % 26;
+                float distance = i < 26 ? 1.0f : 2.0f;
+                point[0] = ps->origin[0] + distance * CorrectSolidDeltas[direction][0];
+                point[1] = ps->origin[1] + distance * CorrectSolidDeltas[direction][1];
+                point[2] = ps->origin[2] + distance * CorrectSolidDeltas[direction][2];
+            } else {
+                int edge = (i - 52) / 8;
+                float along = ((i - 52) % 8) * 0.5f - 2.0f;
+                /* Angled corners can have a clear exit between the original
+                 * axial/diagonal probes. Sample that same small horizontal
+                 * shell more densely, without enlarging its reach. */
+                point[0] = ps->origin[0] + (edge == 0 ? 2.0f : edge == 2 ? -2.0f : along);
+                point[1] = ps->origin[1] + (edge == 1 ? 2.0f : edge == 3 ? -2.0f : along);
+                point[2] = ps->origin[2];
+            }
 
             PM_playerTrace(pm, &trace, point, pm->mins, pm->maxs, point,
                            ps->clientNum, pm->tracemask);
@@ -1807,7 +1829,7 @@ static void PM_REGPARM2_ABI PM_GroundTrace(pmove_t *pm, pml_t *pml)
                 break;
         }
 
-        if (i == 26) {
+        if (i == 84) {
             ps->groundEntityNum = ENTITYNUM_NONE;
             pml->groundPlane = 0;
             pml->almostGroundPlane = 0;

@@ -73,10 +73,12 @@ int main(void){
  // Invalid stale requests do not switch an existing gun to the first slot.
  pm.cmd.weapon=99;ps.weaponstate=WEAPON_READY;ps.weaponslots[1]=10;
  PM_CheckWeaponChange(&pm);assert(ps.weapon==11&&ps.weaponstate==WEAPON_READY);
- // Existing actions still block changes, including a live offhand grenade.
+ // Reloads cancel for a weapon change; other actions, including a live
+ // offhand grenade, still block changes.
  for(int state=WEAPON_FIRING;state<=WEAPON_OFFHAND_END;state++){
   ps.weapon=11;ps.weaponstate=state;pm.cmd.weapon=10;
-  PM_CheckWeaponChange(&pm);assert(ps.weaponstate==state&&ps.weapon==11);
+  PM_CheckWeaponChange(&pm);
+  assert(ps.weaponstate==(PM_WeaponStateIsReloading(state)?WEAPON_DROPPING:state)&&ps.weapon==11);
  }
  ps.weapon=0;ps.weaponstate=WEAPON_OFFHAND_HOLD;PM_CheckWeaponChange(&pm);
  assert(ps.weaponstate==WEAPON_OFFHAND_HOLD);

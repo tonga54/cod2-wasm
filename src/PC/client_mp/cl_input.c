@@ -1428,7 +1428,6 @@ void CL_AdjustAngles(void)
 void CL_KeyMove(usercmd_t *cmd)
 {
     clientActive_t *cl;
-    int *legacyStance;
     int side;
     int forward;
 
@@ -1470,6 +1469,20 @@ void CL_KeyMove(usercmd_t *cmd)
 
     CL_Gamepad_Move(cmd);
 #endif
+
+    /* Sprint stands up from both toggled and held stances. Consume the old
+     * stance press so releasing Shift does not crouch/prone again. Movement
+     * still performs its normal headroom trace before actually standing. */
+    if (cl->snap.ps.pm_type == 0 && (cmd->buttons & BUTTON_SPRINT) &&
+        cmd->forwardmove > 0 && !(cmd->buttons & 0x1000)) {
+        kb[25].active = kb[25].wasPressed = 0;
+        kb[26].active = kb[26].wasPressed = 0;
+        kb[11].active = kb[11].wasPressed = 0;
+        (*(LegacyHacks **)imp_legacyHacks)->cl_stance = 0;
+        (*(LegacyHacks **)imp_legacyHacks)->cl_stanceTemp = 0;
+        cl->stanceHeld = 0;
+        cmd->buttons &= ~0x300;
+    }
 
 #undef KB_AT
 }

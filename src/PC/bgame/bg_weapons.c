@@ -774,52 +774,16 @@ static void __attribute_regparm__(1) PM_Weapon_ReloadDelayedAction(playerState_t
     WeaponDef *weapDef = bg_weaponDefs[iWeapon];
     int weaponBit = 1 << (iWeapon & 0x1f);
     int weaponWord = iWeapon >> 5;
-    int reloadState;
-    int reloadTime;
-    int boltTime;
+    /* Commit a magazine or segmented insertion only when its animation
+     * completes. Cancelling preserves clip/reserve and any earlier completed
+     * insertions; an expired add/bolt delay cannot finish the current reload. */
+    if (weapDef->bBoltAction && (ps->weaponrechamber[weaponWord] & weaponBit)) {
+        ps->weaponrechamber[weaponWord] &= ~weaponBit;
+        PM_AddEvent(ps, 0xa2);
+    }
 
-    if (!weapDef->bBoltAction || !(ps->weaponrechamber[weaponWord] & weaponBit)) {
+    if (!ps->weaponTime)
         PM_ReloadClip(ps);
-        return;
-    }
-
-    ps->weaponrechamber[weaponWord] &= ~weaponBit;
-    PM_AddEvent(ps, 0xa2);
-
-    reloadState = ps->weaponstate - 7;
-    if ((unsigned int)reloadState <= 1 && !weapDef->iReloadStartAddTime)
-        return;
-
-    if (!ps->weaponTime) {
-        PM_ReloadClip(ps);
-        return;
-    }
-
-    if ((unsigned int)reloadState <= 1) {
-        reloadTime = weapDef->iReloadStartAddTime;
-        if (reloadTime >= weapDef->iReloadStartTime)
-            reloadTime = weapDef->iReloadStartTime;
-    } else {
-        if (ps->ammoclip[weapDef->iClipIndex] || weapDef->weapType)
-            reloadTime = weapDef->iReloadTime;
-        else
-            reloadTime = weapDef->iReloadEmptyTime;
-
-        if (weapDef->iReloadAddTime && reloadTime > weapDef->iReloadAddTime)
-            reloadTime = weapDef->iReloadAddTime;
-    }
-
-    boltTime = weapDef->iRechamberBoltTime;
-    if (reloadTime <= boltTime)
-        boltTime = 1;
-
-    reloadTime -= boltTime;
-    if (reloadTime <= 0) {
-        PM_ReloadClip(ps);
-        return;
-    }
-
-    ps->weaponDelay = reloadTime;
 }
 
 static BM_ALWAYS_INLINE int BG_GetViewmodelWeaponIndex_core(const playerState_t *ps)
@@ -1760,7 +1724,8 @@ static qboolean PM_ShouldChangeWeapon(pmove_t *pm)
         return 0;
     if (!PM_WeaponHasInventoryWeapon(ps, newWeapon))
         return 0;
-    if (PM_WeaponStateBlocksChange(ps->weaponstate))
+    if (PM_WeaponStateBlocksChange(ps->weaponstate) &&
+        !PM_WeaponStateIsReloading(ps->weaponstate))
         return 0;
     if (PM_WeaponStateIsBinoculars(ps->weaponstate))
         return 1;
@@ -2026,13 +1991,16 @@ static qboolean PM_CheckMeleeStart(pmove_t *pm, qboolean delayedAction)
     playerState_t *ps = pm->ps;
     WeaponDef *weapDef;
 
-    if (delayedAction || !(pm->cmd.buttons & PM_WEAPON_BUTTON_MELEE)) {
+    if ((delayedAction && !PM_WeaponStateIsReloading(ps->weaponstate)) ||
+        !(pm->cmd.buttons & PM_WEAPON_BUTTON_MELEE)) {
         if (!(pm->cmd.buttons & PM_WEAPON_BUTTON_MELEE))
             ps->pm_flags &= ~PM_WEAPON_FLAG_MELEE_HELD;
         return 0;
     }
 
-    if (!ps->weapon || PM_WeaponStateBlocksChange(ps->weaponstate) ||
+    if (!ps->weapon ||
+        (PM_WeaponStateBlocksChange(ps->weaponstate) &&
+         !PM_WeaponStateIsReloading(ps->weaponstate)) ||
         PM_WeaponStateIsBinoculars(ps->weaponstate))
         return 0;
 
@@ -2261,7 +2229,7 @@ static void PM_RunReloadState(playerState_t *ps, qboolean delayedAction)
 
     weapDef = bg_weaponDefs[ps->weapon];
 
-    if (delayedAction)
+    if (delayedAction || !ps->weaponTime)
         PM_Weapon_ReloadDelayedAction(ps);
 
     if (ps->weaponTime)

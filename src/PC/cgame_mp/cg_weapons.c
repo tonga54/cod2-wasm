@@ -1381,9 +1381,6 @@ void CG_AddViewWeapon(playerState_t *ps)
     if (!cg->cubemapShot && cg_drawGun->current.enabled && !CG_GetWeapReticleZoom(&zoom))
         drawGun = 1;
 
-    if (cg->shellshock.hasSavedScreen)
-        return;
-
     if (playerState->eFlags & 0x300)
         return;
 

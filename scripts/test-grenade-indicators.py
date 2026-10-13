@@ -124,12 +124,15 @@ int main(void){
   reset();float r=heading*.01745329252f,dist=(float[]){32,180,255}[d];
   grenade(64,weapon,cosf(r)*dist,sinf(r)*dist,0);cg->refdefViewAngles[1]=turn;drawCount(1);
   float angle=(heading-turn)*.01745329252f;
-  near(icons[0].x+12.5f,-sinf(angle)*50);near(icons[0].y+12.5f,-cosf(angle)*50);
+  float scale=.75f+.75f*(1-dist/256);
+  near(icons[0].w,25*scale);near(icons[0].h,25*scale);
+  near(icons[0].x+icons[0].w*.5f,-sinf(angle)*50);near(icons[0].y+icons[0].h*.5f,-cosf(angle)*50);
   /* The triangle points away from the crosshair, toward the threat. */
   near(sinf(arrows[0].angle*.01745329252f),-sinf(angle));
   near(cosf(arrows[0].angle*.01745329252f),cosf(angle));
-  near(arrows[0].x+12.5f,-sinf(angle)*71+cosf(angle)*.5f);
-  near(arrows[0].y+6,-cosf(angle)*71-sinf(angle)*.5f);
+  near(arrows[0].w,25*scale);near(arrows[0].h,12*scale);
+  near(arrows[0].x+arrows[0].w*.5f,-sinf(angle)*(50+21*scale)+cosf(angle)*.5f*scale);
+  near(arrows[0].y+arrows[0].h*.5f,-cosf(angle)*(50+21*scale)-sinf(angle)*.5f*scale);
   cases++;
  }
  /* Warning and real damage agree across each weapon's 3D blast boundary. */
@@ -180,11 +183,12 @@ int main(void){
  reset();cent=grenade(64,1,0,0,150);height.current.value=100;drawCount(0);
  /* Fixed draw budget selects the closest warnings in a crowded snapshot. */
  reset();for(int i=0;i<9;i++)grenade(64+i,1,(float[]){90,60,20,80,40,10,70,30,50}[i],0,0);
- drawCount(4);for(int i=0;i<4;i++)near(icons[i].x,-12.5f);
+ drawCount(4);for(int i=0;i<4;i++)near(icons[i].x+icons[i].w*.5f,0);
  /* Inspect selection using different quadrants at known distances. */
  reset();grenade(64,1,80,0,0);grenade(65,1,0,60,0);grenade(66,1,-40,0,0);grenade(67,1,0,-20,0);grenade(68,1,200,0,0);
- drawCount(4);near(icons[0].x+12.5f,50);near(icons[1].y+12.5f,50);
- near(icons[2].x+12.5f,-50);near(icons[3].y+12.5f,-50);
+ drawCount(4);near(icons[0].x+icons[0].w*.5f,50);near(icons[1].y+icons[1].h*.5f,50);
+ near(icons[2].x+icons[2].w*.5f,-50);near(icons[3].y+icons[3].h*.5f,-50);
+ assert(icons[0].w>icons[1].w&&icons[1].w>icons[2].w&&icons[2].w>icons[3].w);
  /* Snapshot limits and identifiers remain safe even on malformed input. */
  reset();grenade(1021,6,30,0,0);nextSnap.numEntities=9999;
  for(int i=1;i<256;i++)nextSnap.entities[i].number=(int[]){-1,1022,1023,9000}[i%4];drawCount(1);
@@ -203,6 +207,7 @@ variants = [
     ('smoke warning', distance.replace('weapon->offhandClass != OFFHAND_CLASS_FRAG_GRENADE', '0'), draw),
     ('reversed pointer', distance, draw.replace('7, 7, -angle,', '7, 7, angle,')),
     ('unbounded warnings', distance, draw.replace('MAX_WARNINGS = 4', 'MAX_WARNINGS = 6')),
+    ('fixed-size warnings', distance, draw.replace('0.75f + 0.75f * proximity', '1.0f')),
 ]
 with tempfile.TemporaryDirectory(prefix='cod2-grenade-indicators-') as directory:
     path = Path(directory)

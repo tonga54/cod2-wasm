@@ -207,22 +207,9 @@ const char *CL_GetHudMsgIconMaterialName(int index)
 
 void Con_ToggleConsole_f(void)
 {
-    char *field;
-
-    if (con_restricted->current.enabled) {
-        if (*(int *)((char *)*(void **)imp_keys + 0x780))
-            goto toggle;
-        if (!((*(clientActive_t **)imp_cl)->keyCatchers & 1))
-            return;
-    }
-toggle:
-    field = (char *)imp_g_consoleField;
-    Field_Clear(field);
-    ((field_t *)field)->widthInPixels = g_console_field_width;
-    ((field_t *)field)->charHeight = g_console_char_height;
-    ((field_t *)field)->fixedSize = 1;
+    /* Disable the player console even for saved bindings and direct commands. */
+    clients.keyCatchers &= ~1;
     con.outputVisible = 0;
-    clients.keyCatchers ^= 1;
 }
 
 static void Con_ChatModePublic_f(void)
@@ -568,7 +555,7 @@ void Con_DrawSay(int y)
 
 void Con_ToggleConsoleOutput(void)
 {
-    con.outputVisible = (con.outputVisible == 0) ? 1 : 0;
+    con.outputVisible = 0;
 }
 
 static BM_NOINLINE void Con_DrawOuputWindow(void)

@@ -40,7 +40,10 @@ static serverStatic_t svs;static void *imp_svs=&svs;
 static cachedClient_t cache[4096];static cachedSnapshot_t snap;
 static int lastFrame;
 #define CACHEDCLIENT_STRIDE sizeof(cachedClient_t)
-static cachedSnapshot_t *SV_GetCachedSnapshotInternal(int frame) { lastFrame=frame;return &snap; }
+static cachedSnapshot_t *SV_GetCachedSnapshotInternal(int frame) {
+ if(frame<0||frame>=svs.nextArchivedSnapshotFrames)return NULL;
+ lastFrame=frame;snap.time=frame*50-(frame==98?50:0);return &snap;
+}
 static int GetFollowPlayerState(int n,byte *ps) { memcpy(ps,&cache[n].ps,sizeof(playerState_t));return 1; }
 static clientState_t *G_GetClientState(int n) { return &cache[n].cs; }
 '''
@@ -90,16 +93,16 @@ int main(void) {
  return 0;
 }
 '''
-archive = function('SV_GetArchivedClientInfo')
+archive = function('SV_FindArchivedSnapshotAtTime') + function('SV_GetArchivedClientInfo')
 sample = function('SV_GetClientPositionAtTime').replace('SV_GetArchivedClientInfo(', 'sampleHistory(')
 with tempfile.TemporaryDirectory(prefix='cod2-antilag-') as directory:
     path = Path(directory)
     variants = [(archive,sample),
-                (archive.replace('(sv_fps_dvar)', '(sv_maxRate_dvar)'),sample),
+                (archive.replace('int targetTime = svs->time - archiveTime;', 'int targetTime = svs->time - archiveTime + 100;'),sample),
                 (archive,sample.replace(' || startTime == endTime', ''))]
     for index,(a,s) in enumerate(variants):
         (path/'test.c').write_text(support+a+archive_check+sampling+s+checks)
         subprocess.run(['cc','-std=c99','-O1','-g','-fsanitize=address,undefined',str(path/'test.c'),'-lm','-o',str(path/'test')],check=True)
         result=subprocess.run([str(path/'test')],capture_output=True,timeout=10)
         assert (result.returncode==0)==(index==0),result.stderr.decode()
-print('PASS: 64 client histories, 32000 interpolations, identical/missing/gapped samples; old bandwidth and zero-division variants fail')
+print('PASS: 64 client histories, 32000 interpolations, identical/missing/gapped samples; future-sample and zero-division variants fail')

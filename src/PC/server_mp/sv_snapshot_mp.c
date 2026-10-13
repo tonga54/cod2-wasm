@@ -1016,46 +1016,74 @@ void SV_SendMessageToClient(msg_t *msg, client_t *client)
     ZN10LargeLocalD1Ev(compressedBuf_ll);
 }
 
+static cachedSnapshot_t *SV_FindArchivedSnapshotAtTime(int archiveTime)
+{
+    serverStatic_t *svs = (serverStatic_t *)imp_svs;
+    int low = svs->nextArchivedSnapshotFrames - 1200;
+    int high = svs->nextArchivedSnapshotFrames - 1;
+    int targetTime = svs->time - archiveTime;
+    int before = -1, after = -1;
+
+    if (!svs->archiveEnabled || archiveTime <= 0)
+        return NULL;
+    if (low < 0)
+        low = 0;
+
+    /* The usual fixed-rate case needs only adjacent cached samples. Treat
+     * fps as a search hint and validate the real timestamps; gaps and rate
+     * changes fall back to the bounded search below. This keeps anti-lag
+     * history queries cheap as well as synchronizing the killcam. */
+    {
+        int fps = (*(dvar_t **)(sv_fps_dvar))->current.integer;
+        int step = fps > 0 && fps <= 1000 ? 1000 / fps : 0;
+        cachedSnapshot_t *latest = step && high >= low ? SV_GetCachedSnapshotInternal(high) : NULL;
+        int offset = latest ? latest->time - targetTime : 0;
+        int guess = latest ? high - (offset > 0 ? (offset - 1) / step + 1 : 0) : -1;
+        if (guess >= low && guess <= high) {
+            cachedSnapshot_t *sample = SV_GetCachedSnapshotInternal(guess);
+            if (sample && sample->time <= targetTime) {
+                cachedSnapshot_t *next = guess < high ? SV_GetCachedSnapshotInternal(guess + 1) : NULL;
+                if ((next && next->time > targetTime) || guess == high)
+                    return SV_GetCachedSnapshotInternal(guess);
+            }
+        }
+    }
+
+    /* Archive counts are not a clock: 30 Hz uses 33 ms ticks, and dropped
+     * archives or a changed tick rate invalidate count*fps estimates. Find
+     * the last real sample at/before the requested replay time instead. */
+    while (low <= high) {
+        int middle = low + (high - low) / 2;
+        int frame = middle;
+        cachedSnapshot_t *sample = NULL;
+        while (frame <= high && !(sample = SV_GetCachedSnapshotInternal(frame)))
+            ++frame;
+        if (!sample) {
+            high = middle - 1;
+        } else if (sample->time <= targetTime) {
+            before = frame;
+            low = frame + 1;
+        } else {
+            after = frame;
+            high = middle - 1;
+        }
+    }
+    /* At match start the requested history may predate the archive. Trim
+     * once to its oldest available sample. Re-fetch after cache searches. */
+    if (before < 0 && after < 0)
+        return NULL;
+    return SV_GetCachedSnapshotInternal(before >= 0 ? before : after);
+}
+
 qboolean SV_GetArchivedClientInfo(int clientNum, int *pArchiveTime, int (*ps)[4], void (*cs)())
 {
     serverStatic_t *svs = (serverStatic_t *)imp_svs;
     cachedSnapshot_t *snap = NULL;
-    int archivedFrame = 0;
 
     if (svs->archiveEnabled != 0 && *pArchiveTime > 0) {
-        int archivedSnapshotCount = svs->nextArchivedSnapshotFrames;
-        int rate = (*(dvar_t **)(sv_fps_dvar))->current.integer;
-        int minFrame;
-
-        if (rate <= 0)
+        snap = SV_FindArchivedSnapshotAtTime(*pArchiveTime);
+        if (!snap)
             return 0;
-
-        archivedFrame = archivedSnapshotCount - (*pArchiveTime * rate / 1000);
-        minFrame = archivedSnapshotCount - 0x4b0;
-
-        if (archivedFrame < minFrame) {
-            *pArchiveTime = (archivedSnapshotCount - minFrame) * 1000 / rate;
-            archivedFrame = minFrame;
-        }
-
-        if (archivedFrame < 0) {
-            *pArchiveTime = archivedSnapshotCount * 1000 / rate;
-            archivedFrame = 0;
-        }
-
-        if (svs->nextArchivedSnapshotFrames > archivedFrame) {
-            serverStatic_t *svsReload = (serverStatic_t *)imp_svs;
-            while (archivedFrame < svsReload->nextArchivedSnapshotFrames) {
-                snap = SV_GetCachedSnapshotInternal(archivedFrame);
-                if (snap != NULL)
-                    break;
-                archivedFrame++;
-            }
-        }
-
-        if (snap == NULL) {
-            *pArchiveTime = 0;
-        }
     }
 
     if (snap != NULL) {
@@ -1099,14 +1127,10 @@ qboolean SV_GetArchivedClientInfo(int clientNum, int *pArchiveTime, int (*ps)[4]
             playerState_t *pps = (playerState_t *)psBytes;
             if (pps->commandTime != 0)
                 pps->commandTime += deltaTime;
-            if (pps->pm_time != 0)
-                pps->pm_time += deltaTime;
             if (pps->foliageSoundTime != 0)
                 pps->foliageSoundTime += deltaTime;
             if (pps->jumpTime != 0)
                 pps->jumpTime += deltaTime;
-            if (pps->legsTimer != 0)
-                pps->legsTimer += deltaTime;
             if (pps->adsDelayTime != 0)
                 pps->adsDelayTime += deltaTime;
             if (pps->viewHeightLerpTime != 0)
@@ -1481,9 +1505,7 @@ static cachedSnapshot_t *SV_FindArchivedSnapshotForClientLocal(int clientNum, in
 {
     serverStatic_t *svs = (serverStatic_t *)imp_svs;
     int requestedArchiveTime;
-    int fps;
-    int archivedFrame;
-    int oldestFrame;
+    cachedSnapshot_t *sample;
 
     *archiveTime = 0;
     if (!svs->archiveEnabled) {
@@ -1495,32 +1517,15 @@ static cachedSnapshot_t *SV_FindArchivedSnapshotForClientLocal(int clientNum, in
         return NULL;
     }
 
-    fps = SV_DvarIntLocal((byte *)sv_fps_dvar);
-    if (fps <= 0) {
-        return NULL;
+    sample = SV_FindArchivedSnapshotAtTime(requestedArchiveTime);
+    if (sample) {
+        int availableAge = svs->time - sample->time;
+        /* Keep the requested delay through ordinary tick rounding. Feeding
+         * rounded ages back every frame moves the replay endpoint. Only a
+         * request older than the available history needs to be shortened. */
+        *archiveTime = requestedArchiveTime < availableAge ? requestedArchiveTime : availableAge;
     }
-
-    archivedFrame = svs->nextArchivedSnapshotFrames - (requestedArchiveTime * fps) / 1000;
-    oldestFrame = svs->nextArchivedSnapshotFrames - 1200;
-    if (archivedFrame < oldestFrame) {
-        archivedFrame = oldestFrame;
-        requestedArchiveTime = ((svs->nextArchivedSnapshotFrames - archivedFrame) * 1000) / fps;
-    }
-    if (archivedFrame < 0) {
-        archivedFrame = 0;
-        requestedArchiveTime = (svs->nextArchivedSnapshotFrames * 1000) / fps;
-    }
-
-    while (archivedFrame < svs->nextArchivedSnapshotFrames) {
-        cachedSnapshot_t *cachedFrame = SV_GetCachedSnapshotInternal(archivedFrame);
-        if (cachedFrame) {
-            *archiveTime = requestedArchiveTime;
-            return cachedFrame;
-        }
-        ++archivedFrame;
-    }
-
-    return NULL;
+    return sample;
 }
 
 static void SV_BuildVisibleCachedEntitiesLocal(clientSnapshot_t *frame, cachedSnapshot_t *cachedFrame,

@@ -41,7 +41,7 @@ typedef struct {float mins[3],maxs[3];int contents,numsides,axialMaterialNum[2][
 typedef struct {float origin[3],velocity[3];int gravity,clientNum,pm_time,pm_flags,groundEntityNum,pm_type,eFlags;float proneDirection,fTorsoHeight,fTorsoPitch,fWaistPitch;vec3_t vLadderVec;} playerState_t;
 typedef struct {playerState_t *ps;vec3_t mins,maxs;int tracemask,handler,numtouch,touchents[32];struct {int forwardmove;}cmd;} pmove_t;
 typedef struct {float frametime,impactSpeed;int groundPlane,almostGroundPlane,walking;vec3_t previous_origin,previous_velocity;trace_t groundTrace;} pml_t;
-static cbrush_t wall,floorBrush;
+static cbrush_t wall,floorBrush,cornerWall;
 static cplane_t face,back;
 static cbrushside_t sides[2];
 static void CM_InitTraceThreadInfo(traceWork_t *tw) {}
@@ -74,6 +74,7 @@ static void PM_playerTrace(pmove_t *pm,trace_t *t,const float *start,
  traceWork_t tw;CM_InitTraceWork(&tw,start,end,mins,maxs,mask);
  *t=(trace_t){.fraction=1,.entityNum=1023};
  CM_TraceThroughBrush(&tw,&wall,t);
+ if(!t->allsolid)CM_TraceThroughBrush(&tw,&cornerWall,t);
  if(!t->allsolid)CM_TraceThroughBrush(&tw,&floorBrush,t);
  if(t->fraction<1||t->startsolid)t->entityNum=1022;
 }
@@ -187,6 +188,35 @@ int main(void) {
   if(object)assert(ps.origin[1]>100&&fabsf(ps.origin[2]-128.125f)<.5f);
   else assert(ps.origin[0]>200&&ps.origin[2]<.3f); // Crosses the car and lands normally.
  }
+ /* A shallow overlap at both faces of a corner needs the second recovery
+  * shell. Once clear, normal slide movement must immediately work again. */
+ for(int stance=0;stance<3;stance++)for(int angle=0;angle<360;angle+=15) {
+  geometry(angle);
+  cplane_t cornerFace={.normal={-face.normal[1],face.normal[0],0}};
+  cplane_t cornerBack={.normal={face.normal[1],-face.normal[0],0},.dist=128};
+  cbrushside_t cornerSides[2]={{.plane=&cornerFace},{.plane=&cornerBack}};
+  cornerWall=wall;cornerWall.sides=cornerSides;
+  playerState_t ps={.groundEntityNum=1022,.gravity=800};
+  for(int i=0;i<2;i++)ps.origin[i]=(face.normal[i]+cornerFace.normal[i])*13.6f;
+  ps.origin[2]=.125f;
+  pmove_t pm={.ps=&ps,.mins={-15,-15,0},.maxs={15,15,30+20*stance},.tracemask=1};
+  pml_t pml={.frametime=.033f};fallHits=0;
+  trace_t t;PM_playerTrace(&pm,&t,ps.origin,pm.mins,pm.maxs,ps.origin,0,1);assert(t.allsolid);
+  PM_GroundTrace(&pm,&pml);
+  PM_playerTrace(&pm,&t,ps.origin,pm.mins,pm.maxs,ps.origin,0,1);
+  if(t.startsolid||t.allsolid)fprintf(stderr,"corner stance=%d angle=%d origin=%.4f,%.4f,%.4f\n",stance,angle,ps.origin[0],ps.origin[1],ps.origin[2]);
+  assert(!t.startsolid&&!t.allsolid);
+  float before[3];memcpy(before,ps.origin,sizeof(before));
+  for(int i=0;i<2;i++)ps.velocity[i]=(face.normal[i]+cornerFace.normal[i])*100;
+  PM_SlideMove(&pm,&pml,0);
+  assert(hypotf(ps.origin[0]-before[0],ps.origin[1]-before[1])>4&&!fallHits);
+  /* Deep embedding is not permission to teleport through solid walls. */
+  for(int i=0;i<2;i++)ps.origin[i]=(face.normal[i]+cornerFace.normal[i])*10;
+  ps.origin[2]=.125f;PM_GroundTrace(&pm,&pml);
+  PM_playerTrace(&pm,&t,ps.origin,pm.mins,pm.maxs,ps.origin,0,1);assert(t.allsolid);
+  assert(!pml.walking&&!fallHits);
+ }
+ cornerWall=(cbrush_t){0};
  /* Slanted slopes/walls use capsule support; zero-sized bullet traces and
   * axial wall/floor boundaries retain the same hit distances. */
  for(int z=0;z<=10;z++) {
@@ -209,9 +239,13 @@ old_support = '''support = CM_AbsFloat(normal[0]) * CM_AbsFloat(tw->size[0]) +
               CM_AbsFloat(normal[2]) * CM_AbsFloat(tw->size[2]);'''
 with tempfile.TemporaryDirectory(prefix='cod2-corners-') as directory:
     d = Path(directory)
-    for index, variant in enumerate((brush_code, brush_code.replace(
-            'support = tw->radius + CM_AbsFloat(normal[2]) * tw->offsetZ;', old_support))):
-        (d / 'test.c').write_text(support + variant + player_trace + prone_support + ground_support + movement + checks)
+    variants = (brush_code, brush_code.replace(
+            'support = tw->radius + CM_AbsFloat(normal[2]) * tw->offsetZ;', old_support), brush_code)
+    for index, variant in enumerate(variants):
+        ground = ground_support
+        if index == 2:
+            ground = ground.replace('i < 84', 'i < 26').replace('i == 84', 'i == 26')
+        (d / 'test.c').write_text(support + variant + player_trace + prone_support + ground + movement + checks)
         subprocess.run(['cc', '-std=c99', '-O1', '-g', '-fsanitize=address,undefined',
                         str(d / 'test.c'), '-o', str(d / 'test'), '-lm'], check=True)
         result = subprocess.run([str(d / 'test')], capture_output=True, text=True)
@@ -219,3 +253,4 @@ with tempfile.TemporaryDirectory(prefix='cod2-corners-') as directory:
         if index == 0:
             print(result.stdout.strip())
 print('PASS: original square-shoulder collision mutant reproduces the corner overlap and fails')
+print('PASS: 72 shallow corner recoveries preserve movement; one-unit recovery fails and deeper embedding stays blocked')

@@ -107,7 +107,8 @@ retail CoD2:
   and difficulty settings, objectives for all five modes, cover, normal weapon
   rules and collision-based navigation.
 - **Sprint:** Shift + W increases movement speed, lowers and swings the weapon,
-  and uses the running body animation. Sprint currently has no stamina limit.
+  and uses the running body animation. It also stands up from crouch/prone when
+  headroom permits. Sprint currently has no stamina limit.
   Melee moves to V; scoped Hold Breath continues to use Shift.
 - **Melee damage:** butt strikes deal at most 50 damage without random bonuses
   or bullet hit-location multipliers. Two hits kill a player with 100 health;
@@ -184,13 +185,19 @@ retail CoD2:
   gun, preferring the primary slots. Removed weapons, grenades and binoculars
   cannot leave a newly armed player waiting on an invalid weapon selection.
 - Reloading returns to held/toggled aiming unless the player cancels aim.
+  Switching weapons or striking cancels the current reload without adding
+  ammunition; segmented reloads retain only completed insertions.
   Scoped Hold Breath lasts at most 4.5 seconds, with 5.5 seconds of recovery
   after exhaustion.
 - Frag grenades have their original 3.5-second fuse, can be cooked in the hand,
   bounce off players, and can be picked up and returned with G while preserving
   the remaining fuse. Holding one too long kills its holder. Nearby live frags
-  show the original icon and directional warning inside their blast radius;
+  show the original icon and directional warning inside their blast radius,
+  growing with proximity;
   cover can still block splash damage.
+- Blast shellshock keeps the first-person weapon visible. Killcam samples use
+  actual archive timestamps, including when the server tick rate changes.
+- The player console is disabled, including its toggle command and saved bindings.
 - Hits show the original red directional damage arc and low-health blood overlay.
   Teammate names remain visible without aiming at them. Kill notifications reach
   all players/spectators and expire normally.

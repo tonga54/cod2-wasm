@@ -101,6 +101,11 @@ int main(void) {
     assert(cg->vGunSpeed[0]==0&&cg->vGunOffset[0]==0);
     assert(cg->playerEntity.fLastIdleFactor>170&&cg->playerEntity.vLastMoveAng[0]>170);
     assert(draws>11000);
+    /* Saved-screen shellshock must retain the live first-person weapon for
+     * the entire effect, including the next frame after it finishes. */
+    cg->shellshock.hasSavedScreen=1;
+    for(int t=0;t<5000;t+=16){int before=draws;cg->time+=16;CG_AddViewWeapon(&ps);assert(draws==before+1);}
+    cg->shellshock.hasSavedScreen=0;int before=draws;CG_AddViewWeapon(&ps);assert(draws==before+1);
     return 0;
 }
 '''
@@ -160,7 +165,9 @@ with tempfile.TemporaryDirectory(prefix='cod2-weapon-regression-') as directory:
         viewbody.replace('cg->gunPitch = worldAngles[0];','cg->gunPitch = weaponAngles[0];')
                 .replace('cg->gunYaw = worldAngles[1];','cg->gunYaw = weaponAngles[1];'),
         viewbody.replace('cg->vGunSpeed[i] = ws.vGunSpeed[i];',''),
-        viewbody.replace('ws.time = cg->time;','ws.time = cg->time - playerState->commandTime;')]),
+        viewbody.replace('ws.time = cg->time;','ws.time = cg->time - playerState->commandTime;'),
+        viewbody.replace('    weaponIndex = BG_GetViewmodelWeaponIndex(playerState);',
+                         '    if (cg->shellshock.hasSavedScreen) return;\n    weaponIndex = BG_GetViewmodelWeaponIndex(playerState);')]),
         ('ground',mathbody+itemtypes,itembody,itemchecks,[
         itembody.replace('ent->r.inuse && tr.fraction','ent->active && tr.fraction')])]
     for name,support,body,checks,mutants in suites:
@@ -169,4 +176,4 @@ with tempfile.TemporaryDirectory(prefix='cod2-weapon-regression-') as directory:
             subprocess.run(['cc', '-I', str(root / 'src/headers'),'-std=c99','-O1','-g','-fsanitize=address,undefined',str(path),'-lm','-o',str(tmp/name)],check=True)
             result=subprocess.run([str(tmp/name)],capture_output=True,text=True)
             assert (result.returncode==0)==(index==0),(name,index,result.stderr)
-print('PASS: 333 world-space scope directions, 11,000 recoil frames, 168 slope/yaw landings, freed entities and 4 failing regression mutants')
+print('PASS: 333 world-space scope directions, 11,000 recoil frames, shellshock weapon visibility, 168 slope/yaw landings, freed entities and 5 failing regression mutants')

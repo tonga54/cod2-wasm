@@ -317,10 +317,7 @@ void Key_SetCatcher(int catcher)
 {
     clientActive_t **pp = (clientActive_t **)imp_cl;
     clientActive_t *ptr = *pp;
-    if (ptr->keyCatchers & 1)
-        ptr->keyCatchers = catcher | 1;
-    else
-        ptr->keyCatchers = catcher;
+    ptr->keyCatchers = catcher & ~1;
     ptr = *pp;
     if (!(ptr->keyCatchers & 8))
         ptr->displayHUDWithKeycatchUI = 0;
