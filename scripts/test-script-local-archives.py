@@ -4,6 +4,8 @@ import re, subprocess, tempfile
 from pathlib import Path
 root=Path(__file__).resolve().parent.parent
 source=(root/'src/PC/script/scr_vm.c').read_text()
+headers=(root/'src/headers/common_types.h').read_text()
+stack_buffer=re.search(r'struct VariableStackBuffer \{.*?\n\};',headers,re.S).group()
 def function(name):
     m=re.search(r'^.*\b'+name+r'\([^;{}]*?\)\n\{',source,re.M)
     assert m,name
@@ -19,12 +21,23 @@ support=r'''
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+// The production host VM stores code/stack values in 32-bit slots even when
+// pointers are 64-bit. Exercise that path on ARM64 test hosts as well.
+#if UINTPTR_MAX > UINT32_MAX
+#define _M_X64 1
+#endif
 #define __attribute_regparm__(n)
 #define VAR_UNDEFINED 0
 typedef unsigned char byte;
-typedef union {int intValue;unsigned stackValue;const char *codePosValue;} VariableUnion;
+typedef struct VariableStackBuffer VariableStackBuffer;
+''' + stack_buffer + r'''
+#if UINTPTR_MAX > UINT32_MAX
+typedef union {int intValue;unsigned stackValue,codePosValue;} VariableUnion;
+#else
+typedef union {int intValue;VariableStackBuffer *stackValue;const char *codePosValue;} VariableUnion;
+#endif
 typedef struct {VariableUnion u;int type;} VariableValue;
-typedef struct __attribute__((packed)) {const char *pos;unsigned short size,localId,bufLen;byte time;char buf[1];} VariableStackBuffer;
+static const char program[128]="test script code positions";
 static struct scrVarPub_t {unsigned time,timeArrayId;} varPub;
 static const void *imp_scrVarPub=&varPub;
 static struct {unsigned localVarCount;const char *pos;} frameFs;
@@ -35,10 +48,23 @@ static unsigned parents[65534];
 static void *MT_Alloc(int n,int flags){(void)flags;void*p=calloc(1,n);assert(p);return p;}
 static int MT_Realloc(int oldSize,int newSize){(void)oldSize;(void)newSize;return 0;}
 static void MT_Free(void *p,int size){(void)size;free(p);}
+#if UINTPTR_MAX > UINT32_MAX
 #define SCR_STACK_ENC(p) ((unsigned)(uintptr_t)(p))
+static unsigned encodeCodePos(const char *p){
+ if(!p)return 0;
+ assert(p>program&&p<program+sizeof(program));
+ return (unsigned)(p-program);
+}
+#define SCR_CODEPOS_ENC(p) encodeCodePos(p)
+#define SCR_CODEPOS_GET(u) ((u).codePosValue?program+(u).codePosValue:NULL)
+#else
+#define SCR_STACK_ENC(p) (p)
+#define SCR_CODEPOS_GET(u) ((u).codePosValue)
+#endif
 static void AddRefToValue(int type,VariableUnion value){(void)value;assert(type==6);}
 static void RemoveRefToValue(int type,VariableUnion value){(void)value;assert(type==0||type==6);}
-static unsigned killedFrame,queuedStack;
+static unsigned killedFrame;
+static typeof(((VariableUnion*)0)->stackValue) queuedStack;
 static void Scr_KillThread(unsigned id){killedFrame=id;}
 static void RemoveRefToObject(unsigned id){(void)id;}
 static void Scr_SetThreadWaitTime(unsigned id,unsigned time){(void)id;(void)time;}
@@ -46,7 +72,6 @@ static unsigned GetVariable(unsigned parent,unsigned key){(void)parent;(void)key
 static unsigned GetArray(unsigned id){return id;}
 static unsigned GetNewObjectVariable(unsigned parent,unsigned key){(void)parent;(void)key;return 1;}
 static void SetNewVariableValue(unsigned id,VariableValue*value){assert(id==1&&value->type==10);queuedStack=value->u.stackValue;}
-#define SCR_CODEPOS_GET(u) ((u).codePosValue)
 static void Com_Error(int level,const char *s){(void)level;fprintf(stderr,"%s\n",s);abort();}
 static unsigned GetParentLocalId(unsigned id){assert(id>0);return id-1;}
 static unsigned GetSafeParentLocalId(unsigned id){assert(id<65534);return parents[id];}
@@ -73,7 +98,10 @@ static void restore(VariableStackBuffer*p,unsigned count,unsigned value){
  free(p);
 }
 int main(void){
- _Static_assert(offsetof(VariableStackBuffer,buf)==11,"original i386 stack ABI");
+ _Static_assert(sizeof(VariableUnion)==4,"original four-byte script value ABI");
+ _Static_assert(offsetof(VariableStackBuffer,buf)==sizeof(void*)+7,"production stack header ABI");
+ _Static_assert(offsetof(VariableStackBuffer,bufLen)==sizeof(void*)+2,"production buffer length field");
+ _Static_assert(offsetof(VariableStackBuffer,localId)==sizeof(void*)+4,"production local id field");
  // More sleeping scripts than the old 256-slot eviction ring can retain.
  VariableStackBuffer *live[1024];
  for(unsigned j=0;j<1024;j++)live[j]=archive(10+j,j%64+1,10000+j*40);
@@ -83,11 +111,17 @@ int main(void){
  // Sibling reconstruction can reverse the caller's cached variable indices.
  parents[60001]=60000;cacheCount=3;scrVmPub.localVars=vars+128;
  scrVmPub.function_count=2;scrVmPub.function_frame=frames+2;
- frames[1].fs.localVarCount=4;frames[1].fs.pos="caller";
+ frames[1].fs.localVarCount=4;frames[1].fs.pos=program+1;
  for(unsigned j=0;j<7;j++)vars[122+j]=500+j;
  VariableValue boundary={{0},7};unsigned nestedId=60001;
- VariableStackBuffer*nested=VM_ArchiveStack(1,"callee",&boundary,3,&nestedId);
+ VariableStackBuffer*nested=VM_ArchiveStack(1,program+20,&boundary,3,&nestedId);
  assert(nestedId==60000&&nested->localId==60001);
+ assert(nested->pos==program+20&&nested->buf[0]==7);
+#if UINTPTR_MAX > UINT32_MAX
+ assert(*(unsigned*)(nested->buf+1)==1);
+#else
+ assert(*(const char**)(nested->buf+1)==program+1);
+#endif
  scrVmPub.localVars=vars+128;
  assert(VM_RestoreArchivedFrameLocalVars(nested,60000)==4);
  assert(VM_RestoreArchivedLocalVars(nested)==3);
@@ -97,11 +131,12 @@ int main(void){
  // while invalidating the terminated child before its allocator id is reused.
  parents[60003]=60002;cacheCount=3;scrVmPub.localVars=vars+128;
  scrVmPub.function_count=2;scrVmPub.function_frame=frames+2;
- frames[1].fs.localVarCount=4;frames[1].fs.pos="resume caller";
+ frames[1].fs.localVarCount=4;frames[1].fs.pos=program+40;
  for(unsigned j=0;j<7;j++)vars[122+j]=800+j;
- nestedId=60003;nested=VM_ArchiveStack(1,"cancel child",&boundary,3,&nestedId);
+ nestedId=60003;nested=VM_ArchiveStack(1,program+60,&boundary,3,&nestedId);
  VM_TerminateStack(60003,60002,nested);
  assert(killedFrame==60003&&queuedStack==SCR_STACK_ENC(nested)&&nested->localId==60002);
+ assert(nested->pos==program+40);
  assert(!vmLocalVarArchives[60003].stackValue&&vmLocalVarArchives[60002].stackValue==nested);
  scrVmPub.localVars=vars+128;assert(VM_RestoreArchivedLocalVars(nested)==4);
  for(unsigned j=0;j<4;j++)assert(vars[129+j]==800+j);
@@ -130,7 +165,7 @@ int main(void){
  assert(!vmLocalVarArchives[65533].localId);
  replacement=archive(65533,2,300);restore(replacement,2,300);free(old);
  for(unsigned j=0;j<VM_LOCAL_ARCHIVE_SLOTS;j++)assert(!vmLocalVarArchives[j].localId);
- puts("PASS: 1,024 concurrent script waits retain exact locals, cancellation and stack identity protect reused ids, and highest valid id resumes correctly");
+ puts("PASS: production stack/value ABI, encoded caller positions, 1,024 concurrent waits, cancellation, relocated notification stacks and highest valid id");
 }
 '''
 # Both actual cancellation paths discard their archive before unwinding/freeing.

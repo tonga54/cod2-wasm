@@ -1152,7 +1152,8 @@ static BM_NOINLINE void __attribute_regparm__(3) RB_DrawSingleTechnique(Material
             }
 
             {
-                int fogSrc = (((MaterialPassDx7 *)pass)->fogToBlack == 1) ? 0 : 2;
+                FogColorSrcEnum fogSrc = ((MaterialPassDx7 *)pass)->fogToBlack
+                    ? FOG_COLOR_SRC_BLACK : FOG_COLOR_SRC_STANDARD;
                 RB_UpdateFogColor(fogSrc);
             }
 

@@ -37,6 +37,9 @@ extern const dvar_t **r_dlightLimit;
 extern void qsort(void *base, unsigned int nmemb, unsigned int size, int (*compar)(const void *, const void *));
 
 extern const float *colorWhite;
+#ifdef __EMSCRIPTEN__
+extern const dvar_t *r_lodDistanceScale;
+#endif
 
 extern void AxisCopy(vec3_t *in, vec3_t *out);
 extern void R_Error(int level, const char *msg, ...);
@@ -534,6 +537,10 @@ void R_SetLodOrigin(const refdef_t *refdef)
 
     rgg->lodParms.scale = (*(const dvar_t **)imp_r_lodScale)->current.value;
     rgg->lodParms.bias = (*(const dvar_t **)imp_r_lodBias)->current.value;
+#ifdef __EMSCRIPTEN__
+    if (r_lodDistanceScale)
+        rgg->lodParms.scale /= r_lodDistanceScale->current.value;
+#endif
 
     if (refdef->fov_x != 80.0f) {
         invFovScale =

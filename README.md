@@ -130,6 +130,12 @@ retail CoD2:
 - **Smoother baked shadows:** sun visibility uses all four source samples when
   preparing each lightmap texel at map load. Shadow edges have less aliasing,
   with the same uploaded texture size and no additional gameplay render passes.
+- **Map atmosphere and farther model detail:** the browser renders each map's
+  original fog color/density, with separate world and HUD state and black fog
+  for materials that request it. Model detail transitions and finite vegetation
+  draw distances extend by 50% by default. The archived `r_lodDistanceScale`
+  setting ranges from 1 (original distances) to 2; authored lower-detail models,
+  wall/frustum culling, texture resolution and mip filtering remain in use.
 - **Browser hosting and controls:** create/delete rooms without a desktop game
   installation on each client, cached asset downloads with actual byte progress,
   English interface text, update notices, compact chat, and an explicit

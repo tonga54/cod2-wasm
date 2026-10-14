@@ -335,7 +335,7 @@ typedef struct {
     DWORD stencilRef;
     DWORD stencilMask;
     DWORD stencilWriteMask;
-    DWORD _pad554;
+    DWORD fogVertexMode;
     DWORD sRGBWriteEnable;
     DWORD separateAlphaBlendEnable;
     DWORD colorWriteEnable1;
@@ -383,6 +383,8 @@ typedef struct {
     DWORD bc8Val;
     unsigned char bccPad[0x100];
 } DeviceImpl;
+
+static void CDirect3DDevice_ApplyFog(const DeviceImpl *dev, int is2D);
 
 static DWORD g_currentFVF = 0;
 static float g_vsConst[256 * 4];
@@ -1984,7 +1986,11 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
         }
         glDisable(0x0B44);
 
+#ifdef __EMSCRIPTEN__
+        CDirect3DDevice_ApplyFog(dev, is2D);
+#else
         glDisable(0x0B60);
+#endif
         glDisable(0x0B50);
         if (g_alphaTestEnable) {
             glEnable(0x0BC0);
@@ -2401,6 +2407,21 @@ static void CDirect3DDevice_ApplyDepthBias(void)
     }
 }
 
+static void CDirect3DDevice_ApplyFog(const DeviceImpl *dev, int is2D)
+{
+    /* D3D's table fog takes precedence over vertex fog. UI does not
+     * inherit the world's atmosphere. The DX7 material
+     * iterator supplies black fog for additive passes and map color otherwise. */
+    DWORD mode = dev->fogTableMode ? dev->fogTableMode : dev->fogVertexMode;
+    if (is2D || !dev->fogEnable || !mode) {
+        glDisable(0x0B60); /* GL_FOG */
+        return;
+    }
+    extern void glFogf(unsigned int pname, float param);
+    glFogf(0x0B65, mode == 3 ? 0x2601 : mode == 2 ? 0x0801 : 0x0800);
+    glEnable(0x0B60);
+}
+
 HRESULT COD2_FORCE_ALIGN_ARG_POINTER CDirect3DDevice_SetRenderState(const CDirect3DDevice *_this, D3DRENDERSTATETYPE State, DWORD Value)
 {
     DeviceImpl *dev = (DeviceImpl *)_this;
@@ -2451,6 +2472,24 @@ HRESULT COD2_FORCE_ALIGN_ARG_POINTER CDirect3DDevice_SetRenderState(const CDirec
     case D3DRS_FOGENABLE:
         dev->fogEnable = Value;
         break;
+    case 0x23: /* D3DRS_FOGTABLEMODE */
+        dev->fogTableMode = Value;
+        break;
+    case 0x8c: /* D3DRS_FOGVERTEXMODE */
+        dev->fogVertexMode = Value;
+        break;
+    case 0x24: /* D3DRS_FOGSTART */
+    case 0x25: /* D3DRS_FOGEND */
+    case 0x26: { /* D3DRS_FOGDENSITY: D3D passes IEEE float bits as a DWORD. */
+        float parameter;
+        extern void glFogf(unsigned int pname, float param);
+        memcpy(&parameter, &Value, sizeof(parameter));
+        if (State == 0x24) dev->fogStart = Value;
+        else if (State == 0x25) dev->fogEnd = Value;
+        else dev->fogDensity = Value;
+        glFogf(State == 0x24 ? 0x0B63 : State == 0x25 ? 0x0B64 : 0x0B62, parameter);
+        break;
+    }
     case D3DRS_TEXTUREFACTOR:
         g_textureFactor = Value;
         break;
@@ -2529,6 +2568,21 @@ HRESULT CDirect3DDevice_GetRenderState(const CDirect3DDevice *_this, D3DRENDERST
         break;
     case D3DRS_FOGENABLE:
         *pValue = dev->fogEnable;
+        break;
+    case 0x23:
+        *pValue = dev->fogTableMode;
+        break;
+    case 0x8c:
+        *pValue = dev->fogVertexMode;
+        break;
+    case 0x24:
+        *pValue = dev->fogStart;
+        break;
+    case 0x25:
+        *pValue = dev->fogEnd;
+        break;
+    case 0x26:
+        *pValue = dev->fogDensity;
         break;
     case D3DRS_TEXTUREFACTOR:
         *pValue = g_textureFactor;
@@ -3552,6 +3606,15 @@ void CDirect3DDevice_Init(void *device)
     dev->zFunc = 4;
     dev->colorWriteEnable = 0xF;
     dev->fogColor = 0xFF000000u;
+    dev->fogEnable = 0;
+    dev->fogTableMode = 0;
+    dev->fogVertexMode = 0;
+    dev->fogStart = 0;
+    {
+        const float one = 1.0f;
+        memcpy(&dev->fogEnd, &one, sizeof(one));
+        memcpy(&dev->fogDensity, &one, sizeof(one));
+    }
     dev->blendOp = 1;
     g_alphaTestEnable = 0;
     g_textureFactor = 0xFFFFFFFFu;

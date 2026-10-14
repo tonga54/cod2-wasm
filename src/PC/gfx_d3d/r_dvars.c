@@ -26,6 +26,9 @@ extern const dvar_t *r_aspectRatio;
 extern const dvar_t *r_smc_enable;
 extern const dvar_t *r_lodScale;
 extern const dvar_t *r_lodBias;
+#ifdef __EMSCRIPTEN__
+const dvar_t *r_lodDistanceScale;
+#endif
 extern const dvar_t *r_znear;
 extern const dvar_t *r_znear_depthhack;
 extern const dvar_t *r_zfar;
@@ -279,6 +282,12 @@ void R_RegisterDvars(void)
     r_lodScale = ri.Dvar_RegisterFloat("r_lodScale", 1.0f, 1.0f, 4.0f, 0x2001);
 
     r_lodBias = ri.Dvar_RegisterFloat("r_lodBias", 0.0f, -1000.0f, 0.0f, 0x2001);
+#ifdef __EMSCRIPTEN__
+    /* Retain detail/vegetation farther away without removing authored LODs
+     * or visibility culling. A separate archived dvar also reaches existing
+     * browser profiles without replacing their saved graphics settings. */
+    r_lodDistanceScale = ri.Dvar_RegisterFloat("r_lodDistanceScale", 1.5f, 1.0f, 2.0f, 0x2001);
+#endif
 
     r_znear = ri.Dvar_RegisterFloat("r_znear", 4.0f, 0.001f, 16.0f, 0x2080);
 
