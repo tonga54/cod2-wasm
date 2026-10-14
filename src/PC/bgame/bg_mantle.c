@@ -344,9 +344,10 @@ void Mantle_Move(pmove_t *pm, playerState_t *ps, pml_t *pml)
     trans[1] -= prevTrans[1];
     trans[2] -= prevTrans[2];
 
-    /* The ledge was clear when selected, but the animated route can meet
-     * a car roof, wall, or another player. Never push root motion through
-     * that collision and leave the next movement step embedded. */
+    /* The ledge, headroom and landing were checked against the world before
+     * starting. Original mantle clips tuck/dip the root through the sill;
+     * sweeping a standing walking capsule against it cancels valid vaults.
+     * Continue that authored route, still stopping for live player bodies. */
     {
         trace_t trace;
         float end[3], maxs[3];
@@ -358,7 +359,7 @@ void Mantle_Move(pmove_t *pm, playerState_t *ps, pml_t *pml)
         if ((mstate->flags & 2) && maxs[2] > 50.0f)
             maxs[2] = 50.0f;
         PM_trace(pm, &trace, ps->origin, pm->mins, maxs, end,
-                 ps->clientNum, pm->tracemask);
+                 ps->clientNum, pm->tracemask & 0x02000000);
         if (!trace.startsolid && !trace.allsolid) {
             for (axis = 0; axis < 3; axis++)
                 ps->origin[axis] += trans[axis] * trace.fraction;
@@ -580,7 +581,7 @@ static Bool __attribute_regparm__(3) Mantle_CheckLedge(pmove_t *pm, pml_t *pml, 
             for (axis = 0; axis < 3; axis++)
                 alignedStart[axis] = mr->endPos[axis] - animDelta[axis];
             PM_trace(pm, &tr, ps->origin, mins, maxs, alignedStart,
-                     ps->clientNum, pm->tracemask);
+                     ps->clientNum, pm->tracemask & 0x02000000);
             if (tr.startsolid || tr.allsolid || tr.fraction < 1.0f)
                 return 0;
             for (axis = 0; axis < 3; axis++)

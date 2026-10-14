@@ -529,12 +529,16 @@ draw_icon:
 
 void CG_DrawMantleHint(const rectDef_t *rect, struct Font_s *font, float fontscale, int textStyle)
 {
+    const vec4_t hintColor = {1.0f, 1.0f, 1.0f, 1.0f};
     char binding[0x100];
     const char *text;
     float length;
     float x;
 
-    if (!cg_drawMantleHint->current.enabled) {
+    if (!cg_drawMantleHint->current.enabled || cg->renderingThirdPerson ||
+        cg->predictedPlayerState.pm_type > 1 ||
+        cg->predictedPlayerState.stats[0] <= 0 ||
+        (cg->predictedPlayerState.pm_flags & 4) || !cgs->media.mantleHint) {
         return;
     }
 
@@ -543,9 +547,9 @@ void CG_DrawMantleHint(const rectDef_t *rect, struct Font_s *font, float fontsca
     }
 
     Controls_GetConfig();
-    if (!GetKeyBindingLocalizedString("+gostand", binding)) {
-        GetKeyBindingLocalizedString("+moveup", binding);
-    }
+    if (!GetKeyBindingLocalizedString("+gostand", binding) &&
+        !GetKeyBindingLocalizedString("+moveup", binding))
+        return;
 
     text = UI_ReplaceConversionString(UI_SafeTranslateString("PLATFORM_MANTLE"), binding);
     length = (float)UI_TextWidth(text, 0, font, fontscale);
@@ -560,7 +564,7 @@ void CG_DrawMantleHint(const rectDef_t *rect, struct Font_s *font, float fontsca
         rect->horzAlign,
         rect->vertAlign,
         fontscale,
-        color,
+        hintColor,
         textStyle);
 
     UI_DrawHandlePic(
@@ -570,7 +574,7 @@ void CG_DrawMantleHint(const rectDef_t *rect, struct Font_s *font, float fontsca
         rect->h,
         rect->horzAlign,
         rect->vertAlign,
-        color,
+        hintColor,
         cgs->media.mantleHint);
 }
 

@@ -362,8 +362,8 @@ void CG_DrawRotatedPicPhysical(float x, float y, float width, float height, floa
     vec2_t verts[4];
     int i;
     for (i = 0; i < 4; i++) {
-        verts[i][0] = cx + cw * sign[i][0] - sw * sign[i][1];
-        verts[i][1] = cy + sh * sign[i][0] + ch * sign[i][1];
+        verts[i][0] = cx + cw * sign[i][0] - sh * sign[i][1];
+        verts[i][1] = cy + sw * sign[i][0] + ch * sign[i][1];
     }
 
     CL_DrawQuadPic(verts, color, material);

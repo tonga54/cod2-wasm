@@ -73,18 +73,21 @@ static dvar_t on={.current.enabled=1},off,range={.current.value=20};
 static dvar_t radius={.current.value=.1f},angle={.current.value=60};
 static dvar_t *mantle_enable=&on,*mantle_debug=&off,*mantle_check_range=&range;
 static dvar_t *mantle_check_radius=&radius,*mantle_check_angle=&angle;
-static int wallFlags=0x2000000,solid,headroom=1,overClear=1,blockedMotion,zeroLength;
+static int wallFlags=0x2000000,solid,headroom=1,overClear=1,blockedMotion,zeroLength,authoredDip,sillContact,worldChecks,bodyChecks;
 static float wallFraction=.5f,ledgeHeight=139,normalZ=1,heading;
 static int XAnimGetLengthMsec(void *anims,int index) {assert(anims);return zeroLength?0:(index<8?200:100);}
 static void XAnimGetAbsDelta(void *anims,int index,float *rot,float *delta,float frac) {
     assert(anims&&frac>=0&&frac<=1);
     delta[0]=(index<8?16:31)*frac;delta[1]=0;
     delta[2]=(index<8?s_mantleTrans[index-1].height:-18)*frac;
+    if(authoredDip&&index<8&&frac<.5f)delta[2]-=10*sinf(frac*6.2831853f);
 }
 static void PM_trace(pmove_t *pm,void *raw,float *start,float *mins,float *maxs,
     float *end,int client,int mask) {
     trace_t *tr=raw;memset(tr,0,sizeof(*tr));tr->fraction=1;
     if(pm->ps->pm_flags&4) {
+        assert(mask==0x02000000);bodyChecks++;
+        if(sillContact&&(mask&1))tr->fraction=.1f;
         if(blockedMotion){tr->fraction=.25f;tr->startsolid=blockedMotion==2;tr->allsolid=blockedMotion==3;}
         return;
     }
@@ -93,6 +96,8 @@ static void PM_trace(pmove_t *pm,void *raw,float *start,float *mins,float *maxs,
         tr->allsolid=(solid==1);tr->startsolid=(solid==2);
         tr->normal[0]=-cosf(heading);tr->normal[1]=-sinf(heading);return;
     }
+    if(mask&1)worldChecks++;
+    if(sillContact && !(mask&1))return;
     if(end[2]<start[2]&&start[0]==end[0]&&start[1]==end[1]) {
         if(ledgeHeight<start[2]&&ledgeHeight>end[2]) {
             tr->fraction=(start[2]-ledgeHeight)/(start[2]-end[2]);tr->normal[2]=normalZ;
@@ -116,7 +121,7 @@ static playerState_t player(void) {
 int main(void) {
     /* Reachable ledges include heights above a normal 39-unit jump. */
     for(int h=21;h<=57;h+=6)for(int yaw=0;yaw<360;yaw+=30)for(int over=0;over<2;over++) {
-        playerState_t ps=player();pmove_t pm={.ps=&ps,.tracemask=1};
+        playerState_t ps=player();pmove_t pm={.ps=&ps,.tracemask=0x2810011};
         pml_t pml={.msec=17};heading=yaw*.01745329252f;
         pml.forward[0]=cosf(heading);pml.forward[1]=sinf(heading);
         ledgeHeight=100+h;wallFlags=over?0x4000000:0x2000000;
@@ -140,8 +145,21 @@ int main(void) {
         Mantle_Check(&pm,&pml);assert(!(ps.pm_flags&4)); // Held key cannot restart on the next ledge.
 
     }
+    /* Original clips dip and tuck through a validated sill: walking-world
+     * sweeps must not abort their root motion, but live bodies still do. */
+    for(int over=0;over<2;over++){
+        playerState_t ps=player();pmove_t pm={.ps=&ps,.tracemask=0x2810011,.cmd.buttons=0x400};
+        pml_t pml={.msec=17,.forward={1,0,0}};heading=0;ledgeHeight=139;
+        wallFlags=over?0x4000000:0x2000000;worldChecks=bodyChecks=0;
+        Mantle_Check(&pm,&pml);assert(ps.pm_flags&4);assert(worldChecks>=4);
+        authoredDip=sillContact=1;int frames=0;
+        while(ps.pm_flags&4){assert(frames++<20);Mantle_Move(&pm,&ps,&pml);}
+        assert(ps.mantleState.timer==pm.mantleDuration&&bodyChecks==frames);
+        assert(fabsf(ps.origin[2]-(139-(over?18:0)))<.001f);
+        authoredDip=sillContact=0;
+    }
     for(int blocked=1;blocked<=3;blocked++) {
-        playerState_t ps=player();pmove_t pm={.ps=&ps,.tracemask=1,.cmd.buttons=0x400};
+        playerState_t ps=player();pmove_t pm={.ps=&ps,.tracemask=0x2810011,.cmd.buttons=0x400};
         pml_t pml={.msec=17,.forward={1,0,0}};heading=0;ledgeHeight=139;wallFlags=0x2000000;
         Mantle_Check(&pm,&pml);assert(ps.pm_flags&4);float z=ps.origin[2];
         blockedMotion=blocked;Mantle_Move(&pm,&ps,&pml);blockedMotion=0;
@@ -158,7 +176,7 @@ int main(void) {
         zeroLength=0;
     }
     for(int reason=0;reason<9;reason++) {
-        playerState_t ps=player();pmove_t pm={.ps=&ps,.tracemask=1,.cmd.buttons=0x400};
+        playerState_t ps=player();pmove_t pm={.ps=&ps,.tracemask=0x2810011,.cmd.buttons=0x400};
         pml_t pml={.forward={1,0,0}};heading=0;solid=0;wallFraction=.5f;
         wallFlags=0x2000000;headroom=1;normalZ=1;ledgeHeight=139;
         if(reason==0)solid=1;if(reason==1)solid=2;if(reason==2)wallFraction=1;

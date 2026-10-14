@@ -1142,7 +1142,7 @@ static void CG_DrawGrenadeIndicators(void)
     int count = 0, entities, i;
     float width, height, pointerWidth, pointerHeight, pulse;
     vec4_t iconColor = {1.0f, 1.0f, 1.0f, 1.0f};
-    vec4_t pointerColor = {1.0f, 0.2f, 0.1f, 1.0f};
+    vec4_t pointerColor = {1.0f, 1.0f, 1.0f, 1.0f};
 
     if (!snap || !cg_entities || ps->pm_type > 1 || ps->stats[0] <= 0 ||
         cg->renderingThirdPerson || CG_AreHudMenusHidden() ||
@@ -1195,13 +1195,10 @@ static void CG_DrawGrenadeIndicators(void)
     for (i = 0; i < count; ++i) {
         vec3_t delta;
         float angle, radians, s, c, x, y, pivotX, pivotY;
-        const WeaponDef *grenade = BG_GetWeaponDef(threats[i].cent->nextState.weapon);
-        float range = fminf((float)grenade->iExplosionRadius,
-                           cg_hudGrenadeIconMaxRange->current.value);
-        float proximity = 1.0f - sqrtf(threats[i].distanceSq) / range;
-        float scale = 0.75f + 0.75f * proximity;
-        float iconW = width * scale, iconH = height * scale;
-        float arrowW = pointerWidth * scale, arrowH = pointerHeight * scale;
+        /* HUD symbols keep their screen size as threats move in depth. Only
+         * bearing rotates the flat pointer; distance controls eligibility. */
+        float iconW = width, iconH = height;
+        float arrowW = pointerWidth, arrowH = pointerHeight;
         delta[0] = threats[i].cent->lerpOrigin[0] - ps->origin[0];
         delta[1] = threats[i].cent->lerpOrigin[1] - ps->origin[1];
         delta[2] = 0.0f;
@@ -1215,8 +1212,8 @@ static void CG_DrawGrenadeIndicators(void)
                          iconW, iconH, 7, 7, iconColor, cgs->media.grenadeIcon);
         /* Rotate the original triangle around its configured icon pivot,
          * leaving the grenade silhouette upright and the crosshair clear. */
-        pivotX = (pointerWidth * 0.5f - cg_hudGrenadePointerPivot->current.vector[0]) * scale;
-        pivotY = (pointerHeight * 0.5f - cg_hudGrenadePointerPivot->current.vector[1]) * scale;
+        pivotX = pointerWidth * 0.5f - cg_hudGrenadePointerPivot->current.vector[0];
+        pivotY = pointerHeight * 0.5f - cg_hudGrenadePointerPivot->current.vector[1];
         CG_DrawRotatedPic(x + c * pivotX + s * pivotY - arrowW * 0.5f,
                          y - s * pivotX + c * pivotY - arrowH * 0.5f,
                          arrowW, arrowH, 7, 7, -angle,

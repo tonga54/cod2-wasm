@@ -124,7 +124,7 @@ int main(void){
   reset();float r=heading*.01745329252f,dist=(float[]){32,180,255}[d];
   grenade(64,weapon,cosf(r)*dist,sinf(r)*dist,0);cg->refdefViewAngles[1]=turn;drawCount(1);
   float angle=(heading-turn)*.01745329252f;
-  float scale=.75f+.75f*(1-dist/256);
+  float scale=1;
   near(icons[0].w,25*scale);near(icons[0].h,25*scale);
   near(icons[0].x+icons[0].w*.5f,-sinf(angle)*50);near(icons[0].y+icons[0].h*.5f,-cosf(angle)*50);
   /* The triangle points away from the crosshair, toward the threat. */
@@ -188,7 +188,7 @@ int main(void){
  reset();grenade(64,1,80,0,0);grenade(65,1,0,60,0);grenade(66,1,-40,0,0);grenade(67,1,0,-20,0);grenade(68,1,200,0,0);
  drawCount(4);near(icons[0].x+icons[0].w*.5f,50);near(icons[1].y+icons[1].h*.5f,50);
  near(icons[2].x+icons[2].w*.5f,-50);near(icons[3].y+icons[3].h*.5f,-50);
- assert(icons[0].w>icons[1].w&&icons[1].w>icons[2].w&&icons[2].w>icons[3].w);
+ for(int i=0;i<4;i++){near(icons[i].w,25);near(icons[i].h,25);near(arrows[i].w,25);near(arrows[i].h,12);near(arrows[i].color[0],1);near(arrows[i].color[1],1);near(arrows[i].color[2],1);}
  /* Snapshot limits and identifiers remain safe even on malformed input. */
  reset();grenade(1021,6,30,0,0);nextSnap.numEntities=9999;
  for(int i=1;i<256;i++)nextSnap.entities[i].number=(int[]){-1,1022,1023,9000}[i%4];drawCount(1);
@@ -207,7 +207,7 @@ variants = [
     ('smoke warning', distance.replace('weapon->offhandClass != OFFHAND_CLASS_FRAG_GRENADE', '0'), draw),
     ('reversed pointer', distance, draw.replace('7, 7, -angle,', '7, 7, angle,')),
     ('unbounded warnings', distance, draw.replace('MAX_WARNINGS = 4', 'MAX_WARNINGS = 6')),
-    ('fixed-size warnings', distance, draw.replace('0.75f + 0.75f * proximity', '1.0f')),
+    ('perspective-sized warnings', distance, draw.replace('float iconW = width, iconH = height;', 'float iconW = width * .75f, iconH = height * .75f;')),
 ]
 with tempfile.TemporaryDirectory(prefix='cod2-grenade-indicators-') as directory:
     path = Path(directory)
