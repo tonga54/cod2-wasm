@@ -441,13 +441,14 @@
       return gl;
     };
   }
+  let browserBuildId;
   function loadFactory() {
     if (!factoryPromise) factoryPromise = (async () => {
       let buildId;
       try {
         const response = await fetch('/build-info.json', { cache: 'no-store', signal: AbortSignal.timeout(3000) });
         const build = response.ok && await response.json();
-        if (/^[a-f0-9]{64}$/.test(build?.buildId)) buildId = build.buildId;
+        if (/^[a-f0-9]{64}$/.test(build?.buildId)) browserBuildId = buildId = build.buildId;
         if (/^[a-f0-9]{40}$/.test(build?.revision))
           browserVersion = `Browser ${build.revision.slice(0, 8)}${build.dirty ? ' dev' : ''}`;
       } catch { /* Hosts without metadata still load a fresh engine. */ }
@@ -524,9 +525,26 @@
     // Toolbar interactions must not fire a weapon or activate a native menu.
     for (const type of ['pointerdown', 'pointerup', 'pointermove', 'mousedown', 'mouseup', 'mousemove', 'click',
       'keydown', 'keyup', 'keypress']) panel.addEventListener(type, event => event.stopPropagation());
-    document.addEventListener('fullscreenchange', render);
+    let keyboardGeneration = 0, escapeLocked = false;
+    document.addEventListener('fullscreenchange', async () => {
+      render();
+      const generation = ++keyboardGeneration;
+      escapeLocked = false;
+      const keyboard = globalThis.navigator?.keyboard;
+      if (!keyboard?.lock || !keyboard?.unlock) return;
+      if (!document.fullscreenElement) { keyboard.unlock(); return; }
+      try {
+        // Short Escape opens the menu; held Escape retains the browser exit.
+        await keyboard.lock(['Escape']);
+        escapeLocked = generation === keyboardGeneration && Boolean(document.fullscreenElement);
+        if (generation !== keyboardGeneration && !document.fullscreenElement) keyboard.unlock();
+      } catch { /* Denied/unsupported capture keeps browser controls usable. */ }
+    });
     // Pointer lock hides the mouse; keep this control available through F10.
     for (const type of ['keydown', 'keyup']) window.addEventListener(type, event => {
+      if (event.isTrusted && event.key === 'Escape' && type === 'keydown' && event.repeat && escapeLocked) {
+        event.preventDefault(); event.stopImmediatePropagation(); return;
+      }
       if (!event.isTrusted || event.key !== 'F10' || event.ctrlKey || event.metaKey ||
           event.altKey || event.shiftKey) return;
       event.preventDefault();
@@ -542,6 +560,8 @@
     script.onload = () => {
       if (typeof globalThis.createCod2UpdateNotifier !== 'function') return;
       updateNotifier = globalThis.createCod2UpdateNotifier({
+        loadedBuild: () => browserBuildId,
+        setMenuNotice: available => native?._web_client_update_available?.(available ? 1 : 0),
         canNotify: () => !failed && Boolean(native) && native._web_client_state() === 1 &&
           typeof native._web_client_connected === 'function' && !native._web_client_connected()
       });
@@ -664,6 +684,7 @@
         native = await factory({
           cod2Performance: meter,
           cod2SaveProfile: config => saveProfile(context, config),
+          cod2ReloadClient: () => updateNotifier?.reload(),
           canvas: context.elements.canvas, noInitialRun: true,
           // Emscripten's default terminal stdin opens window.prompt("Input:").
           // Browser gameplay receives keyboard events through SDL instead.

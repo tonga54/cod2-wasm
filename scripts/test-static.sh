@@ -108,6 +108,7 @@ node "${repo_root}/scripts/test-web-room-create.cjs"
 node "${repo_root}/scripts/test-web-qport.cjs"
 node "${repo_root}/scripts/test-web-audio.cjs"
 node "${repo_root}/scripts/test-update-notifier.cjs"
+python3 "${repo_root}/scripts/test-client-update-menu.py"
 python3 "${repo_root}/scripts/test-update-local.py"
 node "${framework_dir}/scripts/check-game-package.js" "${site_dir}"
 node - "${site_dir}" <<'NODE'

@@ -7,7 +7,7 @@ const control = source.slice(source.indexOf('  function startFullscreenControl('
   source.indexOf('  function startUpdateNotifier('));
 assert.ok(control.includes('function startFullscreenControl('));
 
-function browser() {
+function browser({keyboardSupported = false, denyKeyboard = false, delayedKeyboard = false} = {}) {
   const elements = [], docEvents = new Map(), keyEvents = new Map();
   class Element {
     constructor(tag) {
@@ -44,7 +44,18 @@ function browser() {
   const window = {addEventListener(name, fn, capture) {
     assert.equal(capture, true, 'shortcut runs before game input'); keyEvents.set(name, fn);
   }};
-  const sandbox = vm.createContext({document, window});
+  let locks = 0, unlocks = 0, finishKeyboard;
+  const navigator = keyboardSupported ? {keyboard:{
+    lock(keys) {
+      assert.deepEqual(Array.from(keys), ['Escape'], 'only Escape is captured');
+      ++locks;
+      if(denyKeyboard) return Promise.reject(Error('Permission denied'));
+      if(delayedKeyboard) return new Promise(resolve=>{finishKeyboard=resolve;});
+      return Promise.resolve();
+    },
+    unlock(){++unlocks;}
+  }} : {};
+  const sandbox = vm.createContext({document, window, navigator});
   vm.runInContext(control, sandbox);
   sandbox.startFullscreenControl({elements:{canvas}});
   const panel = elements.find(el => el.id === 'cod2-fullscreen-controls');
@@ -59,6 +70,7 @@ function browser() {
     keyEvents.get(type)(event); return event;
   }
   return {document, panel, button, label, status, canvas, click, key,
+    locks:()=>locks,unlocks:()=>unlocks,finishKeyboard:()=>finishKeyboard(),
     requests: () => requests, exits: () => exits,
     focusButton(from = canvas) {
       document.activeElement = from; button.events.get('pointerdown')();
@@ -128,5 +140,17 @@ const settle = async () => { await Promise.resolve(); await Promise.resolve(); }
   b.document.fullscreenEnabled = false; b.escape();
   assert.equal(b.button.disabled, true);
   const before = b.requests(); b.click(); b.key(); assert.equal(b.requests(), before);
+  const locked = browser({keyboardSupported:true});
+  locked.click();locked.enter();await settle();assert.equal(locked.locks(),1);
+  const escape=locked.key('keydown',{key:'Escape'});
+  assert.equal(escape.stopped,false,'locked Escape reaches the native game menu');
+  assert.equal(locked.key('keydown',{key:'Escape',repeat:true}).stopped,true,'held Escape cannot repeatedly toggle native menus');
+  assert.ok(locked.document.fullscreenElement,'short Escape keeps fullscreen');
+  locked.click();await settle();assert.equal(locked.unlocks(),1);
+  const denied=browser({keyboardSupported:true,denyKeyboard:true});
+  denied.click();denied.enter();await settle();assert.equal(denied.status.hidden,true,'optional capture denial does not break fullscreen');
+  const delayed=browser({keyboardSupported:true,delayedKeyboard:true});
+  delayed.click();delayed.enter();delayed.escape();delayed.finishKeyboard();await settle();
+  assert.equal(delayed.unlocks(),2,'late keyboard capture is released after an external fullscreen exit');
   console.log('PASS: explicit fullscreen entry/exit, F10 under pointer capture, external exits, pending/denied transitions, focus restoration and isolated toolbar input');
 })().catch(error => {console.error(error); process.exitCode = 1;});

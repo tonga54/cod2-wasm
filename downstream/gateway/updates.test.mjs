@@ -7,55 +7,21 @@ import { createGateway } from './server.mjs';
 
 const old = 'a'.repeat(40), latest = 'b'.repeat(40);
 const build = { revision: old, buildId: 'c'.repeat(64), dirty: false };
-const reply = value => ({ ok: true, text: async () => JSON.stringify(value) });
 
-test('GitHub checks are shared, cached, and refreshed after deployment', async () => {
-  let calls = 0, clock = 0, current = build;
-  const check = createUpdateChecker({ readBuild: async () => current, now: () => clock,
-    fetchImpl: async (url, options) => {
-      ++calls;
-      assert.equal(options.redirect, 'error');
-      assert.ok(!options.headers.Authorization);
-      if (url.endsWith('/git/ref/heads/main')) return reply({ object: { sha: latest } });
-      assert.equal(url, `https://api.github.com/repos/tonga54/cod2-wasm/compare/${old}...${latest}?per_page=1&page=2`);
-      return reply({ status: 'ahead' });
-    } });
-  const results = await Promise.all(Array.from({ length: 64 }, () => check()));
-  assert.equal(calls, 2);
-  assert.ok(results.every(result => result.update.available));
-  await check(); assert.equal(calls, 2);
-  clock = 300001; await check(); assert.equal(calls, 4);
-  current = { ...build, revision: latest, buildId: 'd'.repeat(64) };
-  const deployed = await check(); assert.equal(calls, 5);
-  assert.equal(deployed.current.buildId, current.buildId);
-  assert.equal(deployed.update.status, 'current');
-  assert.equal(deployed.update.available, false);
-});
-
-test('local commits and divergent histories never trigger a normal update', async () => {
-  for (const [comparison, status] of [['behind', 'local-ahead'], ['diverged', 'diverged']]) {
-    const check = createUpdateChecker({ readBuild: async () => build,
-      fetchImpl: async url => reply(url.includes('/git/ref/') ? { object: { sha: latest } } : { status: comparison }) });
-    const result = await check();
-    assert.equal(result.update.status, status);
-    assert.equal(result.update.available, false);
+test('players only receive installed builds and never repository-update popups', async () => {
+  let current=build;
+  const check=createUpdateChecker({readBuild:async()=>current,
+    fetchImpl:()=>{throw Error('Player version checks must not contact GitHub');}});
+  for(const result of await Promise.all(Array.from({length:64},()=>check()))){
+    assert.deepEqual(result.current,build);assert.equal(result.update.available,false);
+    assert.equal(result.update.status,'host-managed');
   }
-});
-
-test('offline, rate limiting, malformed responses, and missing metadata stay unknown', async () => {
-  for (const fetchImpl of [async () => { throw new Error('offline'); },
-    async () => ({ ok: false, status: 403 }), async () => reply({ object: { sha: 'invalid' } }),
-    async () => ({ ok: true, text: async () => 'x'.repeat(131073) })]) {
-    let calls = 0;
-    const check = createUpdateChecker({ readBuild: async () => build,
-      fetchImpl: (...args) => { ++calls; return fetchImpl(...args); } });
-    assert.equal((await check()).update.status, 'unknown');
-    assert.equal((await check()).update.available, false);
-    assert.equal(calls, 1, 'failure is also cached');
-  }
-  const missing = createUpdateChecker({ readBuild: async () => { throw new Error('old host'); },
-    fetchImpl: () => { throw new Error('must not reach GitHub'); } });
-  assert.equal((await missing()).current, null);
+  current={...build,revision:latest,buildId:'d'.repeat(64)};
+  assert.deepEqual((await check()).current,current);
+  assert.equal((await check()).update.available,false);
+  const offline=createUpdateChecker({readBuild:async()=>{throw Error('missing');}});
+  assert.equal((await offline()).current,null);
+  assert.equal((await offline()).update.status,'unknown');
 });
 
 test('metadata validation and HTTP version endpoint are read-only', async () => {

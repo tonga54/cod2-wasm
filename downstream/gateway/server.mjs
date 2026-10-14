@@ -4,11 +4,12 @@ import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import WebSocket, { WebSocketServer } from 'ws';
 import { createUpdateChecker, readBuildInfo } from './updates.mjs';
+import { createMaintenanceCheck } from './maintenance.mjs';
 
 export function createGateway({ webHost = 'cod2-web', webPort = 8088,
   udpHost = 'cod2-server', udpPort = 28960, maxClients = 64,
   iconPath = '/game-ui/cod2.ico', startupPath = '/game-ui/cod2-startup.png',
-  roomsEnabled = false, managerPort = 8090, updateChecker,
+  roomsEnabled = false, managerPort = 8090, updateChecker, maintenanceCheck = createMaintenanceCheck(),
   udpSocketFactory = () => dgram.createSocket('udp4') } = {}) {
   const reservations = new Map();
   const checkUpdates = updateChecker || createUpdateChecker({
@@ -57,6 +58,9 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
       return;
     }
     if (roomsEnabled && request.url === '/servers') {
+      if (request.method === 'POST' && maintenanceCheck()) {
+        json(response, 503, {error:'The server is updating. Please try again shortly.'}); return;
+      }
       if (!['GET', 'POST', 'DELETE'].includes(request.method)) {
         json(response, 405, { error: 'Unsupported method' }); return;
       }
@@ -138,7 +142,9 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
     }
     if (request.url === '/gateway/health') {
       response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-      response.end(JSON.stringify({ gateway: 'ready', clients: wss.clients.size, maxClients }));
+      response.end(JSON.stringify({ gateway: 'ready', clients: wss.clients.size,
+        pendingClients: [...reservations.values()].reduce((sum, count) => sum + count, 0),
+        updating: maintenanceCheck(), maxClients }));
       return;
     }
     const upstream = http.request({ hostname: webHost, port: webPort,
@@ -158,6 +164,9 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
   const wss = new WebSocketServer({ noServer: true, maxPayload: 65507,
     perMessageDeflate: false });
   server.on('upgrade', async (request, socket, head) => {
+    if (maintenanceCheck()) {
+      socket.end('HTTP/1.1 503 Updating\r\nConnection: close\r\nContent-Length: 0\r\n\r\n'); return;
+    }
     const roomMatch = /^\/game(?:\?room=([0-2]))?$/.exec(request.url);
     const roomId = roomMatch?.[1] ? Number(roomMatch[1]) : 0;
     const occupied = [...wss.clients].filter(ws => ws.roomId === roomId).length + (reservations.get(roomId) || 0);
@@ -179,6 +188,8 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
             (reservations.get(roomId) || 0) > maxClients - bots) throw new Error('Room full');
         destination = room.port;
       }
+      // The host can begin its idle transition while the manager request waits.
+      if (maintenanceCheck()) throw new Error('Server update in progress');
       wss.handleUpgrade(request, socket, head, ws => {
         ws.roomId = roomId;
         wss.emit('connection', ws, destination);

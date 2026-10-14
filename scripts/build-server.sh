@@ -7,7 +7,8 @@ docker build --platform linux/amd64 \
 docker run --rm --platform linux/amd64 --cpus "${COD2_BUILD_JOBS:-4}" \
   -v "${repo_root}:/workspace/cod2-wasm" \
   -e "COD2_BUILD_JOBS=${COD2_BUILD_JOBS:-4}" local/cod2-native-build:dev \
-  bash -lc 'cmake -S . -B out/cod2-native -DCMAKE_BUILD_TYPE=Release \
+  bash -lc 'git config --global --add safe.directory /workspace/cod2-wasm \
+    && cmake -S . -B out/cod2-native -DCMAKE_BUILD_TYPE=Release \
     -DCOD2_WWWDL_LIBS= \
     -DCOD2_FEATURE_CFLAGS="-DCOD2_FEATURE_WWW_DOWNLOAD=0 -DCOD2_FEATURE_PUNKBUSTER=0" \
     && cmake --build out/cod2-native --target cod2_lnxded -j "$COD2_BUILD_JOBS"'

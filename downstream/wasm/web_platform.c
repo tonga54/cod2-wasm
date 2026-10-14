@@ -8,6 +8,8 @@ extern void Com_Frame(void);
 extern void Key_ClearStates(void);
 extern int FS_ReadFile(const char *path, void **buffer);
 extern void FS_FreeFile(void *buffer);
+extern void Dvar_SetBoolByName(const char *name, int value);
+extern int Dvar_GetBool(const char *name);
 
 EM_JS(void, Web_StoreProfile, (const char *data, int length), {
     if (Module.cod2SaveProfile) Module.cod2SaveProfile(UTF8ToString(data, length));
@@ -59,6 +61,17 @@ EMSCRIPTEN_KEEPALIVE void web_chat_char(int character) {
 /* Menus/chat can be open during a match. Update notices wait until disconnect. */
 EMSCRIPTEN_KEEPALIVE int web_client_connected(void) {
     return clientConnections[0].state >= CA_CONNECTING;
+}
+
+EMSCRIPTEN_KEEPALIVE void web_client_update_available(int available) {
+    if (cls.uiStarted)
+        Dvar_SetBoolByName("ui_clientUpdateAvailable", available && !web_client_connected());
+}
+
+void Web_ReloadClient(void) {
+    if (!cls.uiStarted || web_client_connected() || !Dvar_GetBool("ui_clientUpdateAvailable"))
+        return;
+    EM_ASM({ if (Module.cod2ReloadClient) Module.cod2ReloadClient(); });
 }
 
 EMSCRIPTEN_KEEPALIVE void web_background_frame(void) {

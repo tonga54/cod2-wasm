@@ -18,13 +18,14 @@ const locate = source.match(/locateFile: (path => `[^`]+`),/)[1];
       },
       document: { createElement: () => ({}), head: { appendChild: value => { script = value; context.createCod2Client = () => {}; value.onload(); } } }
     });
-    vm.runInContext('let factoryPromise, moduleAssetQuery;\n' + source.slice(start, end) + `\nconst locateFile=${locate};`, context);
+    vm.runInContext('let factoryPromise, moduleAssetQuery, browserBuildId;\n' + source.slice(start, end) + `\nconst locateFile=${locate};`, context);
     const factory = await vm.runInContext('loadFactory()', context);
     assert.equal(await vm.runInContext('loadFactory()', context), factory);
     const suffix = '?build=' + (mode === 'metadata' ? key : '1234');
     assert.equal(script.src, '/cod2.js' + suffix);
     assert.equal(vm.runInContext('locateFile("cod2.wasm")', context), '/cod2.wasm' + suffix);
     assert.equal(calls, 1);
+    assert.equal(vm.runInContext('browserBuildId',context), mode === 'metadata' ? key : undefined);
   }
   console.log('PASS: loader and WASM use one build URL, metadata bypasses cache, missing/offline fallback and a single factory');
 })().catch(error => { console.error(error); process.exitCode = 1; });

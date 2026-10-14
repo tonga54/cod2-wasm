@@ -1,0 +1,47 @@
+name: Validated Raspberry Pi release
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**/*.md', 'docs/**']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: pi-release-main
+  cancel-in-progress: true
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        with:
+          platforms: arm64
+      - name: Build and validate public code images
+        env:
+          COD2_BUILD_JOBS: '2'
+        run: bash scripts/build-pi-release.sh
+      - name: Publish immutable package for this main commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="pi-${GITHUB_SHA}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            if test "$(gh release view "$tag" --json isDraft --jq .isDraft)" = false; then
+              echo 'This immutable main package is already published.'
+              exit 0
+            fi
+            gh release upload "$tag" out/pi-release/manifest.json out/pi-release/pi-images.tar.gz --clobber
+          else
+            gh release create "$tag" out/pi-release/manifest.json out/pi-release/pi-images.tar.gz \
+              --target "$GITHUB_SHA" --draft --prerelease --title "Validated Pi build ${GITHUB_SHA:0:8}" \
+              --notes 'Public code images only. The host prepares private assets and validates this package before applying it to an idle server.'
+          fi
+          gh release edit "$tag" --draft=false --prerelease

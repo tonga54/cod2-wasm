@@ -164,6 +164,16 @@ retail CoD2:
   objective and recent-death weights rank the remaining points. If every free
   point is threatened, the selector maximizes distance to the nearest enemy.
   Spectator and S&D round spawns retain their original rules.
+- **Native update notice and fullscreen menus:** new installed client builds
+  appear inside the main menu with an Update game action after disconnect.
+  Repository pushes do not create player popups. Chrome/Edge keyboard capture
+  lets a short Escape open the menu without exiting fullscreen; hold Escape
+  or press F10 to exit. Unsupported/denied capture retains browser behavior.
+- **Automatic Pi updates:** validated public `main` release packages are checked
+  every five minutes, tested with real maps/bots in an isolated stack, and
+  applied only when no players are connected. Failed activation restores the
+  previous assets/images. Owner IWDs stay private on the Pi; see
+  [update operations](docs/UPDATES.md).
 - **Movement conveniences:** C toggles crouch. Space first stands up from crouch
   or prone, including when the stance key is held; another press while standing
   jumps. Ordinary ground movement stops
