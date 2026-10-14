@@ -312,6 +312,11 @@ static inline __attribute__((always_inline)) void CM_ClipBrushPlaneDistances(
 
     if (startDist > endDist) {
         fraction = (startDist - 0.125f) / denominator;
+        /* Within the contact margin a shallow approach can produce a value
+         * below the -1 sentinel. Clamp before selecting the entering face:
+         * otherwise a zero-fraction hit loses its normal and stops sliding. */
+        if (fraction < 0.0f)
+            fraction = 0.0f;
         if (fraction > *enterFrac) {
             *enterFrac = fraction;
             enterNormal[0] = normal[0];

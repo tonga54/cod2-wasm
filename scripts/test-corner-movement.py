@@ -149,6 +149,54 @@ int main(void) {
   assert(t.startsolid&&t.allsolid);
   cases++;
  }
+ /* Shallow contacts inside the trace margin must retain a unit normal,
+  * including nearly parallel motion while turning against a wall. */
+ int grazing=0;
+ for(int angle=0;angle<360;angle+=15)for(int height=30;height<=70;height+=20)
+ for(int frame=0;frame<5;frame++)for(int gap=0;gap<6;gap++)
+ for(int approach=0;approach<7;approach++)for(int direction=-1;direction<=1;direction+=2)
+ for(int sprint=0;sprint<2;sprint++){
+  geometry(angle);float margin=(float[]){.0001f,.001f,.01f,.12f,.125f,.2f}[gap];
+  float inward=(float[]){.001f,.01f,.1f,1,3,20,190}[approach];
+  float tangent[2]={-face.normal[1],face.normal[0]},speed=sprint?275.5f:190;
+  playerState_t ps={.origin={face.normal[0]*(15+margin),face.normal[1]*(15+margin),.125f},.groundEntityNum=1022};
+  pmove_t pm={.ps=&ps,.mins={-15,-15,0},.maxs={15,15,height},.tracemask=1};
+  pml_t pml={.frametime=(int[]){4,8,17,33,66}[frame]*.001f,.groundPlane=1,.groundTrace={.normal={0,0,1}}};
+  for(int a=0;a<2;a++)ps.velocity[a]=direction*speed*tangent[a]-inward*face.normal[a];
+  vec3_t end;for(int a=0;a<3;a++)end[a]=ps.origin[a]+ps.velocity[a]*pml.frametime;
+  trace_t hit;PM_playerTrace(&pm,&hit,ps.origin,pm.mins,pm.maxs,end,0,1);
+  assert(!hit.startsolid&&!hit.allsolid);
+  if(hit.fraction<1)assert(fabsf(hypotf(hit.normal[0],hit.normal[1])-1)<.001f);
+  PM_StepSlideMove(&pm,&pml,0);
+  assert(direction*(ps.origin[0]*tangent[0]+ps.origin[1]*tangent[1])>speed*pml.frametime*.98f);
+  assert(ps.origin[0]*face.normal[0]+ps.origin[1]*face.normal[1]>=15-.001f);
+  grazing++;
+ }
+ /* Hold forward, graze a finite jamb, then rotate into the opening. Neither
+  * reversing input nor shrinking the player should be needed to get free. */
+ int doorways=0;
+ for(int angle=0;angle<360;angle+=30)for(int frame=0;frame<5;frame++)for(int sprint=0;sprint<2;sprint++){
+  geometry(angle);vec3_t tangent={-face.normal[1],face.normal[0],0};back.dist=16;
+  cplane_t jambEnd={.normal={tangent[0],tangent[1],0}},jambStart={.normal={-tangent[0],-tangent[1],0},.dist=256};
+  cbrushside_t jambSides[4]={sides[0],sides[1],{.plane=&jambEnd},{.plane=&jambStart}};
+  wall.numsides=4;wall.sides=jambSides;wall.mins[2]=0;wall.maxs[2]=140;
+  playerState_t ps={.origin={face.normal[0]*15.0001f-tangent[0]*64,face.normal[1]*15.0001f-tangent[1]*64,.125f},.groundEntityNum=1022};
+  pmove_t pm={.ps=&ps,.mins={-15,-15,0},.maxs={15,15,70},.tracemask=1};
+  int dt=(int[]){4,8,17,33,66}[frame];float speed=sprint?275.5f:190;
+  pml_t pml={.frametime=dt*.001f,.groundPlane=1,.groundTrace={.normal={0,0,1}}};
+  float initial=ps.origin[0]*tangent[0]+ps.origin[1]*tangent[1],duration=0;
+  for(int time=0;time<2000;time+=dt){
+   float yaw=(time<250?90.003f:135.f)*.01745329252f;
+   for(int a=0;a<2;a++)ps.velocity[a]=speed*(cosf(yaw)*face.normal[a]+sinf(yaw)*tangent[a]);
+   ps.velocity[2]=0;PM_StepSlideMove(&pm,&pml,0);duration+=pml.frametime;
+   if(time<250)assert(ps.origin[0]*tangent[0]+ps.origin[1]*tangent[1]-initial>speed*duration*.95f);
+   trace_t hit;PM_playerTrace(&pm,&hit,ps.origin,pm.mins,pm.maxs,ps.origin,0,1);
+   assert(!hit.startsolid&&!hit.allsolid&&ps.origin[2]>=0&&ps.origin[2]<.3f);
+  }
+  assert(ps.origin[0]*face.normal[0]+ps.origin[1]*face.normal[1]<-40);
+  assert(ps.origin[0]*tangent[0]+ps.origin[1]*tangent[1]>60);doorways++;
+ }
+ printf("PASS: %d grazing-wall contacts with valid normals and %d held-forward turn-through-doorway schedules\n",grazing,doorways);
  /* Real prone support traces, with a zero ladder vector, must permit
   * crawling over flat ground in every direction at all command steps. */
  geometry(0);
@@ -237,10 +285,12 @@ int main(void) {
 old_support = '''support = CM_AbsFloat(normal[0]) * CM_AbsFloat(tw->size[0]) +
               CM_AbsFloat(normal[1]) * CM_AbsFloat(tw->size[1]) +
               CM_AbsFloat(normal[2]) * CM_AbsFloat(tw->size[2]);'''
+clamp = '        if (fraction < 0.0f)\n            fraction = 0.0f;\n'
+assert clamp in brush_code
 with tempfile.TemporaryDirectory(prefix='cod2-corners-') as directory:
     d = Path(directory)
     variants = (brush_code, brush_code.replace(
-            'support = tw->radius + CM_AbsFloat(normal[2]) * tw->offsetZ;', old_support), brush_code)
+            'support = tw->radius + CM_AbsFloat(normal[2]) * tw->offsetZ;', old_support), brush_code, brush_code.replace(clamp, '', 1))
     for index, variant in enumerate(variants):
         ground = ground_support
         if index == 2:
@@ -254,3 +304,4 @@ with tempfile.TemporaryDirectory(prefix='cod2-corners-') as directory:
             print(result.stdout.strip())
 print('PASS: original square-shoulder collision mutant reproduces the corner overlap and fails')
 print('PASS: 72 shallow corner recoveries preserve movement; one-unit recovery fails and deeper embedding stays blocked')
+print('PASS: lost grazing-contact normal regression is rejected without reducing collision bounds')
