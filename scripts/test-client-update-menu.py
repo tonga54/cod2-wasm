@@ -52,7 +52,7 @@ with tempfile.TemporaryDirectory(prefix='cod2-update-menu-') as directory:
 menu = b'''{ menuDef { name "main_text" itemDef { text "Original item" } } }'''
 patched = apply_settings_menu('ui_mp/main.menu', menu)
 assert b'Original item' in patched
-assert patched.count(b'showDvar { "1" }') == 2
+assert b'name browser_client_update_notice' in patched and b'name browser_client_update_reload' in patched
 assert b'uiScript ReloadClient;' in patched
 assert b'text "New client version available"' in patched
 assert apply_settings_menu('ui_mp/joinserver.menu', menu) == menu

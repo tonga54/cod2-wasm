@@ -39,12 +39,50 @@ def apply_settings_menu(name, data):
         if text.count(marker) != 1:
             raise ValueError('Unexpected main menu')
         insertion = text.index('itemDef', text.index(marker))
-        text = text[:insertion] + '''
+        fullscreen_items = ''
+        for mode, label in ((1, 'Fullscreen: Off'), (2, 'Fullscreen: On')):
+            fullscreen_items += f'''
+        itemDef {{
+            name browser_fullscreen_{mode}
+            type ITEM_TYPE_BUTTON
+            style WINDOW_STYLE_EMPTY
+            text "{label}"
+            rect MAIN_RECT_X 310 MAIN_RECT_WIDTH MAIN_RECT_HEIGHT
+            textfont UI_FONT_NORMAL
+            textstyle ITEM_TEXTSTYLE_SHADOWED
+            textscale MAIN_TEXTSCALE
+            textaligny MAIN_TEXTALIGN_Y
+            forecolor MAIN_FORECOLOR
+            visible 1
+            dvarTest "ui_browserFullscreen"
+            showDvar {{ "{mode}" }}
+            mouseEnter {{ play "mouse_over"; }}
+            action {{ play "mouse_click"; uiScript ToggleFullscreen; }}
+        }}
+'''
+        fullscreen_items += '''
+        itemDef {
+            name browser_fullscreen_failed
+            type ITEM_TYPE_TEXT
+            text "Fullscreen unavailable. Try again."
+            rect MAIN_RECT_X 336 230 12
+            textfont UI_FONT_NORMAL
+            textstyle ITEM_TEXTSTYLE_SHADOWED
+            textscale .18
+            textaligny 12
+            forecolor .85 .75 .55 1
+            visible 1
+            decoration
+            dvarTest "ui_browserFullscreenFailed"
+            showDvar { "1" }
+        }
+'''
+        text = text[:insertion] + fullscreen_items + '''
         itemDef {
             name browser_client_update_notice
             type ITEM_TYPE_TEXT
             text "New client version available"
-            rect MAIN_RECT_X 330 230 18
+            rect MAIN_RECT_X 350 230 18
             textfont UI_FONT_NORMAL
             textstyle ITEM_TEXTSTYLE_SHADOWED
             textscale .24
@@ -60,7 +98,7 @@ def apply_settings_menu(name, data):
             type ITEM_TYPE_BUTTON
             style WINDOW_STYLE_EMPTY
             text "Update game"
-            rect MAIN_RECT_X 352 MAIN_RECT_WIDTH MAIN_RECT_HEIGHT
+            rect MAIN_RECT_X 372 MAIN_RECT_WIDTH MAIN_RECT_HEIGHT
             textfont UI_FONT_NORMAL
             textstyle ITEM_TEXTSTYLE_SHADOWED
             textscale MAIN_TEXTSCALE

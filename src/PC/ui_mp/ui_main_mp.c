@@ -3321,6 +3321,14 @@ void UI_RunMenuScript(const char **args)
     if (!String_Parse(args, name, 0x400))
         return;
 
+    if (I_stricmp(name, "ToggleFullscreen") == 0) {
+#ifdef __EMSCRIPTEN__
+        extern void Web_ToggleFullscreen(void);
+        Web_ToggleFullscreen();
+#endif
+        return;
+    }
+
     if (I_stricmp(name, "ReloadClient") == 0) {
 #ifdef __EMSCRIPTEN__
         extern void Web_ReloadClient(void);

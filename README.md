@@ -133,7 +133,7 @@ retail CoD2:
 - **Browser hosting and controls:** create/delete rooms without a desktop game
   installation on each client, cached asset downloads with actual byte progress,
   English interface text, update notices, compact chat, and an explicit
-  fullscreen button/F10. Change your gametag in **Options → Game Options**.
+  native **Fullscreen: Off/On** menu option or F10. Change your gametag in **Options → Game Options**.
   The native profile saves the name, key bindings, mouse, sound and graphics
   settings in this browser, including across reloads and game updates. Browser
   storage must be enabled; clearing site data removes the saved profile.
@@ -244,7 +244,7 @@ Defaults can be changed in **Options → Controls**.
 | Public / team chat | T / Y |
 | Send / cancel chat | Enter / Escape |
 | Quick messages | H |
-| Enter / exit fullscreen | Top-right button or F10 |
+| Enter / exit fullscreen | Main menu's Fullscreen: Off/On text or F10 |
 
 Chat keeps mouse capture while typing and displays five wrapped lines for eight
 seconds by default. Clicking the canvas does not change fullscreen mode.

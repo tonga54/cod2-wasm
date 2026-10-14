@@ -194,9 +194,5 @@ const context = {
   nativeState = 1;
   windowListeners.get('keydown')({key:'w',isTrusted:true});
   assert.equal(keyboardCaptureRequests,1,'menus, shortcuts, Escape and synthetic keys do not acquire capture');
-  nativeState = 2;
-  clockMs += 2000;
-  windowListeners.get('keydown')({key:'Enter',isTrusted:true,target:{closest:()=>true}});
-  assert.equal(keyboardCaptureRequests,1,'fullscreen toolbar keys must not acquire game input');
   console.log('PASS: byte-weighted download/cache and preparation progress, automatic launch, console/chat Space and slash input, retained chat capture, explicit fullscreen and pointer-lock lifecycle');
 })().catch(error => { console.error(error); process.exitCode = 1; });

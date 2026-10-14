@@ -10,6 +10,8 @@ LABEL org.opencontainers.image.title="Call of Duty 2 WASM development checkpoint
       org.opencontainers.image.revision="$VCS_REF"
 
 COPY out/cod2-wasm-core/site/ /opt/game-site/
+COPY scripts/prepare-web-shell.cjs /opt/cod2/prepare-web-shell.cjs
+RUN node /opt/cod2/prepare-web-shell.cjs /opt/shared-shell/index.html
 
 ENV WASM_GAME_VARIANT=${GAME_VARIANT}
 VOLUME ["/data"]

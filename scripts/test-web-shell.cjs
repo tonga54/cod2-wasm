@@ -1,0 +1,17 @@
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const {prepareWebShell}=require('./prepare-web-shell.cjs');
+const framework=process.env.COD2_WASM_FRAMEWORK_DIR||'../wasm-game-framework';
+const original=fs.readFileSync(framework+'/dist/index.html','utf8');
+const result=prepareWebShell(original);
+const gate=result.indexOf('id="cod2-startup-gate"');
+assert.ok(gate>0&&gate<result.indexOf('</head>')&&gate<result.indexOf('<body>'));
+assert.ok(result.indexOf('href="/startup.css"')<result.indexOf('<body>'));
+assert.match(result,/#launcher\{display:none!important\}/);
+assert.match(result,/#launcher-form>:not\(#error\):not\(#status\)\{display:none!important\}/);
+assert.match(result,/#launcher:has\(#error:not\(\[hidden\]\)\)\{display:grid!important\}/);
+assert.equal(prepareWebShell(result),result);
+for(const id of ['launcher','player-name','advanced-settings','launch-fullscreen','error','game-canvas'])assert.ok(result.includes('id="'+id+'"'));
+assert.throws(()=>prepareWebShell('<html>Unexpected</html>'));
+assert.match(fs.readFileSync('Dockerfile','utf8'),/prepare-web-shell.cjs \/opt\/shared-shell\/index.html/);
+console.log('PASS: launcher hidden before first paint, blocking game CSS in head, visible startup failures, preserved framework anchors and idempotent pinned-shell adaptation');

@@ -11,6 +11,7 @@
   let chatCancelledCapture = false;
   let keyboardCaptureAfter = 0;
   let updateNotifier;
+  let fullscreenControl;
   let gametag;
   const gametagStorageKey = 'cod2-wasm-gametag';
   const startupStyle = document.createElement('link');
@@ -469,78 +470,47 @@
     return factoryPromise;
   }
   function startFullscreenControl(context) {
-    if (typeof document.documentElement?.requestFullscreen !== 'function') return;
-    const panel = document.createElement('div');
-    panel.id = 'cod2-fullscreen-controls';
-    const button = document.createElement('button');
-    button.id = 'cod2-fullscreen-toggle';
-    button.type = 'button';
-    button.setAttribute('aria-keyshortcuts', 'F10');
-    const label = document.createElement('span');
-    const shortcut = document.createElement('kbd');
-    shortcut.textContent = 'F10';
-    button.append(label, shortcut);
-    const status = document.createElement('p');
-    status.hidden = true;
-    status.setAttribute('role', 'status');
-    button.setAttribute('aria-describedby', 'cod2-fullscreen-status');
-    status.id = 'cod2-fullscreen-status';
-    panel.append(button, status);
-    document.body.appendChild(panel);
-    let pending = false;
-    let previousFocus;
-    function render() {
-      const active = Boolean(document.fullscreenElement);
-      label.textContent = active ? 'Exit fullscreen' : 'Enter fullscreen';
-      button.setAttribute('aria-label', label.textContent);
-      button.setAttribute('aria-pressed', String(active));
-      button.title = `${label.textContent} (F10)`;
-      button.disabled = pending || document.fullscreenEnabled === false;
+    let pending = false, failedRequest = false, nativeClient, sentState;
+    const available = () => typeof document.documentElement?.requestFullscreen === 'function' &&
+      document.fullscreenEnabled !== false;
+    function sync(client = nativeClient) {
+      nativeClient = client;
+      const state = [available() ? (document.fullscreenElement ? 2 : 1) : 0,
+        pending ? 1 : 0, failedRequest ? 1 : 0];
+      const key = state.join(':');
+      if (client?._web_client_fullscreen_state && key !== sentState &&
+          client._web_client_fullscreen_state(...state)) sentState = key;
     }
     async function toggle() {
-      if (pending || document.fullscreenEnabled === false) return;
+      if (pending || !available() ||
+          (globalThis.navigator?.userActivation && !navigator.userActivation.isActive)) return;
       pending = true;
-      status.hidden = true;
-      render();
+      failedRequest = false;
+      sync();
       try {
         if (document.fullscreenElement) await document.exitFullscreen();
         else await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
       } catch {
-        status.textContent = 'Fullscreen could not be changed. Try again.';
-        status.hidden = false;
+        failedRequest = true;
       } finally {
         pending = false;
-        render();
-        // Do not leave keyboard input on a toolbar button after using it.
-        if (document.activeElement === button) {
-          const target = previousFocus?.isConnected && previousFocus !== button &&
-            previousFocus !== document.body && previousFocus !== document.documentElement
-            ? previousFocus : context.elements.canvas;
-          target.focus({ preventScroll: true });
-        }
+        sync();
       }
     }
-    button.addEventListener('pointerdown', () => { previousFocus = document.activeElement; });
-    button.addEventListener('click', event => { if (event.isTrusted) toggle(); });
-    // Toolbar interactions must not fire a weapon or activate a native menu.
-    for (const type of ['pointerdown', 'pointerup', 'pointermove', 'mousedown', 'mouseup', 'mousemove', 'click',
-      'keydown', 'keyup', 'keypress']) panel.addEventListener(type, event => event.stopPropagation());
     let keyboardGeneration = 0, escapeLocked = false;
     document.addEventListener('fullscreenchange', async () => {
-      render();
+      sync();
       const generation = ++keyboardGeneration;
       escapeLocked = false;
       const keyboard = globalThis.navigator?.keyboard;
       if (!keyboard?.lock || !keyboard?.unlock) return;
       if (!document.fullscreenElement) { keyboard.unlock(); return; }
       try {
-        // Short Escape opens the menu; held Escape retains the browser exit.
         await keyboard.lock(['Escape']);
         escapeLocked = generation === keyboardGeneration && Boolean(document.fullscreenElement);
         if (generation !== keyboardGeneration && !document.fullscreenElement) keyboard.unlock();
-      } catch { /* Denied/unsupported capture keeps browser controls usable. */ }
+      } catch { /* Optional keyboard capture keeps browser controls usable. */ }
     });
-    // Pointer lock hides the mouse; keep this control available through F10.
     for (const type of ['keydown', 'keyup']) window.addEventListener(type, event => {
       if (event.isTrusted && event.key === 'Escape' && type === 'keydown' && event.repeat && escapeLocked) {
         event.preventDefault(); event.stopImmediatePropagation(); return;
@@ -551,7 +521,7 @@
       event.stopImmediatePropagation();
       if (type === 'keydown' && !event.repeat) toggle();
     }, true);
-    render();
+    return { toggle, sync };
   }
   function startUpdateNotifier(context) {
     if (!context.config?.updates) return;
@@ -572,7 +542,7 @@
   }
   globalThis.WasmGameAdapter = Object.freeze({
     async init(context) {
-      startFullscreenControl(context);
+      fullscreenControl = startFullscreenControl(context);
       startUpdateNotifier(context);
       // Keep right-click available to the game, including before pointer lock.
       context.elements.canvas.addEventListener('contextmenu', event => event.preventDefault());
@@ -581,7 +551,6 @@
       // refresh that state before Space is prevented (which cancels SDL's
       // keypress/TEXTINPUT event in the browser).
       window.addEventListener('keydown', event => {
-        if (event.target?.closest?.('#cod2-fullscreen-controls')) return;
         if (!native || failed) return;
         const nativeState = native._web_client_state();
         chatCancelledCapture = nativeState === 3 && event.key === 'Escape';
@@ -685,6 +654,7 @@
           cod2Performance: meter,
           cod2SaveProfile: config => saveProfile(context, config),
           cod2ReloadClient: () => updateNotifier?.reload(),
+          cod2ToggleFullscreen: () => fullscreenControl?.toggle(),
           canvas: context.elements.canvas, noInitialRun: true,
           // Emscripten's default terminal stdin opens window.prompt("Input:").
           // Browser gameplay receives keyboard events through SDL instead.
@@ -726,6 +696,7 @@
           '+set', 'com_hunkMegs', '128', '+set', 'r_fullscreen', '0',
           '+set', 'ui_browserVersion', `"${browserVersion}"`
         ]);
+        fullscreenControl?.sync(native);
         const state = native._web_client_state();
         if (state === 1 || state === 2) context.showRuntime(state === 2 ? 'gameplay' : 'menu');
       } catch (error) {
@@ -738,11 +709,13 @@
     readEngineState() {
       if (failed) return 'crashed';
       if (!native) return 'launcher';
+      fullscreenControl?.sync(native);
       const state = native._web_client_state();
       return state === 2 || state === 3 ? 'gameplay' : state === 1 ? 'menu' : 'loading';
     },
     readCaptureIntent() {
       if (failed || !native) return false;
+      fullscreenControl?.sync(native);
       const state = native._web_client_state();
       return state === 2 || state === 3;
     },

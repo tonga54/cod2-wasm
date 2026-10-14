@@ -12,7 +12,12 @@ the match before the button appears. The game never reloads automatically.
 There is no HTML popup, guide link or repository-push notice. The gateway also
 suppresses the obsolete host-update notice for clients running older scripts.
 
-In Chrome/Edge, the fullscreen control requests capture of Escape only. A short
+The generic launcher is hidden in the document head before configuration loads;
+players see the game startup screen and then its native menu. The native main
+menu's **Fullscreen: Off/On** text toggles the browser display mode. There is no
+floating HTML fullscreen button.
+
+In Chrome/Edge, fullscreen entry requests capture of Escape only. A short
 press opens the native menu; holding Escape retains the browser's fullscreen
 exit gesture. F10 also exits. Keyboard capture requires browser permission and
 is unavailable in some browsers; denial falls back to browser behavior. See
