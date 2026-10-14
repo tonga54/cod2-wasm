@@ -40,7 +40,7 @@ def atomic_json(path, value):
 
 
 def validate_manifest(value, revision):
-    if not SHA.fullmatch(revision) or value.get('schemaVersion') != 1 or value.get('revision') != revision:
+    if not SHA.fullmatch(revision) or value.get('schemaVersion') != 2 or value.get('revision') != revision:
         raise ValueError('Release revision/schema mismatch')
     if value.get('platform') != 'linux/arm64' or value.get('build', {}).get('revision') != revision:
         raise ValueError('Release architecture/build mismatch')
@@ -52,12 +52,31 @@ def validate_manifest(value, revision):
         image = value['images'][service]
         if image.get('tag') != f'{RELEASE_REPOS[service]}:release-{revision}' or not re.fullmatch(r'sha256:[a-f0-9]{64}', image.get('id', '')):
             raise ValueError('Release image identity is invalid')
+        if not HASH.fullmatch(image.get('fingerprint', '')):
+            raise ValueError('Release image content fingerprint is invalid')
     archive = value.get('archive', {})
     if archive.get('name') != 'pi-images.tar.gz' or not HASH.fullmatch(archive.get('sha256', '')):
         raise ValueError('Release archive metadata is invalid')
     if type(archive.get('size')) is not int or not 0 < archive['size'] <= 1536 * 1024**2:
         raise ValueError('Release archive size is invalid')
     return value
+
+
+def image_fingerprint(image):
+    # Docker's classic store reports a config digest as Id; containerd reports
+    # a manifest digest. Ordered filesystem layers and runtime configuration
+    # identify the same content on both stores without relying on that Id.
+    config = image.get('Config') or {}
+    fields = {}
+    for name in ('Env', 'Entrypoint', 'Cmd', 'User', 'WorkingDir', 'Labels',
+                 'ExposedPorts', 'Volumes', 'Healthcheck', 'StopSignal', 'OnBuild'):
+        value = config.get(name)
+        if value in ({}, []):
+            value = None
+        fields[name] = value
+    value = {'architecture': image['Architecture'], 'os': image['Os'],
+             'layers': image['RootFS']['Layers'], 'config': fields}
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
 def is_idle(health):
@@ -185,7 +204,7 @@ class Updater:
         self.run('docker', 'load', '-i', str(archive))
         for service in SERVICES:
             image = json.loads(self.run('docker', 'image', 'inspect', manifest['images'][service]['tag']))[0]
-            if image['Id'] != manifest['images'][service]['id'] or image['Architecture'] != 'arm64' or image['Config']['Labels'].get('org.opencontainers.image.revision') != revision:
+            if image_fingerprint(image) != manifest['images'][service]['fingerprint'] or image['Architecture'] != 'arm64' or image['Config']['Labels'].get('org.opencontainers.image.revision') != revision:
                 raise ValueError('Loaded image does not match its validated release')
         source = release / 'source'
         if not source.exists():
@@ -294,7 +313,7 @@ class Updater:
                 self.assets.replace(release / 'previous-assets')
                 (release / 'assets').replace(self.assets)
                 for service in SERVICES:
-                    self.run('docker', 'tag', manifest['images'][service]['id'], ALIASES[service])
+                    self.run('docker', 'tag', manifest['images'][service]['tag'], ALIASES[service])
                 self.compose(release / 'source', 'cod2-wasm-pi', self.assets, ALIASES,
                              'up', '-d', '--no-build', '--force-recreate', '--wait', '--wait-timeout', '90', *SERVICES)
                 print(self.verify(release / 'source', 'cod2-wasm-pi', self.assets, ALIASES, manifest['build']), flush=True)

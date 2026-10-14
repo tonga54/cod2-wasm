@@ -16,10 +16,10 @@ OLD, NEW = 'a' * 40, 'b' * 40
 
 
 def manifest():
-    return {'schemaVersion': 1, 'revision': NEW, 'platform': 'linux/arm64',
+    return {'schemaVersion': 2, 'revision': NEW, 'platform': 'linux/arm64',
             'build': {'revision': NEW, 'buildId': 'c' * 64, 'dirty': False},
             'assetManifestSha256': 'd' * 64,
-            'images': {s: {'tag': f'{module.RELEASE_REPOS[s]}:release-{NEW}', 'id': 'sha256:' + 'e' * 64} for s in module.SERVICES},
+            'images': {s: {'tag': f'{module.RELEASE_REPOS[s]}:release-{NEW}', 'id': 'sha256:' + 'e' * 64, 'fingerprint':'1'*64} for s in module.SERVICES},
             'archive': {'name': 'pi-images.tar.gz', 'size': 100, 'sha256': 'f' * 64}}
 
 
@@ -91,6 +91,18 @@ class FakeUpdater(module.Updater):
 
 
 class Tests(unittest.TestCase):
+    def test_image_identity_is_portable_across_docker_stores(self):
+        classic={'Id':'sha256:'+'a'*64,'Architecture':'arm64','Os':'linux',
+                 'RootFS':{'Layers':['sha256:'+'b'*64]},'Config':{'Cmd':['node','server.mjs'],'Labels':{'revision':NEW}}}
+        containerd=copy.deepcopy(classic)
+        containerd['Id']='sha256:'+'c'*64
+        containerd['Descriptor']={'digest':containerd['Id']}
+        containerd['Config']['OnBuild']=[]
+        self.assertEqual(module.image_fingerprint(classic),module.image_fingerprint(containerd))
+        containerd['RootFS']['Layers'].append('sha256:'+'d'*64)
+        self.assertNotEqual(module.image_fingerprint(classic),module.image_fingerprint(containerd))
+        containerd=copy.deepcopy(classic);containerd['Config']['Cmd']=['different']
+        self.assertNotEqual(module.image_fingerprint(classic),module.image_fingerprint(containerd))
     def test_manifest_identity(self):
         self.assertEqual(module.validate_manifest(manifest(),NEW)['revision'],NEW)
         corruptions=[('platform','linux/amd64'),('revision',OLD),('assetManifestSha256','invalid')]

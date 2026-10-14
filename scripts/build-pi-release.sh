@@ -47,20 +47,21 @@ done
 mkdir -p out/pi-release
 docker save "${web_image}" "${server_image}" "${gateway_image}" | gzip -1 > out/pi-release/pi-images.tar.gz
 python3 - "${revision}" "${web_image}" "${server_image}" "${gateway_image}" <<'PY'
-import hashlib,json,subprocess,sys
+import hashlib,json,subprocess,sys,runpy
 from pathlib import Path
 revision,*tags=sys.argv[1:]
 images={}
+fingerprint=runpy.run_path('scripts/update-pi.py')['image_fingerprint']
 for service,tag in zip(('cod2-web','cod2-server','cod2-gateway'),tags):
     image=json.loads(subprocess.check_output(['docker','image','inspect',tag]))[0]
     assert image['Architecture']=='arm64'
     assert image['Config']['Labels']['org.opencontainers.image.revision']==revision
-    images[service]={'tag':tag,'id':image['Id']}
+    images[service]={'tag':tag,'id':image['Id'],'fingerprint':fingerprint(image)}
 build=json.loads(Path('out/cod2-wasm-core/site/build-info.json').read_text())
 assert build['revision']==revision and not build['dirty']
 assert not subprocess.check_output(['git','status','--porcelain'])
 archive=Path('out/pi-release/pi-images.tar.gz')
-manifest={'schemaVersion':1,'revision':revision,'platform':'linux/arm64','build':build,
+manifest={'schemaVersion':2,'revision':revision,'platform':'linux/arm64','build':build,
  'images':images,'assetManifestSha256':hashlib.sha256(Path('site/wasm-game-data.json').read_bytes()).hexdigest(),
  'archive':{'name':archive.name,'size':archive.stat().st_size,'sha256':hashlib.sha256(archive.read_bytes()).hexdigest()}}
 Path('out/pi-release/manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
