@@ -3,6 +3,9 @@
 set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_root}"
+# Create the shared output parent as the runner before root Docker processes
+# populate it; host-side regressions need to create temporary fixtures here.
+mkdir -p out
 revision="$(git rev-parse HEAD)"
 test -z "$(git status --porcelain)"
 [[ "${revision}" =~ ^[a-f0-9]{40}$ ]]

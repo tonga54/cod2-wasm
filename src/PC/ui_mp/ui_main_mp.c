@@ -3321,6 +3321,14 @@ void UI_RunMenuScript(const char **args)
     if (!String_Parse(args, name, 0x400))
         return;
 
+    if (I_stricmp(name, "ReloadClient") == 0) {
+#ifdef __EMSCRIPTEN__
+        extern void Web_ReloadClient(void);
+        Web_ReloadClient();
+#endif
+        return;
+    }
+
     if (I_stricmp(name, "StartServer") == 0) {
 #ifdef __EMSCRIPTEN__
         extern void Web_CreateServer(const char *name, const char *mapName, const char *gameType, int botCount, int botDifficulty);
