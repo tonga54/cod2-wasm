@@ -2426,91 +2426,56 @@ qboolean Display_MouseMove(displayContextDef_t *dc, void *p, int x, int y)
     return 1;
 }
 
+/* Directional navigation uses the selected widget's painted location, not
+ * the old mouse position. Text-only team/weapon buttons have a smaller hit
+ * rectangle than their item bounds. Visit at most itemCount entries. */
+static itemDef_t *Menu_MoveCursor(displayContextDef_t *dc, menuDef_t *menu, int direction)
+{
+    int oldCursor = menu->cursorItem[0];
+    int count = menu->itemCount;
+    int cursor = oldCursor;
+    int visited;
+    if (count <= 0) return NULL;
+    if (cursor < 0 || cursor >= count) cursor = direction > 0 ? -1 : 0;
+    for (visited = 0; visited < count; ++visited) {
+        itemDef_t *item;
+        rectDef_t rect;
+        float x, y, scaleX = 1.0f, scaleY = 1.0f;
+        cursor = (cursor + direction + count) % count;
+        item = menu->items[cursor];
+        if (!item) continue;
+        rect = item->window.rect[0];
+        if (item->type == 0 && item->textRect[0].w > 0.0f) {
+            rect = item->textRect[0];
+            rect.y -= rect.h;
+        }
+        CalcScreenPlacement(&rect.x, &rect.y, &rect.w, &rect.h,
+                            rect.horzAlign, rect.vertAlign);
+        CalcScreenX(&scaleX, 4);
+        CalcScreenY(&scaleY, 4);
+        if (scaleX <= 0.0f || scaleY <= 0.0f) return NULL;
+        x = (rect.x + rect.w * 0.5f) / scaleX;
+        y = (rect.y + rect.h * 0.5f) / scaleY;
+        if (Item_SetFocus(dc, item, x, y)) {
+            Menu_SetCursorItem(menu, cursor);
+            dc->cursorx = (int)x;
+            dc->cursory = (int)y;
+            Menu_HandleMouseMove(dc, menu, x, y);
+            return item;
+        }
+    }
+    Menu_SetCursorItem(menu, oldCursor);
+    return NULL;
+}
+
 itemDef_t *Menu_SetNextCursorItem(displayContextDef_t *dc, menuDef_t *menu)
 {
-    byte *m = (byte *)menu;
-    byte *d = (byte *)dc;
-    int oldCursor = (((menuDef_t*)(m))->cursorItem[0]);
-    int wrapped = 0;
-    int cursor;
-    if (oldCursor == -1) {
-        Menu_SetCursorItem(menu, 0);
-        wrapped = 1;
-    }
-    cursor = (((menuDef_t*)(m))->cursorItem[0]);
-    for (;;) {
-        if (cursor >= (((menuDef_t*)(m))->itemCount)) {
-            Menu_SetCursorItem(menu, oldCursor);
-            return NULL;
-        }
-        Menu_SetCursorItem(menu, cursor + 1);
-        cursor = (((menuDef_t*)(m))->cursorItem[0]);
-        if (cursor >= (((menuDef_t*)(m))->itemCount)) {
-            if (wrapped)
-                return *(itemDef_t **)((char *)&((menuDef_t *)m)->items[oldCursor]);
-            Menu_SetCursorItem(menu, 0);
-            wrapped = 1;
-            cursor = (((menuDef_t*)(m))->cursorItem[0]);
-        }
-        itemDef_t *item = *(itemDef_t **)((char *)&((menuDef_t *)m)->items[cursor]);
-        if (Item_SetFocus(dc, item, (float)((displayContextDef_t *)d)->cursorx, (float)(((displayContextDef_s*)(d))->cursory))) {
-            cursor = (((menuDef_t*)(m))->cursorItem[0]);
-            item = *(itemDef_t **)((char *)&((menuDef_t *)m)->items[cursor]);
-            Menu_HandleMouseMove(dc, menu, (((rectDef_t*)(item))->x) + 1.0f, *((float *)item + 1) + 1.0f);
-            cursor = (((menuDef_t*)(m))->cursorItem[0]);
-            return *(itemDef_t **)((char *)&((menuDef_t *)m)->items[cursor]);
-        }
-        cursor = (((menuDef_t*)(m))->cursorItem[0]);
-    }
+    return Menu_MoveCursor(dc, menu, 1);
 }
 
 itemDef_t *Menu_SetPrevCursorItem(displayContextDef_t *dc, menuDef_t *menu)
 {
-    byte *m = (byte *)menu;
-    byte *d = (byte *)dc;
-    int oldCursor = (((menuDef_t*)(m))->cursorItem[0]);
-    int wrapped = 0;
-    int cursor;
-    if (oldCursor < 0) {
-        Menu_SetCursorItem(menu, (((menuDef_t*)(m))->itemCount) - 1);
-        wrapped = 1;
-    }
-    for (;;) {
-        cursor = (((menuDef_t*)(m))->cursorItem[0]);
-        if (cursor <= -1) {
-            if (wrapped)
-                goto fail;
-            Menu_SetCursorItem(menu, (((menuDef_t*)(m))->itemCount) - 1);
-            wrapped = 1;
-            cursor = (((menuDef_t*)(m))->cursorItem[0]);
-            if (cursor < 0)
-                goto fail;
-        } else {
-            Menu_SetCursorItem(menu, cursor - 1);
-            cursor = (((menuDef_t*)(m))->cursorItem[0]);
-            if (cursor < 0) {
-                if (wrapped)
-                    goto try_focus;
-                Menu_SetCursorItem(menu, (((menuDef_t*)(m))->itemCount) - 1);
-                wrapped = 1;
-                cursor = (((menuDef_t*)(m))->cursorItem[0]);
-                if (cursor < 0)
-                    goto fail;
-            }
-        }
-    try_focus:;
-        itemDef_t *item = *(itemDef_t **)((char *)&((menuDef_t *)m)->items[cursor]);
-        if (Item_SetFocus(dc, item, (float)((displayContextDef_t *)d)->cursorx, (float)(((displayContextDef_s*)(d))->cursory))) {
-            cursor = (((menuDef_t*)(m))->cursorItem[0]);
-            item = *(itemDef_t **)((char *)&((menuDef_t *)m)->items[cursor]);
-            Menu_HandleMouseMove(dc, menu, (((rectDef_t*)(item))->x) + 1.0f, *((float *)item + 1) + 1.0f);
-            cursor = (((menuDef_t*)(m))->cursorItem[0]);
-            return *(itemDef_t **)((char *)&((menuDef_t *)m)->items[cursor]);
-        }
-    }
-fail:
-    Menu_SetCursorItem(menu, oldCursor);
-    return NULL;
+    return Menu_MoveCursor(dc, menu, -1);
 }
 
 void Item_TextColor(displayContextDef_t *dc, itemDef_t *item, vec4_t *newColor)
@@ -3364,8 +3329,6 @@ qboolean Item_SetFocus(displayContextDef_t *dc, itemDef_t *item, float x, float 
     int flags = ((itemDef_t *)it)->window.dynamicFlags[0];
     if (!(flags & 4))
         return 0;
-    if (flags & 2)
-        return 1;
 
     byte *parent = (*(byte **)&((itemDef_t *)it)->parent);
 
@@ -3419,6 +3382,8 @@ check_dvar:;
             return 0;
     }
 
+    if (flags & 2) return 1;
+
     byte *menu = (*(byte **)&((itemDef_t *)it)->parent);
 
     void *oldFocus = NULL;
@@ -3456,14 +3421,6 @@ check_dvar:;
         if (tcy < ty || tcy > ty + th)
             goto fail;
 
-        Window_AddDynamicFlags((void *)it, 2);
-        snd_alias_list_t *itemSound = ((itemDef_t *)it)->focusSound;
-        if (itemSound) {
-            UI_PlayLocalSoundAlias(itemSound);
-        } else if (defaultSound) {
-            UI_PlayLocalSoundAlias(defaultSound);
-        }
-        goto set_cursor;
     }
 
     Window_AddDynamicFlags((void *)it, 2);
@@ -3478,13 +3435,10 @@ check_dvar:;
         UI_PlayLocalSoundAlias(defaultSound);
     }
 
-set_cursor:;
-
     if (menu) {
         int itemCount = (((menuDef_t*)(menu))->itemCount);
-        byte *items = (*(byte **)&((menuDef_t *)menu)->items);
         for (i = 0; i < itemCount; i++) {
-            if (*(void **)(items + i * 4) == item) {
+            if (((menuDef_t *)menu)->items[i] == item) {
                 Menu_SetCursorItem((menuDef_t *)menu, i);
                 return 1;
             }
@@ -3500,17 +3454,7 @@ fail:
             Item_RunScript(dc, (itemDef_t *)oldFocus, ((itemDef_t *)oldFocus)->onFocus);
     }
 
-    if (menu) {
-        int itemCount = (((menuDef_t*)(menu))->itemCount);
-        byte *items = (*(byte **)&((menuDef_t *)menu)->items);
-        for (i = 0; i < itemCount; i++) {
-            if (*(void **)(items + i * 4) == item) {
-                Menu_SetCursorItem((menuDef_t *)menu, i);
-                return 1;
-            }
-        }
-    }
-    return 1;
+    return 0;
 }
 
 void Script_SetFocusByDvar(displayContextDef_t *dc, itemDef_t *item, const char **args)
@@ -5004,12 +4948,12 @@ void Menu_HandleKey(displayContextDef_t *dc, menuDef_t *menu, int key, qboolean 
         return;
     }
 
-    if (key == 9 || key == 0x9b || key == 0x9d || key == 0x9c) {
+    if (key == 9 || key == 0x9b || key == 0x9d) {
         Menu_SetNextCursorItem(dc, menu);
         return;
     }
 
-    if (key == 0x9a) {
+    if (key == 0x9a || key == 0x9c) {
         Menu_SetPrevCursorItem(dc, menu);
         return;
     }

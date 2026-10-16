@@ -1,10 +1,10 @@
 {
   "namespace": "cod2-browser",
-  "version": "bootstrap-1d9aa70080ead6cb",
+  "version": "bootstrap-0be9a0da7ba33fa0",
   "variants": {
     "cod2-mp": {
       "namespace": "cod2-lan-tdm",
-      "version": "bootstrap-1d9aa70080ead6cb",
+      "version": "bootstrap-0be9a0da7ba33fa0",
       "phase": "lan-maps-dependencies-unverified",
       "files": [
         {
@@ -44,7 +44,7 @@
             3,
             4
           ],
-          "sha256": "401b6d228891d5967511ab4f01ab2908b10361e4d605a35c2fb0f25f9a0a5c9f"
+          "sha256": "cb8ca456007bde8eb3eb4e3a5e4f6c5b30a4afb6002e9ad4678990a1fd8f63b2"
         },
         {
           "key": "cod2-browser-audio",

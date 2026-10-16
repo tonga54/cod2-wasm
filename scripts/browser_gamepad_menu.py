@@ -5,7 +5,7 @@ import re
 def controller_menu():
     actions = (
         ('Fire', '+attack'), ('Aim (hold)', '+speed'),
-        ('Jump / stand', '+gostand'), ('Toggle crouch', 'togglecrouch'),
+        ('Jump / stand', '+gostand'), ('Crouch / hold prone', '+stance'),
         ('Go prone', 'goprone'), ('Use / reload', '+usereload'),
         ('Switch weapon', 'weapnext'), ('Melee', '+melee'),
         ('Sprint / hold breath', '+sprint'), ('Frag grenade', '+frag'),

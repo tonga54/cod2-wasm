@@ -36,7 +36,8 @@ static int focused=1;
 typedef int qboolean;
 typedef int sysEventType_t;
 #define SE_KEY 1
-typedef struct {int keyCatchers;float viewangles[3],cgameSensitivity,cgameMaxYawSpeed,cgameMaxPitchSpeed;} clientActive_t;
+#define BUTTON_SPRINT 2
+typedef struct {int keyCatchers,stanceHeld;struct {struct {int pm_type;} ps;} snap;float viewangles[3],cgameSensitivity,cgameMaxYawSpeed,cgameMaxPitchSpeed;} clientActive_t;
 typedef struct {int frametime,realtime;} clientStatic_t;
 clientStatic_t cls;
 static clientActive_t client,*clientPtr=&client;
@@ -68,7 +69,7 @@ static struct {int key,down;} events[1024];static int eventCount;
 void Sys_QueEvent(int t,sysEventType_t type,int key,int down,int len,void *p){
  assert(eventCount<1024);events[eventCount].key=key;events[eventCount++].down=down;
 }
-typedef struct {signed char rightmove,forwardmove;} usercmd_t;
+typedef struct {int buttons;signed char rightmove,forwardmove;} usercmd_t;
 typedef struct {int buttons[16],axes[6];} SDL_GameController;
 typedef int SDL_JoystickID;
 static SDL_GameController pad;
@@ -99,6 +100,10 @@ run(prefix + source + r'''
 int main(void){
  client.cgameSensitivity=1.0f;CL_Gamepad_Init();assert(CL_Gamepad_IsConnected());
  assert(!strcmp(bindings[K_BUTTON_RTRIG],"+attack"));
+ assert(!strcmp(bindings[K_BUTTON_B],"+stance"));
+ // Existing defaults migrate once; saved remaps and unbound controls survive.
+ Key_SetBinding(K_BUTTON_B,"togglecrouch");var("cl_gamepadStanceInitialized")->current.enabled=0;
+ CL_Gamepad_Shutdown();CL_Gamepad_Init();assert(!strcmp(bindings[K_BUTTON_B],"+stance"));
  Key_SetBinding(K_BUTTON_A,"+melee");Key_SetBinding(K_BUTTON_B,"");
  CL_Gamepad_Shutdown();CL_Gamepad_Init();
  assert(!strcmp(bindings[K_BUTTON_A],"+melee") && !bindings[K_BUTTON_B][0]);
@@ -130,6 +135,32 @@ int main(void){
  assert(!CL_Gamepad_IsConnected() && !g_buttonDown[K_BUTTON_RTRIG]);
  CL_Gamepad_HandleDeviceEvent(SDL_CONTROLLERDEVICEADDED,0);
  pad.axes[5]=0;CL_Gamepad_Frame();
+ // A stick click latches sprint after release, until neutral or an action.
+ usercmd_t run={0};pad.axes[1]=-32767;
+ pad.buttons[SDL_CONTROLLER_BUTTON_LEFTSTICK]=1;CL_Gamepad_Frame();CL_Gamepad_Move(&run);
+ assert(run.buttons&BUTTON_SPRINT);
+ pad.buttons[SDL_CONTROLLER_BUTTON_LEFTSTICK]=0;CL_Gamepad_Frame();
+ for(int i=0;i<600;i++){run=(usercmd_t){0};CL_Gamepad_Move(&run);assert(run.buttons&BUTTON_SPRINT);}
+ pad.axes[1]=0;run=(usercmd_t){0};CL_Gamepad_Move(&run);assert(!(run.buttons&BUTTON_SPRINT));
+ pad.axes[1]=-32767;run=(usercmd_t){0};CL_Gamepad_Move(&run);assert(!(run.buttons&BUTTON_SPRINT));
+ const int stops[]={1,4,0x100,0x200,0x1000,0x10000};
+ for(int i=0;i<6;i++){
+  pad.buttons[SDL_CONTROLLER_BUTTON_LEFTSTICK]=1;CL_Gamepad_Frame();run=(usercmd_t){0};CL_Gamepad_Move(&run);
+  assert(run.buttons&BUTTON_SPRINT);pad.buttons[SDL_CONTROLLER_BUTTON_LEFTSTICK]=0;CL_Gamepad_Frame();
+  run=(usercmd_t){.buttons=stops[i]};CL_Gamepad_Move(&run);assert(!(run.buttons&BUTTON_SPRINT));
+  run=(usercmd_t){0};CL_Gamepad_Move(&run);assert(!(run.buttons&BUTTON_SPRINT));
+ }
+ // Remapping sprint retains click-to-run, while other L3 assignments do not.
+ Key_SetBinding(K_BUTTON_A,"+sprint");Key_SetBinding(K_BUTTON_LSTICK,"+melee");
+ pad.buttons[SDL_CONTROLLER_BUTTON_A]=1;CL_Gamepad_Frame();run=(usercmd_t){0};CL_Gamepad_Move(&run);
+ assert(run.buttons&BUTTON_SPRINT);pad.buttons[SDL_CONTROLLER_BUTTON_A]=0;CL_Gamepad_Frame();
+ focused=0;CL_Gamepad_Frame();focused=1;run=(usercmd_t){0};CL_Gamepad_Move(&run);
+ assert(!(run.buttons&BUTTON_SPRINT));
+ pad.buttons[SDL_CONTROLLER_BUTTON_LEFTSTICK]=1;CL_Gamepad_Frame();run=(usercmd_t){0};CL_Gamepad_Move(&run);
+ assert(!(run.buttons&BUTTON_SPRINT));pad.buttons[SDL_CONTROLLER_BUTTON_LEFTSTICK]=0;CL_Gamepad_Frame();
+ Key_SetBinding(K_BUTTON_B,"+stance");pad.buttons[SDL_CONTROLLER_BUTTON_B]=1;CL_Gamepad_Frame();
+ client.stanceHeld=1;client.keyCatchers=8;CL_Gamepad_Frame();assert(!client.stanceHeld);
+ pad.buttons[SDL_CONTROLLER_BUTTON_B]=0;CL_Gamepad_Frame();client.keyCatchers=0;CL_Gamepad_Frame();
  // Analog motion preserves small fractions, deadzone and frame-rate independence.
  usercmd_t cmd={0};cls.frametime=10;
  pad.axes[0]=pad.axes[1]=1000;CL_Gamepad_Move(&cmd);
@@ -156,7 +187,7 @@ int main(void){
  pending=1;CL_Gamepad_Frame();assert(!events[2].down);
  CL_Gamepad_Shutdown();return 0;
 }
-''', 'controller hotplug, saved mappings, raw capture, triggers, menu releases, focus, analog sticks and repeat')
+''', 'controller hotplug, saved mapping migration, click-to-sprint/cancellation, raw capture, triggers, focus, analog sticks and repeat')
 
 ui = (root / 'src/PC/ui_mp/ui_shared_mp.c').read_text()
 signature = 'qboolean Item_Bind_HandleKey(displayContextDef_t *dc, itemDef_t *item, int key, qboolean down)\n{'

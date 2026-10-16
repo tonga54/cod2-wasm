@@ -245,9 +245,14 @@ trigger. Controller assignments are saved in this browser independently of
 keyboard/mouse bindings. Escape cancels an assignment; Backspace clears it.
 The same page adjusts sensitivity, stick deadzone and inverted vertical look,
 and restores controller defaults. Left stick moves/navigates; right stick looks.
-By default, RT/R2 fires, LT/L2 aims, A/Cross jumps, B/Circle crouches,
+By default, RT/R2 fires, LT/L2 aims, A/Cross jumps, B/Circle toggles crouch/stand
+on a short press and goes prone when held for 300 ms (tap again to stand),
 X/Square uses/reloads, Y/Triangle changes weapons, LB/L1 throws smoke,
 RB/R1 throws a frag, L3 sprints/holds breath, R3 melees, and Start/Options pauses.
+Click L3 once while moving forward to keep sprinting after releasing the click;
+centering the stick, aiming, combat actions or changing stance cancels the run.
+While aiming, hold L3 to hold breath. Directional navigation highlights the
+selected menu item, including team and weapon choices.
 Use a browser that exposes the controller through the Gamepad API (HTTPS or
 localhost).
 

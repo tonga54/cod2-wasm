@@ -3483,3 +3483,43 @@ correctly while preserving keyboard/mouse bindings. The layout regression in
 `test-gamepad.py` checks widget bounds and the per-page assignment limit.
 Evidence: `out/gamepad-controller-compact.png` and
 `out/gamepad-controller-640x480.png`.
+
+
+## Controller stance, sprint and directional focus — 2026-10-16
+
+B/Circle now uses the existing `+stance` action: tap toggles crouch/stand,
+including standing from prone; holding for 300 ms goes prone without standing
+on release. The timer runs during command creation and on release, including
+slow frames. An archived one-time migration upgrades only the previous B/Circle
+default and retains remapped/unbound buttons. The Controller menu exposes the
+combined action. Cancelling controller input also cancels an unfinished stance
+press.
+
+Controller sprint now latches from a click on any button assigned to `+sprint`.
+It persists after releasing the click while the movement stick points forward;
+neutral/backward input, stance/combat actions, aiming, menus, loss of focus,
+disabling or disconnecting the pad clear it. Raw press/release events still
+support holding breath while aiming. Keyboard sprint behavior is unchanged.
+
+Directional UI traversal now uses each control's painted hit rectangle, updates
+the cursor and preserves focus/hover highlighting. Text options run their
+on-focus scripts so team/weapon previews update. Traversal is bounded, handles
+empty/nonselectable menus, includes the first/last item when starting without a
+selection, and uses typed pointer indexing on 64-bit hosts. Left/up go backward.
+
+Validation: the complete `scripts/test-static.sh` suite passed, as did the
+Emscripten build and private asset audit. Sanitizer tests replay short/long
+stance presses from all three postures, delayed releases, saved bindings,
+600 frames of sprint after releasing L3, interruption/restart and remapped
+sprint. `scripts/test-ui-directional-focus.py` exercises real focus/hover code
+with text buttons, preview scripts, disabled/hidden rows, wraparound and scaled
+alignment. Logs: `out/gamepad-fixes-build.log`, `out/gamepad-fixes-static.log`.
+Browser verification uses a simulated standard Gamepad and a private local
+fixture loading the real team menus without joining a server; this is not
+physical-controller or live-match validation.
+
+The browser also confirmed the gold team selection and matching American
+soldier preview using only simulated D-pad input, plus Options navigation and
+A/Cross activation. Evidence: `out/gamepad-team-focus.png`.
+The Controller Buttons 1 page also displayed `Crouch / hold prone` mapped
+to B/Circle at 640x480: `out/gamepad-stance-controls.png`.

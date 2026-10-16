@@ -4,6 +4,7 @@
 
 #    include <SDL2/SDL.h>
 #    include <math.h>
+#    include "cod2_sprint.h"
 
 #    define __m128 __m128_cod2
 #    include "common_types.h"
@@ -189,6 +190,8 @@ static int g_blockedButton[GAMEPAD_BUTTON_STATES];
 static int g_menuState;
 static int g_navDirection;
 static int g_navDeadline;
+static int g_sprintRequested;
+static int g_sprintLatched;
 
 static void Gamepad_SendKey(int key, int down);
 static void Gamepad_ReleaseAll(void)
@@ -196,6 +199,11 @@ static void Gamepad_ReleaseAll(void)
     int key;
     for (key = 1; key < GAMEPAD_BUTTON_STATES; ++key) {
         if (g_buttonDown[key]) {
+            const char *binding = Key_GetBinding(key);
+            if (g_emittedKey[key] == key && binding && !stricmp_local(binding, "+stance")) {
+                clientActive_t *cl = imp_cl ? *(clientActive_t **)imp_cl : NULL;
+                if (cl) cl->stanceHeld = 0;
+            }
             Gamepad_SendKey(key, 0);
             g_blockedButton[key] = 1;
         }
@@ -203,6 +211,7 @@ static void Gamepad_ReleaseAll(void)
     if (g_navDirection)
         Sys_QueEvent(0, SE_KEY, g_navDirection, 0, 0, NULL);
     g_navDirection = 0;
+    g_sprintRequested = g_sprintLatched = 0;
 }
 
 static int Gamepad_HasFocus(void)
@@ -217,7 +226,7 @@ static int Gamepad_HasFocus(void)
 void CL_Gamepad_DefaultBindings(void)
 {
     static const char *commands[16] = {
-        "+gostand", "togglecrouch", "+usereload", "weapnext",
+        "+gostand", "+stance", "+usereload", "weapnext",
         "+smoke", "+frag", "+scores", "togglemenu",
         "+sprint", "+melee", "+breath_binoculars", "goprone",
         "+leanleft", "+leanright", "+speed", "+attack"
@@ -227,6 +236,7 @@ void CL_Gamepad_DefaultBindings(void)
     for (i = 0; i < 16; ++i)
         Key_SetBinding(K_AUX1 + i, commands[i]);
     Dvar_SetBoolByName("cl_gamepadBindingsInitialized", 1);
+    Dvar_SetBoolByName("cl_gamepadStanceInitialized", 1);
 }
 
 int CL_Gamepad_IsConnected(void)
@@ -351,6 +361,13 @@ void CL_Gamepad_Init(void)
         Dvar_SetBoolByName("cl_gamepadBindingsInitialized", 1);
     }
     g_menuState = Gamepad_KeyCatchers();
+    /* Upgrade the old default once; preserve remapped and cleared buttons. */
+    if (!Dvar_RegisterBool_mac("cl_gamepadStanceInitialized", 0, 0x1)->current.enabled) {
+        const char *binding = Key_GetBinding(K_BUTTON_B);
+        if (binding && !stricmp_local(binding, "togglecrouch"))
+            Key_SetBinding(K_BUTTON_B, "+stance");
+        Dvar_SetBoolByName("cl_gamepadStanceInitialized", 1);
+    }
 }
 
 void CL_Gamepad_ApplyButtonConfig(const char *preset)
@@ -518,6 +535,11 @@ static void Gamepad_SendKey(int key, int down)
             if (key == K_BUTTON_START) emitted = K_ESCAPE;
         }
         g_emittedKey[key] = emitted;
+        if (!(Gamepad_KeyCatchers() & (1 | 8 | 0x10))) {
+            const char *binding = Key_GetBinding(key);
+            if (binding && !stricmp_local(binding, "+sprint"))
+                g_sprintRequested = 1;
+        }
     } else {
         emitted = g_emittedKey[key];
         g_emittedKey[key] = 0;
@@ -642,6 +664,18 @@ void CL_Gamepad_Move(usercmd_t *cmd)
 
     cmd->rightmove = (signed char)side;
     cmd->forwardmove = (signed char)forward;
+
+    /* Clicking the stick starts a run; releasing the click must not end it.
+     * Keep the normal key events for held breath while aiming. Neutral/back,
+     * stance, combat actions and menus cancel the run, requiring a new click. */
+    if (g_sprintRequested) g_sprintLatched = 1;
+    if (cl->snap.ps.pm_type != 0 || my >= -0.1f ||
+        (cmd->buttons & (0x1 | 0x4 | 0x8 | 0x10 | 0x20 | 0x40 | 0x80 |
+                         0x1000 | 0x4000 | 0x10000 | 0x20000)) ||
+        (!g_sprintRequested && (cmd->buttons & (0x100 | 0x200))))
+        g_sprintLatched = 0;
+    g_sprintRequested = 0;
+    if (g_sprintLatched) cmd->buttons |= BUTTON_SPRINT;
 }
 
 #    if COD2_FEATURE_RUMBLE

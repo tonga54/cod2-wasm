@@ -671,12 +671,26 @@ void IN_Stance_Down(void)
     }
 
     cl = *(clientActive_t **)imp_cl;
+    if (cl->stanceHeld)
+        return;
     cl->stanceHeld = 1;
     lh = (LegacyHacks **)imp_legacyHacks;
     cl->stancePosition = (*lh)->cl_stance;
     cl->stanceTime = *(int *)imp_com_frameTime;
-    if (cl->stancePosition != 1) {
+    if (cl->stancePosition == 0) {
         (*lh)->cl_stance = 1;
+    }
+}
+
+static void CL_UpdateHeldStance(void)
+{
+    clientActive_t *cl = *(clientActive_t **)imp_cl;
+    if (cl->stanceHeld &&
+        *(int *)imp_com_frameTime - cl->stanceTime >= cl_stanceHoldTime->current.integer) {
+        if (!kb[25].active && !kb[11].active)
+            (*(LegacyHacks **)imp_legacyHacks)->cl_stance = 2;
+        /* A long press must not turn into a tap on release. */
+        cl->stanceHeld = 0;
     }
 }
 
@@ -684,11 +698,11 @@ void IN_Stance_Up(void)
 {
     clientActive_t **clp;
     clientActive_t *ptr;
-    if (kb[25].active || kb[11].active )
-        return;
+    CL_UpdateHeldStance();
     clp = (clientActive_t **)imp_cl;
     ptr = *clp;
-    if (ptr->stanceHeld && ptr->stancePosition == 1) {
+    if (ptr->stanceHeld && ptr->stancePosition != 0 &&
+        !kb[25].active && !kb[11].active) {
         (*(LegacyHacks **)imp_legacyHacks)->cl_stance = 0;
     }
     (*clp)->stanceHeld = 0;
@@ -1435,7 +1449,7 @@ void CL_KeyMove(usercmd_t *cmd)
 
     cl = *(clientActive_t **)imp_cl;
 
-    (void)cl;
+    CL_UpdateHeldStance();
 
     {
         int clStance = (*(LegacyHacks **)imp_legacyHacks)->cl_stance;

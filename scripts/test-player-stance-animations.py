@@ -44,12 +44,15 @@ typedef struct {int buttons,forwardmove,rightmove;} usercmd_t;
 typedef struct {int cl_stance,cl_stanceTemp;} LegacyHacks;
 static LegacyHacks legacy,*legacyPtr=&legacy;
 static void *imp_legacyHacks=&legacyPtr;
-typedef struct {int keyCatchers,cgameInShellshock,stanceHeld,usingAds;struct {struct {int pm_type,pm_flags,viewHeightTarget;}ps;}snap;} clientActive_t;
+typedef struct {int keyCatchers,cgameInShellshock,stanceHeld,stancePosition,stanceTime,usingAds;struct {struct {int pm_type,pm_flags,viewHeightTarget;}ps;}snap;} clientActive_t;
 static clientActive_t client,*clientPtr=&client;
 static void *imp_cl=&clientPtr;
 static struct {struct {int enabled;}current;} bypass,*cl_bypassMouseInput=&bypass;
 static unsigned int frameMsec=16;
 static void *imp_frame_msec=&frameMsec;
+static int frameTime;
+static void *imp_com_frameTime=&frameTime;
+static struct {struct {int integer;}current;} stanceHold={.current.integer=300},*cl_stanceHoldTime=&stanceHold;
 #define BUTTON_SPRINT 2
 static int CL_KeyMoveValue(kbutton_t *b){return b->active?127:0;}
 static int ClampChar(int n){return n>127?127:n<-127?-127:n;}
@@ -59,9 +62,21 @@ static const char *Cmd_Argv(int n) {return n==1 ? "32" : "1000";}
 '''
 input_body = ''.join(function('src/PC/client_mp/cl_input.c', n) for n in (
     'IN_KeyDown', 'IN_KeyUp', 'IN_ToggleCrouch', 'IN_GoProne', 'IN_GoStandDown',
-    'IN_GoStandUp', 'CL_ConsumeButtonPress', 'CL_CmdButtons', 'CL_KeyMove'))
+    'IN_GoStandUp', 'IN_Stance_Down', 'CL_UpdateHeldStance', 'IN_Stance_Up',
+    'CL_ConsumeButtonPress', 'CL_CmdButtons', 'CL_KeyMove'))
 input_checks = r'''
 int main(void) {
+    // Tap alternates crouch/stand (also stands from prone); holding goes
+    // prone at 300ms, including a release after a delayed render frame.
+    for(int posture=0;posture<=2;posture++)for(int duration=0;duration<=600;duration+=10){
+        memset(kb,0,sizeof(kb));client.stanceHeld=0;legacy.cl_stance=posture;frameTime=1000;
+        IN_Stance_Down();frameTime+=duration;
+        if(duration>=300){CL_UpdateHeldStance();assert(legacy.cl_stance==2);}
+        IN_Stance_Up();assert(legacy.cl_stance==(duration>=300?2:(posture==0?1:0)));
+        assert(!client.stanceHeld);
+        legacy.cl_stance=posture;frameTime=2000;IN_Stance_Down();frameTime+=duration;
+        IN_Stance_Up();assert(legacy.cl_stance==(duration>=300?2:(posture==0?1:0)));
+    }
     for(int posture=1;posture<=2;posture++) for(int type=0;type<8;type++) {
         memset(kb,0,sizeof(kb));legacy.cl_stance=posture;client.snap.ps.pm_type=type;
         IN_GoStandDown(); assert(legacy.cl_stance==0 && !kb[10].active);
