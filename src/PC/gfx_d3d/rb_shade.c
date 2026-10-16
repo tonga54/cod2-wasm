@@ -1970,6 +1970,7 @@ void RB_EndSurface(void)
                             extern unsigned int g_prebind_texTarget;
                             g_prebind_texID = texID;
                             g_prebind_texTarget = texTarget;
+#ifndef __EMSCRIPTEN__
                             if (texID) {
                                 if (texTarget == RB_GL_TEXTURE_CUBE_MAP) {
                                     glDisable(RB_GL_TEXTURE_2D);
@@ -1981,6 +1982,7 @@ void RB_EndSurface(void)
                                     glEnable(RB_GL_TEXTURE_2D);
                                 }
                             }
+#endif
                         }
                     }
                 } else {

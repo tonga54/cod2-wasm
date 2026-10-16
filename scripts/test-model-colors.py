@@ -24,7 +24,7 @@ functions = ''.join(function(device, name) for name in (
     'CDirect3DDevice_InterleavedColors',
     'CDirect3DDevice_SetMaterial', 'CDirect3DDevice_SetLight',
     'CDirect3DDevice_LightEnable', 'CDirect3DDevice_GetLightEnable',
-    'CDirect3DDevice_ApplyModelLights'))
+    'CDirect3DDevice_ApplyModelLights', 'CDirect3DDevice_ApplyModelLightsCached'))
 functions += function((root/'src/PC/gfx_d3d/rb_shade.c').read_text(), 'RB_CopyVerticesWithColorConvert')
 functions += function(converter, 'CColorConverter_ByteSwap32')
 functions += function(converter, 'StdConverterARGB_Convert')
@@ -51,8 +51,13 @@ enum { COLOR_BYTES_RGBA,COLOR_BYTES_BGRA,COLOR_BYTES_ARGB };
 static struct { int projection2D; } backEnd;
 static byte *g_colorArrayScratch;static UINT g_colorArrayScratchCapacity;
 static float viewSent[16],ambientSent[4],diffuseSent[4],lightDirections[8][4],lightAmbient[8][4],lightDiffuse[8][4];
-static int lightsEnabled[8],lightingEnabled;
-static void glLoadMatrixf(const float *view){memcpy(viewSent,view,64);}
+static int lightsEnabled[8],lightingEnabled,lightUploadCount;
+static int g_cachedModelLightsValid;
+static float g_cachedModelLightView[16];
+static BOOL g_cachedModelLightEnabled[8];
+static D3DLIGHT9 g_cachedModelLights[8];
+static D3DMATERIAL9 g_cachedModelMaterial;
+static void glLoadMatrixf(const float *view){memcpy(viewSent,view,64);lightUploadCount++;}
 static void glLightModelfv(unsigned int p,const float *v){assert(p==0x0B53);for(int i=0;i<4;i++)assert(v[i]==0);}
 static void glMaterialfv(unsigned int face,unsigned int p,const float *v){
  assert(face==0x408);if(p==0x1200)memcpy(ambientSent,v,16);else if(p==0x1201)memcpy(diffuseSent,v,16);else {assert(p==0x1202);for(int i=0;i<4;i++)assert(v[i]==0);}
@@ -136,6 +141,14 @@ int main(void){
  assert(CDirect3DDevice_SetLight(dev,8,&dev->lightData.state.lights[0]));
  assert(CDirect3DDevice_SetLight(dev,0,0));assert(CDirect3DDevice_LightEnable(dev,8,1));
  BOOL enabled;assert(CDirect3DDevice_GetLightEnable(dev,8,&enabled));assert(CDirect3DDevice_GetLightEnable(dev,0,0));
+ g_cachedModelLightsValid=0;lightUploadCount=0;
+ float cachedView[16]={1,0,0,0,0,1,0,0,0,0,1,0,10,20,30,1};
+ for(int i=0;i<600;i++)CDirect3DDevice_ApplyModelLightsCached(dev,cachedView);
+ assert(lightUploadCount==1);
+ cachedView[12]=15;CDirect3DDevice_ApplyModelLightsCached(dev,cachedView);
+ assert(lightUploadCount==2);
+ dev->lightData.state.material.Diffuse.r=.9f;CDirect3DDevice_ApplyModelLightsCached(dev,cachedView);
+ assert(lightUploadCount==3);
  assert(guard.before==0xabcdef&&guard.after==0xfedcba);
  free(g_colorArrayScratch);return 0;
 }

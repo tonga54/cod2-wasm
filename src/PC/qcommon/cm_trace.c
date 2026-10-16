@@ -57,7 +57,7 @@ static cmodel_t cm_fallbackBoxModel;
 
 /* Only immutable world geometry is memoized. Dynamic entities, temporary box
  * models and transformed/partial traces still run their complete solvers. */
-#define CM_WORLD_TRACE_CACHE_SIZE 256
+#define CM_WORLD_TRACE_CACHE_SIZE 1024
 typedef struct {
     unsigned int bits[13];
 } cmWorldTraceKey_t;
@@ -227,7 +227,7 @@ static void CM_InitTraceWork(traceWork_t *tw, const vec_t *start, const vec_t *e
     CM_CalcTraceEntents(&tw->extents);
 
     tw->deltaLenSq = CM_DotProduct(tw->delta, tw->delta);
-    tw->deltaLen = sqrtf(tw->deltaLenSq);
+    tw->deltaLen = tw->deltaLenSq > 0.0f ? sqrtf(tw->deltaLenSq) : 0.0f;
 
     radius = CM_MinFloat(CM_AbsFloat(tw->size[0]), CM_AbsFloat(tw->size[2]));
     tw->radius = radius;
@@ -621,17 +621,23 @@ static int __attribute_regparm__(3) CM_Trace(trace_t *results, const vec_t *star
         int leafs[1024];
         /* Leaf brush indexes are unsigned 16-bit values. */
         byte brushSeen[65536 / 8];
+        int brushSeenReady = 0;
         int lastLeaf = 0;
         int leafCount;
         int i;
 
-        int brushCount = cm.numBrushes > 65536 ? 65536 : cm.numBrushes;
-        memset(brushSeen, 0, brushCount > 0 ? (brushCount + 7) / 8 : 0);
         leafCount = CM_BoxLeafnums(tw.bounds[0], tw.bounds[1], leafs, 1024, &lastLeaf);
         for (i = 0; i < leafCount; i++) {
             int leafIndex = leafs[i];
-            if (leafIndex >= 0 && leafIndex < cm.numLeafs)
-                CM_TraceLeaf(&tw, &cm.leafs[leafIndex], results, brushSeen);
+            if (leafIndex >= 0 && leafIndex < cm.numLeafs) {
+                cLeaf_t *leaf = &cm.leafs[leafIndex];
+                if (!brushSeenReady && (leaf->brushContents & tw.contents)) {
+                    int brushCount = cm.numBrushes > 65536 ? 65536 : cm.numBrushes;
+                    memset(brushSeen, 0, brushCount > 0 ? (brushCount + 7) / 8 : 0);
+                    brushSeenReady = 1;
+                }
+                CM_TraceLeaf(&tw, leaf, results, brushSeenReady ? brushSeen : NULL);
+            }
             if (results->allsolid || results->fraction == 0.0f)
                 break;
         }

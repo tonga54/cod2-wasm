@@ -7,7 +7,7 @@ assert(start >= 0 && end > start);
 const cache = Function(source.slice(start, end) + 'return cacheWebGlState;')();
 const calls = [];
 const gl = {TEXTURE0: 100, DEPTH_TEST: 0xB71, BLEND: 0xBE2};
-for (const name of ['activeTexture','bindTexture','texParameteri','texParameterf','deleteTexture','uniformMatrix4fv','uniform4fv','uniform4f','linkProgram','enable','disable','depthFunc','cullFace','frontFace','depthMask','colorMask'])
+for (const name of ['activeTexture','bindTexture','texParameteri','texParameterf','deleteTexture','uniformMatrix4fv','uniform4fv','uniform4f','uniform1i','uniform1f','useProgram','blendFunc','linkProgram','enable','disable','depthFunc','cullFace','frontFace','depthMask','colorMask'])
   gl[name] = (...args) => calls.push([name, ...args]);
 gl.getUniformLocation = (program,name) => {calls.push(['getUniformLocation',program,name]);return {};};
 let restore;
@@ -111,4 +111,23 @@ gl.activeTexture(100);gl.texParameteri(3553,10241,9987);
 assert.equal(count('texParameteri')-samplerCalls,3);
 gl.deleteTexture(shared);gl.activeTexture(101);gl.texParameteri(3553,10241,9987);
 assert.equal(count('texParameteri')-samplerCalls,4);
-console.log('PASS: 600 changing muzzle-light arrays preserve material caches; scalar/vector float32 equivalence, array length changes and shared samplers retain values');
+const progA = {}, progB = {}, uIntLoc = {}, uFloatLoc = {};
+for (let i = 0; i < 600; i++) {
+  gl.useProgram(progA);
+  gl.blendFunc(0x0302, 0x0303);
+  gl.uniform1i(uIntLoc, 2);
+  gl.uniform1f(uFloatLoc, 0.75);
+}
+assert.equal(count('useProgram'), 1);
+assert.equal(count('blendFunc'), 1);
+assert.equal(count('uniform1i'), 1);
+assert.equal(count('uniform1f'), 1);
+gl.useProgram(progB); assert.equal(count('useProgram'), 2);
+gl.blendFunc(1, 1); assert.equal(count('blendFunc'), 2);
+gl.uniform1i(uIntLoc, 3); assert.equal(count('uniform1i'), 2);
+gl.uniform1f(uFloatLoc, 0.25); assert.equal(count('uniform1f'), 2);
+gl.linkProgram(progB);
+gl.useProgram(progB); assert.equal(count('useProgram'), 3);
+gl.uniform1i(uIntLoc, 3); assert.equal(count('uniform1i'), 3);
+gl.uniform1f(uFloatLoc, 0.25); assert.equal(count('uniform1f'), 3);
+console.log('PASS: 600 changing muzzle-light arrays preserve material caches; scalar/vector float32 equivalence, blend/program/scalar caches and shared samplers retain values');

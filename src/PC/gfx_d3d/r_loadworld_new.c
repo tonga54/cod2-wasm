@@ -59,6 +59,17 @@ static float R_FilterSunVisibility(const byte *pixel, int rowBytes)
     return (pixel[0] + pixel[1] + pixel[rowBytes] + pixel[rowBytes + 1]) * 0.25f;
 }
 
+/* Smooth diagonal shadow stair-stepping across a 16-sample tent footprint
+ * strictly inside each 512x512 lightmap tile so atlas seams never bleed. */
+static float R_FilterSunPenumbra(const byte *pixel, int rowBytes, float centerVis)
+{
+    return 0.6f * centerVis + 0.1f * (
+        R_FilterSunVisibility(pixel - 2, rowBytes) +
+        R_FilterSunVisibility(pixel + 2, rowBytes) +
+        R_FilterSunVisibility(pixel - rowBytes * 2, rowBytes) +
+        R_FilterSunVisibility(pixel + rowBytes * 2, rowBytes));
+}
+
 static void R_PrintLoadProgress(const char *what)
 {
     ri.Printf(0, "Loading %s...\n", what);
@@ -501,6 +512,10 @@ GfxWorld *R_LoadWorldInternal(const char *name)
                             for (int x = 1; x <= pixWidth; x++) {
 
                                 float sunVis = R_FilterSunVisibility(hiResPtr, pixWidth * 2);
+                                if (((x - 1) & 511) > 0 && ((x - 1) & 511) < 511 &&
+                                    (y & 511) > 0 && (y & 511) < 511) {
+                                    sunVis = R_FilterSunPenumbra(hiResPtr, pixWidth * 2, sunVis);
+                                }
 
                                 float valR = (float)(unsigned char)(*loR) + sunR * sunVis;
                                 valR = floorf(valR * 0.5f + 0.5f);

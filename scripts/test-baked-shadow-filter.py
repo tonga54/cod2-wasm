@@ -8,11 +8,16 @@ match=re.search(r'static float R_FilterSunVisibility\([^;]*?\)\n\{',source)
 end,depth=match.end(),1
 while depth:
     depth+=(source[end]=='{')-(source[end]=='}');end+=1
-body=source[match.start():end]
+penumbra=re.search(r'static float R_FilterSunPenumbra\([^;]*?\)\n\{',source)
+pend,pdepth=penumbra.end(),1
+while pdepth:
+    pdepth+=(source[pend]=='{')-(source[pend]=='}');pend+=1
+body=source[match.start():end]+'\n'+source[penumbra.start():pend]
 assert 'R_FilterSunVisibility(hiResPtr, pixWidth * 2)' in source
 assert 'hiResPtr += 2;' in source and 'hiResBase + y * pixWidth * 4' in source
 support=r'''
 #include <assert.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 typedef unsigned char byte;
@@ -32,6 +37,10 @@ int main(void){
    memset(pixels,value,(size_t)stride*height*2);
    assert(R_FilterSunVisibility(pixels,stride)==value);
    assert(R_FilterSunVisibility(pixels+(height*2-2)*stride+stride-2,stride)==value);
+   if(width>=4 && height>=4){
+    const byte *interior=pixels+2*stride+2;
+    assert(fabsf(R_FilterSunPenumbra(interior,stride,R_FilterSunVisibility(interior,stride))-value)<1e-4f);
+   }
   }
   free(pixels);
  }

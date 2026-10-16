@@ -1362,23 +1362,29 @@ static int SV_EntityIsVisibleToClientLocal(byte *entBytes, const vec3_t org, con
     if (svEnt->numClusters <= 0) {
         return 0;
     }
-    for (i = 0; i < svEnt->numClusters && i < 16; ++i) {
-        if (SV_BitVectorTestLocal(pvs, svEnt->clusternums[i])) {
-            break;
-        }
-    }
-    if (i == svEnt->numClusters) {
-        int cluster;
-        if (!svEnt->lastCluster) {
+    if (svEnt->numClusters == 1 && !svEnt->lastCluster) {
+        if (!SV_BitVectorTestLocal(pvs, svEnt->clusternums[0])) {
             return 0;
         }
-        for (cluster = svEnt->clusternums[0] + 1; cluster <= svEnt->lastCluster; ++cluster) {
-            if (SV_BitVectorTestLocal(pvs, cluster)) {
+    } else {
+        for (i = 0; i < svEnt->numClusters && i < 16; ++i) {
+            if (SV_BitVectorTestLocal(pvs, svEnt->clusternums[i])) {
                 break;
             }
         }
-        if (cluster == svEnt->lastCluster) {
-            return 0;
+        if (i == svEnt->numClusters) {
+            int cluster;
+            if (!svEnt->lastCluster) {
+                return 0;
+            }
+            for (cluster = svEnt->clusternums[0] + 1; cluster <= svEnt->lastCluster; ++cluster) {
+                if (SV_BitVectorTestLocal(pvs, cluster)) {
+                    break;
+                }
+            }
+            if (cluster == svEnt->lastCluster) {
+                return 0;
+            }
         }
     }
 
@@ -1532,13 +1538,11 @@ static void SV_BuildVisibleCachedEntitiesLocal(clientSnapshot_t *frame, cachedSn
                                                const vec3_t org, int clientNum, int deltaTime)
 {
     serverStatic_t *svs = (serverStatic_t *)imp_svs;
-    snapshotEntityNumbers_t entityNumbers;
     byte *pvs;
     float fogOpaqueDistSqrd;
     int cluster;
     int e;
 
-    entityNumbers.numSnapshotEntities = 0;
     cluster = CM_LeafCluster(CM_PointLeafnum((byte *)org));
     if (cluster >= 0) {
         pvs = CM_ClusterPVS(cluster);
@@ -1549,27 +1553,22 @@ static void SV_BuildVisibleCachedEntitiesLocal(clientSnapshot_t *frame, cachedSn
         for (e = 0; e < cachedFrame->num_entities; ++e) {
             archivedEntity_t *archEnt = SV_CachedEntityLocal(svs, cachedFrame->first_entity + e);
             if (SV_CachedEntityIsVisibleLocal(archEnt, org, pvs, fogOpaqueDistSqrd, clientNum)) {
-                SV_AddSnapshotEntityNumberLocal(&entityNumbers, e);
+                SV_CopyCachedEntityToSnapshotLocal(frame, archEnt, deltaTime);
+                if (frame->num_entities == SV_MAX_SNAPSHOT_ENTITIES)
+                    break;
             }
         }
-    }
-
-    for (e = 0; e < entityNumbers.numSnapshotEntities; ++e) {
-        archivedEntity_t *archEnt = SV_CachedEntityLocal(svs, cachedFrame->first_entity + entityNumbers.snapshotEntities[e]);
-        SV_CopyCachedEntityToSnapshotLocal(frame, archEnt, deltaTime);
     }
 }
 
 static void SV_BuildVisibleCurrentEntitiesLocal(clientSnapshot_t *frame, const vec3_t org, int clientNum)
 {
     server_t *sv = (server_t *)imp_sv;
-    snapshotEntityNumbers_t entityNumbers;
     byte *pvs;
     float fogOpaqueDistSqrd;
     int cluster;
     int entnum;
 
-    entityNumbers.numSnapshotEntities = 0;
     cluster = CM_LeafCluster(CM_PointLeafnum((byte *)org));
     if (cluster >= 0) {
         pvs = CM_ClusterPVS(cluster);
@@ -1580,14 +1579,11 @@ static void SV_BuildVisibleCurrentEntitiesLocal(clientSnapshot_t *frame, const v
         for (entnum = 0; entnum < sv->num_entities; ++entnum) {
             byte *ent = SV_GentityNum(entnum);
             if (SV_EntityIsVisibleToClientLocal(ent, org, pvs, fogOpaqueDistSqrd, clientNum)) {
-                SV_AddSnapshotEntityNumberLocal(&entityNumbers, entnum);
+                SV_CopyEntityToSnapshotLocal(frame, ent);
+                if (frame->num_entities == SV_MAX_SNAPSHOT_ENTITIES)
+                    break;
             }
         }
-    }
-
-    for (entnum = 0; entnum < entityNumbers.numSnapshotEntities; ++entnum) {
-        byte *ent = SV_GentityNum(entityNumbers.snapshotEntities[entnum]);
-        SV_CopyEntityToSnapshotLocal(frame, ent);
     }
 }
 

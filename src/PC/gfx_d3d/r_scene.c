@@ -745,7 +745,9 @@ void R_RenderScene(const refdef_t *refdef)
 
 #ifdef __EMSCRIPTEN__
     extern void WebPointLights_SetScene(const GfxLight *, int);
+    extern void WebPointLights_SetShadowCasters(const GfxEntity *, int, const float *);
     WebPointLights_SetScene(scene.dlights, scene.dlightCount);
+    WebPointLights_SetShadowCasters(scene.def.entities, scene.def.entityCount, rg_p->viewOrg);
 #endif
 
     drawSurfStart = (int)(intptr_t)scene.drawSurfs;

@@ -621,6 +621,30 @@ static void CDirect3DDevice_ApplyModelLights(DeviceImpl *dev, const float *view)
     glEnable(0x0B50);
 }
 
+static int g_cachedModelLightsValid = 0;
+static float g_cachedModelLightView[16];
+static BOOL g_cachedModelLightEnabled[8];
+static D3DLIGHT9 g_cachedModelLights[8];
+static D3DMATERIAL9 g_cachedModelMaterial;
+
+static void CDirect3DDevice_ApplyModelLightsCached(DeviceImpl *dev, const float *view)
+{
+    if (g_cachedModelLightsValid &&
+        memcmp(g_cachedModelLightView, view, sizeof(g_cachedModelLightView)) == 0 &&
+        memcmp(g_cachedModelLightEnabled, dev->lightData.state.enabled, sizeof(g_cachedModelLightEnabled)) == 0 &&
+        memcmp(&g_cachedModelMaterial, &dev->lightData.state.material, sizeof(g_cachedModelMaterial)) == 0 &&
+        memcmp(g_cachedModelLights, dev->lightData.state.lights, sizeof(g_cachedModelLights)) == 0) {
+        glEnable(0x0B50);
+        return;
+    }
+    CDirect3DDevice_ApplyModelLights(dev, view);
+    memcpy(g_cachedModelLightView, view, sizeof(g_cachedModelLightView));
+    memcpy(g_cachedModelLightEnabled, dev->lightData.state.enabled, sizeof(g_cachedModelLightEnabled));
+    memcpy(&g_cachedModelMaterial, &dev->lightData.state.material, sizeof(g_cachedModelMaterial));
+    memcpy(g_cachedModelLights, dev->lightData.state.lights, sizeof(g_cachedModelLights));
+    g_cachedModelLightsValid = 1;
+}
+
 static const float *CDirect3DDevice_CameraTexCoords(const byte *vertices, UINT stride,
                                                   int positionOffset, UINT count,
                                                   const float *worldView)
@@ -786,6 +810,10 @@ static GLenum CDirect3DDevice_MapTextureMinFilter(DWORD minFilter, DWORD mipFilt
     }
 
     if (mipFilter == D3DTEXF_POINT) {
+#ifdef __EMSCRIPTEN__
+        if (minFilter == D3DTEXF_ANISOTROPIC)
+            return GL_LINEAR_MIPMAP_LINEAR;
+#endif
         return (minFilter == D3DTEXF_POINT) ? GL_NEAREST_MIPMAP_NEAREST : GL_LINEAR_MIPMAP_NEAREST;
     }
 
@@ -1012,6 +1040,15 @@ static int CDirect3DDevice_LightmapScale(void)
     return scale;
 }
 
+static struct {
+    int valid;
+    DWORD colorOp, alphaOp;
+    DWORD colorArg0, colorArg1, colorArg2;
+    DWORD alphaArg0, alphaArg1, alphaArg2;
+    DWORD textureFactor;
+} g_appliedTexStageCache[8];
+static int g_stage1DefaultLightmapCombine = 0;
+
 static void CDirect3DDevice_ApplyTextureStageState(UINT stage)
 {
     DWORD colorOp = g_textureStageState[stage][D3DTSS_COLOROP];
@@ -1029,6 +1066,33 @@ static void CDirect3DDevice_ApplyTextureStageState(UINT stage)
         alphaOp = D3DTOP_MODULATE;
     /* D3DTA_DIFFUSE is zero, a valid vertex-color input. Device creation
      * initializes the defaults; replacing zero here loses colors and alpha. */
+
+    if (stage < 8) {
+        if (stage == 1)
+            g_stage1DefaultLightmapCombine = 0;
+        if (g_appliedTexStageCache[stage].valid &&
+            g_appliedTexStageCache[stage].colorOp == colorOp &&
+            g_appliedTexStageCache[stage].alphaOp == alphaOp &&
+            g_appliedTexStageCache[stage].colorArg0 == colorArg0 &&
+            g_appliedTexStageCache[stage].colorArg1 == colorArg1 &&
+            g_appliedTexStageCache[stage].colorArg2 == colorArg2 &&
+            g_appliedTexStageCache[stage].alphaArg0 == alphaArg0 &&
+            g_appliedTexStageCache[stage].alphaArg1 == alphaArg1 &&
+            g_appliedTexStageCache[stage].alphaArg2 == alphaArg2 &&
+            g_appliedTexStageCache[stage].textureFactor == g_textureFactor) {
+            return;
+        }
+        g_appliedTexStageCache[stage].valid = 1;
+        g_appliedTexStageCache[stage].colorOp = colorOp;
+        g_appliedTexStageCache[stage].alphaOp = alphaOp;
+        g_appliedTexStageCache[stage].colorArg0 = colorArg0;
+        g_appliedTexStageCache[stage].colorArg1 = colorArg1;
+        g_appliedTexStageCache[stage].colorArg2 = colorArg2;
+        g_appliedTexStageCache[stage].alphaArg0 = alphaArg0;
+        g_appliedTexStageCache[stage].alphaArg1 = alphaArg1;
+        g_appliedTexStageCache[stage].alphaArg2 = alphaArg2;
+        g_appliedTexStageCache[stage].textureFactor = g_textureFactor;
+    }
 
     glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
     CDirect3DDevice_SetTextureFactorColor();
@@ -1084,7 +1148,8 @@ static void CDirect3DDevice_ApplySamplerState(UINT sampler, GLenum target)
     {
         float maximum = CDirect3DDevice_WebMaxAnisotropy();
         if (maximum > 0) {
-            float amount = minFilter == D3DTEXF_ANISOTROPIC
+            float amount = (minFilter == D3DTEXF_ANISOTROPIC ||
+                            (minFilter == D3DTEXF_LINEAR && mipFilter != D3DTEXF_NONE))
                 ? (float)g_samplerState[sampler][D3DSAMP_MAXANISOTROPY] : 1.0f;
             if (amount < 1) amount = 1;
             if (amount > maximum) amount = maximum;
@@ -2062,7 +2127,7 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                 glLoadMatrixf(proj);
                 glMatrixMode(0x1700);
                 if (dev->lighting && normalOffset >= 0)
-                    CDirect3DDevice_ApplyModelLights(dev, view);
+                    CDirect3DDevice_ApplyModelLightsCached(dev, view);
                 glLoadMatrixf(modelView);
             } else {
                 glMatrixMode(0x1701);
@@ -2165,24 +2230,32 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                                     CDirect3DDevice_ApplySamplerState(1, 0x0DE1);
                                     if (g_textureStageState[1][D3DTSS_COLOROP] != D3DTOP_DISABLE) {
                                         CDirect3DDevice_ApplyTextureStageState(1);
+                                        glTexParameteri(0x0DE1, 0x2801 , 0x2601 );
+                                        glTexParameteri(0x0DE1, 0x2800 , 0x2601 );
+                                        glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_ALPHA, 0x1E01 );
+                                        glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_ALPHA, GL_PREVIOUS);
+                                        glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_ALPHA, 0x0302 );
+                                        glTexEnvi(GL_TEXTURE_ENV, 0x0D1C , 1);
+                                        g_appliedTexStageCache[1].valid = 0;
                                     } else {
-
-                                        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
-                                        glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, 0x2100);
-                                        glTexEnvi(GL_TEXTURE_ENV, GL_RGB_SCALE, CDirect3DDevice_LightmapScale());
-                                        glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_RGB, 0x1702);
-                                        glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_RGB, 0x0300);
-                                        glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE1_RGB, GL_PREVIOUS);
-                                        glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND1_RGB, 0x0300);
+                                        if (!g_stage1DefaultLightmapCombine) {
+                                            glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
+                                            glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, 0x2100);
+                                            glTexEnvi(GL_TEXTURE_ENV, GL_RGB_SCALE, CDirect3DDevice_LightmapScale());
+                                            glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_RGB, 0x1702);
+                                            glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_RGB, 0x0300);
+                                            glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE1_RGB, GL_PREVIOUS);
+                                            glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND1_RGB, 0x0300);
+                                            glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_ALPHA, 0x1E01 );
+                                            glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_ALPHA, GL_PREVIOUS);
+                                            glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_ALPHA, 0x0302 );
+                                            glTexEnvi(GL_TEXTURE_ENV, 0x0D1C , 1);
+                                            g_stage1DefaultLightmapCombine = 1;
+                                            g_appliedTexStageCache[1].valid = 0;
+                                        }
+                                        glTexParameteri(0x0DE1, 0x2801 , 0x2601 );
+                                        glTexParameteri(0x0DE1, 0x2800 , 0x2601 );
                                     }
-
-                                    glTexParameteri(0x0DE1, 0x2801 , 0x2601 );
-                                    glTexParameteri(0x0DE1, 0x2800 , 0x2601 );
-
-                                    glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_ALPHA, 0x1E01 );
-                                    glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_ALPHA, GL_PREVIOUS);
-                                    glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_ALPHA, 0x0302 );
-                                    glTexEnvi(GL_TEXTURE_ENV, 0x0D1C , 1);
 
                                     glActiveTextureARB(GL_TEXTURE0_ARB);
                                 }
@@ -2339,6 +2412,17 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
         WebPointLights_Draw(pointLightViewValid ? pointLightView : NULL,
             !is2D && dev->zWriteEnable && !dev->alphaBlendEnable &&
             stage0Target == 0x0DE1 && (usesLightmap || dev->lighting));
+        {
+            extern float g_webViewmodelAdsBlur;
+            extern void WebPointLights_DrawEnhancements(const float *view, int worldShadowEnabled, float weaponBlur);
+            int isViewmodel = !is2D && dev->viewportMinZ == 0.0f &&
+                dev->viewportMaxZ > 0.0f && dev->viewportMaxZ <= 0.25f &&
+                dev->lighting && stage0Target == 0x0DE1;
+            int worldShadow = !is2D && dev->zWriteEnable && !dev->alphaBlendEnable &&
+                stage0Target == 0x0DE1 && usesLightmap;
+            WebPointLights_DrawEnhancements(pointLightViewValid ? pointLightView : NULL,
+                worldShadow, isViewmodel ? g_webViewmodelAdsBlur : 0.0f);
+        }
 #endif
         glDrawElements(0x0004 , indexCount,
                        0x1403 ,
@@ -3619,6 +3703,9 @@ void CDirect3DDevice_Init(void *device)
     g_alphaTestEnable = 0;
     g_textureFactor = 0xFFFFFFFFu;
     g_prebind_texTarget = 0x0DE1;
+    g_cachedModelLightsValid = 0;
+    g_stage1DefaultLightmapCombine = 0;
+    memset(g_appliedTexStageCache, 0, sizeof(g_appliedTexStageCache));
     memset(g_textureStageState, 0, sizeof(g_textureStageState));
     memset(g_samplerState, 0, sizeof(g_samplerState));
     for (stage = 0; stage < 8; ++stage) {

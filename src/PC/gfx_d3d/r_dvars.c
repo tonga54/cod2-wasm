@@ -255,9 +255,15 @@ void R_RegisterDvars(void)
 
     r_ignoreHwGamma = ri.Dvar_RegisterBool("r_ignorehwgamma", 0, 0x2021);
 
+#ifdef __EMSCRIPTEN__
+    r_textureMode = ri.Dvar_RegisterEnum("r_textureMode", textureModeNames, 4, 0x2001);
+
+    r_anisotropy = ri.Dvar_RegisterInt("r_anisotropy", 16, 2, 16, 0x2001);
+#else
     r_textureMode = ri.Dvar_RegisterEnum("r_textureMode", textureModeNames, 2, 0x2001);
 
     r_anisotropy = ri.Dvar_RegisterInt("r_anisotropy", 8, 2, 16, 0x2001);
+#endif
 
     r_fullbright = ri.Dvar_RegisterBool("r_fullbright", 0, 0x2080);
 
@@ -301,7 +307,11 @@ void R_RegisterDvars(void)
 
     r_polygonOffsetBias = ri.Dvar_RegisterFloat("r_polygonOffsetBias", -1.0f, -16.0f, 16.0f, 0x2001);
 
+#ifdef __EMSCRIPTEN__
+    r_picmip_manual = ri.Dvar_RegisterBool("r_picmip_manual", 1, 0x2001);
+#else
     r_picmip_manual = ri.Dvar_RegisterBool("r_picmip_manual", 0, 0x2001);
+#endif
 
     r_picmip = ri.Dvar_RegisterInt("r_picmip", 0, 0, 3, 0x2001);
 

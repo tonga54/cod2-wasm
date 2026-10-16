@@ -134,8 +134,7 @@ INDEX_BIND_REPLACEMENT = '''        var indexBuffer = GL.getTempIndexBuffer(numP
           1 << GL.log2ceilLookup(numProvidedIndexes << 1), GLctx.STREAM_DRAW);'''
 
 
-POINT_DEFS_ORIGINAL = '          var vsSource = ['
-POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once, including frames without flashes.
+POINT_DEFS_LEGACY = r'''          // COD2_POINT_LIGHT_SHADER: compile once, including frames without flashes.
           // Uniform count zero skips lighting; firing never creates a shader variant.
           var pointLights = this.usedTexUnitList.indexOf(0) !== -1 &&
             GLImmediate.TexEnvJIT.getTexUnitType(0) == 0x0DE1;
@@ -175,6 +174,78 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
             pointPass += "gl_FragColor.rgb += " + pointAlbedo + ".rgb * lightSum;\n}\n";
           }
           var vsSource = ['''
+POINT_DEFS_ORIGINAL = '          var vsSource = ['
+POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once, including frames without flashes.
+          // Uniform count zero skips lighting; firing never creates a shader variant.
+          var pointLights = this.usedTexUnitList.indexOf(0) !== -1 &&
+            GLImmediate.TexEnvJIT.getTexUnitType(0) == 0x0DE1;
+          var pointNormal = pointLights && GLEmulation.lightingEnabled;
+          var pointVarying = pointLights ? "varying highp vec3 v_cod2Eye;" : "";
+          if (pointNormal) pointVarying += "varying mediump vec3 v_cod2Normal;";
+          var pointDefs = pointLights ? pointVarying +
+            "uniform int u_cod2LightCount; uniform highp vec4 u_cod2LightEye[4]; uniform vec4 u_cod2LightColor[4];" +
+            (pointNormal ? "uniform mediump float u_cod2WeaponBlur;" :
+              "uniform int u_cod2ShadowCount; uniform highp vec4 u_cod2ShadowEye[4];") : "";
+          var pointPass = "";
+          if (pointLights) {
+            var pointUV = GLImmediate.useTextureMatrix ? "(u_textureMatrix0 * v_texCoord0).xy" : "v_texCoord0.xy";
+            // Reuse the material's base texel for illumination. This removes
+            // the second texture lookup on flashes, including matrix UVs.
+            var pointSample = "texture2D(u_texUnit0, " + pointUV + ")";
+            var pointAlbedo = pointSample;
+            if (fsTexEnvPass.indexOf(pointSample) !== -1) {
+              var weaponDofPass = pointNormal ?
+                "if (u_cod2WeaponBlur > 0.0) {\n" +
+                "highp float cod2Depth = max(-v_cod2Eye.z, 0.0);\n" +
+                "highp float cod2Radial = length(v_cod2Eye.xy);\n" +
+                "float cod2Near = clamp((13.0 - cod2Depth) * 0.11, 0.0, 1.0);\n" +
+                "float cod2Edge = clamp((cod2Radial - 1.6) * 0.22, 0.0, 0.75) * clamp((19.0 - cod2Depth) * 0.1, 0.0, 1.0);\n" +
+                "float cod2Dof = clamp(max(cod2Near, cod2Edge), 0.0, 1.0);\n" +
+                "cod2Dof *= cod2Dof * u_cod2WeaponBlur;\n" +
+                "if (cod2Dof > 0.01) {\n" +
+                "highp vec2 cod2Uv = " + pointUV + ";\n" +
+                "highp vec2 cod2Dx = dFdx(cod2Uv) * (cod2Dof * 2.4);\n" +
+                "highp vec2 cod2Dy = dFdy(cod2Uv) * (cod2Dof * 2.4);\n" +
+                "float cod2Bias = cod2Dof * 2.2;\n" +
+                "cod2BaseTexel = 0.2 * (cod2BaseTexel + " +
+                "texture(u_texUnit0, cod2Uv + cod2Dx + cod2Dy * 0.5, cod2Bias) + " +
+                "texture(u_texUnit0, cod2Uv - cod2Dx - cod2Dy * 0.5, cod2Bias) + " +
+                "texture(u_texUnit0, cod2Uv + cod2Dy - cod2Dx * 0.5, cod2Bias) + " +
+                "texture(u_texUnit0, cod2Uv - cod2Dy + cod2Dx * 0.5, cod2Bias));\n}\n}\n" : "";
+              fsTexEnvPass = "vec4 cod2BaseTexel = " + pointSample + ";\n" +
+                weaponDofPass +
+                fsTexEnvPass.split(pointSample).join("cod2BaseTexel");
+              pointAlbedo = "cod2BaseTexel";
+            }
+            pointPass = "if (u_cod2LightCount > 0) {\n" +
+              (pointNormal ? "highp vec3 n = v_cod2Normal;\n" :
+                "highp vec3 n = cross(dFdx(v_cod2Eye), dFdy(v_cod2Eye));\n") +
+              "n *= inversesqrt(max(dot(n,n), 0.00000001));\nvec3 lightSum = vec3(0.0);\n";
+            for (var light = 0; light < 4; ++light) {
+              pointPass += "if (u_cod2LightCount > " + light + ") {\n" +
+                "highp vec3 delta = u_cod2LightEye[" + light + "].xyz - v_cod2Eye;\n" +
+                "highp float distance2 = dot(delta,delta);\n" +
+                "float attenuation = max(1.0 - distance2 * u_cod2LightEye[" + light + "].w, 0.0);\n" +
+                // Models have authored outward normals; flashes must not
+                // light their back side. Derivative world normals lack a
+                // guaranteed orientation, so retain two-sided world lighting.
+                "float incidence = " + (pointNormal ? "max(dot(n,delta), 0.0)" : "abs(dot(n,delta))") +
+                " * inversesqrt(max(distance2, 0.0001));\n" +
+                "lightSum += u_cod2LightColor[" + light + "].rgb * attenuation * attenuation * incidence;\n}\n";
+            }
+            pointPass += "gl_FragColor.rgb += " + pointAlbedo + ".rgb * lightSum;\n}\n";
+            if (!pointNormal) {
+              pointPass += "if (u_cod2ShadowCount > 0) {\nfloat cod2Shadow = 1.0;\n";
+              for (var shadow = 0; shadow < 4; ++shadow) {
+                pointPass += "if (u_cod2ShadowCount > " + shadow + ") {\n" +
+                  "highp vec3 sDelta = v_cod2Eye - u_cod2ShadowEye[" + shadow + "].xyz;\n" +
+                  "float sAtten = max(1.0 - dot(sDelta, sDelta) * u_cod2ShadowEye[" + shadow + "].w, 0.0);\n" +
+                  "cod2Shadow *= 1.0 - 0.42 * sAtten * sAtten;\n}\n";
+              }
+              pointPass += "gl_FragColor.rgb *= cod2Shadow;\n}\n";
+            }
+          }
+          var vsSource = ['''
 POINT_VERTEX_ORIGINAL = 'vsPointSizeDefs, vsClipPlaneDefs, vsLightingDefs, "void main()"'
 POINT_VERTEX_REPLACEMENT = 'vsPointSizeDefs, vsClipPlaneDefs, vsLightingDefs, pointVarying, "void main()"'
 POINT_POSITION_ORIGINAL = '"  gl_Position = u_projection * ecPosition;", "  v_color = a_color;"'
@@ -183,13 +254,41 @@ POINT_FRAGMENT_ORIGINAL = 'fogHeaderIfNeeded, fsClipPlaneDefs, fsAlphaTestDefs, 
 POINT_FRAGMENT_REPLACEMENT = 'fogHeaderIfNeeded, fsClipPlaneDefs, fsAlphaTestDefs, pointDefs, "void main()"'
 POINT_PASS_ORIGINAL = 'fsClipPlanePass, fsTexEnvPass, fogPass, fsAlphaTestPass'
 POINT_PASS_REPLACEMENT = 'fsClipPlanePass, fsTexEnvPass, pointPass, fogPass, fsAlphaTestPass'
-POINT_UNIFORMS_ORIGINAL = '        this.normalMatrixLocation = GLctx.getUniformLocation(this.program, "u_normalMatrix");'
-POINT_UNIFORMS_REPLACEMENT = r'''        this.normalMatrixLocation = GLctx.getUniformLocation(this.program, "u_normalMatrix");
+POINT_UNIFORMS_LEGACY = r'''        this.normalMatrixLocation = GLctx.getUniformLocation(this.program, "u_normalMatrix");
         this.cod2LightCountLocation = GLctx.getUniformLocation(this.program, "u_cod2LightCount");
         this.cod2LightEyeLocation = GLctx.getUniformLocation(this.program, "u_cod2LightEye[0]");
         this.cod2LightColorLocation = GLctx.getUniformLocation(this.program, "u_cod2LightColor[0]");
         this.cod2LightCount = -1;
         this.cod2LightRevision = -1;'''
+POINT_UNIFORMS_ORIGINAL = '        this.normalMatrixLocation = GLctx.getUniformLocation(this.program, "u_normalMatrix");'
+POINT_UNIFORMS_REPLACEMENT = r'''        this.normalMatrixLocation = GLctx.getUniformLocation(this.program, "u_normalMatrix");
+        this.cod2LightCountLocation = GLctx.getUniformLocation(this.program, "u_cod2LightCount");
+        this.cod2LightEyeLocation = GLctx.getUniformLocation(this.program, "u_cod2LightEye[0]");
+        this.cod2LightColorLocation = GLctx.getUniformLocation(this.program, "u_cod2LightColor[0]");
+        this.cod2WeaponBlurLocation = GLctx.getUniformLocation(this.program, "u_cod2WeaponBlur");
+        this.cod2ShadowCountLocation = GLctx.getUniformLocation(this.program, "u_cod2ShadowCount");
+        this.cod2ShadowEyeLocation = GLctx.getUniformLocation(this.program, "u_cod2ShadowEye[0]");
+        this.cod2LightCount = -1;
+        this.cod2LightRevision = -1;
+        this.cod2WeaponBlur = -1;
+        this.cod2ShadowCount = -1;
+        this.cod2ShadowRevision = -1;'''
+POINT_UPLOAD_LEGACY = r'''        // COD2_POINT_LIGHT_UNIFORMS: cache per program; no allocation per draw.
+        if (this.cod2LightCountLocation !== null) {
+          var lights = Module.cod2PointLights;
+          var count = lights ? lights.drawCount : 0;
+          if (this.cod2LightCount !== count) {
+            GLctx.uniform1i(this.cod2LightCountLocation, count);
+            this.cod2LightCount = count;
+          }
+          if (count && this.cod2LightRevision !== lights.eyeRevision) {
+            GLctx.uniform4fv(this.cod2LightEyeLocation, lights.eye);
+            GLctx.uniform4fv(this.cod2LightColorLocation, lights.color);
+            this.cod2LightRevision = lights.eyeRevision;
+          }
+        }
+        if (GLImmediate.mode == GLctx.POINTS) {
+          if (this.pointSizeLocation) {'''
 POINT_UPLOAD_ORIGINAL = '        if (GLImmediate.mode == GLctx.POINTS) {\n          if (this.pointSizeLocation) {'
 POINT_UPLOAD_REPLACEMENT = r'''        // COD2_POINT_LIGHT_UNIFORMS: cache per program; no allocation per draw.
         if (this.cod2LightCountLocation !== null) {
@@ -203,6 +302,26 @@ POINT_UPLOAD_REPLACEMENT = r'''        // COD2_POINT_LIGHT_UNIFORMS: cache per p
             GLctx.uniform4fv(this.cod2LightEyeLocation, lights.eye);
             GLctx.uniform4fv(this.cod2LightColorLocation, lights.color);
             this.cod2LightRevision = lights.eyeRevision;
+          }
+        }
+        if (this.cod2WeaponBlurLocation !== null && this.cod2WeaponBlurLocation !== undefined) {
+          var blurLights = Module.cod2PointLights;
+          var blurAmount = blurLights && blurLights.weaponBlur ? blurLights.weaponBlur : 0;
+          if (this.cod2WeaponBlur !== blurAmount) {
+            GLctx.uniform1f(this.cod2WeaponBlurLocation, blurAmount);
+            this.cod2WeaponBlur = blurAmount;
+          }
+        }
+        if (this.cod2ShadowCountLocation !== null && this.cod2ShadowCountLocation !== undefined) {
+          var shadowLights = Module.cod2PointLights;
+          var shadowCount = shadowLights && shadowLights.shadowDrawCount ? shadowLights.shadowDrawCount : 0;
+          if (this.cod2ShadowCount !== shadowCount) {
+            GLctx.uniform1i(this.cod2ShadowCountLocation, shadowCount);
+            this.cod2ShadowCount = shadowCount;
+          }
+          if (shadowCount && this.cod2ShadowRevision !== shadowLights.shadowEyeRevision) {
+            GLctx.uniform4fv(this.cod2ShadowEyeLocation, shadowLights.shadowEye);
+            this.cod2ShadowRevision = shadowLights.shadowEyeRevision;
           }
         }
         if (GLImmediate.mode == GLctx.POINTS) {
@@ -241,6 +360,11 @@ def main():
     parser.add_argument("javascript", type=Path)
     path = parser.parse_args().javascript
     source = path.read_text()
+    for legacy, original in ((POINT_DEFS_LEGACY, POINT_DEFS_ORIGINAL),
+                             (POINT_UNIFORMS_LEGACY, POINT_UNIFORMS_ORIGINAL),
+                             (POINT_UPLOAD_LEGACY, POINT_UPLOAD_ORIGINAL)):
+        if source.count(legacy) == 1:
+            source = source.replace(legacy, original, 1)
     for original, replacement in ((ORIGINAL, REPLACEMENT), (DRAW_ORIGINAL, DRAW_REPLACEMENT),
                                   (CUBE_SAMPLE_ORIGINAL, CUBE_SAMPLE_REPLACEMENT),
                                   (CUBE_UNIFORM_ORIGINAL, CUBE_UNIFORM_REPLACEMENT),

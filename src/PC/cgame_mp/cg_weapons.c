@@ -389,6 +389,10 @@ static void CG_Madd(vec3_t out, const vec3_t dir, float scale)
 
 static void CG_ResetViewWeaponOffsets(cg_t *cg)
 {
+#ifdef __EMSCRIPTEN__
+    extern float g_webViewmodelAdsBlur;
+    g_webViewmodelAdsBlur = 0.0f;
+#endif
     cg->gunPitch = cg->refdefViewAngles[0];
     cg->gunYaw = cg->refdefViewAngles[1];
     cg->gunXOfs = 0.0f;
@@ -1328,6 +1332,9 @@ void CG_AddPlayerWeapon(GfxEntity *parent, playerState_t *ps, centity_t *cent, q
 
 static float sprintViewBlend;
 static int sprintViewTime;
+#ifdef __EMSCRIPTEN__
+float g_webViewmodelAdsBlur;
+#endif
 
 void CG_ResetSprintView(void)
 {
@@ -1371,18 +1378,30 @@ void CG_AddViewWeapon(playerState_t *ps)
 
     playerState = ps;
 
-    if (playerState->pm_type == 4 || playerState->pm_type == 5)
+    if (playerState->pm_type == 4 || playerState->pm_type == 5) {
+#ifdef __EMSCRIPTEN__
+        g_webViewmodelAdsBlur = 0.0f;
+#endif
         return;
+    }
 
-    if (cg->renderingThirdPerson)
+    if (cg->renderingThirdPerson) {
+#ifdef __EMSCRIPTEN__
+        g_webViewmodelAdsBlur = 0.0f;
+#endif
         return;
+    }
 
     drawGun = 0;
     if (!cg->cubemapShot && cg_drawGun->current.enabled && !CG_GetWeapReticleZoom(&zoom))
         drawGun = 1;
 
-    if (playerState->eFlags & 0x300)
+    if (playerState->eFlags & 0x300) {
+#ifdef __EMSCRIPTEN__
+        g_webViewmodelAdsBlur = 0.0f;
+#endif
         return;
+    }
 
     weaponIndex = BG_GetViewmodelWeaponIndex(playerState);
 #    ifdef VM_TRACE
@@ -1464,6 +1483,9 @@ void CG_AddViewWeapon(playerState_t *ps)
 
     if (BG_IsAimDownSightWeapon(weaponIndex) && playerState->fWeaponPosFrac > 0.0f) {
         vec3_t worldAngles;
+#ifdef __EMSCRIPTEN__
+        g_webViewmodelAdsBlur = drawGun ? playerState->fWeaponPosFrac : 0.0f;
+#endif
         /* Crosshair projection compares against the world-space camera axis. */
         AxisToAngles(finalAxis, worldAngles);
         cg->gunPitch = worldAngles[0];

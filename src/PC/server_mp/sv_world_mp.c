@@ -677,6 +677,16 @@ int SV_ClipSightToEntity(const sightclip_t *clip, svEntity_t *check)
         }
     }
 
+    {
+        int i;
+        for (i = 0; i < 3; ++i) {
+            float lo = (clip->end[i] > clip->start[i] ? clip->start[i] : clip->end[i]) - clip->outerSize[i];
+            float hi = (clip->end[i] > clip->start[i] ? clip->end[i] : clip->start[i]) + clip->outerSize[i];
+            if (touch->r.absmin[i] > hi || lo > touch->r.absmax[i])
+                return 0;
+        }
+    }
+
     clipHandle = SV_ClipHandleForEntity_core(touch);
     angles = touch->r.bmodel ? touch->r.currentAngles : (const vec_t *)imp_vec3_origin;
 
@@ -765,6 +775,16 @@ int SV_PointSightTraceToEntity(const sightpointtrace_t *clip, svEntity_t *check)
             }
 
             return 0;
+        }
+    }
+
+    {
+        int i;
+        for (i = 0; i < 3; ++i) {
+            float lo = (clip->end[i] > clip->start[i] ? clip->start[i] : clip->end[i]) - 1.0f;
+            float hi = (clip->end[i] > clip->start[i] ? clip->end[i] : clip->start[i]) + 1.0f;
+            if (touch->r.absmin[i] > hi || lo > touch->r.absmax[i])
+                return 0;
         }
     }
 

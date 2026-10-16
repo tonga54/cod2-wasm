@@ -327,7 +327,7 @@ static void __attribute_regparm__(3) MSG_ReadDeltaHudElems(msg_t *msg, hudelem_t
 void MSG_ReadDeltaPlayerstate(msg_t *msg, playerState_t *from, playerState_t *to);
 void MSG_ReadDeltaUsercmdKey(msg_t *msg, int key, usercmd_t *from, usercmd_t *to);
 void MSG_WriteDeltaUsercmdKey(msg_t *msg, int key, usercmd_t *from, usercmd_t *to);
-static void __attribute_regparm__(3) MSG_WriteDeltaField(msg_t *msg, byte *from, byte *to, const NetField *field);
+static inline __attribute__((always_inline)) void MSG_WriteDeltaField(msg_t *msg, byte *from, byte *to, const NetField *field);
 static void __attribute_regparm__(3) MSG_WriteDeltaHudElems(msg_t *msg, hudelem_t *from, hudelem_t *to, int count);
 static void __attribute_regparm__(3) MSG_WriteDeltaStruct(msg_t *msg, byte *from, byte *to, qboolean force, int numFields, int indexBits, const NetField *stateFields, qboolean bChangeBit);
 void MSG_WriteDeltaClient(msg_t *msg, clientState_s *from, clientState_s *to, qboolean force);
@@ -1626,7 +1626,7 @@ void MSG_WriteDeltaUsercmdKey(msg_t *msg, int key, usercmd_t *from, usercmd_t *t
     }
 }
 
-static void __attribute_regparm__(3)
+static inline __attribute__((always_inline)) void
     MSG_WriteDeltaField(msg_t *msg, byte *from, byte *to, const NetField *field)
 {
     int *fromF;
@@ -1717,8 +1717,6 @@ static void __attribute_regparm__(3)
 static void __attribute_regparm__(3)
     MSG_WriteDeltaHudElems(msg_t *msg, hudelem_t *from, hudelem_t *to, int count)
 {
-    typedef void(__attribute_regparm__(3) * WriteDeltaFieldFn)(msg_t *, byte *, byte *, const NetField *);
-    WriteDeltaFieldFn writeDeltaField = (WriteDeltaFieldFn)MSG_WriteDeltaField;
     int inuse;
     int i;
     int j;
@@ -1731,18 +1729,18 @@ static void __attribute_regparm__(3)
     MSG_WriteBits(msg, inuse, 5);
 
     for (i = 0; i < inuse; ++i) {
-        lc = 0;
-        for (j = 0; j < 32; ++j) {
+        for (j = 31; j > 0; --j) {
             const int ofs = hudElemFields[j].offset;
-            if (*(int *)((byte *)&from[i] + ofs) != *(int *)((byte *)&to[i] + ofs)) {
-                lc = j;
+            if (*(const int *)((const byte *)&from[i] + ofs) != *(const int *)((const byte *)&to[i] + ofs)) {
+                break;
             }
         }
+        lc = j;
 
         MSG_WriteBits(msg, lc, 5);
 
         for (j = 0; j <= lc; ++j) {
-            writeDeltaField(msg, (byte *)&from[i], (byte *)&to[i], &hudElemFields[j]);
+            MSG_WriteDeltaField(msg, (byte *)&from[i], (byte *)&to[i], &hudElemFields[j]);
         }
     }
 }
@@ -1753,6 +1751,17 @@ static void __attribute_regparm__(3)
 static inline int MSG_LastChangedField(const byte *from, const byte *to,
                                      const NetField *fields, int count)
 {
+    while (count >= 4) {
+        if (*(const int *)(from + fields[count - 1].offset) != *(const int *)(to + fields[count - 1].offset))
+            return count;
+        if (*(const int *)(from + fields[count - 2].offset) != *(const int *)(to + fields[count - 2].offset))
+            return count - 1;
+        if (*(const int *)(from + fields[count - 3].offset) != *(const int *)(to + fields[count - 3].offset))
+            return count - 2;
+        if (*(const int *)(from + fields[count - 4].offset) != *(const int *)(to + fields[count - 4].offset))
+            return count - 3;
+        count -= 4;
+    }
     while (count > 0) {
         int offset = fields[count - 1].offset;
         if (*(const int *)(from + offset) != *(const int *)(to + offset))
@@ -1820,6 +1829,8 @@ void MSG_WriteDeltaClient(msg_t *msg, clientState_s *from, clientState_s *to, qb
     if (!from) {
         memset(&dummy, 0, sizeof(dummy));
         from = &dummy;
+    } else if (!force && to && !memcmp(from, to, sizeof(clientState_t))) {
+        return;
     }
 
     MSG_WriteDeltaStruct(msg, (byte *)from, (byte *)to, force, 0x16, 6, clientStateFields, 1);
@@ -1832,6 +1843,9 @@ void MSG_WriteDeltaArchivedEntity(msg_t *msg, archivedEntity_t *from, archivedEn
 
 void MSG_WriteDeltaEntity(msg_t *msg, entityState_s *from, entityState_s *to, qboolean force)
 {
+    if (!force && from && to && !memcmp(from, to, sizeof(entityState_t))) {
+        return;
+    }
     MSG_WriteDeltaStruct(msg, (byte *)from, (byte *)to, force, 0x3b, 0xa, entityStateFields, 0);
 }
 

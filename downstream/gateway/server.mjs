@@ -12,6 +12,13 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
   roomsEnabled = false, managerPort = 8090, updateChecker, maintenanceCheck = createMaintenanceCheck(),
   udpSocketFactory = () => dgram.createSocket('udp4') } = {}) {
   const reservations = new Map();
+  const artworkCache = new Map();
+  const wsBinaryOptions = Object.freeze({ binary: true, compress: false });
+  function roomConnections(roomId) {
+    let count = reservations.get(roomId) || 0;
+    for (const client of wss.clients) if (client.roomId === roomId) ++count;
+    return count;
+  }
   const checkUpdates = updateChecker || createUpdateChecker({
     readBuild: () => readBuildInfo(webHost, webPort)
   });
@@ -114,8 +121,7 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
         }
         if (request.method === 'GET' && Array.isArray(result.value.rooms)) {
           for (const room of result.value.rooms) {
-            room.connections = [...wss.clients].filter(ws => ws.roomId === room.id).length +
-              (reservations.get(room.id) || 0);
+            room.connections = roomConnections(room.id);
             room.maxPlayers = maxClients;
             room.maxHumans = maxClients - Math.max(room.botCount || 0, room.bots || 0);
           }
@@ -132,7 +138,11 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
       if (!['GET', 'HEAD'].includes(request.method)) {
         response.writeHead(405, { Allow: 'GET, HEAD' }); response.end(); return;
       }
-      readFile(artwork.path).then(icon => {
+      const cached = artworkCache.get(artwork.path);
+      (cached ? Promise.resolve(cached) : readFile(artwork.path).then(buf => {
+        artworkCache.set(artwork.path, buf);
+        return buf;
+      })).then(icon => {
         response.writeHead(200, { 'Content-Type': artwork.type,
           'Content-Length': icon.length, 'Cache-Control': 'public, max-age=3600',
           'X-Content-Type-Options': 'nosniff' });
@@ -169,7 +179,7 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
     }
     const roomMatch = /^\/game(?:\?room=([0-2]))?$/.exec(request.url);
     const roomId = roomMatch?.[1] ? Number(roomMatch[1]) : 0;
-    const occupied = [...wss.clients].filter(ws => ws.roomId === roomId).length + (reservations.get(roomId) || 0);
+    const occupied = roomConnections(roomId);
     const status = !roomMatch || (!roomsEnabled && request.url !== '/game') ? 404 : !sameOrigin(request) ? 403 :
       occupied >= maxClients ? 503 : 0;
     if (status) {
@@ -184,8 +194,7 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
         const room = list.value.rooms?.find(room => room.id === roomId);
         if (!room || room.port !== udpPort + roomId) throw new Error('Room unavailable');
         const bots = Math.max(room.botCount || 0, room.bots || 0);
-        if ([...wss.clients].filter(ws => ws.roomId === roomId).length +
-            (reservations.get(roomId) || 0) > maxClients - bots) throw new Error('Room full');
+        if (roomConnections(roomId) > maxClients - bots) throw new Error('Room full');
         destination = room.port;
       }
       // The host can begin its idle transition while the manager request waits.
@@ -237,7 +246,7 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
     });
     udp.on('message', data => {
       if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount < 262144)
-        ws.send(data, { binary: true, compress: false });
+        ws.send(data, wsBinaryOptions);
     });
     udp.on('error', error => {
       console.error('[gateway] UDP:', error.code);

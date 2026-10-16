@@ -304,9 +304,15 @@ void R_SetPicmip(void)
 
         ri_Printf(0, "Dx7 renderer: using low-res textures\n");
         if (texMemInMegs > 128) {
+#ifdef __EMSCRIPTEN__
+            IG_SCALAR(2048) = 0;
+            IG_SCALAR(2049) = 0;
+            IG_SCALAR(2050) = 0;
+#else
             IG_SCALAR(2048) = 1;
             IG_SCALAR(2049) = 1;
             IG_SCALAR(2050) = 1;
+#endif
         } else {
             IG_SCALAR(2048) = 2;
             IG_SCALAR(2049) = 2;

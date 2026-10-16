@@ -37,7 +37,7 @@
     gametag = validGametag(legacyName) || validGametag(context.preferences?.values().playerName) || 'Player';
     const defaults = {
       name: gametag, r_gpuSync: 'off', com_maxfps: '0', r_mode: '1280x720',
-      r_textureMode: 'anisotropic', r_anisotropy: '4', r_aaSamples: '4',
+      r_textureMode: 'anisotropic', r_anisotropy: '16', r_aaSamples: '4',
       r_picmip_manual: '1', r_picmip: '0', cl_maxpackets: '60', rate: '25000',
       snaps: '30', g_gametype: 'tdm', ui_mapname: 'mp_toujane', ui_netSource: '0',
       ui_browserShowEmpty: '1', ui_browserShowFull: '1', ui_browserShowPure: '0',
@@ -137,13 +137,13 @@
     let unitBindings = new Map();
     bindings.set(unit, unitBindings);
     let samplers = new WeakMap(), matrices = new WeakMap(), vectors = new WeakMap();
-    let locations = new WeakMap();
+    let scalars = new WeakMap(), locations = new WeakMap();
     let pipeline = new Map(), enabled = new Map();
     const reset = () => {
       unit = gl.TEXTURE0; bindings = new Map();
       unitBindings = new Map(); bindings.set(unit, unitBindings);
       samplers = new WeakMap(); matrices = new WeakMap(); vectors = new WeakMap();
-      locations = new WeakMap();
+      scalars = new WeakMap(); locations = new WeakMap();
       pipeline = new Map(); enabled = new Map();
     };
     canvas.addEventListener('webglcontextrestored', reset);
@@ -279,11 +279,47 @@
       }
       previous[0] = a; previous[1] = b; previous[2] = c; previous[3] = d;
     };
+    if (typeof gl.blendFunc === 'function') {
+      const blendFunc = gl.blendFunc;
+      gl.blendFunc = function (sfactor, dfactor) {
+        if (!Number.isInteger(sfactor) || !Number.isInteger(dfactor)) {
+          pipeline.delete('blendFunc');
+          return blendFunc.apply(this, arguments);
+        }
+        const key = (sfactor << 16) ^ dfactor;
+        if (pipeline.get('blendFunc') === key) return;
+        blendFunc.call(this, sfactor, dfactor); pipeline.set('blendFunc', key);
+      };
+    }
+    if (typeof gl.useProgram === 'function') {
+      const useProgram = gl.useProgram;
+      gl.useProgram = function (program) {
+        if (pipeline.get('program') === program && program) return;
+        useProgram.call(this, program); pipeline.set('program', program);
+      };
+    }
+    for (const method of ['uniform1i', 'uniform1f']) {
+      if (typeof gl[method] !== 'function') continue;
+      const original = gl[method];
+      gl[method] = function (location, value) {
+        if (!location || arguments.length !== 2) {
+          if (location) scalars.delete(location);
+          return original.apply(this, arguments);
+        }
+        const normalized = method === 'uniform1f' ? Math.fround(value) : (value | 0);
+        const previous = scalars.get(location);
+        if (previous?.method === method && Object.is(previous.value, normalized)) return;
+        original.call(this, location, value);
+        if (previous) { previous.method = method; previous.value = normalized; }
+        else scalars.set(location, { method, value: normalized });
+      };
+    }
     const linkProgram = gl.linkProgram;
     gl.linkProgram = function (program) {
       linkProgram.call(this, program);
       // Linking resets uniforms, even if the program object is reused.
-      matrices = new WeakMap(); vectors = new WeakMap();
+      matrices = new WeakMap(); vectors = new WeakMap(); scalars = new WeakMap();
+      pipeline.delete('program');
       if (program) locations.delete(program);
     };
   }

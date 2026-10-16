@@ -583,6 +583,17 @@ static void AccumulateGridColors(vec4_t *colorForDir, GfxLightGridColors *gridCo
     }
 }
 
+#define RB_LIGHTGRID_SAMPLE_CACHE_SIZE 64
+typedef struct {
+    const GfxLightGridPoint *points;
+    int pointCount;
+    unsigned int posBits[3];
+    float sunVisibility;
+    vec4_t colorForDir[6];
+    int valid;
+} rbLightGridSampleCache_t;
+static rbLightGridSampleCache_t s_lightGridSampleCache[RB_LIGHTGRID_SAMPLE_CACHE_SIZE];
+
 float RB_GetLightingAtPoint(const GfxLightGrid *lightGrid, const vec_t *samplePos, vec4_t *colorForDir)
 {
     int x0, y0, z0;
@@ -591,6 +602,30 @@ float RB_GetLightingAtPoint(const GfxLightGrid *lightGrid, const vec_t *samplePo
     int cornerIndex;
     GfxWorld *world;
     int doDebug;
+    unsigned int posBits[3];
+    rbLightGridSampleCache_t *cacheEntry = NULL;
+
+    if (!RB_LightGridEnableTweaksDvar()->current.enabled &&
+        !RB_LightGridContrastDvar()->current.integer &&
+        !RB_LightGridUseTweakedValuesDvar()->current.enabled &&
+        lightGrid && lightGrid->points && samplePos) {
+        unsigned int hash = 2166136261u;
+        memcpy(posBits, samplePos, sizeof(posBits));
+        hash = (hash ^ posBits[0]) * 16777619u;
+        hash = (hash ^ posBits[1]) * 16777619u;
+        hash = (hash ^ posBits[2]) * 16777619u;
+        hash ^= hash >> 16;
+        cacheEntry = &s_lightGridSampleCache[hash & (RB_LIGHTGRID_SAMPLE_CACHE_SIZE - 1)];
+        if (cacheEntry->valid &&
+            cacheEntry->points == lightGrid->points &&
+            cacheEntry->pointCount == lightGrid->pointCount &&
+            cacheEntry->posBits[0] == posBits[0] &&
+            cacheEntry->posBits[1] == posBits[1] &&
+            cacheEntry->posBits[2] == posBits[2]) {
+            memcpy(colorForDir, cacheEntry->colorForDir, sizeof(cacheEntry->colorForDir));
+            return cacheEntry->sunVisibility;
+        }
+    }
 
     {
         float fx = samplePos[0] + 131072.0f;
@@ -784,8 +819,17 @@ float RB_GetLightingAtPoint(const GfxLightGrid *lightGrid, const vec_t *samplePo
         }
     }
 
-    if (maxWeight >= 0.98f)
+    if (maxWeight >= 0.98f) {
+        if (cacheEntry) {
+            cacheEntry->points = lightGrid->points;
+            cacheEntry->pointCount = lightGrid->pointCount;
+            memcpy(cacheEntry->posBits, posBits, sizeof(posBits));
+            cacheEntry->sunVisibility = sunWeight;
+            memcpy(cacheEntry->colorForDir, colorForDir, sizeof(cacheEntry->colorForDir));
+            cacheEntry->valid = 1;
+        }
         return sunWeight;
+    }
 
     if (maxWeight == 0.0f) {
 
@@ -936,6 +980,14 @@ float RB_GetLightingAtPoint(const GfxLightGrid *lightGrid, const vec_t *samplePo
         }
     }
 
+    if (cacheEntry) {
+        cacheEntry->points = lightGrid->points;
+        cacheEntry->pointCount = lightGrid->pointCount;
+        memcpy(cacheEntry->posBits, posBits, sizeof(posBits));
+        cacheEntry->sunVisibility = sunWeight;
+        memcpy(cacheEntry->colorForDir, colorForDir, sizeof(cacheEntry->colorForDir));
+        cacheEntry->valid = 1;
+    }
     return sunWeight;
 }
 
