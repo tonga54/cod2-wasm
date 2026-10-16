@@ -1489,9 +1489,9 @@ void CL_KeyMove(usercmd_t *cmd)
      * still performs its normal headroom trace before actually standing. */
     if (cl->snap.ps.pm_type == 0 && (cmd->buttons & BUTTON_SPRINT) &&
         cmd->forwardmove > 0 && !(cmd->buttons & 0x1000)) {
-        kb[25].active = kb[25].wasPressed = 0;
-        kb[26].active = kb[26].wasPressed = 0;
-        kb[11].active = kb[11].wasPressed = 0;
+        memset(&kb[25], 0, sizeof(kb[25]));
+        memset(&kb[26], 0, sizeof(kb[26]));
+        memset(&kb[11], 0, sizeof(kb[11]));
         (*(LegacyHacks **)imp_legacyHacks)->cl_stance = 0;
         (*(LegacyHacks **)imp_legacyHacks)->cl_stanceTemp = 0;
         cl->stanceHeld = 0;

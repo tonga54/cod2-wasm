@@ -333,6 +333,105 @@ Bool Melee_Trace(gentity_t *ent, weaponParms *wp, int damage, float range,
     return 0;
 }
 
+/* Depth in map units along the shot, not perpendicular to the surface.
+ * Unknown/ground/rock surfaces remain solid. No material-name lookups or
+ * per-frame work: only a bullet that hits eligible cover pays for exit traces. */
+static float Bullet_PenetrationDepth(const WeaponDef *weapon, int surfaceFlags)
+{
+    float depth;
+    if (surfaceFlags & 0x14) /* sky or noimpact */
+        return 0.0f;
+    switch ((surfaceFlags >> 20) & 31) {
+    case 1: depth = 12.0f; break; /* bark */
+    case 2: depth = weapon->bRifleBullet ? 4.0f : 0.0f; break; /* brick */
+    case 3: depth = 8.0f; break; /* carpet */
+    case 4: case 8: depth = 32.0f; break; /* cloth, foliage */
+    case 5: depth = weapon->bRifleBullet ? 2.0f : 0.0f; break; /* concrete */
+    case 9: depth = 12.0f; break; /* glass */
+    case 13: depth = 4.0f; break; /* metal sheet */
+    case 15: depth = 24.0f; break; /* paper */
+    case 16: depth = 12.0f; break; /* plaster */
+    case 21: depth = 16.0f; break; /* wood */
+    default: return 0.0f;
+    }
+    if (weapon->bRifleBullet)
+        depth *= 2.0f;
+    if (weapon->armorPiercing)
+        depth *= 1.25f;
+    if (weapon->weapClass == WEAPCLASS_SPREAD)
+        depth *= 0.25f;
+    return depth;
+}
+
+static qboolean Bullet_FindExit(const gentity_t *source, const weaponParms *wp,
+                               const trace_t *entry, const vec3_t hit,
+                               const vec3_t end, float *damageMultiplier,
+                               vec3_t nextStart)
+{
+    vec3_t dir, inside, probe, before, exitPos;
+    trace_t forward, back;
+    float depth, remaining, exitDepth, thickness, loss, probeDistance;
+    int axis;
+
+    if (entry->startsolid || entry->allsolid || entry->fraction >= 1.0f)
+        return 0;
+    depth = Bullet_PenetrationDepth(wp->weapDef, entry->surfaceFlags);
+    if (depth <= 0.0f)
+        return 0;
+    for (axis = 0; axis < 3; ++axis)
+        dir[axis] = end[axis] - hit[axis];
+    remaining = Vec3Normalize(dir);
+    depth *= *damageMultiplier;
+    if (depth > remaining)
+        depth = remaining;
+    if (depth <= 0.5f)
+        return 0;
+    for (axis = 0; axis < 3; ++axis) {
+        inside[axis] = hit[axis] + dir[axis] * 0.25f;
+        probe[axis] = hit[axis] + dir[axis] * depth;
+        before[axis] = hit[axis] - dir[axis] * 0.25f;
+    }
+    /* Ignore bodies only while measuring cover. The continuation uses the
+     * full bullet mask again, so a player just behind the exit is still hit.
+     * Stop the probe at the next obstruction, never jump across an air gap
+     * and a second wall with a single reverse trace. */
+    G_LocationalTrace(&forward, inside, probe, source->s.number, 0x802831, NULL);
+    if (forward.allsolid)
+        return 0;
+    probeDistance = 0.25f + (depth - 0.25f) * forward.fraction;
+    for (axis = 0; axis < 3; ++axis)
+        probe[axis] = inside[axis] + (probe[axis] - inside[axis]) * forward.fraction;
+    G_LocationalTrace(&back, probe, before, source->s.number, 0x802831, NULL);
+    if (back.startsolid || back.allsolid || back.fraction >= 1.0f ||
+        back.entityNum != entry->entityNum)
+        return 0;
+    exitDepth = Bullet_PenetrationDepth(wp->weapDef, back.surfaceFlags);
+    if (exitDepth <= 0.0f)
+        return 0;
+    if (exitDepth < Bullet_PenetrationDepth(wp->weapDef, entry->surfaceFlags))
+        depth = exitDepth * *damageMultiplier;
+    thickness = 0.0f;
+    for (axis = 0; axis < 3; ++axis) {
+        exitPos[axis] = probe[axis] + (before[axis] - probe[axis]) * back.fraction;
+        thickness += (exitPos[axis] - hit[axis]) * dir[axis];
+    }
+    if (thickness <= 0.0f || thickness >= depth ||
+        thickness + 0.125f >= probeDistance ||
+        back.normal[0] * dir[0] + back.normal[1] * dir[1] + back.normal[2] * dir[2] <= 0.0f)
+        return 0;
+    /* Charge both thickness and a fixed loss per layer. Damage and depth
+     * decrease together; successive surfaces cannot reset bullet energy. */
+    loss = 0.12f + thickness / depth;
+    if (loss >= 1.0f)
+        return 0;
+    *damageMultiplier *= 1.0f - loss;
+    if (*damageMultiplier < 0.1f)
+        return 0;
+    for (axis = 0; axis < 3; ++axis)
+        nextStart[axis] = exitPos[axis] + dir[axis] * 0.125f;
+    return 1;
+}
+
 static void Bullet_Fire_Extended(const gentity_t *source, gentity_s (*attacker)[16], vec_t *start, vec_t *end, float damageMultiplier, int recursion, const weaponParms *wp, const gentity_t *weaponEnt, const int gametime)
 {
     WeaponDef *weapDef;
@@ -369,6 +468,8 @@ static void Bullet_Fire_Extended(const gentity_t *source, gentity_s (*attacker)[
         dflags |= 2;
 
     G_LocationalTrace(&tr, start, end, source->s.number, 0x2802831, priorityMap);
+    if (tr.startsolid || tr.allsolid)
+        return;
 
     endpos[0] = start[0] + (end[0] - start[0]) * tr.fraction;
     endpos[1] = start[1] + (end[1] - start[1]) * tr.fraction;
@@ -401,36 +502,20 @@ static void Bullet_Fire_Extended(const gentity_t *source, gentity_s (*attacker)[
         tent->s.otherEntityNum = weaponEnt->s.number;
     }
 
-    if (tr.contents & 0x10) {
-        vec3_t dir;
-        float dot;
-        float offset;
-
-        dir[0] = end[0] - start[0];
-        dir[1] = end[1] - start[1];
-        dir[2] = end[2] - start[2];
-        Vec3Normalize(dir);
-
-        dot = -(dir[0] * tr.normal[0] + dir[1] * tr.normal[1] + dir[2] * tr.normal[2]);
-        offset = 0.0f;
-        if (dot >= 0.125f)
-            offset = 0.25f / dot;
-
-        start[0] = endpos[0] + dir[0] * offset;
-        start[1] = endpos[1] + dir[1] * offset;
-        start[2] = endpos[2] + dir[2] * offset;
-
-        Bullet_Fire_Extended(source, attacker, start, end, damageMultiplier,
-                             recursion + 1, wp, weaponEnt, gametime);
+    if (!traceEnt->takedamage || traceEnt == attackerEnt) {
+        vec3_t nextStart;
+        /* Three cover layers maximum. No new trace on direct player hits,
+         * misses, or opaque materials, and at most two exit tests per layer. */
+        if (!traceEnt->client && recursion < 3 &&
+            Bullet_FindExit(source, wp, &tr, endpos, end, &damageMultiplier, nextStart))
+            Bullet_Fire_Extended(source, attacker, nextStart, end, damageMultiplier,
+                                 recursion + 1, wp, weaponEnt, gametime);
         return;
     }
 
-    if (!traceEnt->takedamage || traceEnt == attackerEnt)
-        return;
-
-    distance = sqrtf((start[0] - endpos[0]) * (start[0] - endpos[0]) +
-                     (start[1] - endpos[1]) * (start[1] - endpos[1]) +
-                     (start[2] - endpos[2]) * (start[2] - endpos[2]));
+    distance = sqrtf((wp->muzzleTrace[0] - endpos[0]) * (wp->muzzleTrace[0] - endpos[0]) +
+                     (wp->muzzleTrace[1] - endpos[1]) * (wp->muzzleTrace[1] - endpos[1]) +
+                     (wp->muzzleTrace[2] - endpos[2]) * (wp->muzzleTrace[2] - endpos[2]));
 
     if (weapDef->fMaxDamageRange > distance) {
         damage = weapDef->damage;

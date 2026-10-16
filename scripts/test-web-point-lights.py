@@ -10,7 +10,7 @@ source = (root/'downstream/wasm/web_point_lights.c').read_text()
 start = source.index('void WebPointLights_SetScene(')
 end = source.index('\nEM_JS', start)
 shadow_start = source.index('void WebPointLights_SetShadowCasters(')
-shadow_end = source.index('\nEM_JS', shadow_start)
+shadow_end = len(source)
 support = r'''
 #include <assert.h>
 #include <math.h>

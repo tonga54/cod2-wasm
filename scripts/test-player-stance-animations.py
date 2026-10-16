@@ -123,10 +123,14 @@ int main(void){
  for(int posture=1;posture<=2;posture++)for(int held=0;held<3;held++){
   memset(kb,0,sizeof(kb));client=(clientActive_t){0};legacy=(LegacyHacks){posture,1};
   client.stanceHeld=1;kb[(int[]){11,25,26}[held]].active=1;kb[2].active=1;
+  kb[(int[]){11,25,26}[held]].down[0]=32;
   usercmd_t cmd={.buttons=BUTTON_SPRINT|0x300};CL_KeyMove(&cmd);
   assert(cmd.forwardmove==127&&!(cmd.buttons&0x300)&&!legacy.cl_stance&&!legacy.cl_stanceTemp);
   assert(!client.stanceHeld&&!kb[11].active&&!kb[25].active&&!kb[26].active);
+  assert(!kb[11].down[0]&&!kb[25].down[0]&&!kb[26].down[0]);
   cmd=(usercmd_t){0};CL_KeyMove(&cmd);assert(!(cmd.buttons&0x300));
+  IN_KeyDown(&kb[(int[]){11,25,26}[held]]);
+  assert((kb[(int[]){11,25,26}[held]].active));
  }
  /* Shift while aiming keeps the posture used for scoped Hold Breath. */
  client.usingAds=1;legacy.cl_stance=2;usercmd_t cmd={.buttons=BUTTON_SPRINT};CL_KeyMove(&cmd);

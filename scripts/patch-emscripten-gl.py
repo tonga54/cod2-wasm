@@ -184,8 +184,7 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
           if (pointNormal) pointVarying += "varying mediump vec3 v_cod2Normal;";
           var pointDefs = pointLights ? pointVarying +
             "uniform int u_cod2LightCount; uniform highp vec4 u_cod2LightEye[4]; uniform vec4 u_cod2LightColor[4];" +
-            (pointNormal ? "uniform mediump float u_cod2WeaponBlur;" :
-              "uniform int u_cod2ShadowCount; uniform highp vec4 u_cod2ShadowEye[4];") : "";
+            (pointNormal ? "" : "uniform int u_cod2ShadowCount; uniform highp vec4 u_cod2ShadowEye[4];") : "";
           var pointPass = "";
           if (pointLights) {
             var pointUV = GLImmediate.useTextureMatrix ? "(u_textureMatrix0 * v_texCoord0).xy" : "v_texCoord0.xy";
@@ -194,26 +193,10 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
             var pointSample = "texture2D(u_texUnit0, " + pointUV + ")";
             var pointAlbedo = pointSample;
             if (fsTexEnvPass.indexOf(pointSample) !== -1) {
-              var weaponDofPass = pointNormal ?
-                "if (u_cod2WeaponBlur > 0.0) {\n" +
-                "highp float cod2Depth = max(-v_cod2Eye.z, 0.0);\n" +
-                "highp float cod2Radial = length(v_cod2Eye.xy);\n" +
-                "float cod2Near = clamp((13.0 - cod2Depth) * 0.11, 0.0, 1.0);\n" +
-                "float cod2Edge = clamp((cod2Radial - 1.6) * 0.22, 0.0, 0.75) * clamp((19.0 - cod2Depth) * 0.1, 0.0, 1.0);\n" +
-                "float cod2Dof = clamp(max(cod2Near, cod2Edge), 0.0, 1.0);\n" +
-                "cod2Dof *= cod2Dof * u_cod2WeaponBlur;\n" +
-                "if (cod2Dof > 0.01) {\n" +
-                "highp vec2 cod2Uv = " + pointUV + ";\n" +
-                "highp vec2 cod2Dx = dFdx(cod2Uv) * (cod2Dof * 2.4);\n" +
-                "highp vec2 cod2Dy = dFdy(cod2Uv) * (cod2Dof * 2.4);\n" +
-                "float cod2Bias = cod2Dof * 2.2;\n" +
-                "cod2BaseTexel = 0.2 * (cod2BaseTexel + " +
-                "texture(u_texUnit0, cod2Uv + cod2Dx + cod2Dy * 0.5, cod2Bias) + " +
-                "texture(u_texUnit0, cod2Uv - cod2Dx - cod2Dy * 0.5, cod2Bias) + " +
-                "texture(u_texUnit0, cod2Uv + cod2Dy - cod2Dx * 0.5, cod2Bias) + " +
-                "texture(u_texUnit0, cod2Uv - cod2Dy + cod2Dx * 0.5, cod2Bias));\n}\n}\n" : "";
+              // Preserve the authored texture footprint. A positive mip bias
+              // erases weapon detail; it cannot reproduce COD4's resolved-scene
+              // depth of field, which filters silhouettes and lighting too.
               fsTexEnvPass = "vec4 cod2BaseTexel = " + pointSample + ";\n" +
-                weaponDofPass +
                 fsTexEnvPass.split(pointSample).join("cod2BaseTexel");
               pointAlbedo = "cod2BaseTexel";
             }
@@ -265,12 +248,10 @@ POINT_UNIFORMS_REPLACEMENT = r'''        this.normalMatrixLocation = GLctx.getUn
         this.cod2LightCountLocation = GLctx.getUniformLocation(this.program, "u_cod2LightCount");
         this.cod2LightEyeLocation = GLctx.getUniformLocation(this.program, "u_cod2LightEye[0]");
         this.cod2LightColorLocation = GLctx.getUniformLocation(this.program, "u_cod2LightColor[0]");
-        this.cod2WeaponBlurLocation = GLctx.getUniformLocation(this.program, "u_cod2WeaponBlur");
         this.cod2ShadowCountLocation = GLctx.getUniformLocation(this.program, "u_cod2ShadowCount");
         this.cod2ShadowEyeLocation = GLctx.getUniformLocation(this.program, "u_cod2ShadowEye[0]");
         this.cod2LightCount = -1;
         this.cod2LightRevision = -1;
-        this.cod2WeaponBlur = -1;
         this.cod2ShadowCount = -1;
         this.cod2ShadowRevision = -1;'''
 POINT_UPLOAD_LEGACY = r'''        // COD2_POINT_LIGHT_UNIFORMS: cache per program; no allocation per draw.
@@ -302,14 +283,6 @@ POINT_UPLOAD_REPLACEMENT = r'''        // COD2_POINT_LIGHT_UNIFORMS: cache per p
             GLctx.uniform4fv(this.cod2LightEyeLocation, lights.eye);
             GLctx.uniform4fv(this.cod2LightColorLocation, lights.color);
             this.cod2LightRevision = lights.eyeRevision;
-          }
-        }
-        if (this.cod2WeaponBlurLocation !== null && this.cod2WeaponBlurLocation !== undefined) {
-          var blurLights = Module.cod2PointLights;
-          var blurAmount = blurLights && blurLights.weaponBlur ? blurLights.weaponBlur : 0;
-          if (this.cod2WeaponBlur !== blurAmount) {
-            GLctx.uniform1f(this.cod2WeaponBlurLocation, blurAmount);
-            this.cod2WeaponBlur = blurAmount;
           }
         }
         if (this.cod2ShadowCountLocation !== null && this.cod2ShadowCountLocation !== undefined) {
@@ -354,12 +327,41 @@ POINT_VS_UPLOAD_REPLACEMENT = '          GLctx.shaderSource(this.vertexShader, p
 POINT_FS_UPLOAD_ORIGINAL = '          GLctx.shaderSource(this.fragmentShader, fsSource);'
 POINT_FS_UPLOAD_REPLACEMENT = '          GLctx.shaderSource(this.fragmentShader, pointLights ? cod2Glsl300(fsSource, false) : fsSource);'
 
+TEXTURE_LIMIT_ORIGINAL = '    GLImmediate.MAX_TEXTURES = Math.min(Module["GL_MAX_TEXTURE_IMAGE_UNITS"] || GLctx.getParameter(GLctx.MAX_TEXTURE_IMAGE_UNITS), 28);'
+TEXTURE_LIMIT_REPLACEMENT = '''    // Texture coordinates share the vertex attribute limit with position/normal/color.
+    GLImmediate.MAX_TEXTURES = Math.min(Module["GL_MAX_TEXTURE_IMAGE_UNITS"] || GLctx.getParameter(GLctx.MAX_TEXTURE_IMAGE_UNITS), 28,
+      GLctx.getParameter(GLctx.MAX_VERTEX_ATTRIBS) - GLImmediate.TEXTURE0);'''
+TEXTURE_ATTRIBUTES_ORIGINAL = '''        if (this.hasTextures) {
+          for (var i = 0; i < GLImmediate.MAX_TEXTURES; i++) {
+            if (!GLctx.currentArrayBufferBinding) {'''
+TEXTURE_ATTRIBUTES_REPLACEMENT = '''        if (this.hasTextures) {
+          for (var i = 0; i < GLImmediate.MAX_TEXTURES; i++) {
+            if (!GLctx.currentArrayBufferBinding && this.texCoordLocations[i] !== undefined && this.texCoordLocations[i] >= 0) {'''
+COLOR_ATTRIBUTE_ORIGINAL = '          GLctx.vertexAttrib4fv(this.colorLocation, [ 1, 1, 1, 1 ]);'
+COLOR_ATTRIBUTE_REPLACEMENT = '          if (this.colorLocation >= 0) GLctx.vertexAttrib4fv(this.colorLocation, [ 1, 1, 1, 1 ]);'
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("javascript", type=Path)
     path = parser.parse_args().javascript
     source = path.read_text()
+    marker = '          // COD2_POINT_LIGHT_SHADER:'
+    if source.count(marker) == 1:
+        start = source.index(marker)
+        end = source.index(POINT_DEFS_ORIGINAL, start) + len(POINT_DEFS_ORIGINAL)
+        source = source[:start] + POINT_DEFS_ORIGINAL + source[end:]
+    # Normalize prior patched uniform blocks too, including the removed ADS
+    # material blur. This supports reapplying/upgrading without stale uploads.
+    if source.count('        this.cod2LightCountLocation =') == 1:
+        start = source.index(POINT_UNIFORMS_ORIGINAL)
+        end = source.index('        this.hasTextures = hasTextures;', start)
+        source = source[:start] + POINT_UNIFORMS_ORIGINAL + "\n" + source[end:]
+    upload_marker = '        // COD2_POINT_LIGHT_UNIFORMS:'
+    if source.count(upload_marker) == 1:
+        start = source.index(upload_marker)
+        end = source.index(POINT_UPLOAD_ORIGINAL, start)
+        source = source[:start] + source[end:]
     for legacy, original in ((POINT_DEFS_LEGACY, POINT_DEFS_ORIGINAL),
                              (POINT_UNIFORMS_LEGACY, POINT_UNIFORMS_ORIGINAL),
                              (POINT_UPLOAD_LEGACY, POINT_UPLOAD_ORIGINAL)):
@@ -380,7 +382,10 @@ def main():
                                   (SHADER_CHECK_ORIGINAL, SHADER_CHECK_REPLACEMENT),
                                   (POINT_GLSL_ORIGINAL, POINT_GLSL_REPLACEMENT),
                                   (POINT_VS_UPLOAD_ORIGINAL, POINT_VS_UPLOAD_REPLACEMENT),
-                                  (POINT_FS_UPLOAD_ORIGINAL, POINT_FS_UPLOAD_REPLACEMENT)):
+                                  (POINT_FS_UPLOAD_ORIGINAL, POINT_FS_UPLOAD_REPLACEMENT),
+                                  (TEXTURE_LIMIT_ORIGINAL, TEXTURE_LIMIT_REPLACEMENT),
+                                  (TEXTURE_ATTRIBUTES_ORIGINAL, TEXTURE_ATTRIBUTES_REPLACEMENT),
+                                  (COLOR_ATTRIBUTE_ORIGINAL, COLOR_ATTRIBUTE_REPLACEMENT)):
         if source.count(replacement) == 1:
             continue
         if source.count(original) != 1:

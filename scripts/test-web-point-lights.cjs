@@ -11,7 +11,8 @@ function emjs(name, args) {
   return Function('Module', 'HEAPF32', ...args, bridge.slice(pos + 1, end - 1)).bind(null, Module, HEAPF32);
 }
 const set = emjs('WebPointLights_Set', ['packed', 'count']);
-const draw = emjs('WebPointLights_Draw', ['view', 'enabled']);
+const drawScene = emjs('WebPointLights_Draw', ['view', 'enabled', 'worldShadowEnabled']);
+const draw = (view, enabled) => drawScene(view, enabled, 0);
 draw(0, 0);
 HEAPF32.set([100, 20, 60, 200, 1, .7, .3, 0, -10, 30, 90, 100, .2, .3, 1, 0], 8);
 set(32, 2);
@@ -100,47 +101,60 @@ set(32, 0); draw(256, 1); upload.call(renderer, Module, GLctx); assert.equal(ren
 assert.deepEqual(buffers, [lights.world, lights.eye, lights.color, lights.view]);
 for (const key of ['world', 'eye', 'color', 'view']) assert.equal(lights[key], buffers[['world','eye','color','view'].indexOf(key)]);
 const setShadows = emjs('WebPointLights_SetShadows', ['packed', 'count']);
-const drawEnhancements = emjs('WebPointLights_DrawEnhancements', ['view', 'worldShadowEnabled', 'weaponBlur']);
+const drawEnhancements = (view, shadow) => drawScene(view, 0, shadow);
 HEAPF32.set([50, 20, 0, 22, -30, 40, 10, 30], 16);
 setShadows(64, 2);
 HEAPF32.set([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -10, 5, -20, 1], 64);
-drawEnhancements(256, 1, 0.75);
+drawEnhancements(256, 1);
 assert.equal(lights.shadowDrawCount, 2);
-assert.equal(lights.weaponBlur, 0.75);
 assert.equal(lights.shadowEye[0], 40);
 assert.equal(lights.shadowEye[1], 25);
 assert.equal(lights.shadowEye[2], -20);
 assert(Math.abs(lights.shadowEye[3] * 22 * 22 - 1) < 1e-6);
 const shadowRev = lights.shadowEyeRevision;
-for (let i = 0; i < 100; ++i) drawEnhancements(256, 1, 1.5);
+for (let i = 0; i < 100; ++i) drawEnhancements(256, 1);
 assert.equal(lights.shadowEyeRevision, shadowRev, 'repeated world draws reuse transformed shadow casters');
-assert.equal(lights.weaponBlur, 1, 'ADS blur clamps above 1');
-drawEnhancements(256, 0, -0.5);
+drawEnhancements(256, 0);
 assert.equal(lights.shadowDrawCount, 0);
-assert.equal(lights.weaponBlur, 0, 'ADS blur clamps below 0');
 const modelShader = generate.call({usedTexUnitList:[0]}, {useTextureMatrix:false,TexEnvJIT:{getTexUnitType:()=>0x0DE1}}, {lightingEnabled:true}, 'gl_FragColor = texture2D(u_texUnit0, v_texCoord0.xy) * v_color;');
-assert(modelShader.pointDefs.includes('uniform mediump float u_cod2WeaponBlur;'));
-assert(modelShader.fsTexEnvPass.includes('if (u_cod2WeaponBlur > 0.0)'));
-assert(modelShader.fsTexEnvPass.includes('cod2Near = clamp((13.0 - cod2Depth) * 0.11, 0.0, 1.0)'));
-assert(modelShader.fsTexEnvPass.includes('texture(u_texUnit0, cod2Uv + cod2Dx + cod2Dy * 0.5, cod2Bias)'));
+assert(!modelShader.pointDefs.includes('u_cod2WeaponBlur'), 'ADS does not add a texture-blur uniform');
+assert.equal(modelShader.fsTexEnvPass,
+  'vec4 cod2BaseTexel = texture2D(u_texUnit0, v_texCoord0.xy);\ngl_FragColor = cod2BaseTexel * v_color;',
+  'weapons keep the original texture footprint and vertex lighting');
+assert.equal((modelShader.fsTexEnvPass.match(/texture(?:2D)?\(/g) || []).length, 1,
+  'weapons and flashes share one unbiased sample without extra passes');
 const worldShader = generate.call({usedTexUnitList:[0]}, {useTextureMatrix:false,TexEnvJIT:{getTexUnitType:()=>0x0DE1}}, {lightingEnabled:false}, 'gl_FragColor = texture2D(u_texUnit0, v_texCoord0.xy) * v_color;');
 assert(worldShader.pointDefs.includes('uniform int u_cod2ShadowCount; uniform highp vec4 u_cod2ShadowEye[4];'));
 assert(worldShader.pointPass.includes('if (u_cod2ShadowCount > 0)'));
 assert(worldShader.pointPass.includes('gl_FragColor.rgb *= cod2Shadow;'));
-let blurUploads = 0, shadowCountUploads = 0, shadowArrayUploads = 0;
+let shadowCountUploads = 0, shadowArrayUploads = 0;
 const enhGLctx = {
   uniform1i(loc, val) { if (loc === 5) ++shadowCountUploads; else ++countUploads; },
-  uniform1f(loc, val) { assert.equal(loc, 4); assert(val >= 0 && val <= 1); ++blurUploads; },
+  uniform1f() { assert.fail("material blur must not upload uniforms"); },
   uniform4fv(loc, buf) { if (loc === 6) { assert.equal(buf.length, 16); ++shadowArrayUploads; } else ++arrayUploads; }
 };
 const enhRenderer = {
   cod2LightCountLocation: 1, cod2LightEyeLocation: 2, cod2LightColorLocation: 3,
-  cod2WeaponBlurLocation: 4, cod2ShadowCountLocation: 5, cod2ShadowEyeLocation: 6,
-  cod2LightCount: -1, cod2LightRevision: -1, cod2WeaponBlur: -1, cod2ShadowCount: -1, cod2ShadowRevision: -1
+  cod2ShadowCountLocation: 5, cod2ShadowEyeLocation: 6,
+  cod2LightCount: -1, cod2LightRevision: -1, cod2ShadowCount: -1, cod2ShadowRevision: -1
 };
-drawEnhancements(256, 1, 0.85);
+drawEnhancements(256, 1);
 upload.call(enhRenderer, Module, enhGLctx);
-assert.equal(blurUploads, 1); assert.equal(shadowCountUploads, 1); assert.equal(shadowArrayUploads, 1);
+assert.equal(shadowCountUploads, 1); assert.equal(shadowArrayUploads, 1);
 for (let i = 0; i < 200; ++i) upload.call(enhRenderer, Module, enhGLctx);
-assert.equal(blurUploads, 1); assert.equal(shadowCountUploads, 1); assert.equal(shadowArrayUploads, 1);
-console.log('PASS: 121 camera transforms, cached uniform uploads, ADS weapon DOF blur, ground shadows, HUD isolation and all 48 shader texture/normal variants');
+assert.equal(shadowCountUploads, 1); assert.equal(shadowArrayUploads, 1);
+console.log('PASS: 121 camera transforms, cached uniform uploads, sharp weapon materials, ground shadows, HUD isolation and all 48 shader texture/normal variants');
+
+// A camera change while one channel is inactive must invalidate that channel.
+HEAPF32.set([100,20,60,200,1,.7,.3,0],8); set(32,1);
+HEAPF32[76]=-10; drawScene(256,1,1);
+const oldLightX=lights.eye[0], oldShadowX=lights.shadowEye[0];
+HEAPF32[76]=-30; drawScene(256,0,1); drawScene(256,1,0);
+assert.equal(lights.eye[0],oldLightX-20);
+HEAPF32[76]=-50; drawScene(256,1,0); drawScene(256,0,1);
+assert.equal(lights.shadowEye[0],oldShadowX-40);
+const revisions=[lights.eyeRevision,lights.shadowEyeRevision];
+for(let i=0;i<1000;i++)drawScene(256,1,1);
+assert.deepEqual([lights.eyeRevision,lights.shadowEyeRevision],revisions);
+drawScene(0,0,0); assert.equal(lights.drawCount,0); assert.equal(lights.shadowDrawCount,0);
+console.log('PASS: shared camera transform cache survives inactive light/shadow channels and 1000 combined draws');

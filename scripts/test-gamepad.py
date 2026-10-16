@@ -37,7 +37,7 @@ typedef int qboolean;
 typedef int sysEventType_t;
 #define SE_KEY 1
 #define BUTTON_SPRINT 2
-typedef struct {int keyCatchers,stanceHeld;struct {struct {int pm_type;} ps;} snap;float viewangles[3],cgameSensitivity,cgameMaxYawSpeed,cgameMaxPitchSpeed;} clientActive_t;
+typedef struct {int keyCatchers,stanceHeld,stancePosition,stanceTime,usingAds;struct {struct {int pm_type;} ps;} snap;float viewangles[3],cgameSensitivity,cgameMaxYawSpeed,cgameMaxPitchSpeed;} clientActive_t;
 typedef struct {int frametime,realtime;} clientStatic_t;
 clientStatic_t cls;
 static clientActive_t client,*clientPtr=&client;
@@ -188,6 +188,69 @@ int main(void){
  CL_Gamepad_Shutdown();return 0;
 }
 ''', 'controller hotplug, saved mapping migration, click-to-sprint/cancellation, raw capture, triggers, focus, analog sticks and repeat')
+
+def input_function(name):
+    text = (root / 'src/PC/client_mp/cl_input.c').read_text()
+    match = re.search(r'^[^\n;]*\b' + name + r'\([^;]*?\)\n\{', text, re.M)
+    assert match, name
+    end, depth = match.end(), 1
+    while depth:
+        depth += (text[end] == '{') - (text[end] == '}')
+        end += 1
+    return text[match.start():end] + '\n'
+
+stance_support = r'''
+typedef struct {int down[2],downtime,msec;unsigned char active,wasPressed,padding[2];} kbutton_t;
+static kbutton_t kb[28];
+typedef struct {int cl_stance,cl_stanceTemp;} LegacyHacks;
+static LegacyHacks legacy,*legacyPtr=&legacy;
+static void *imp_legacyHacks=&legacyPtr;
+static int frameTime;
+static void *imp_com_frameTime=&frameTime;
+static struct {struct {int integer;} current;} hold={.current.integer=300},*cl_stanceHoldTime=&hold;
+typedef unsigned char byte;
+static int CL_KeyMoveValue(kbutton_t *b){return b->active?127:0;}
+static int ClampChar(int n){return n>127?127:n<-127?-127:n;}
+static int PM_IsBinocularsADS(void *ps){return 0;}
+'''
+stance_body = ''.join(input_function(n) for n in (
+    'IN_Stance_Down', 'CL_UpdateHeldStance', 'IN_Stance_Up', 'CL_KeyMove'))
+run(prefix + source + stance_support + stance_body + r'''
+int main(void) {
+ client.cgameSensitivity=1;CL_Gamepad_Init();
+ int cases=0;
+ for(int stance=1;stance<=2;stance++)for(int held=0;held<4;held++)
+ for(int delay=0;delay<=240;delay+=16) {
+  Gamepad_ReleaseAll();memset(&pad,0,sizeof(pad));CL_Gamepad_Frame();
+  memset(kb,0,sizeof(kb));eventCount=0;legacy=(LegacyHacks){stance,1};
+  frameTime=cls.realtime=1000;client.stanceHeld=0;
+  if(held<3)kb[(int[]){11,25,26}[held]]=(kbutton_t){.active=1,.down={32}};
+  else {IN_Stance_Down();frameTime+=310;CL_UpdateHeldStance();}
+  pad.buttons[SDL_CONTROLLER_BUTTON_LEFTSTICK]=1;CL_Gamepad_Frame();
+  usercmd_t cmd={0};CL_KeyMove(&cmd); // Click before the stick leaves neutral.
+  assert(!cmd.forwardmove);
+  pad.buttons[SDL_CONTROLLER_BUTTON_LEFTSTICK]=0;CL_Gamepad_Frame();
+  cls.realtime+=delay;pad.axes[1]=-32767;cmd=(usercmd_t){0};CL_KeyMove(&cmd);
+  assert((cmd.buttons&BUTTON_SPRINT)&&!(cmd.buttons&0x300)&&cmd.forwardmove==127);
+  assert(!legacy.cl_stance&&!legacy.cl_stanceTemp&&!client.stanceHeld);
+  assert(!kb[11].down[0]&&!kb[25].down[0]&&!kb[26].down[0]);
+  IN_Stance_Up(); // Releasing the old long hold cannot put us back on the floor.
+  for(int i=0;i<120;i++){cmd=(usercmd_t){0};CL_KeyMove(&cmd);assert((cmd.buttons&BUTTON_SPRINT)&&!(cmd.buttons&0x300));}
+  // A new crouch/prone command intentionally cancels sprint.
+  legacy.cl_stance=stance;cmd=(usercmd_t){0};CL_KeyMove(&cmd);assert(!(cmd.buttons&BUTTON_SPRINT));
+  cases++;
+ }
+ Gamepad_ReleaseAll();memset(&pad,0,sizeof(pad));CL_Gamepad_Frame();
+ legacy.cl_stance=2;cls.realtime=5000;
+ pad.buttons[SDL_CONTROLLER_BUTTON_LEFTSTICK]=1;CL_Gamepad_Frame();
+ usercmd_t cmd={0};CL_KeyMove(&cmd);
+ pad.buttons[SDL_CONTROLLER_BUTTON_LEFTSTICK]=0;CL_Gamepad_Frame();
+ cls.realtime+=251;pad.axes[1]=-32767;cmd=(usercmd_t){0};CL_KeyMove(&cmd);
+ assert(!(cmd.buttons&BUTTON_SPRINT)&&legacy.cl_stance==2);
+ printf("PASS: %d combined controller/stance replays, buffered click, sustained sprint, stance release and timeout\n",cases);
+ return 0;
+}
+''', 'production gamepad movement and posture command integration')
 
 ui = (root / 'src/PC/ui_mp/ui_shared_mp.c').read_text()
 signature = 'qboolean Item_Bind_HandleKey(displayContextDef_t *dc, itemDef_t *item, int key, qboolean down)\n{'

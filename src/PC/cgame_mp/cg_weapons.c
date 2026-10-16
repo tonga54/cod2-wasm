@@ -137,6 +137,7 @@ extern int BG_ClipForWeapon(int weapon);
 extern const vec_t Vec3Normalize(vec_t *v);
 extern const vec_t Vec3NormalizeTo(const vec_t *v, vec_t *out);
 extern const vec_t Vec3Distance(const vec_t *v1, const vec_t *v2);
+extern void Vec3Cross(const vec_t *v1, const vec_t *v2, vec_t *out);
 extern localEntity_t *CG_AllocLocalEntity(void);
 extern int rand(void);
 extern float sqrtf(float x);
@@ -389,10 +390,6 @@ static void CG_Madd(vec3_t out, const vec3_t dir, float scale)
 
 static void CG_ResetViewWeaponOffsets(cg_t *cg)
 {
-#ifdef __EMSCRIPTEN__
-    extern float g_webViewmodelAdsBlur;
-    g_webViewmodelAdsBlur = 0.0f;
-#endif
     cg->gunPitch = cg->refdefViewAngles[0];
     cg->gunYaw = cg->refdefViewAngles[1];
     cg->gunXOfs = 0.0f;
@@ -1169,10 +1166,11 @@ void CG_BulletHitClientEvent(int sourceEntityNum, vec_t *position, int surfType,
 
     flashTag = *(unsigned short *)s_barrelTags[0];
     tracerChance = cg_tracerChance->current.value;
-    if (tracerChance <= 0.0f)
+    if (!CG_CalcMuzzlePoint(sourceEntityNum, muzzle, flashTag))
         return;
 
-    if (!CG_CalcMuzzlePoint(sourceEntityNum, muzzle, flashTag))
+    CG_WhizbySound(muzzle, position);
+    if (tracerChance <= 0.0f)
         return;
 
     {
@@ -1190,7 +1188,6 @@ void CG_BulletHitClientEvent(int sourceEntityNum, vec_t *position, int surfType,
             CG_SpawnTracer(muzzle, position);
     }
 
-    CG_WhizbySound(muzzle, position);
 }
 
 void CG_AddPlayerWeapon(GfxEntity *parent, playerState_t *ps, centity_t *cent, qboolean bDrawGun)
@@ -1332,9 +1329,6 @@ void CG_AddPlayerWeapon(GfxEntity *parent, playerState_t *ps, centity_t *cent, q
 
 static float sprintViewBlend;
 static int sprintViewTime;
-#ifdef __EMSCRIPTEN__
-float g_webViewmodelAdsBlur;
-#endif
 
 void CG_ResetSprintView(void)
 {
@@ -1379,16 +1373,10 @@ void CG_AddViewWeapon(playerState_t *ps)
     playerState = ps;
 
     if (playerState->pm_type == 4 || playerState->pm_type == 5) {
-#ifdef __EMSCRIPTEN__
-        g_webViewmodelAdsBlur = 0.0f;
-#endif
         return;
     }
 
     if (cg->renderingThirdPerson) {
-#ifdef __EMSCRIPTEN__
-        g_webViewmodelAdsBlur = 0.0f;
-#endif
         return;
     }
 
@@ -1397,9 +1385,6 @@ void CG_AddViewWeapon(playerState_t *ps)
         drawGun = 1;
 
     if (playerState->eFlags & 0x300) {
-#ifdef __EMSCRIPTEN__
-        g_webViewmodelAdsBlur = 0.0f;
-#endif
         return;
     }
 
@@ -1483,9 +1468,6 @@ void CG_AddViewWeapon(playerState_t *ps)
 
     if (BG_IsAimDownSightWeapon(weaponIndex) && playerState->fWeaponPosFrac > 0.0f) {
         vec3_t worldAngles;
-#ifdef __EMSCRIPTEN__
-        g_webViewmodelAdsBlur = drawGun ? playerState->fWeaponPosFrac : 0.0f;
-#endif
         /* Crosshair projection compares against the world-space camera axis. */
         AxisToAngles(finalAxis, worldAngles);
         cg->gunPitch = worldAngles[0];
@@ -1557,10 +1539,11 @@ void CG_BulletHitEvent(int sourceEntityNum, vec_t *position, vec_t *normal, vec_
 
     flashTag = *(unsigned short *)s_barrelTags[0];
     tracerChance = cg_tracerChance->current.value;
-    if (tracerChance <= 0.0f)
+    if (!CG_CalcMuzzlePoint(sourceEntityNum, muzzle, flashTag))
         return;
 
-    if (!CG_CalcMuzzlePoint(sourceEntityNum, muzzle, flashTag))
+    CG_WhizbySound(muzzle, position);
+    if (tracerChance <= 0.0f)
         return;
 
     if (getenv("PTRACE"))
@@ -1582,7 +1565,6 @@ void CG_BulletHitEvent(int sourceEntityNum, vec_t *position, vec_t *normal, vec_
             CG_SpawnTracer(muzzle, position);
     }
 
-    CG_WhizbySound(muzzle, position);
 }
 
 static float CG_TracerScaleForDistance(float dist, float width, float tracerScale, float minDist, float distRange)
@@ -1611,11 +1593,8 @@ void CG_DrawTracer(vec_t *start, vec_t *finish)
 {
     vec3_t dir;
     vec3_t right;
+    vec3_t toBeam;
     vec_t *viewOrg;
-    vec_t *viewAxis0;
-    vec_t *viewAxis1;
-    float forwardDot;
-    float rightDot;
     float width;
     float startWidth;
     float finishWidth;
@@ -1629,16 +1608,15 @@ void CG_DrawTracer(vec_t *start, vec_t *finish)
     dir[2] = finish[2] - start[2];
 
     viewOrg = cg->refdef.vieworg;
-    viewAxis0 = cg->refdef.viewaxis[1];
-    viewAxis1 = cg->refdef.viewaxis[2];
-
-    forwardDot = dir[0] * viewAxis0[0] + dir[1] * viewAxis0[1] + dir[2] * viewAxis0[2];
-    rightDot = dir[0] * viewAxis1[0] + dir[1] * viewAxis1[1] + dir[2] * viewAxis1[2];
-
-    right[0] = rightDot * viewAxis0[0] - forwardDot * viewAxis1[0];
-    right[1] = rightDot * viewAxis0[1] - forwardDot * viewAxis1[1];
-    right[2] = rightDot * viewAxis0[2] - forwardDot * viewAxis1[2];
-    Vec3Normalize(right);
+    if (dir[0] == 0.0f && dir[1] == 0.0f && dir[2] == 0.0f)
+        return;
+    for (int i = 0; i < 3; ++i)
+        toBeam[i] = start[i] - viewOrg[i];
+    /* Face the eye from the beam's position, including off-center parallel fire. */
+    Vec3Cross(dir, toBeam, right);
+    if (Vec3Normalize(right) < 0.0001f)
+        for (int i = 0; i < 3; ++i)
+            right[i] = cg->refdef.viewaxis[1][i];
 
     width = cg_tracerWidth->current.value;
     tracerScale = cg_tracerScale->current.value;
@@ -1654,6 +1632,8 @@ void CG_DrawTracer(vec_t *start, vec_t *finish)
         finishWidth = CG_TracerScaleForDistance(Vec3Distance(finish, viewOrg), width, tracerScale,
                                                 tracerScaleMinDist, tracerScaleDistRange);
     }
+
+    startWidth *= 0.35f;
 
     verts[0].xyz[0] = finish[0] + right[0] * finishWidth;
     verts[0].xyz[1] = finish[1] + right[1] * finishWidth;
@@ -1676,7 +1656,7 @@ void CG_DrawTracer(vec_t *start, vec_t *finish)
     verts[2].xyz[0] = start[0] - right[0] * startWidth;
     verts[2].xyz[1] = start[1] - right[1] * startWidth;
     verts[2].xyz[2] = start[2] - right[2] * startWidth;
-    verts[2].color.packed = 0xffffffff;
+    verts[2].color.packed = 0x80808080;
     verts[2].texCoord[0] = 0.0f;
     verts[2].texCoord[1] = 0.0f;
     verts[2].lmapCoord[0] = 0.0f;
@@ -1685,7 +1665,7 @@ void CG_DrawTracer(vec_t *start, vec_t *finish)
     verts[3].xyz[0] = start[0] + right[0] * startWidth;
     verts[3].xyz[1] = start[1] + right[1] * startWidth;
     verts[3].xyz[2] = start[2] + right[2] * startWidth;
-    verts[3].color.packed = 0xffffffff;
+    verts[3].color.packed = 0x80808080;
     verts[3].texCoord[0] = 0.0f;
     verts[3].texCoord[1] = 1.0f;
     verts[3].lmapCoord[0] = 0.0f;

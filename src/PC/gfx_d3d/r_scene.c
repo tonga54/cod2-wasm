@@ -1,4 +1,5 @@
 #include "common_types.h"
+#include <math.h>
 extern dvar_t *r_rendererInUse;
 extern DxGlobals dx;
 #include "imports.h"
@@ -187,7 +188,11 @@ void R_AddLightToScene(const vec_t *org, float radius, float r, float g, float b
 {
     GfxLight *light;
     int dlightCount;
+    int lightSlot;
     r_global_permanent_t *rgpp;
+#ifdef __EMSCRIPTEN__
+    static float influence[32];
+#endif
 
     if (!rg.registered)
         return;
@@ -198,11 +203,38 @@ void R_AddLightToScene(const vec_t *org, float radius, float r, float g, float b
         return;
 
     dlightCount = scene.dlightCount;
+#ifdef __EMSCRIPTEN__
+    int limit = (*(const dvar_t **)imp_r_dlightLimit)->current.integer;
+    if (limit <= 0 || limit > 32 || !isfinite(radius) ||
+        !isfinite(org[0]) || !isfinite(org[1]) || !isfinite(org[2]) ||
+        !isfinite(r) || !isfinite(g) || !isfinite(b))
+        return;
+    float brightness = fmaxf(r, fmaxf(g, b));
+    if (brightness <= 0.0f)
+        return;
+    float dx = (org[0] - rg.viewOrg[0]) / radius;
+    float dy = (org[1] - rg.viewOrg[1]) / radius;
+    float dz = (org[2] - rg.viewOrg[2]) / radius;
+    float score = brightness / (1.0f + dx * dx + dy * dy + dz * dz);
+    lightSlot = dlightCount;
+    if (dlightCount >= limit) {
+        lightSlot = 0;
+        for (int i = 1; i < dlightCount; ++i)
+            if (influence[i] < influence[lightSlot])
+                lightSlot = i;
+        if (score <= influence[lightSlot])
+            return;
+    } else {
+        scene.dlightCount = dlightCount + 1;
+    }
+    influence[lightSlot] = score;
+#else
     if (dlightCount >= (*(const dvar_t **)imp_r_dlightLimit)->current.integer)
         return;
-
-    light = &scene.dlights[dlightCount];
+    lightSlot = dlightCount;
     scene.dlightCount = dlightCount + 1;
+#endif
+    light = &scene.dlights[lightSlot];
     light->def = rgpp->dlightDef;
     light->position[0] = org[0];
     light->position[1] = org[1];

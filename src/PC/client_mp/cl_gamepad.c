@@ -191,6 +191,7 @@ static int g_menuState;
 static int g_navDirection;
 static int g_navDeadline;
 static int g_sprintRequested;
+static int g_sprintRequestTime;
 static int g_sprintLatched;
 
 static void Gamepad_SendKey(int key, int down);
@@ -537,8 +538,10 @@ static void Gamepad_SendKey(int key, int down)
         g_emittedKey[key] = emitted;
         if (!(Gamepad_KeyCatchers() & (1 | 8 | 0x10))) {
             const char *binding = Key_GetBinding(key);
-            if (binding && !stricmp_local(binding, "+sprint"))
+            if (binding && !stricmp_local(binding, "+sprint")) {
                 g_sprintRequested = 1;
+                g_sprintRequestTime = cls.realtime;
+            }
         }
     } else {
         emitted = g_emittedKey[key];
@@ -668,13 +671,24 @@ void CL_Gamepad_Move(usercmd_t *cmd)
     /* Clicking the stick starts a run; releasing the click must not end it.
      * Keep the normal key events for held breath while aiming. Neutral/back,
      * stance, combat actions and menus cancel the run, requiring a new click. */
-    if (g_sprintRequested) g_sprintLatched = 1;
-    if (cl->snap.ps.pm_type != 0 || my >= -0.1f ||
+    /* A click just before pushing forward (especially while getting up from
+     * prone) must survive the neutral command. Expire it quickly so a much
+     * later movement cannot unexpectedly start sprinting. */
+    if (g_sprintRequested &&
+        (unsigned int)(cls.realtime - g_sprintRequestTime) > 250u)
+        g_sprintRequested = 0;
+    if (cl->snap.ps.pm_type != 0 || my > 0.1f ||
         (cmd->buttons & (0x1 | 0x4 | 0x8 | 0x10 | 0x20 | 0x40 | 0x80 |
-                         0x1000 | 0x4000 | 0x10000 | 0x20000)) ||
-        (!g_sprintRequested && (cmd->buttons & (0x100 | 0x200))))
+                         0x1000 | 0x4000 | 0x10000 | 0x20000))) {
+        g_sprintRequested = g_sprintLatched = 0;
+    } else if (my >= -0.1f) {
         g_sprintLatched = 0;
-    g_sprintRequested = 0;
+    } else if (g_sprintRequested) {
+        g_sprintLatched = 1;
+        g_sprintRequested = 0;
+    } else if (cmd->buttons & (0x100 | 0x200)) {
+        g_sprintLatched = 0;
+    }
     if (g_sprintLatched) cmd->buttons |= BUTTON_SPRINT;
 }
 

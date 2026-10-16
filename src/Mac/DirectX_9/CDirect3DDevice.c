@@ -7,7 +7,7 @@
 EM_JS(void, WebDrawPerfAdd, (const char *name, double elapsed), {
     Module.cod2Performance.add(UTF8ToString(name), elapsed);
 });
-extern void WebPointLights_Draw(const float *view, int enabled);
+extern void WebPointLights_Draw(const float *view, int enabled, int worldShadowEnabled);
 #endif
 
 /* This reconstructed translation unit doesn't include the GL header. Keep
@@ -2409,19 +2409,13 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
         WEB_STATE_CHECK("attributes");
         WEB_DRAW_PERF("backendAttributes");
 #ifdef __EMSCRIPTEN__
-        WebPointLights_Draw(pointLightViewValid ? pointLightView : NULL,
-            !is2D && dev->zWriteEnable && !dev->alphaBlendEnable &&
-            stage0Target == 0x0DE1 && (usesLightmap || dev->lighting));
         {
-            extern float g_webViewmodelAdsBlur;
-            extern void WebPointLights_DrawEnhancements(const float *view, int worldShadowEnabled, float weaponBlur);
-            int isViewmodel = !is2D && dev->viewportMinZ == 0.0f &&
-                dev->viewportMaxZ > 0.0f && dev->viewportMaxZ <= 0.25f &&
-                dev->lighting && stage0Target == 0x0DE1;
+            int pointLight = !is2D && dev->zWriteEnable && !dev->alphaBlendEnable &&
+                stage0Target == 0x0DE1 && (usesLightmap || dev->lighting);
             int worldShadow = !is2D && dev->zWriteEnable && !dev->alphaBlendEnable &&
                 stage0Target == 0x0DE1 && usesLightmap;
-            WebPointLights_DrawEnhancements(pointLightViewValid ? pointLightView : NULL,
-                worldShadow, isViewmodel ? g_webViewmodelAdsBlur : 0.0f);
+            WebPointLights_Draw(pointLightViewValid ? pointLightView : NULL,
+                pointLight, worldShadow);
         }
 #endif
         glDrawElements(0x0004 , indexCount,

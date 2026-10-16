@@ -178,3 +178,42 @@ persistentFlush(6,0,0);
 assert.equal(persistentPrepare,601);assert.equal(persistentDraws.length,601);
 assert.deepEqual(persistentDraws[0],[4,6,0x1403,20]);assert.deepEqual(persistentDraws[600],[4,6,0x1403,0]);
 console.log('PASS: 601 linked persistent index draws preserve byte offsets, vertex zero and shader preparation without CPU index reads/uploads');
+
+// A texture unit needs a coordinate attribute as well as a sampler slot.
+const limitMatch = source.match(/GLImmediate\.MAX_TEXTURES = Math\.min\([\s\S]*?;/);
+assert(limitMatch);
+for (const vertexLimit of [8,16,32]) for (const samplerLimit of [8,16,32]) {
+  const limits={TEXTURE0:3};
+  Function('GLImmediate','Module','GLctx',limitMatch[0])(limits,{},
+    {MAX_TEXTURE_IMAGE_UNITS:1,MAX_VERTEX_ATTRIBS:2,getParameter:p=>p===1?samplerLimit:vertexLimit});
+  assert.equal(limits.MAX_TEXTURES,Math.min(samplerLimit,28,vertexLimit-3));
+}
+const texPrepareStart=source.indexOf('        if (this.hasTextures) {');
+let texPrepareEnd=source.indexOf('{',texPrepareStart)+1,texDepth=1;
+while(texDepth){texDepth+=(source[texPrepareEnd]==='{')-(source[texPrepareEnd]==='}');texPrepareEnd++;}
+const textureCalls=[];
+const texGL={currentArrayBufferBinding:0,
+  vertexAttribPointer(...args){textureCalls.push(args);},
+  vertexAttrib4f(...args){textureCalls.push(args);},uniformMatrix4fv(){}};
+const texImmediate={MAX_TEXTURES:13,TEXTURE0:3,stride:32,matrixVersion:[]};
+const texAttrs=Array.from({length:16},()=>({size:0}));
+texAttrs[3]={size:2,type:0x1406,offset:20};
+const texturePrepare=Function('GLImmediate','GLctx','clientAttributes',source.slice(texPrepareStart,texPrepareEnd));
+const texRenderer={hasTextures:true,texCoordLocations:[3,-1,5],textureMatrixLocations:[]};
+for(let i=0;i<600;i++)texturePrepare.call(texRenderer,texImmediate,texGL,texAttrs);
+assert.equal(textureCalls.length,1200);
+assert.deepEqual(textureCalls[0],[3,2,0x1406,false,32,20]);
+assert.deepEqual(textureCalls[1],[5,0,0,0,1]);
+texGL.currentArrayBufferBinding=1;texturePrepare.call(texRenderer,texImmediate,texGL,texAttrs);
+assert.equal(textureCalls.length,1200,'persistent buffers retain their pointer state');
+console.log('PASS: 9 GPU limit combinations, 600 sparse-texture draws, inactive attributes skipped and persistent buffers retained');
+// Texture matrix state is independent of whether its coordinate attribute survived linking.
+let matrixUploads=0;
+texGL.uniformMatrix4fv=()=>matrixUploads++;
+texRenderer.textureMatrixLocations[1]={};texRenderer.textureMatrixVersion={};
+texImmediate.matrixVersion[3]=1;texImmediate.matrix=[];texImmediate.matrix[3]=new Float32Array(16);
+texturePrepare.call(texRenderer,texImmediate,texGL,texAttrs);
+assert.equal(matrixUploads,1);
+texturePrepare.call(texRenderer,texImmediate,texGL,texAttrs);
+assert.equal(matrixUploads,1);
+console.log('PASS: inactive coordinate attributes still preserve independently active texture matrices');

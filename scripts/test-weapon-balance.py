@@ -83,21 +83,24 @@ weapon_source = (root / 'src/PC/game_mp/g_weapon_mp.c').read_text()
 combat_source = (root / 'src/PC/game_mp/g_combat_mp.c').read_text()
 body = ''.join(function(combat_source, n) for n in (
     'G_GetHitLocDamageMult', 'G_IsPlayerDamageable', 'G_Damage'))
-body += function(weapon_source, 'Bullet_Fire_Extended')
+body += ''.join(function(weapon_source, n) for n in (
+    'Bullet_PenetrationDepth', 'Bullet_FindExit', 'Bullet_Fire_Extended'))
 support = r'''
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
 typedef int hitLocation_t;
+typedef int qboolean;
 typedef unsigned char byte;
 typedef float vec_t,vec3_t[3];
 #define WEAPTYPE_BULLET 0
-typedef struct {int weapType,bRifleBullet,armorPiercing,damage,minDamage;float fMaxDamageRange,fMinDamageRange,locationDamageMultipliers[19];} WeaponDef;
+#define WEAPCLASS_SPREAD 3
+typedef struct {int weapType,bRifleBullet,armorPiercing,damage,minDamage;float fMaxDamageRange,fMinDamageRange,locationDamageMultipliers[19];int weapClass;} WeaponDef;
 typedef struct {int noclip,ufo;struct {int connected;} sess;} gclient_t;
 typedef struct entity {struct {int number,weapon,eType,eventParm,eventParm2,surfType,otherEntityNum;} s;gclient_t *client;int takedamage,flags,health,handler;} gentity_t,gentity_s;
-typedef struct {float fraction,normal[3];int entityNum,surfaceFlags,contents,partGroup;} trace_t;
-typedef struct {WeaponDef *weapDef;} weaponParms;
+typedef struct {float fraction,normal[3];int entityNum,surfaceFlags,contents,partGroup,startsolid,allsolid;} trace_t;
+typedef struct {WeaponDef *weapDef;vec3_t muzzleTrace;} weaponParms;
 typedef struct {void (*pain)(gentity_t*,gentity_t*,int,const vec_t*,int,hitLocation_t);void (*die)(gentity_t*,gentity_t*,gentity_t*,int,int,int,const vec_t*,hitLocation_t,int);} entityHandler_t;
 typedef struct {struct {int enabled;} current;} dvar_t;
 typedef struct {int damage,death;} scr_const_t;

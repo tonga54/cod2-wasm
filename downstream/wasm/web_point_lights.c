@@ -40,19 +40,28 @@ void WebPointLights_SetScene(const GfxLight *lights, int count)
     WebPointLights_Set(packed, used);
 }
 
-EM_JS(void, WebPointLights_Draw, (const float *view, int enabled), {
+EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShadowEnabled), {
     var lights = Module.cod2PointLights;
     if (!lights) return;
     lights.drawCount = enabled && view ? lights.count : 0;
-    if (!lights.drawCount) return;
+    lights.shadowDrawCount = worldShadowEnabled && view && lights.shadowCount ? lights.shadowCount : 0;
+    if (!lights.drawCount && !lights.shadowDrawCount) return;
     var offset = view >>> 2;
-    var changed = lights.transformedRevision !== lights.revision;
+    var changed = false;
     for (var i = 0; i < 16; ++i)
         if (lights.view[i] !== HEAPF32[offset + i]) changed = true;
-    if (!changed) return;
+    var transformLights = lights.drawCount && (changed || lights.transformedRevision !== lights.revision);
+    var transformShadows = lights.shadowDrawCount && (changed || lights.shadowTransformedRevision !== lights.shadowRevision);
+    // A changed view invalidates inactive data too: a later draw may enable it.
+    if (changed) {
+        lights.transformedRevision = -1;
+        lights.shadowTransformedRevision = -1;
+    }
+    if (!transformLights && !transformShadows) return;
     for (var i = 0; i < 16; ++i) lights.view[i] = HEAPF32[offset + i];
     var m = lights.view, world = lights.world;
-    for (var i = 0; i < lights.count; ++i) {
+    if (transformLights) {
+      for (var i = 0; i < lights.count; ++i) {
         var p = i * 8, q = i * 4;
         for (var j = 0; j < 3; ++j) {
             lights.eye[q + j] = m[j] * world[p] + m[4 + j] * world[p + 1]
@@ -60,9 +69,23 @@ EM_JS(void, WebPointLights_Draw, (const float *view, int enabled), {
             lights.color[q + j] = world[p + 4 + j];
         }
         lights.eye[q + 3] = 1 / (world[p + 3] * world[p + 3]);
+      }
+      lights.transformedRevision = lights.revision;
+      ++lights.eyeRevision;
     }
-    lights.transformedRevision = lights.revision;
-    ++lights.eyeRevision;
+    if (transformShadows) {
+      world = lights.shadowWorld;
+      for (var i = 0; i < lights.shadowCount; ++i) {
+        var p = i * 4;
+        for (var j = 0; j < 3; ++j) {
+            lights.shadowEye[p + j] = m[j] * world[p] + m[4 + j] * world[p + 1]
+                + m[8 + j] * world[p + 2] + m[12 + j];
+        }
+        lights.shadowEye[p + 3] = 1 / (world[p + 3] * world[p + 3]);
+      }
+      lights.shadowTransformedRevision = lights.shadowRevision;
+      ++lights.shadowEyeRevision;
+    }
 });
 
 EM_JS(void, WebPointLights_SetShadows, (const float *packed, int count), {
@@ -75,13 +98,11 @@ EM_JS(void, WebPointLights_SetShadows, (const float *packed, int count), {
     if (!lights.shadowWorld) {
         lights.shadowWorld = new Float32Array(16);
         lights.shadowEye = new Float32Array(16);
-        lights.shadowView = new Float32Array(16);
         lights.shadowCount = 0;
         lights.shadowDrawCount = 0;
         lights.shadowRevision = 0;
         lights.shadowEyeRevision = 0;
         lights.shadowTransformedRevision = -1;
-        lights.weaponBlur = 0;
     }
     lights.shadowWorld.set(HEAPF32.subarray(packed >>> 2, (packed >>> 2) + count * 4));
     lights.shadowCount = count;
@@ -134,28 +155,3 @@ void WebPointLights_SetShadowCasters(const GfxEntity *entities, int entityCount,
     }
     WebPointLights_SetShadows(packed, used);
 }
-
-EM_JS(void, WebPointLights_DrawEnhancements, (const float *view, int worldShadowEnabled, float weaponBlur), {
-    var lights = Module.cod2PointLights;
-    if (!lights) return;
-    lights.weaponBlur = weaponBlur > 0 && weaponBlur <= 1 ? weaponBlur : (weaponBlur > 1 ? 1 : 0);
-    lights.shadowDrawCount = worldShadowEnabled && view && lights.shadowCount ? lights.shadowCount : 0;
-    if (!lights.shadowDrawCount) return;
-    var offset = view >>> 2;
-    var changed = lights.shadowTransformedRevision !== lights.shadowRevision;
-    for (var i = 0; i < 16; ++i)
-        if (lights.shadowView[i] !== HEAPF32[offset + i]) changed = true;
-    if (!changed) return;
-    for (var i = 0; i < 16; ++i) lights.shadowView[i] = HEAPF32[offset + i];
-    var m = lights.shadowView, world = lights.shadowWorld;
-    for (var i = 0; i < lights.shadowCount; ++i) {
-        var p = i * 4;
-        for (var j = 0; j < 3; ++j) {
-            lights.shadowEye[p + j] = m[j] * world[p] + m[4 + j] * world[p + 1]
-                + m[8 + j] * world[p + 2] + m[12 + j];
-        }
-        lights.shadowEye[p + 3] = 1 / (world[p + 3] * world[p + 3]);
-    }
-    lights.shadowTransformedRevision = lights.shadowRevision;
-    ++lights.shadowEyeRevision;
-});

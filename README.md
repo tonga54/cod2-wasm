@@ -152,6 +152,16 @@ retail CoD2:
   flashes, brass and tracers. BAR muzzle tails transform to world space once;
   ADS raise/lower poses follow the predicted aiming fraction without an extra
   half-second crossfade that can leave sights tilted during transitions.
+- **Combat presentation within the existing render budget:** aiming preserves
+  the weapon's original texture detail; material blur no longer lowers its mip
+  resolution. Lighting reuses the same unmodified base texture sample.
+  Tracers face the camera from their actual position, with a tapered, fading
+  tail using the same four vertices. Near-miss audio remains audible when
+  visual tracers are disabled. The four default FX light slots prioritize
+  camera proximity, radius and brightness. Shared lighting/shadow transforms
+  and active texture attributes avoid redundant browser work; resolution,
+  texture detail, particle counts and simulation rules are unchanged.
+  See [graphics validation and limits](docs/GRAPHICS_2026-10-16.md).
 - **Remote player poses:** other players see vertical aim in the correct
   direction and Q/E as a lateral lean. Controllers rotate in model axes after
   skeletal composition, preserving movement animations. The respawn/teleport
@@ -166,9 +176,12 @@ retail CoD2:
   an eight-body pool, dropped weapons/ammunition expire after twenty seconds,
   and TDM uses a three-second respawn countdown.
 - **Safer respawns:** DM, TDM, CTF and HQ exclude occupied points and points
-  within 850 units of a living enemy when a free safe point exists. Retail team,
-  objective and recent-death weights rank the remaining points. If every free
-  point is threatened, the selector maximizes distance to the nearest enemy.
+  within 1000 units of a living enemy when a free safe point exists. They prefer
+  128 units of space from teammates and avoid points another player used in the
+  last 750 ms. Up to eight visibility checks prefer cover from nearby enemies;
+  team/objective weights rank the candidates. If every free point is threatened,
+  the selector maximizes distance to the nearest enemy. See the
+  [respawn rules and validation](docs/RESPAWN_SAFETY.md) for crowded-map limits.
   Spectator and S&D round spawns retain their original rules.
 - **Native update notice and fullscreen menus:** new installed client builds
   appear inside the main menu with an Update game action after disconnect.
@@ -251,10 +264,17 @@ X/Square uses/reloads, Y/Triangle changes weapons, LB/L1 throws smoke,
 RB/R1 throws a frag, L3 sprints/holds breath, R3 melees, and Start/Options pauses.
 Click L3 once while moving forward to keep sprinting after releasing the click;
 centering the stick, aiming, combat actions or changing stance cancels the run.
+L3 plus forward also stands up from crouch/prone when there is headroom. A click
+up to 250 ms before pushing forward is accepted, including after a long B hold.
 While aiming, hold L3 to hold breath. Directional navigation highlights the
 selected menu item, including team and weapon choices.
 Use a browser that exposes the controller through the Gamepad API (HTTPS or
 localhost).
+
+Bullets can penetrate thin cover according to its collision material, thickness
+and the weapon's power, losing damage with each layer. Wood, glass, plaster and
+sheet metal offer less protection than thick masonry or rock. See
+[ballistics and controller validation](docs/BALLISTICS_AND_GAMEPAD.md).
 
 | Action | Default |
 | --- | --- |
