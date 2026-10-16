@@ -208,28 +208,34 @@ float CG_GetViewFov(void)
             if (BG_IsAimDownSightWeapon(weapIndex)) {
                 float fPosLerp = cg->predictedPlayerState.fWeaponPosFrac;
                 float adsFov = ((WeaponDef *)weapDef)->fAdsZoomFov;
-                int *peBase = (int *)&((cg_t *)cg)->playerEntity.fLastWeaponPosFrac;
 
                 if (fPosLerp == 1.0f) {
+                    cg->playerEntity.bPositionToADS = 0;
                     fov_x = adsFov;
-                } else if (fPosLerp != 0.0f) {
+                } else if (fPosLerp == 0.0f) {
+                    cg->playerEntity.bPositionToADS = 1;
+                } else {
                     float transTime;
                     float normalizedLerp;
 
-                    if (peBase[1] != 0) {
+                    if (cg->playerEntity.bPositionToADS != 0) {
                         transTime = ((WeaponDef *)weapDef)->fAdsZoomInFrac;
                     } else {
                         transTime = ((WeaponDef *)weapDef)->fAdsZoomOutFrac;
                     }
 
                     normalizedLerp = fPosLerp - (1.0f - transTime);
-                    if (normalizedLerp > 0.0f) {
+                    if (normalizedLerp > 0.0f && transTime > 0.0f) {
                         normalizedLerp /= transTime;
                         if (normalizedLerp > 0.0f) {
+                            if (normalizedLerp > 1.0f)
+                                normalizedLerp = 1.0f;
+                            normalizedLerp = normalizedLerp * normalizedLerp * (3.0f - 2.0f * normalizedLerp);
                             fov_x -= (fov_x - adsFov) * normalizedLerp;
                         }
                     }
                 }
+                cg->playerEntity.fLastWeaponPosFrac = fPosLerp;
             }
         }
     }
@@ -633,18 +639,21 @@ static void CG_CalcViewValues(void)
             float hbob = BG_GetHorizontalBobFactor(ps, bobCycle, speed, bobMax);
             float forward[3], right[3], up[3];
             AngleVectors(cg->refdefViewAngles, forward, right, up);
-            cg->refdef.vieworg[0] += hbob * forward[0];
-            cg->refdef.vieworg[1] += hbob * forward[1];
-            cg->refdef.vieworg[2] += hbob * forward[2];
+            cg->refdef.vieworg[0] += hbob * right[0];
+            cg->refdef.vieworg[1] += hbob * right[1];
+            cg->refdef.vieworg[2] += hbob * right[2];
         }
 
         {
             int delta = cg->time - cg->landTime;
-            if (delta < 150) {
-                cg->refdef.vieworg[2] += (float)delta / 150.0f * cg->landChange;
-            } else if (delta < 450) {
-                cg->refdef.vieworg[2] +=
-                    (((float)delta - 150.0f) / -300.0f + 1.0f) * cg->landChange;
+            if (delta > 0 && delta < 150) {
+                float t = (float)delta / 150.0f;
+                t = t * t * (3.0f - 2.0f * t);
+                cg->refdef.vieworg[2] += t * cg->landChange;
+            } else if (delta >= 150 && delta < 450) {
+                float t = 1.0f - ((float)delta - 150.0f) / 300.0f;
+                t = t * t * (3.0f - 2.0f * t);
+                cg->refdef.vieworg[2] += t * cg->landChange;
             }
         }
 
@@ -652,11 +661,10 @@ static void CG_CalcViewValues(void)
             int elapsed = cg->time - cg->stepTime;
             if (elapsed < 0)
                 cg->stepTime = cg->time;
-            if (elapsed > 99) {
-
-            } else {
-                cg->refdef.vieworg[2] +=
-                    (float)(100 - elapsed) * cg->stepChange / -100.0f;
+            if (elapsed >= 0 && elapsed <= 119) {
+                float t = (float)(120 - elapsed) / 120.0f;
+                t = t * t * (3.0f - 2.0f * t);
+                cg->refdef.vieworg[2] -= t * cg->stepChange;
             }
         }
 
@@ -874,7 +882,6 @@ qboolean CG_DrawActiveFrame(int serverTime, DemoType demoType,
     CG_AddPacketEntities();
     CG_PERF_MARK("entities");
     R_UpdateEffectsNonBolt();
-    CG_AddLocalEntities();
     CG_UpdateViewKick();
     CL_Input();
     CG_PredictPlayerState();
@@ -887,6 +894,7 @@ qboolean CG_DrawActiveFrame(int serverTime, DemoType demoType,
     SND_SetListener(cg->nextSnap->ps.clientNum, cg->refdef.vieworg, cg->refdef.viewaxis);
 
     CG_AddViewWeapon(&cg->predictedPlayerState);
+    CG_AddLocalEntities();
     CL_FX_AdjustCamera(&cg->refdef);
 
     if (cg->testFxRespawnTime > 0) {

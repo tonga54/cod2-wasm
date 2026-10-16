@@ -32,13 +32,35 @@ typedef int snapshot_t;
 typedef int snd_alias_list_t;
 typedef struct {struct {float value; int integer,enabled;} current;} dvar_t;
 typedef struct {float xyz[3]; union {unsigned packed;} color; float texCoord[2],lmapCoord[2];} GfxWorldVertex;
-static struct {struct {float vieworg[3],viewaxis[3][3];} refdef;} cgState,*cg=&cgState;
-static dvar_t width,scale,minDist,range,chance,blood;
-static dvar_t *cg_tracerWidth=&width,*cg_tracerScale=&scale,*cg_tracerScaleMinDist=&minDist,*cg_tracerScaleDistRange=&range,*cg_tracerChance=&chance,*cg_blood=&blood;
+typedef int qboolean;
+typedef struct {int clientNum;float fWeaponPosFrac,aimSpreadScale;} playerState_t;
+typedef struct {float fraction;} trace_t;
+typedef struct {int weapType,weapClass,shotCount;float fAdsSpread,fMinDamageRange;} WeaponDef;
+typedef struct {void *viewModelDObj;} weaponInfo_t;
+typedef struct {int leType,endTime;float tracerClipDist;struct {int trType,trTime;float trBase[3],trDelta[3];} pos;} localEntity_t;
+#define LE_MOVING_TRACER 4
+#define TR_LINEAR 2
+static struct {struct {float vieworg[3],viewaxis[3][3];} refdef;int time,frametime;float gunPitch,gunYaw,viewModelAxis[3][3];} cgState,*cg=&cgState;
+static dvar_t width,scale,minDist,range,chance,blood,speed;
+static dvar_t *cg_tracerWidth=&width,*cg_tracerScale=&scale,*cg_tracerScaleMinDist=&minDist,*cg_tracerScaleDistRange=&range,*cg_tracerChance=&chance,*cg_blood=&blood,*cg_tracerSpeed=&speed;
 static struct {struct {int tracerMaterial; snd_alias_list_t *bulletHitSmallSound[23],*bulletHitLargeSound[23],*shotgunHitSound[23]; struct {void *table;} *fx; void *fxNoBloodFleshHit;}media;} cgsState,*cgs=&cgsState;
 typedef struct {char *mEffectName;int mPrimitiveCount;} EffectTemplate;
-static GfxWorldVertex output[4];static int draws,whizzes,spawns,impacts,muzzleReady=1;
-static unsigned short tag;static void *s_barrelTags[]={&tag};
+static GfxWorldVertex output[4];static int draws,whizzes,spawns,impacts,muzzleReady=1,immediateSpawns;
+static localEntity_t immediateLe;
+static unsigned short tag;static void *s_barrelTags[]={&tag,&tag,&tag,&tag};
+static weaponInfo_t weapInfos[4];static weaponInfo_t *weapInfoPtr=weapInfos;static void *imp_cg_weapons=&weapInfoPtr;
+static WeaponDef testWeapon={.weapType=0,.weapClass=0,.shotCount=1,.fAdsSpread=0.5f,.fMinDamageRange=1500.f};
+static float traceFraction=0.25f;
+static float g_webAdsDofFrac,g_webAdsFocusDist=256.f,g_webAdsViewmodelEnd=15.f;
+static int s_pendingLocalFireWeapon,s_pendingLocalFireBarrel,s_pendingLocalFireTime,s_localTracerSpawnedTime;
+static localEntity_t *CG_AllocLocalEntity(void){immediateSpawns++;return &immediateLe;}
+static int BG_IsAimDownSightWeapon(int w){return w==1;}
+static void *BG_GetWeaponDef(int w){return &testWeapon;}
+static int CG_DObjGetViewModelTagPos(void *obj,unsigned t,float *out){out[0]=cg->refdef.vieworg[0]+12;out[1]=cg->refdef.vieworg[1]-2;out[2]=cg->refdef.vieworg[2]-1;return 1;}
+static void AngleVectors(const float *ang,float *f,float *r,float *u){f[0]=1;f[1]=f[2]=0;r[0]=r[2]=0;r[1]=1;u[0]=u[1]=0;u[2]=1;}
+static void BG_GetSpreadForWeapon(const playerState_t *ps,int w,float *lo,float *hi){*lo=1.f;*hi=4.f;}
+static float randomf(void){return 0.5f;}
+static void CG_TraceCapsule(trace_t *tr,const float *s,const float *mn,const float *mx,const float *e,int skip,int mask){tr->fraction=traceFraction;}
 static float Vec3Normalize(float *v){float len=sqrtf(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);if(len)for(int i=0;i<3;i++)v[i]/=len;return len;}
 static float Vec3Distance(const float *a,const float *b){float s=0;for(int i=0;i<3;i++)s+=(a[i]-b[i])*(a[i]-b[i]);return sqrtf(s);}
 static void Vec3Cross(const float *a,const float *b,float *c){c[0]=a[1]*b[2]-a[2]*b[1];c[1]=a[2]*b[0]-a[0]*b[2];c[2]=a[0]*b[1]-a[1]*b[0];}
@@ -60,7 +82,8 @@ static const void *imp_r_dlightLimit=&limitPtr;
 '''
 weapon = 'src/PC/cgame_mp/cg_weapons.c'
 code = ''.join(function(weapon, name) for name in (
-    'CG_TracerScaleForDistance', 'CG_DrawTracer', 'CG_BulletHitClientEvent', 'CG_BulletHitEvent'))
+    'CG_TracerScaleForDistance', 'CG_DrawTracer', 'CG_BulletHitClientEvent',
+    'CG_BulletHitEvent', 'CG_SpawnTracerImmediate', 'CG_UpdateWebWeaponPresentation'))
 code += function('src/PC/gfx_d3d/r_scene.c', 'R_AddLightToScene')
 checks = r'''
 int main(void){
@@ -113,7 +136,24 @@ int main(void){
   float v[7]={1,2,3,200,1,1,1};v[f]=NAN;R_AddLightToScene(v,v[3],v[4],v[5],v[6]);
   assert(scene.dlightCount==0);
  }
- puts("PASS: 1512 translated/off-axis tracer ribbons, end-on/empty beams, audio independent of visuals, 100 light-selection frames, all 0-32 limits and nonfinite rejection");
+ speed.current.value=6500.f;chance.current.value=0.85f;
+ cg->time=5000;cg->frametime=16;cg->viewModelAxis[0][0]=1.f;
+ weapInfos[1].viewModelDObj=&testWeapon;
+ playerState_t ps={.clientNum=0,.fWeaponPosFrac=1.f,.aimSpreadScale=0.f};
+ traceFraction=0.125f;
+ s_pendingLocalFireWeapon=1;s_pendingLocalFireBarrel=0;s_pendingLocalFireTime=5000;
+ immediateSpawns=0;
+ CG_UpdateWebWeaponPresentation(&ps,1,1);
+ assert(immediateSpawns==1 && s_localTracerSpawnedTime==5000);
+ assert(immediateLe.pos.trTime==5000 && immediateLe.pos.trBase[0]==18.f);
+ assert(fabsf(g_webAdsDofFrac-1.f)<1e-6f && g_webAdsFocusDist>256.f && g_webAdsFocusDist<=512.f && g_webAdsViewmodelEnd>=12.5f);
+ testWeapon.weapClass=3;testWeapon.shotCount=8;
+ cg->time=5050;s_pendingLocalFireWeapon=1;s_pendingLocalFireTime=5050;immediateSpawns=0;
+ CG_UpdateWebWeaponPresentation(&ps,1,1);
+ assert(immediateSpawns==3);
+ ps.fWeaponPosFrac=0.f;CG_UpdateWebWeaponPresentation(&ps,1,1);
+ assert(g_webAdsDofFrac==0.f);
+ puts("PASS: 1512 translated/off-axis tracer ribbons, immediate first-person tracers, ADS focus tracking, audio independent of visuals, 100 light-selection frames, all 0-32 limits and nonfinite rejection");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='cod2-combat-presentation-') as tmp:

@@ -656,8 +656,15 @@ static GLenum CDirect3DDevice_MapCompareFunc(DWORD func)
     }
 }
 
+static int g_extraTexUnitsEnabled = 1;
+
 static void CDirect3DDevice_DisableExtraTextureUnits(void)
 {
+#ifdef __EMSCRIPTEN__
+    if (!g_extraTexUnitsEnabled)
+        return;
+    g_extraTexUnitsEnabled = 0;
+#endif
     glActiveTextureARB(GL_TEXTURE1_ARB);
     glDisable(0x0DE1);
     glDisable(GL_TEXTURE_CUBE_MAP);
@@ -777,7 +784,7 @@ static GLenum CDirect3DDevice_MapTextureMinFilter(DWORD minFilter, DWORD mipFilt
 
     if (mipFilter == D3DTEXF_POINT) {
 #ifdef __EMSCRIPTEN__
-        if (minFilter == D3DTEXF_ANISOTROPIC)
+        if (minFilter != D3DTEXF_POINT)
             return GL_LINEAR_MIPMAP_LINEAR;
 #endif
         return (minFilter == D3DTEXF_POINT) ? GL_NEAREST_MIPMAP_NEAREST : GL_LINEAR_MIPMAP_NEAREST;
@@ -890,19 +897,19 @@ static void CDirect3DDevice_ApplyTextureCombineRGB(DWORD op, DWORD arg0, DWORD a
         break;
     case D3DTOP_BLENDDIFFUSEALPHA:
         combine = GL_INTERPOLATE;
-        src2 = 0;
+        src2 = 0 | D3DTA_ALPHAREPLICATE;
         break;
     case D3DTOP_BLENDTEXTUREALPHA:
         combine = GL_INTERPOLATE;
-        src2 = 2;
+        src2 = 2 | D3DTA_ALPHAREPLICATE;
         break;
     case D3DTOP_BLENDFACTORALPHA:
         combine = GL_INTERPOLATE;
-        src2 = 3;
+        src2 = 3 | D3DTA_ALPHAREPLICATE;
         break;
     case D3DTOP_BLENDCURRENTALPHA:
         combine = GL_INTERPOLATE;
-        src2 = 1;
+        src2 = 1 | D3DTA_ALPHAREPLICATE;
         break;
     case D3DTOP_LERP:
         combine = GL_INTERPOLATE;
@@ -1832,6 +1839,7 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
     r_backEndGlobals_t *backEndState;
     int is2D;
     int usesLightmap;
+    int stage1Bound = 0;
     int positionOffset;
     int positionComponents;
     int colorOffset;
@@ -1973,10 +1981,12 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
     }
 #endif
 
+#ifndef __EMSCRIPTEN__
     {
         extern void glBindVertexArray(unsigned int);
         glBindVertexArray(0);
     }
+#endif
     glActiveTextureARB(GL_TEXTURE0_ARB);
     glClientActiveTextureARB(GL_TEXTURE0_ARB);
     if (!usesLightmap) {
@@ -2180,25 +2190,28 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                         byte *tessBase = (byte *)imp_tess;
                         int lmapIndex = ((materialCommands_t *)tessBase)->lmapIndex;
                         int lmapAllowed = !dev->alphaBlendEnable || dev->destBlend == 6;
-                        CDirect3DDevice_DisableExtraTextureUnits();
                         if (lmapAllowed && stage0Target != GL_TEXTURE_CUBE_MAP && lmapIndex >= 0 && lmapIndex < s_world.lightmapCount && s_world.lightmaps) {
                             GfxImage *lmapImg = s_world.lightmaps[lmapIndex][0];
                             if (lmapImg) {
                                 unsigned int lmTexID = CDirect3DDevice_GetImageGLId(lmapImg);
                                 if (lmTexID) {
+                                    DWORD addrU = g_samplerState[1][D3DSAMP_ADDRESSU];
+                                    DWORD addrV = g_samplerState[1][D3DSAMP_ADDRESSV];
+                                    stage1Bound = 1;
+                                    g_extraTexUnitsEnabled = 1;
                                     glActiveTextureARB(GL_TEXTURE1_ARB);
                                     glDisable(GL_TEXTURE_CUBE_MAP);
                                     glEnable(0x0DE1);
                                     glBindTexture(0x0DE1, lmTexID);
 
-                                    glMatrixMode(0x1702 );
-                                    glLoadIdentity();
-                                    glMatrixMode(0x1700 );
-                                    CDirect3DDevice_ApplySamplerState(1, 0x0DE1);
+                                    glTexParameteri(0x0DE1, 0x2802 ,
+                                                    CDirect3DDevice_MapTextureAddress(addrU ? addrU : D3DTADDRESS_WRAP));
+                                    glTexParameteri(0x0DE1, 0x2803 ,
+                                                    CDirect3DDevice_MapTextureAddress(addrV ? addrV : D3DTADDRESS_WRAP));
+                                    glTexParameteri(0x0DE1, 0x2801 , 0x2601 );
+                                    glTexParameteri(0x0DE1, 0x2800 , 0x2601 );
                                     if (g_textureStageState[1][D3DTSS_COLOROP] != D3DTOP_DISABLE) {
                                         CDirect3DDevice_ApplyTextureStageState(1);
-                                        glTexParameteri(0x0DE1, 0x2801 , 0x2601 );
-                                        glTexParameteri(0x0DE1, 0x2800 , 0x2601 );
                                         glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_ALPHA, 0x1E01 );
                                         glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_ALPHA, GL_PREVIOUS);
                                         glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND0_ALPHA, 0x0302 );
@@ -2220,20 +2233,59 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                                             g_stage1DefaultLightmapCombine = 1;
                                             g_appliedTexStageCache[1].valid = 0;
                                         }
-                                        glTexParameteri(0x0DE1, 0x2801 , 0x2601 );
-                                        glTexParameteri(0x0DE1, 0x2800 , 0x2601 );
                                     }
 
                                     glActiveTextureARB(GL_TEXTURE0_ARB);
                                 }
                             }
                         }
+                        if (!stage1Bound && g_textureStageState[1][D3DTSS_COLOROP] == D3DTOP_BLENDCURRENTALPHA &&
+                            stage0Target != GL_TEXTURE_CUBE_MAP) {
+                            CDirect3DDevice_UpdateTextureIfNeeded(g_boundTextures[1]);
+                            unsigned int stage1TexID = CDirect3DDevice_GetTextureGLId(g_boundTextures[1]);
+                            GLenum stage1Target = CDirect3DDevice_GetTextureTarget(g_boundTextures[1]);
+                            if (stage1TexID && stage1Target == 0x0DE1) {
+                                stage1Bound = 2;
+                                g_extraTexUnitsEnabled = 1;
+                                glActiveTextureARB(GL_TEXTURE1_ARB);
+                                glDisable(GL_TEXTURE_CUBE_MAP);
+                                glEnable(0x0DE1);
+                                glBindTexture(0x0DE1, stage1TexID);
+                                CDirect3DDevice_ApplySamplerState(1, 0x0DE1);
+                                CDirect3DDevice_ApplyTextureStageState(1);
+                                g_appliedTexStageCache[1].valid = 0;
+                                glActiveTextureARB(GL_TEXTURE0_ARB);
+                            }
+                        }
+                        if (!stage1Bound)
+                            CDirect3DDevice_DisableExtraTextureUnits();
                     }
                 } else {
 
                     CDirect3DDevice_ApplyTextureStageState(0);
+                    if (g_textureStageState[1][D3DTSS_COLOROP] == D3DTOP_BLENDCURRENTALPHA &&
+                        stage0Target != GL_TEXTURE_CUBE_MAP) {
+                        CDirect3DDevice_UpdateTextureIfNeeded(g_boundTextures[1]);
+                        unsigned int stage1TexID = CDirect3DDevice_GetTextureGLId(g_boundTextures[1]);
+                        GLenum stage1Target = CDirect3DDevice_GetTextureTarget(g_boundTextures[1]);
+                        if (stage1TexID && stage1Target == 0x0DE1) {
+                            stage1Bound = 2;
+                            g_extraTexUnitsEnabled = 1;
+                            glActiveTextureARB(GL_TEXTURE1_ARB);
+                            glDisable(GL_TEXTURE_CUBE_MAP);
+                            glEnable(0x0DE1);
+                            glBindTexture(0x0DE1, stage1TexID);
+                            CDirect3DDevice_ApplySamplerState(1, 0x0DE1);
+                            CDirect3DDevice_ApplyTextureStageState(1);
+                            g_appliedTexStageCache[1].valid = 0;
+                            glActiveTextureARB(GL_TEXTURE0_ARB);
+                        }
+                    }
+                    if (!stage1Bound)
+                        CDirect3DDevice_DisableExtraTextureUnits();
                 }
             } else {
+                CDirect3DDevice_DisableExtraTextureUnits();
                 glDisable(0x0DE1);
                 glDisable(GL_TEXTURE_CUBE_MAP);
             }
@@ -2256,7 +2308,6 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
     {
         extern unsigned CDirect3DVertexBuffer_BindStaticWeb(const CDirect3DVertexBuffer *);
         extern void glBindBuffer(unsigned target, unsigned buffer);
-        glBindBuffer(0x8892, 0);
         /* Reorder only the four color channels in the vertex shader. Preserve
          * original interleaved bytes instead of copying an entire mesh. */
         webColorOrder = colorOffset >= 0 ? colorByteOrder : COLOR_BYTES_RGBA;
@@ -2275,7 +2326,7 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                     (const unsigned short *)(ibData + startIndex * 2), indexCount,
                     &firstVertex, &drawVertexCount);
                 if (!drawIndices) {
-                    glBindBuffer(0x8892, 0);
+                    if (staticVertexBuffer) glBindBuffer(0x8892, 0);
                     return 0;
                 }
             }
@@ -2303,7 +2354,7 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                 glColorPointer(4, 0x1401 , stride,
                                attributeBase + colorOffset);
 
-            if (lightmapOffset >= 0) {
+            if (stage1Bound == 1 && lightmapOffset >= 0) {
                 glClientActiveTextureARB(0x84C1);
                 glEnableClientState(0x8078);
                 glTexCoordPointer(2, 0x1406 , stride,
@@ -2320,6 +2371,12 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                 glColorPointer(4, 0x1401 , 0, colors);
             else
                 glColorPointer(4, 0x1401 , stride, attributeBase + colorOffset);
+        }
+        if (stage1Bound == 2 && texOffset >= 0) {
+            glClientActiveTextureARB(0x84C1);
+            glEnableClientState(0x8078);
+            glTexCoordPointer(2, 0x1406 , stride, attributeBase + texOffset);
+            glClientActiveTextureARB(0x84C0);
         }
         if (texOffset >= 0) {
             glEnableClientState(0x8078);
@@ -2368,8 +2425,12 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
         WEB_DRAW_PERF("backendAttributes");
 #ifdef __EMSCRIPTEN__
         {
+            int isViewmodel = !is2D && dev->viewportMinZ == 0.0f &&
+                dev->viewportMaxZ > 0.0f && dev->viewportMaxZ <= 0.25f &&
+                dev->lighting && stage0Target == 0x0DE1;
             int pointLight = !is2D && dev->zWriteEnable && !dev->alphaBlendEnable &&
-                stage0Target == 0x0DE1 && (usesLightmap || dev->lighting);
+                stage0Target == 0x0DE1 && (usesLightmap || dev->lighting)
+                ? (isViewmodel ? 2 : 1) : 0;
             int worldShadow = !is2D && dev->zWriteEnable && !dev->alphaBlendEnable &&
                 stage0Target == 0x0DE1 && usesLightmap;
             WebPointLights_Draw(pointLightViewValid ? pointLightView : NULL,
@@ -2398,12 +2459,14 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
     glDisableClientState(0x8075);
     glDisableClientState(0x8076);
     glDisableClientState(0x8078);
+#ifndef __EMSCRIPTEN__
     CDirect3DDevice_DisableExtraTextureUnits();
+#endif
 
 #ifdef __EMSCRIPTEN__
     {
         extern void glBindBuffer(unsigned target, unsigned buffer);
-        glBindBuffer(0x8892, 0);
+        if (staticVertexBuffer) glBindBuffer(0x8892, 0);
         if (staticIndexBuffer) glBindBuffer(0x8893, 0);
     }
 #endif
@@ -2446,9 +2509,11 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitiveUP(const CDirect3DDevice *_this,
 static void CDirect3DDevice_ApplyDepthBias(void)
 {
     if (g_depthBias != 0.0f || g_slopeScaleDepthBias != 0.0f) {
+        float factor = (g_slopeScaleDepthBias != 0.0f) ? g_slopeScaleDepthBias : (g_depthBias * 16384.0f);
+        float units = g_depthBias * 131072.0f;
         glEnable(0x8037 );
 
-        ((void (*)(float, float))glPolygonOffset)(g_slopeScaleDepthBias, g_depthBias * 16777216.0f);
+        ((void (*)(float, float))glPolygonOffset)(factor, units);
     } else {
         glDisable(0x8037 );
     }
@@ -2460,7 +2525,10 @@ static void CDirect3DDevice_ApplyFog(const DeviceImpl *dev, int is2D)
      * inherit the world's atmosphere. The DX7 material
      * iterator supplies black fog for additive passes and map color otherwise. */
     DWORD mode = dev->fogTableMode ? dev->fogTableMode : dev->fogVertexMode;
-    if (is2D || !dev->fogEnable || !mode) {
+    if (is2D || !dev->fogEnable || !mode ||
+        (dev->alphaBlendEnable &&
+         ((dev->srcBlend == 1 && dev->destBlend == 3) ||
+          (dev->srcBlend == 9 && dev->destBlend == 1)))) {
         glDisable(0x0B60); /* GL_FOG */
         return;
     }
@@ -3668,6 +3736,7 @@ void CDirect3DDevice_Init(void *device)
     g_prebind_texTarget = 0x0DE1;
     g_cachedModelLightsValid = 0;
     g_stage1DefaultLightmapCombine = 0;
+    g_extraTexUnitsEnabled = 1;
     memset(g_appliedTexStageCache, 0, sizeof(g_appliedTexStageCache));
     memset(g_textureStageState, 0, sizeof(g_textureStageState));
     memset(g_samplerState, 0, sizeof(g_samplerState));

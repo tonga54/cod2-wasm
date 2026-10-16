@@ -175,3 +175,34 @@ drawScene(0,0,0,2);upload.call(colorRenderer,Module,colorGL);
 upload.call(colorRenderer,Module,colorGL);assert.equal(colorRenderer.cod2ColorOrder,0,'generic subsequent GL draws use RGBA');
 Module.cod2PointLights=savedLights;
 console.log('PASS: 2400 RGBA/BGRA/ARGB draws with no FX lights; cached uploads and generic-draw reset');
+
+// Exercise CoD4-style ADS DOF and viewmodel focus uniforms without artificial gloss.
+const setAds = emjs('WebPointLights_SetAds', ['adsFrac', 'focusDist', 'viewmodelEnd']);
+assert(modelShader.pointDefs.includes('uniform highp vec4 u_cod2SceneFx;'));
+assert(!modelShader.pointPass.includes('cod2Spec') && !modelShader.pointPass.includes('cod2Rim'));
+assert(modelShader.pointPass.includes('cod2VmBlur') && modelShader.pointPass.includes('cod2SightKeep'));
+assert(!worldShader.pointPass.includes('cod2Relief') && worldShader.pointPass.includes('cod2Periph'));
+let sceneFxUploads = 0, lastSceneFx = null;
+const fxGL = {
+  uniform1i() {},
+  uniform4fv(loc, buf) { if (loc === 9) { sceneFxUploads++; lastSceneFx = [...buf]; } }
+};
+const fxRenderer = {
+  cod2LightCountLocation: null, cod2SceneFxLocation: 9, cod2SceneFxRevision: -1
+};
+setAds(0.8, 420, 16.5);
+drawScene(256, 1, 0, 0);
+upload.call(fxRenderer, Module, fxGL);
+assert.equal(sceneFxUploads, 1);
+assert(Math.abs(lastSceneFx[0] - 0.8) < 1e-6 && lastSceneFx[1] === 420 && lastSceneFx[2] === 1 && lastSceneFx[3] === 16.5);
+for (let i = 0; i < 300; i++) { drawScene(256, 1, 0, 0); upload.call(fxRenderer, Module, fxGL); }
+assert.equal(sceneFxUploads, 1, 'unchanged scene FX state is cached across draws');
+drawScene(256, 2, 0, 0);
+upload.call(fxRenderer, Module, fxGL);
+assert.equal(sceneFxUploads, 2);
+assert.equal(lastSceneFx[2], 2, 'viewmodel draws select near-stock ADS mode');
+drawScene(0, 0, 0, 0);
+upload.call(fxRenderer, Module, fxGL);
+assert.equal(sceneFxUploads, 3);
+assert.deepEqual(lastSceneFx, [0, 256, 0, 0], '2D HUD draws disable 3D scene shading and ADS blur');
+console.log('PASS: ADS DOF focus distance, viewmodel/world mode switching, HUD reset and cached u_cod2SceneFx uploads');

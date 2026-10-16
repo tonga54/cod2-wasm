@@ -1871,6 +1871,13 @@ static void RB_Set2D(void)
     if (tess.indexCount || tess.optimizedIndexCount)
         RB_EndSurface();
 
+#ifdef __EMSCRIPTEN__
+    if (!backEnd.projection2D && backEnd.viewParms) {
+        extern void WebPointLights_ApplyAdsPostFx(void);
+        WebPointLights_ApplyAdsPostFx();
+    }
+#endif
+
     backEnd.projection2D = 1;
 
     if (!RB_GetViewport(viewport))

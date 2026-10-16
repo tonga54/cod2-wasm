@@ -778,8 +778,13 @@ void R_RenderScene(const refdef_t *refdef)
 #ifdef __EMSCRIPTEN__
     extern void WebPointLights_SetScene(const GfxLight *, int);
     extern void WebPointLights_SetShadowCasters(const GfxEntity *, int, const float *);
+    extern void WebPointLights_SetAdsDof(float, float, float);
+    extern float g_webAdsDofFrac;
+    extern float g_webAdsFocusDist;
+    extern float g_webAdsViewmodelEnd;
     WebPointLights_SetScene(scene.dlights, scene.dlightCount);
     WebPointLights_SetShadowCasters(scene.def.entities, scene.def.entityCount, rg_p->viewOrg);
+    WebPointLights_SetAdsDof(g_webAdsDofFrac, g_webAdsFocusDist, g_webAdsViewmodelEnd);
 #endif
 
     drawSurfStart = (int)(intptr_t)scene.drawSurfs;

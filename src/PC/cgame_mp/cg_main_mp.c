@@ -979,10 +979,17 @@ static inline __attribute__((always_inline)) void CG_RegisterDvars(void)
     cg_nopredict = Dvar_RegisterBool_mac("cg_nopredict", 0, 0x1000);
     cg_showmiss = Dvar_RegisterInt("cg_showmiss", 0, 0, 2, 0x1000);
     cg_footsteps = Dvar_RegisterBool_mac("cg_footsteps", 1, 0x1080);
+#ifdef __EMSCRIPTEN__
+    cg_tracerChance = Dvar_RegisterFloat("cg_tracerchance", 0.85f, 0.0f, 1.0f, 0x1080);
+    cg_tracerWidth = Dvar_RegisterFloat("cg_tracerwidth", 2.0f, 0.0f, 8.0f, 0x1080);
+    cg_tracerSpeed = Dvar_RegisterFloat("cg_tracerSpeed", 6500.0f, 0.0f, FLT_MAX, 0x1080);
+    cg_tracerLength = Dvar_RegisterFloat("cg_tracerlength", 200.0f, 0.0f, FLT_MAX, 0x1080);
+#else
     cg_tracerChance = Dvar_RegisterFloat("cg_tracerchance", 0.400000006f, 0.0f, 1.0f, 0x1080);
     cg_tracerWidth = Dvar_RegisterFloat("cg_tracerwidth", 0.800000012f, 0.0f, 8.0f, 0x1080);
     cg_tracerSpeed = Dvar_RegisterFloat("cg_tracerSpeed", 4500.0f, 0.0f, FLT_MAX, 0x1080);
     cg_tracerLength = Dvar_RegisterFloat("cg_tracerlength", 160.0f, 0.0f, FLT_MAX, 0x1080);
+#endif
     cg_tracerScale = Dvar_RegisterFloat("cg_tracerScale", 50.0f, 1.0f, FLT_MAX, 0x1080);
     cg_tracerScaleMinDist = Dvar_RegisterFloat("cg_tracerScaleMinDist", 5000.0f, 0.0f, FLT_MAX, 0x1080);
     cg_tracerScaleDistRange = Dvar_RegisterFloat("cg_tracerScaleDistRange", 25000.0f, 0.0f, FLT_MAX, 0x1080);

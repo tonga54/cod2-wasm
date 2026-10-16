@@ -322,6 +322,26 @@ XModel *XModelLoad(const char *name, Alloc_t Alloc, Alloc_t AllocColl)
             model->lodInfo[i].dist = config.entries[i].dist;
             lodFilename += nameLens[i];
         }
+#ifdef __EMSCRIPTEN__
+        if (model->numLods > 0 &&
+            memcmp(name, "weapon_", 7) != 0 &&
+            memcmp(name, "projectile_", 11) != 0) {
+            int lastLod = model->numLods - 1;
+            float maxDist = model->lodInfo[lastLod].dist;
+            if (maxDist >= 800.0f && maxDist < 3600.0f) {
+                float factor = 3600.0f / maxDist;
+                if (factor > 3.5f)
+                    factor = 3.5f;
+                for (i = 0; i < model->numLods; i++)
+                    model->lodInfo[i].dist *= factor;
+            } else if (maxDist == 0.0f && model->numLods > 1) {
+                for (i = 0; i < lastLod; i++) {
+                    if (model->lodInfo[i].dist >= 250.0f && model->lodInfo[i].dist < 2400.0f)
+                        model->lodInfo[i].dist *= 1.6f;
+                }
+            }
+        }
+#endif
 
         {
             const char *partsName = model->lodInfo[0].filename;

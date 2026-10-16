@@ -533,6 +533,12 @@ static qboolean __attribute_regparm__(3) CG_CalcMuzzlePoint(int entityNum, vec_t
         return 0;
 
     if (!cg->renderingThirdPerson && snap->ps.clientNum == entityNum) {
+#ifdef __EMSCRIPTEN__
+        extern int s_localTracerSpawnedTime;
+        if (s_localTracerSpawnedTime > 0 && cg->time >= s_localTracerSpawnedTime &&
+            cg->time - s_localTracerSpawnedTime < 250)
+            return 0;
+#endif
         int weapon = BG_GetViewmodelWeaponIndex(&cg->predictedPlayerState);
         struct DObj_s *viewModel = (*(weaponInfo_t **)imp_cg_weapons)[weapon].viewModelDObj;
         if (viewModel && CG_DObjGetViewModelTagPos(viewModel, flashTag, muzzle))
@@ -712,8 +718,19 @@ void CG_FireWeapon(centity_t *cent, int event, int barrel)
     BG_GetWeaponDef(ent->weapon);
     cent->bMuzzleFlash = 1;
 
-    if (CG_IsLocalClientEntity_inl(cg, ent))
+    if (CG_IsLocalClientEntity_inl(cg, ent)) {
         BG_WeaponFireRecoil(&cg->predictedPlayerState, cg->vGunSpeed, cg->kickAVel);
+#ifdef __EMSCRIPTEN__
+        {
+            extern int s_pendingLocalFireWeapon;
+            extern int s_pendingLocalFireBarrel;
+            extern int s_pendingLocalFireTime;
+            s_pendingLocalFireWeapon = ent->weapon;
+            s_pendingLocalFireBarrel = barrel;
+            s_pendingLocalFireTime = cg->time;
+        }
+#endif
+    }
 
     CG_PlayFireWeaponEffect(cent, ent, barrel);
 
@@ -1330,6 +1347,176 @@ void CG_AddPlayerWeapon(GfxEntity *parent, playerState_t *ps, centity_t *cent, q
 static float sprintViewBlend;
 static int sprintViewTime;
 
+#ifdef __EMSCRIPTEN__
+extern void AngleVectors(const vec_t *angles, vec_t *forward, vec_t *right, vec_t *up);
+extern void CG_TraceCapsule(trace_t *result, const vec_t *start, const vec_t *mins, const vec_t *maxs, const vec_t *end, int skipNumber, int mask);
+extern void BG_GetSpreadForWeapon(const playerState_t *ps, int weaponIndex, float *minSpread, float *maxSpread);
+extern float randomf(void);
+float g_webAdsDofFrac = 0.0f;
+float g_webAdsFocusDist = 256.0f;
+float g_webAdsViewmodelEnd = 15.0f;
+int s_pendingLocalFireWeapon = 0;
+int s_pendingLocalFireBarrel = 0;
+int s_pendingLocalFireTime = 0;
+int s_localTracerSpawnedTime = 0;
+
+static void CG_SpawnTracerImmediate(const vec_t *pstart, const vec_t *pend)
+{
+    vec3_t dir;
+    float dist;
+    float speed;
+    localEntity_t *le;
+
+    dir[0] = pend[0] - pstart[0];
+    dir[1] = pend[1] - pstart[1];
+    dir[2] = pend[2] - pstart[2];
+    dist = Vec3Normalize(dir);
+    speed = cg_tracerSpeed->current.value;
+    if (dist <= 24.0f || speed <= 0.0f)
+        return;
+
+    le = CG_AllocLocalEntity();
+    le->leType = LE_MOVING_TRACER;
+    le->tracerClipDist = dist;
+    le->pos.trType = TR_LINEAR;
+    le->pos.trTime = cg->time;
+    le->endTime = cg->time + (int)((dist * 1000.0f) / speed);
+    le->pos.trBase[0] = pstart[0];
+    le->pos.trBase[1] = pstart[1];
+    le->pos.trBase[2] = pstart[2];
+    le->pos.trDelta[0] = speed * dir[0];
+    le->pos.trDelta[1] = speed * dir[1];
+    le->pos.trDelta[2] = speed * dir[2];
+}
+
+static void CG_UpdateWebWeaponPresentation(playerState_t *ps, int weaponIndex, qboolean drawGun)
+{
+    static const vec3_t zeroBounds = { 0.0f, 0.0f, 0.0f };
+    static int lastTraceTime = 0;
+    static vec3_t lastTraceOrg = { 0.0f, 0.0f, 0.0f };
+    static vec3_t lastTraceDir = { 0.0f, 0.0f, 0.0f };
+    static float targetFocusDist = 256.0f;
+
+    if (ps->fWeaponPosFrac > 0.0f && drawGun) {
+        float dot = cg->refdef.viewaxis[0][0] * lastTraceDir[0] +
+                    cg->refdef.viewaxis[0][1] * lastTraceDir[1] +
+                    cg->refdef.viewaxis[0][2] * lastTraceDir[2];
+        float dx = cg->refdef.vieworg[0] - lastTraceOrg[0];
+        float dy = cg->refdef.vieworg[1] - lastTraceOrg[1];
+        float dz = cg->refdef.vieworg[2] - lastTraceOrg[2];
+        g_webAdsDofFrac = ps->fWeaponPosFrac;
+        {
+            struct DObj_s *viewModel = (*(weaponInfo_t **)imp_cg_weapons)[weaponIndex].viewModelDObj;
+            unsigned int flashTag = *(unsigned short *)s_barrelTags[0];
+            vec3_t muzzle;
+            float vmEnd = 15.0f;
+            if (viewModel && CG_DObjGetViewModelTagPos(viewModel, flashTag, muzzle)) {
+                float fwd = (muzzle[0] - cg->refdef.vieworg[0]) * cg->refdef.viewaxis[0][0] +
+                            (muzzle[1] - cg->refdef.vieworg[1]) * cg->refdef.viewaxis[0][1] +
+                            (muzzle[2] - cg->refdef.vieworg[2]) * cg->refdef.viewaxis[0][2];
+                if (isfinite(fwd) && fwd > 6.0f) {
+                    vmEnd = fwd * 0.88f;
+                    if (vmEnd < 12.5f)
+                        vmEnd = 12.5f;
+                    if (vmEnd > 19.5f)
+                        vmEnd = 19.5f;
+                }
+            }
+            g_webAdsViewmodelEnd = vmEnd;
+        }
+        if (cg->time - lastTraceTime > 32 || cg->time < lastTraceTime ||
+            dot < 0.9995f || dx * dx + dy * dy + dz * dz > 16.0f) {
+            vec3_t traceEnd;
+            trace_t trace;
+            for (int i = 0; i < 3; ++i) {
+                traceEnd[i] = cg->refdef.vieworg[i] + 4096.0f * cg->refdef.viewaxis[0][i];
+                lastTraceOrg[i] = cg->refdef.vieworg[i];
+                lastTraceDir[i] = cg->refdef.viewaxis[0][i];
+            }
+            lastTraceTime = cg->time;
+            CG_TraceCapsule(&trace, cg->refdef.vieworg, zeroBounds, zeroBounds,
+                            traceEnd, ps->clientNum, 0x2802831);
+            targetFocusDist = 4096.0f * trace.fraction;
+            if (targetFocusDist < 48.0f)
+                targetFocusDist = 48.0f;
+            if (targetFocusDist > 2500.0f)
+                targetFocusDist = 2500.0f;
+        }
+        {
+            float dt = (float)cg->frametime * 0.001f;
+            if (dt > 0.0f && dt < 0.25f) {
+                float blend = 1.0f - expf(-14.0f * dt);
+                g_webAdsFocusDist += (targetFocusDist - g_webAdsFocusDist) * blend;
+            } else {
+                g_webAdsFocusDist = targetFocusDist;
+            }
+        }
+    } else {
+        g_webAdsDofFrac = 0.0f;
+    }
+
+    if (s_pendingLocalFireTime == cg->time && s_pendingLocalFireWeapon > 0) {
+        int fireWeapon = s_pendingLocalFireWeapon;
+        int barrel = s_pendingLocalFireBarrel & 3;
+        WeaponDef *weapDef = (WeaponDef *)BG_GetWeaponDef(fireWeapon);
+        s_pendingLocalFireTime = 0;
+        if (weapDef && weapDef->weapType == 0 && cg_tracerChance->current.value > 0.0f) {
+            vec3_t muzzle, shotAngles, forward, right, up;
+            unsigned int flashTag = *(unsigned short *)s_barrelTags[barrel];
+            struct DObj_s *viewModel = (*(weaponInfo_t **)imp_cg_weapons)[fireWeapon].viewModelDObj;
+            float minSpread = 0.0f, maxSpread = 0.0f, spread = 0.0f, range = 8192.0f;
+            int shots = 1;
+
+            if (drawGun && viewModel && CG_DObjGetViewModelTagPos(viewModel, flashTag, muzzle)) {
+                for (int i = 0; i < 3; ++i)
+                    muzzle[i] += 6.0f * cg->viewModelAxis[0][i];
+            } else {
+                for (int i = 0; i < 3; ++i)
+                    muzzle[i] = cg->refdef.vieworg[i] + 18.0f * cg->refdef.viewaxis[0][i]
+                               - 2.0f * cg->refdef.viewaxis[1][i] - 2.0f * cg->refdef.viewaxis[2][i];
+            }
+
+            shotAngles[0] = cg->gunPitch;
+            shotAngles[1] = cg->gunYaw;
+            shotAngles[2] = 0.0f;
+            AngleVectors(shotAngles, forward, right, up);
+            BG_GetSpreadForWeapon(ps, fireWeapon, &minSpread, &maxSpread);
+            {
+                float aimScale = ps->aimSpreadScale * (1.0f / 255.0f);
+                if (ps->fWeaponPosFrac == 1.0f)
+                    spread = weapDef->fAdsSpread + (maxSpread - weapDef->fAdsSpread) * aimScale;
+                else
+                    spread = minSpread + (maxSpread - minSpread) * aimScale;
+            }
+            if (weapDef->weapClass == 3) {
+                shots = weapDef->shotCount > 3 ? 3 : (weapDef->shotCount > 0 ? weapDef->shotCount : 1);
+                if (weapDef->fMinDamageRange > 256.0f)
+                    range = weapDef->fMinDamageRange;
+            }
+            for (int s = 0; s < shots; ++s) {
+                float aimOffset = tanf(spread * 0.01745329252f) * range;
+                float angle = randomf() * 6.283185307f;
+                float radius = randomf() * aimOffset;
+                float rightOfs = cosf(angle) * radius;
+                float upOfs = sinf(angle) * radius;
+                vec3_t end, hitPos;
+                trace_t trace;
+                for (int i = 0; i < 3; ++i) {
+                    end[i] = cg->refdef.vieworg[i] + range * forward[i] +
+                             rightOfs * right[i] + upOfs * up[i];
+                }
+                CG_TraceCapsule(&trace, cg->refdef.vieworg, zeroBounds, zeroBounds,
+                                end, ps->clientNum, 0x2802831);
+                for (int i = 0; i < 3; ++i)
+                    hitPos[i] = cg->refdef.vieworg[i] + trace.fraction * (end[i] - cg->refdef.vieworg[i]);
+                CG_SpawnTracerImmediate(muzzle, hitPos);
+            }
+            s_localTracerSpawnedTime = cg->time;
+        }
+    }
+}
+#endif
+
 void CG_ResetSprintView(void)
 {
     sprintViewBlend = 0.0f;
@@ -1373,10 +1560,16 @@ void CG_AddViewWeapon(playerState_t *ps)
     playerState = ps;
 
     if (playerState->pm_type == 4 || playerState->pm_type == 5) {
+#ifdef __EMSCRIPTEN__
+        g_webAdsDofFrac = 0.0f;
+#endif
         return;
     }
 
     if (cg->renderingThirdPerson) {
+#ifdef __EMSCRIPTEN__
+        g_webAdsDofFrac = 0.0f;
+#endif
         return;
     }
 
@@ -1385,6 +1578,9 @@ void CG_AddViewWeapon(playerState_t *ps)
         drawGun = 1;
 
     if (playerState->eFlags & 0x300) {
+#ifdef __EMSCRIPTEN__
+        g_webAdsDofFrac = 0.0f;
+#endif
         return;
     }
 
@@ -1399,6 +1595,9 @@ void CG_AddViewWeapon(playerState_t *ps)
     }
 #    endif
     if (weaponIndex <= 0) {
+#ifdef __EMSCRIPTEN__
+        g_webAdsDofFrac = 0.0f;
+#endif
         CG_ResetViewWeaponOffsets(cg);
         return;
     }
@@ -1442,6 +1641,9 @@ void CG_AddViewWeapon(playerState_t *ps)
     /* Compose a lowered, swinging carry pose with the original hand/weapon
      * animation. Body running clips already scale their playback to speed. */
     sprintBlend = CG_SprintViewBlend(playerState, cg->time);
+#ifdef __EMSCRIPTEN__
+    sprintBlend = sprintBlend * sprintBlend * (3.0f - 2.0f * sprintBlend);
+#endif
     sprintCycle = (float)cg->time * 0.012f;
     weaponAngles[0] += sprintBlend * (10.0f + 2.0f * sinf(sprintCycle));
     weaponAngles[1] += sprintBlend * (-10.0f + 2.0f * cosf(sprintCycle));
@@ -1460,6 +1662,18 @@ void CG_AddViewWeapon(playerState_t *ps)
     CG_Madd(hand.origin, cg->refdef.viewaxis[0], -1.0f * sprintBlend);
     CG_Madd(hand.origin, cg->refdef.viewaxis[2],
             sprintBlend * (-1.0f + 0.6f * cosf(2.0f * sprintCycle)));
+#ifdef __EMSCRIPTEN__
+    if (playerState->fWeaponPosFrac < 1.0f) {
+        int landDelta = cg->time - cg->landTime;
+        if (landDelta > 0 && landDelta < 450) {
+            float landFrac = (landDelta < 150)
+                ? ((float)landDelta / 150.0f)
+                : (1.0f - ((float)landDelta - 150.0f) / 300.0f);
+            landFrac = landFrac * landFrac * (3.0f - 2.0f * landFrac);
+            hand.origin[2] += 0.25f * cg->landChange * landFrac * (1.0f - playerState->fWeaponPosFrac);
+        }
+    }
+#endif
 
     /* vGunOffset is angular recoil, already applied to weaponAngles. */
     CG_Madd(hand.origin, finalAxis[0], cg->swayOffset[0] + CG_DvarValue(imp_cg_gun_x));
@@ -1490,6 +1704,9 @@ void CG_AddViewWeapon(playerState_t *ps)
         }
     }
     CG_AddPlayerWeapon(&hand, playerState, &cg->predictedPlayerEntity, drawGun);
+#ifdef __EMSCRIPTEN__
+    CG_UpdateWebWeaponPresentation(playerState, weaponIndex, drawGun);
+#endif
 }
 
 void CG_BulletHitEvent(int sourceEntityNum, vec_t *position, vec_t *normal, vec_t *reflected, int surfType, int event)
