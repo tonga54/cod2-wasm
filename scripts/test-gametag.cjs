@@ -20,7 +20,7 @@ context.prepareProfile(ui,memfs);
 assert.match(files.get(path),/seta name "Player"/);
 storage.set('cod2-wasm-gametag','Old name');context.prepareProfile(ui,memfs);
 assert.match(files.get(path),/seta name "Old name"/);
-const changed='unbindall\nbind w "+forward"\nbind v "+melee"\nseta name "New name"\nseta r_mode "1600x900"\nseta sensitivity "3.25"\nseta snd_volume "0.4"\nseta password "private"';
+const changed='unbindall\nbind w "+forward"\nbind v "+melee"\nbind AUX1 "+reload"\nseta cl_gamepadBindingsInitialized "1"\nseta cl_gamepadLookSensitivity "6.5"\nseta name "New name"\nseta r_mode "1600x900"\nseta sensitivity "3.25"\nseta snd_volume "0.4"\nseta password "private"';
 context.saveProfile(ui,changed);context.prepareProfile(ui,memfs);
 const restored=files.get(path);
 assert.ok(restored.indexOf('seta name "New name"')>restored.indexOf('seta name "Old name"'));

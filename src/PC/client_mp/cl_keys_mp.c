@@ -367,6 +367,15 @@ static inline __attribute__((always_inline)) char *Key_KeynumToStringInternal(in
         return "<OUT OF RANGE>";
     }
 
+#if COD2_FEATURE_GAMEPAD
+    if (translate && keynum >= 0xcf && keynum <= 0xde) {
+        static char *labels[] = {"A / Cross", "B / Circle", "X / Square", "Y / Triangle",
+            "LB / L1", "RB / R1", "Back / Share", "Start / Options", "LS / L3", "RS / R3",
+            "D-pad Up", "D-pad Down", "D-pad Left", "D-pad Right", "LT / L2", "RT / R2"};
+        return labels[keynum - 0xcf];
+    }
+#endif
+
     if (translate && SEH_GetCurrentLanguage() == 1 && keynum >= '0' && keynum <= '9') {
         return frenchNumberKeysMap[keynum - '0'];
     }

@@ -8,10 +8,17 @@
 #    define __m128 __m128_cod2
 #    include "common_types.h"
 #    undef __m128
+#    ifdef __EMSCRIPTEN__
+#        include <emscripten.h>
+#    endif
 
 extern void Sys_QueEvent(int time, sysEventType_t type, int value, int value2,
                          int ptrLength, void *ptr);
-extern void CL_MouseEvent(int dx, int dy);
+extern clientStatic_t cls;
+extern qboolean Display_KeyBindPending(void);
+extern void Key_SetBinding(int key, const char *command);
+extern const char *Key_GetBinding(int key);
+extern void Dvar_SetBoolByName(const char *name, int value);
 extern void Cbuf_AddText(const char *text);
 extern const dvar_t *Dvar_RegisterBool_mac(const char *name, int value, int flags);
 extern const dvar_t *Dvar_RegisterFloat(const char *name, float value, float min, float max, int flags);
@@ -175,6 +182,52 @@ static int g_gamepadInit;
 static unsigned char g_buttonDown[GAMEPAD_BUTTON_STATES];
 
 static int g_gamepadActiveDevice;
+/* Remember the emitted key, so changing menu/capture state never changes a
+ * release into a different key and leaves attack/navigation held. */
+static int g_emittedKey[GAMEPAD_BUTTON_STATES];
+static int g_blockedButton[GAMEPAD_BUTTON_STATES];
+static int g_menuState;
+static int g_navDirection;
+static int g_navDeadline;
+
+static void Gamepad_SendKey(int key, int down);
+static void Gamepad_ReleaseAll(void)
+{
+    int key;
+    for (key = 1; key < GAMEPAD_BUTTON_STATES; ++key) {
+        if (g_buttonDown[key]) {
+            Gamepad_SendKey(key, 0);
+            g_blockedButton[key] = 1;
+        }
+    }
+    if (g_navDirection)
+        Sys_QueEvent(0, SE_KEY, g_navDirection, 0, 0, NULL);
+    g_navDirection = 0;
+}
+
+static int Gamepad_HasFocus(void)
+{
+#    ifdef __EMSCRIPTEN__
+    return EM_ASM_INT({ return !document.hidden && document.hasFocus(); });
+#    else
+    return 1;
+#    endif
+}
+
+void CL_Gamepad_DefaultBindings(void)
+{
+    static const char *commands[16] = {
+        "+gostand", "togglecrouch", "+usereload", "weapnext",
+        "+smoke", "+frag", "+scores", "togglemenu",
+        "+sprint", "+melee", "+breath_binoculars", "goprone",
+        "+leanleft", "+leanright", "+speed", "+attack"
+    };
+    int i;
+    Gamepad_ReleaseAll();
+    for (i = 0; i < 16; ++i)
+        Key_SetBinding(K_AUX1 + i, commands[i]);
+    Dvar_SetBoolByName("cl_gamepadBindingsInitialized", 1);
+}
 
 int CL_Gamepad_IsConnected(void)
 {
@@ -244,6 +297,7 @@ static void Gamepad_CloseByInstance(int instanceId)
         if (g_pads[i] && g_padInstance[i] == instanceId) {
             Com_Printf("Gamepad disconnected: %s\n",
                        SDL_GameControllerName(g_pads[i]));
+            Gamepad_ReleaseAll();
             SDL_GameControllerClose(g_pads[i]);
             g_pads[i] = NULL;
             g_padInstance[i] = -1;
@@ -266,6 +320,7 @@ void CL_Gamepad_Init(void)
 {
     int i, n;
 
+    Dvar_RegisterBool_mac("ui_gamepadConnected", 0, 0);
     cl_gamepadEnable = Dvar_RegisterBool_mac("cl_gamepadEnable", 1, 0x1);
     cl_gamepadLookSensitivity = Dvar_RegisterFloat("cl_gamepadLookSensitivity", 8.0f, 0.1f, 50.0f, 0x1);
     cl_gamepadDeadzone = Dvar_RegisterFloat("cl_gamepadDeadzone", 0.20f, 0.0f, 0.9f, 0x1);
@@ -284,22 +339,18 @@ void CL_Gamepad_Init(void)
     for (i = 0; i < n; ++i)
         Gamepad_Open(i);
 
-    Cbuf_AddText("bind AUX1 \"+gostand\"\n");
-    Cbuf_AddText("bind AUX2 \"+stance\"\n");
-    Cbuf_AddText("bind AUX3 \"+usereload\"\n");
-    Cbuf_AddText("bind AUX4 \"+melee\"\n");
-    Cbuf_AddText("bind AUX5 \"weapprev\"\n");
-    Cbuf_AddText("bind AUX6 \"weapnext\"\n");
-    Cbuf_AddText("bind AUX7 \"toggleconsole\"\n");
-    Cbuf_AddText("bind AUX8 \"togglemenu\"\n");
-    Cbuf_AddText("bind AUX9 \"+breath_binoculars\"\n");
-    Cbuf_AddText("bind AUX10 \"+sprint\"\n");
-    Cbuf_AddText("bind AUX11 \"+frag\"\n");
-    Cbuf_AddText("bind AUX12 \"+smoke\"\n");
-    Cbuf_AddText("bind AUX13 \"weapprev\"\n");
-    Cbuf_AddText("bind AUX14 \"weapnext\"\n");
-    Cbuf_AddText("bind AUX15 \"+speed\"\n");
-    Cbuf_AddText("bind AUX16 \"+attack\"\n");
+    /* Config is already loaded here. Install once, including on profiles
+     * created before controller support, without overwriting custom/unbound keys. */
+    if (!Dvar_RegisterBool_mac("cl_gamepadBindingsInitialized", 0, 0x1)->current.enabled) {
+        int hasBindings = 0;
+        for (i = K_AUX1; i < K_AUX1 + 16; ++i) {
+            const char *binding = Key_GetBinding(i);
+            if (binding && binding[0]) hasBindings = 1;
+        }
+        if (!hasBindings) CL_Gamepad_DefaultBindings();
+        Dvar_SetBoolByName("cl_gamepadBindingsInitialized", 1);
+    }
+    g_menuState = Gamepad_KeyCatchers();
 }
 
 void CL_Gamepad_ApplyButtonConfig(const char *preset)
@@ -341,6 +392,7 @@ void CL_Gamepad_Shutdown(void)
     int i;
     if (!g_gamepadInit)
         return;
+    Gamepad_ReleaseAll();
     for (i = 0; i < GAMEPAD_MAX_PADS; ++i) {
         if (g_pads[i]) {
             SDL_GameControllerClose(g_pads[i]);
@@ -451,82 +503,96 @@ int CL_GamepadAdsActive(void)
 
 static void Gamepad_SendKey(int key, int down)
 {
+    int emitted;
     if (key <= 0 || key >= GAMEPAD_BUTTON_STATES)
         return;
+    if (!down) g_blockedButton[key] = 0;
+    if (down && g_blockedButton[key]) return;
     if (g_buttonDown[key] == (unsigned char)down)
         return;
     g_buttonDown[key] = (unsigned char)down;
-
-    if (Gamepad_KeyCatchers() & (1 | 8 | 0x10)) {
-        int nav = Gamepad_NavRemap(key);
-        if (nav)
-            key = nav;
+    if (down) {
+        emitted = key;
+        if ((Gamepad_KeyCatchers() & (1 | 8 | 0x10)) && !Display_KeyBindPending()) {
+            emitted = Gamepad_NavRemap(key);
+            if (key == K_BUTTON_START) emitted = K_ESCAPE;
+        }
+        g_emittedKey[key] = emitted;
+    } else {
+        emitted = g_emittedKey[key];
+        g_emittedKey[key] = 0;
     }
-    Sys_QueEvent(0, SE_KEY, key, down, 0, 0);
+    if (emitted)
+        Sys_QueEvent(0, SE_KEY, emitted, down, 0, NULL);
+}
+
+static void Gamepad_MenuStick(SDL_GameController *gc)
+{
+    float x = Gamepad_RawAxis(gc, PHYS_LSTICK_X);
+    float y = Gamepad_RawAxis(gc, PHYS_LSTICK_Y);
+    int direction = 0;
+    if (!Display_KeyBindPending()) {
+        if (fabsf(y) > 0.6f && fabsf(y) >= fabsf(x))
+            direction = y < 0 ? K_UPARROW : K_DOWNARROW;
+        else if (fabsf(x) > 0.6f)
+            direction = x < 0 ? K_LEFTARROW : K_RIGHTARROW;
+    }
+    if (direction != g_navDirection) {
+        if (g_navDirection)
+            Sys_QueEvent(0, SE_KEY, g_navDirection, 0, 0, NULL);
+        g_navDirection = direction;
+        if (direction) {
+            Sys_QueEvent(0, SE_KEY, direction, 1, 0, NULL);
+            g_navDeadline = cls.realtime + 350;
+        }
+    } else if (direction && cls.realtime >= g_navDeadline) {
+        Sys_QueEvent(0, SE_KEY, direction, 1, 0, NULL);
+        g_navDeadline = cls.realtime + 100;
+    }
 }
 
 void CL_Gamepad_Frame(void)
 {
     SDL_GameController *gc;
-    int b;
-    float lx, ly;
-    float sens, look;
-    int dx, dy;
-
-    if (!g_gamepadInit || !cl_gamepadEnable->current.enabled)
+    int b, catchers = Gamepad_KeyCatchers();
+    if (!g_gamepadInit) return;
+    Dvar_SetBoolByName("ui_gamepadConnected", CL_Gamepad_IsConnected());
+    if (catchers != g_menuState) {
+        Gamepad_ReleaseAll();
+        g_menuState = catchers;
+    }
+    if (!cl_gamepadEnable->current.enabled || !Gamepad_HasFocus()) {
+        Gamepad_ReleaseAll();
         return;
-
+    }
     gc = Gamepad_ActivePad();
-    if (!gc)
+    if (!gc) {
+        Gamepad_ReleaseAll();
         return;
-
+    }
     for (b = 0; b < SDL_CONTROLLER_BUTTON_MAX; ++b) {
         int key = Gamepad_SdlButtonToKey(b);
         if (key) {
             int down = SDL_GameControllerGetButton(gc, b) ? 1 : 0;
-
-            if (down && !g_buttonDown[key])
-                g_gamepadActiveDevice = 1;
+            if (down && !g_buttonDown[key]) g_gamepadActiveDevice = 1;
             Gamepad_SendKey(key, down);
         }
     }
+    Gamepad_SendKey(K_BUTTON_LTRIG, Gamepad_RawAxis(gc, PHYS_LTRIG) > 0.5f);
+    Gamepad_SendKey(K_BUTTON_RTRIG, Gamepad_RawAxis(gc, PHYS_RTRIG) > 0.5f);
+    if (catchers & 8) Gamepad_MenuStick(gc);
+}
 
-    {
-        float lt = Gamepad_RawAxis(gc, PHYS_LTRIG);
-        float rt = Gamepad_RawAxis(gc, PHYS_RTRIG);
-        int ltDown = lt > 0.5f ? 1 : 0;
-        int rtDown = rt > 0.5f ? 1 : 0;
-        if ((ltDown && !g_buttonDown[K_BUTTON_LTRIG]) ||
-            (rtDown && !g_buttonDown[K_BUTTON_RTRIG]))
-            g_gamepadActiveDevice = 1;
-        Gamepad_SendKey(K_BUTTON_LTRIG, ltDown);
-        Gamepad_SendKey(K_BUTTON_RTRIG, rtDown);
+static float Gamepad_LookDelta(float axis, float seconds, float sensitivity, float limit)
+{
+    float delta = axis * sensitivity * cl_gamepadLookSensitivity->current.value * 22.5f * seconds;
+    /* Preserve the same mounted-weapon turning limits as mouse input. */
+    if (isfinite(limit) && limit > 0.0f) {
+        float maxDelta = limit * seconds;
+        if (delta > maxDelta) delta = maxDelta;
+        if (delta < -maxDelta) delta = -maxDelta;
     }
-
-    if (Gamepad_VirtualAxis(gc, VIRT_LOOK_X) != 0.0f ||
-        Gamepad_VirtualAxis(gc, VIRT_LOOK_Y) != 0.0f ||
-        Gamepad_VirtualAxis(gc, VIRT_MOVE_X) != 0.0f ||
-        Gamepad_VirtualAxis(gc, VIRT_MOVE_Y) != 0.0f)
-        g_gamepadActiveDevice = 1;
-
-    if (Gamepad_KeyCatchers() & (1 | 8 | 0x10))
-        return;
-
-    lx = Gamepad_VirtualAxis(gc, VIRT_LOOK_X);
-    ly = Gamepad_VirtualAxis(gc, VIRT_LOOK_Y);
-    if (cl_gamepadInvertY->current.enabled)
-        ly = -ly;
-
-    sens = cl_gamepadLookSensitivity->current.value;
-    look = sens;
-
-    {
-        float fx = lx * look, fy = ly * look;
-        dx = (int)fx;
-        dy = (int)fy;
-    }
-    if (dx || dy)
-        CL_MouseEvent(dx, dy);
+    return delta;
 }
 
 void CL_Gamepad_Move(usercmd_t *cmd)
@@ -534,16 +600,31 @@ void CL_Gamepad_Move(usercmd_t *cmd)
     SDL_GameController *gc;
     float mx, my;
     int side, forward;
+    clientActive_t *cl;
+    float seconds, lookX, lookY, sensitivity;
 
     if (!g_gamepadInit || !cl_gamepadEnable->current.enabled)
         return;
-    if (Gamepad_KeyCatchers() & (1 | 8 | 0x10))
+    if (Gamepad_KeyCatchers() & (1 | 8 | 0x10) || !Gamepad_HasFocus())
         return;
 
     gc = Gamepad_ActivePad();
     if (!gc)
         return;
 
+    /* Apply angular velocity during command creation, independently of mouse
+     * sensitivity and display cadence. Fractional stick motion stays smooth. */
+    cl = imp_cl ? *(clientActive_t **)imp_cl : NULL;
+    if (!cl) return;
+    seconds = (float)cls.frametime * 0.001f;
+    if (seconds > 0.1f) seconds = 0.1f;
+    if (seconds < 0.0f) seconds = 0.0f;
+    lookX = Gamepad_VirtualAxis(gc, VIRT_LOOK_X);
+    lookY = Gamepad_VirtualAxis(gc, VIRT_LOOK_Y);
+    sensitivity = isfinite(cl->cgameSensitivity) ? cl->cgameSensitivity : 1.0f;
+    cl->viewangles[1] -= Gamepad_LookDelta(lookX, seconds, sensitivity, cl->cgameMaxYawSpeed);
+    cl->viewangles[0] += Gamepad_LookDelta(lookY, seconds, sensitivity, cl->cgameMaxPitchSpeed) *
+                         (cl_gamepadInvertY->current.enabled ? -1.0f : 1.0f);
     mx = Gamepad_VirtualAxis(gc, VIRT_MOVE_X);
     my = Gamepad_VirtualAxis(gc, VIRT_MOVE_Y);
 

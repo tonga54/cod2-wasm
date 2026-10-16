@@ -237,6 +237,20 @@ retail CoD2:
 
 Defaults can be changed in **Options → Controls**.
 
+Connect an Xbox, PlayStation or other SDL-compatible controller and press a
+button to let the browser detect it. Open **Options → Controller**, choose
+**Buttons 1** or **Buttons 2**, select an action with the mouse or A/Cross,
+then press the desired controller button or
+trigger. Controller assignments are saved in this browser independently of
+keyboard/mouse bindings. Escape cancels an assignment; Backspace clears it.
+The same page adjusts sensitivity, stick deadzone and inverted vertical look,
+and restores controller defaults. Left stick moves/navigates; right stick looks.
+By default, RT/R2 fires, LT/L2 aims, A/Cross jumps, B/Circle crouches,
+X/Square uses/reloads, Y/Triangle changes weapons, LB/L1 throws smoke,
+RB/R1 throws a frag, L3 sprints/holds breath, R3 melees, and Start/Options pauses.
+Use a browser that exposes the controller through the Gamepad API (HTTPS or
+localhost).
+
 | Action | Default |
 | --- | --- |
 | Move / lean | W A S D / Q E |

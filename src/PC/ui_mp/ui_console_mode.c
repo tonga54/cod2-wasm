@@ -59,6 +59,10 @@ void UI_ConsoleMode_RegisterDvar(void)
 
 int UI_ConsoleMode_Active(void)
 {
+#ifdef __EMSCRIPTEN__
+    /* Browser controller input uses the existing retail menus and cursor. */
+    return 0;
+#endif
     int override;
 
     UI_ConsoleMode_RegisterDvar();

@@ -5,8 +5,6 @@
 #if COD2_FEATURE_GAMEPAD
 
 extern uiInfo_t *uiInfo;
-extern int UI_LoadMenus(const char *name, int imageTrack);
-extern void UI_AddMenuList(uiInfo_t *info, int menuList);
 extern qboolean Menus_OpenByName(uiInfo_t *info, const char *name);
 extern void Cmd_AddCommand(const char *cmd, void (*func)(void));
 extern void Cbuf_AddText(const char *text);
@@ -14,19 +12,12 @@ extern void Com_Printf(const char *fmt, ...);
 extern const dvar_t *Dvar_RegisterString(const char *name, const char *value, int flags);
 
 static int s_gamepadMenuCmdsRegistered;
-static int s_gamepadMenuLoaded;
 static const dvar_t *cl_gamepadButtonConfig;
 
 static void UI_Gamepad_OpenMenu_f(void)
 {
-    Com_Printf("Gamepad config (cvar-only):\n"
-               "  cl_gamepadEnable 0|1\n"
-               "  cl_gamepadLookSensitivity <0.1..50>\n"
-               "  cl_gamepadDeadzone <0..0.9>\n"
-               "  cl_gamepadInvertY 0|1\n"
-               "  cl_gamepadButtonConfig default|southpaw|legacy|tactical\n"
-               "  gamepad_defaults   - reset to shipped defaults\n"
-               "  gamepad_restart    - re-apply the button-layout preset\n");
+    if (uiInfo)
+        Menus_OpenByName(uiInfo, "browser_gamepad");
 }
 
 static void UI_Gamepad_Defaults_f(void)
@@ -36,6 +27,10 @@ static void UI_Gamepad_Defaults_f(void)
     Cbuf_AddText("seta cl_gamepadDeadzone 0.2\n");
     Cbuf_AddText("seta cl_gamepadInvertY 0\n");
     Cbuf_AddText("seta cl_gamepadButtonConfig default\n");
+    {
+        extern void CL_Gamepad_DefaultBindings(void);
+        CL_Gamepad_DefaultBindings();
+    }
     Com_Printf("Controller settings reset to defaults.\n");
 }
 

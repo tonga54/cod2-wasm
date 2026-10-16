@@ -706,6 +706,9 @@ static inline __attribute__((always_inline)) void Controls_GetConfig_core(void)
         twokeys[0] = -1;
 
         for (j = 0; j < 0x100; j++) {
+#if COD2_FEATURE_GAMEPAD
+            if (j >= 0xcf && j <= 0xde) continue;
+#endif
             Key_GetBindingBuf(j, b, 0x100);
             if (b[0] == '\0')
                 continue;
@@ -3078,6 +3081,21 @@ void Item_Bind_Paint(displayContextDef_t *dc, itemDef_t *item)
         goto draw;
     }
 
+#if COD2_FEATURE_GAMEPAD
+    if (item->parent && item->parent->window.name &&
+        !I_stricmp(item->parent->window.name, "browser_gamepad")) {
+        int key;
+        I_strncpyz(bindText, UI_SafeTranslateString("KEY_UNBOUND"), sizeof(bindText));
+        for (key = 0xcf; key <= 0xde; ++key) {
+            char binding[256];
+            Key_GetBindingBuf(key, binding, sizeof(binding));
+            if (!I_stricmp(binding, bindName)) {
+                Key_KeynumToStringBuf(key, bindText, sizeof(bindText));
+                break;
+            }
+        }
+    } else
+#endif
     BindingFromName(bindName, bindText);
     drawText = bindText;
 
@@ -4123,76 +4141,63 @@ qboolean Item_Bind_HandleKey(displayContextDef_t *dc, itemDef_t *item, int key, 
         return 0;
     }
 
-    if (!g_bindItem)
-        return 0;
-
-    if ((key & 0x400) || key == 0x60)
-        return 1;
-
-    if (key == 0x7f) {
-        const char *dvarName = item->dvar;
-
-        for (i = 0; i < 0x38; i++) {
-            if (I_stricmp(dvarName, *(const char **)((byte *)g_bindings + i * 0x14)) == 0)
-                break;
-        }
-        if (i < 0x38) {
-
-            int idx = i * 0x14;
-            int key1 = *(int *)((byte *)g_bindings + idx + 12);
-            if (key1 != -1) {
-                Key_SetBinding(key1, "");
-                *(int *)((byte *)g_bindings + idx + 12) = -1;
-            }
-            int key2 = *(int *)((byte *)g_bindings + idx + 16);
-            if (key2 != -1) {
-                Key_SetBinding(key2, "");
-                *(int *)((byte *)g_bindings + idx + 16) = -1;
-            }
-        }
-        Controls_SetConfig(0);
-        g_waitingForKey = 0;
-        g_bindItem = NULL;
-        return 1;
-    }
-
+    if (!g_bindItem) return 0;
+    if (!down) return 1;
+    if ((key & 0x400) || key == 0x60) return 1;
     if (key == 0x1b) {
         g_waitingForKey = 0;
         g_bindItem = NULL;
         return 1;
     }
-
-    if (key != -1) {
-
-        byte *entry = (byte *)g_bindings;
-        while (entry != (byte *)g_bindings + 56 * 0x14) {
-            if ((((bind_t*)(entry))->bind2) == key) {
-                (((bind_t*)(entry))->bind2) = -1;
+#if COD2_FEATURE_GAMEPAD
+    {
+        int controllerMenu = item->parent && item->parent->window.name &&
+            !I_stricmp(item->parent->window.name, "browser_gamepad");
+        if (controllerMenu || (key >= 0xcf && key <= 0xde)) {
+            /* Controller rows edit AUX bindings directly. Keyboard/mouse keep
+             * both slots, and assigning an occupied button moves it once. */
+            if (key != 0x7f && (key < 0xcf || key > 0xde)) return 1;
+            for (i = 0xcf; i <= 0xde; ++i) {
+                char binding[256];
+                Key_GetBindingBuf(i, binding, sizeof(binding));
+                if (!I_stricmp(binding, item->dvar)) Key_SetBinding(i, "");
             }
-            if ((((bind_t*)(entry))->bind1) == key) {
-
-                (((bind_t*)(entry))->bind1) = (((bind_t*)(entry))->bind2);
-                (((bind_t*)(entry))->bind2) = -1;
-            }
-            entry += 0x14;
+            if (key != 0x7f) Key_SetBinding(key, item->dvar);
+            Cbuf_ExecuteText(2, "bindingsave\n");
+            g_waitingForKey = 0;
+            g_bindItem = NULL;
+            return 1;
         }
     }
-
-    const char *bindName = item->dvar;
-    int bindIdx = -1;
-    for (i = 0; i < 0x38; i++) {
-        if (I_stricmp(bindName, *(const char **)((byte *)g_bindings + i * 0x14)) == 0) {
-            bindIdx = i;
-            break;
+#endif
+    /* Use typed entries here too: bind_t has a different stride on x64. */
+    for (i = 0; i < 56; ++i) {
+        bind_t *binding = &g_bindings[i];
+        if (key == 0x7f) {
+            if (binding->command && !I_stricmp(item->dvar, binding->command)) {
+                if (binding->bind1 != -1) Key_SetBinding(binding->bind1, "");
+                if (binding->bind2 != -1) Key_SetBinding(binding->bind2, "");
+                binding->bind1 = binding->bind2 = -1;
+            }
+        } else if (key >= 0 && key < 256) {
+            if (binding->bind2 == key) binding->bind2 = -1;
+            if (binding->bind1 == key) {
+                binding->bind1 = binding->bind2;
+                binding->bind2 = -1;
+            }
         }
     }
-
-    if (bindIdx >= 0 && key != -1) {
-        int offset = bindIdx * 0x14;
-        if (*(int *)((byte *)g_bindings + offset + 12) == -1) {
-            *(int *)((byte *)g_bindings + offset + 12) = key;
-        } else {
-            *(int *)((byte *)g_bindings + offset + 16) = key;
+    if (key != 0x7f && key >= 0 && key < 256) {
+        for (i = 0; i < 56; ++i) {
+            bind_t *binding = &g_bindings[i];
+            if (binding->command && !I_stricmp(item->dvar, binding->command)) {
+                if (binding->bind1 == -1) binding->bind1 = key;
+                else {
+                    if (binding->bind2 != -1) Key_SetBinding(binding->bind2, "");
+                    binding->bind2 = key;
+                }
+                break;
+            }
         }
     }
 

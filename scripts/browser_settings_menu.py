@@ -1,5 +1,6 @@
 """Adapt private retail menus to the persistent single browser profile."""
 import re
+from browser_gamepad_menu import add_controller_menu
 
 
 def items(source, transform):
@@ -112,7 +113,7 @@ def apply_settings_menu(name, data):
         }
 ''' + text[insertion:]
     elif name == 'ui_mp/options.menu':
-        text = items(text, lambda item: '' if '@MENU_VOICECHAT' in item else item)
+        text = add_controller_menu(text, items)
     elif name == 'ui_mp/options_multi.menu':
         text = items(text, lambda item: '' if '@MENU_VOICE_CHAT_BUTTON' in item or '"+talk"' in item else item)
     elif name == 'ui/options_game.menu':

@@ -3449,3 +3449,37 @@ python3 scripts/test-bot-runtime.py --bots 4 --seconds 40 \
   --policy out/spawn-safety/controlled.gsc --expect-passes 10 \
   --stop-after-passes --output out/spawn-safety/tdm
 ```
+
+## Browser controller input — 2026-10-16
+
+The WASM client now enables its SDL game-controller path, with a native
+**Options → Controller** panel for button/trigger assignments, look sensitivity,
+stick deadzone, vertical inversion and restoring controller defaults. Controller
+bindings use AUX1–AUX16 independently of the two keyboard/mouse slots. Archived
+bindings and controller settings survive reloads; first-run defaults also migrate
+existing browser profiles. The framework's controller overlay remains disabled
+because SDL handles the physical controller directly.
+
+Validation: `scripts/test-gamepad.py` exercises the actual C polling/binding
+functions with sanitizers, including hotplug, raw button/trigger capture, menu
+transitions, focus loss, disabled input, fractional analog movement, frame-rate
+independence, mounted turning limits and separate keyboard slots. The complete
+static suite passed; the final incremental WASM build, updated profile/menu
+regressions, package contract and private asset audit also passed. A local browser
+with a simulated standard Gamepad verified SDL detection, Controller menu entry,
+A/Cross reassignment to Fire, unchanged Space/mouse bindings, persistence after a
+full reload and restoring defaults. The retail options file has an extra closing
+brace, so the controller menu definition must precede the existing options menu.
+Evidence: `out/gamepad-controller-menu.png`, `out/gamepad-static.log`,
+`out/gamepad-web-build-final.log`. Physical controller hardware and controller
+play in a connected match have not been verified in this change.
+
+Controller layout correction: settings and assignments now occupy three tabs,
+with eight assignments per button page. Every widget stays within the original
+menu artwork's y=64..416 safe area; the title and controls use larger text.
+Browser checks at 1280x720 and 640x480 confirmed all three pages fit, including
+Restore defaults and Back. A controller assignment from Buttons 2 also saved
+correctly while preserving keyboard/mouse bindings. The layout regression in
+`test-gamepad.py` checks widget bounds and the per-page assignment limit.
+Evidence: `out/gamepad-controller-compact.png` and
+`out/gamepad-controller-640x480.png`.
