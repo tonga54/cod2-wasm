@@ -52,7 +52,8 @@ for (let mask = 0; mask < 256; mask++) {
     lightEnabled: Array.from({length:8}, (_, i) => Boolean(mask & (1 << i)))});
   assert(vsLightingDefs.includes('attribute vec3 a_normal;'));
   assert(vsLightingPass.includes('normalize(u_normalMatrix * a_normal)'));
-  assert(vsLightingPass.indexOf('v_color *= a_color;') < vsLightingPass.indexOf('v_color = clamp('));
+  assert(vsLightingPass.includes('v_color *= cod2VertexColor;'));
+  assert(vsLightingPass.indexOf('v_color *= cod2VertexColor;') < vsLightingPass.indexOf('v_color = clamp('));
   for (let i = 0; i < 8; i++)
     assert.equal(vsLightingDefs.includes(`uniform vec4 u_lightDiffuse${i};`), Boolean(mask & (1 << i)));
 }
@@ -217,3 +218,31 @@ assert.equal(matrixUploads,1);
 texturePrepare.call(texRenderer,texImmediate,texGL,texAttrs);
 assert.equal(matrixUploads,1);
 console.log('PASS: inactive coordinate attributes still preserve independently active texture matrices');
+
+// Unchanged matrices keep shader versions hot without trusting WASM pointers.
+const identityStart=source.indexOf('var _glLoadIdentity =');
+const identityEnd=source.indexOf('var _emscripten_glLoadIdentity',identityStart);
+const matrices=Array.from({length:5},()=>new Float32Array(16));
+const matrixState={currentMatrix:0,matrix:matrices,matrixVersion:[0,0,0,0,0],matricesModified:false,
+ matrixLib:{mat4:{identity(dst){for(let i=0;i<16;i++)dst[i]=i%5===0?1:0;},set(src,dst){for(let i=0;i<16;i++)dst[i]=src[i];}}}};
+const matrixHeap=new Float32Array(64);
+const loadMatrix=Function('GLImmediate','HEAPF32','return '+linkedFunction('_glLoadMatrixf'))(matrixState,matrixHeap);
+const loadIdentity=Function('GLImmediate',source.slice(identityStart,identityEnd)+';return _glLoadIdentity;')(matrixState);
+for(let slot=0;slot<5;slot++){
+ matrixState.currentMatrix=slot;loadIdentity();const version=matrixState.matrixVersion[slot];
+ matrixHeap.set(matrices[slot]);
+ for(let i=0;i<1000;i++){loadMatrix(0);loadIdentity();}
+ assert.equal(matrixState.matrixVersion[slot],version,'unchanged matrix does not invalidate derived shader state');
+ for(let i=0;i<16;i++)for(const value of [Math.fround(i/7),-0,0,Infinity,-Infinity,NaN]){
+  matrixHeap[i]=value;loadMatrix(0);assert.deepEqual(matrices[slot],matrixHeap.subarray(0,16));
+ }
+ // Matrix-stack/arithmetic operations can replace the array independently.
+ matrices[slot]=new Float32Array(16);loadMatrix(0);assert.deepEqual(matrices[slot],matrixHeap.subarray(0,16));
+ loadIdentity();for(let i=0;i<16;i++)assert(Object.is(matrices[slot][i],i%5===0?1:0));
+}
+console.log('PASS: 5000 repeated matrix loads retain versions; mutated memory, matrix replacement, signed zeros and nonfinite values preserve exact results');
+
+const textureVersions=source.match(/        this.textureMatrixVersion = [^;]+;/)[0];
+const freshRenderer={};Function('GLImmediate',textureVersions).call(freshRenderer,{MAX_TEXTURES:13});
+assert.equal(freshRenderer.textureMatrixVersion.length,15);
+assert(freshRenderer.textureMatrixVersion.every(v=>v===-1),'fresh shaders must upload identity texture matrices even at version zero');

@@ -40,7 +40,8 @@ void WebPointLights_SetScene(const GfxLight *lights, int count)
     WebPointLights_Set(packed, used);
 }
 
-EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShadowEnabled), {
+EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShadowEnabled, int colorOrder), {
+    Module.cod2VertexColorOrder = colorOrder;
     var lights = Module.cod2PointLights;
     if (!lights) return;
     lights.drawCount = enabled && view ? lights.count : 0;

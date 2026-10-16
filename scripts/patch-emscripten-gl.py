@@ -117,11 +117,13 @@ CUBE_UNIFORM_REPLACEMENT = r'''            // COD2_CUBE_TEXTURE_SAMPLER: match t
             texUnitUniformList += "uniform " + samplerType + " " + uTexUnitPrefix + texUnit + ";\n";'''
 
 LIGHT_COLOR_ORIGINAL = '''            vsLightingPass += "  v_color = clamp(v_color, 0.0, 1.0);";'''
-LIGHT_COLOR_REPLACEMENT = '''            // COD2_LIT_VERTEX_COLOR: DX7 uses COLOR1 for ambient and diffuse.
+LIGHT_COLOR_LEGACY = '''            // COD2_LIT_VERTEX_COLOR: DX7 uses COLOR1 for ambient and diffuse.
             // Its material is white, with zero emission/specular. Preserve
             // the original per-vertex tint/alpha before clamping the light sum.
             vsLightingPass += "  v_color *= a_color;";
             vsLightingPass += "  v_color = clamp(v_color, 0.0, 1.0);";'''
+
+LIGHT_COLOR_REPLACEMENT = LIGHT_COLOR_LEGACY.replace("v_color *= a_color;", "v_color *= cod2VertexColor;")
 
 INDEX_BIND_ORIGINAL = '''        var indexBuffer = GL.getTempIndexBuffer(numProvidedIndexes << 1);
         GLctx.bindBuffer(GLctx.ELEMENT_ARRAY_BUFFER, indexBuffer);'''
@@ -230,9 +232,13 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
           }
           var vsSource = ['''
 POINT_VERTEX_ORIGINAL = 'vsPointSizeDefs, vsClipPlaneDefs, vsLightingDefs, "void main()"'
-POINT_VERTEX_REPLACEMENT = 'vsPointSizeDefs, vsClipPlaneDefs, vsLightingDefs, pointVarying, "void main()"'
+POINT_VERTEX_LEGACY = 'vsPointSizeDefs, vsClipPlaneDefs, vsLightingDefs, pointVarying, "void main()"'
 POINT_POSITION_ORIGINAL = '"  gl_Position = u_projection * ecPosition;", "  v_color = a_color;"'
-POINT_POSITION_REPLACEMENT = '"  gl_Position = u_projection * ecPosition;", (pointLights ? "v_cod2Eye = ecPosition.xyz;" : ""), (pointNormal ? "v_cod2Normal = u_normalMatrix * a_normal;" : ""), "  v_color = a_color;"'
+POINT_POSITION_LEGACY = '"  gl_Position = u_projection * ecPosition;", (pointLights ? "v_cod2Eye = ecPosition.xyz;" : ""), (pointNormal ? "v_cod2Normal = u_normalMatrix * a_normal;" : ""), "  v_color = a_color;"'
+POINT_VERTEX_REPLACEMENT = POINT_VERTEX_LEGACY.replace('pointVarying,', 'pointVarying, "uniform lowp int u_cod2ColorOrder;",')
+POINT_POSITION_REPLACEMENT = POINT_POSITION_LEGACY.replace('"  v_color = a_color;"',
+    '"  vec4 cod2VertexColor = u_cod2ColorOrder == 2 ? a_color.yzwx : (u_cod2ColorOrder == 1 ? a_color.zyxw : a_color);", "  v_color = cod2VertexColor;"')
+
 POINT_FRAGMENT_ORIGINAL = 'fogHeaderIfNeeded, fsClipPlaneDefs, fsAlphaTestDefs, "void main()"'
 POINT_FRAGMENT_REPLACEMENT = 'fogHeaderIfNeeded, fsClipPlaneDefs, fsAlphaTestDefs, pointDefs, "void main()"'
 POINT_PASS_ORIGINAL = 'fsClipPlanePass, fsTexEnvPass, fogPass, fsAlphaTestPass'
@@ -245,6 +251,8 @@ POINT_UNIFORMS_LEGACY = r'''        this.normalMatrixLocation = GLctx.getUniform
         this.cod2LightRevision = -1;'''
 POINT_UNIFORMS_ORIGINAL = '        this.normalMatrixLocation = GLctx.getUniformLocation(this.program, "u_normalMatrix");'
 POINT_UNIFORMS_REPLACEMENT = r'''        this.normalMatrixLocation = GLctx.getUniformLocation(this.program, "u_normalMatrix");
+        this.cod2ColorOrderLocation = GLctx.getUniformLocation(this.program, "u_cod2ColorOrder");
+        this.cod2ColorOrder = -1;
         this.cod2LightCountLocation = GLctx.getUniformLocation(this.program, "u_cod2LightCount");
         this.cod2LightEyeLocation = GLctx.getUniformLocation(this.program, "u_cod2LightEye[0]");
         this.cod2LightColorLocation = GLctx.getUniformLocation(this.program, "u_cod2LightColor[0]");
@@ -272,6 +280,15 @@ POINT_UPLOAD_LEGACY = r'''        // COD2_POINT_LIGHT_UNIFORMS: cache per progra
           if (this.pointSizeLocation) {'''
 POINT_UPLOAD_ORIGINAL = '        if (GLImmediate.mode == GLctx.POINTS) {\n          if (this.pointSizeLocation) {'
 POINT_UPLOAD_REPLACEMENT = r'''        // COD2_POINT_LIGHT_UNIFORMS: cache per program; no allocation per draw.
+        // Consume the per-draw format even when no FX lights were submitted.
+        // Subsequent generic GL draws retain their normal RGBA interpretation.
+        var colorOrder = Module.cod2VertexColorOrder || 0;
+        Module.cod2VertexColorOrder = 0;
+        if (this.cod2ColorOrderLocation !== null && this.cod2ColorOrderLocation !== undefined &&
+            this.cod2ColorOrder !== colorOrder) {
+          GLctx.uniform1i(this.cod2ColorOrderLocation, colorOrder);
+          this.cod2ColorOrder = colorOrder;
+        }
         if (this.cod2LightCountLocation !== null) {
           var lights = Module.cod2PointLights;
           var count = lights ? lights.drawCount : 0;
@@ -341,6 +358,38 @@ COLOR_ATTRIBUTE_ORIGINAL = '          GLctx.vertexAttrib4fv(this.colorLocation, 
 COLOR_ATTRIBUTE_REPLACEMENT = '          if (this.colorLocation >= 0) GLctx.vertexAttrib4fv(this.colorLocation, [ 1, 1, 1, 1 ]);'
 
 
+MATRIX_LOAD_ORIGINAL = """function _glLoadMatrixf(matrix) {
+  matrix >>>= 0;
+  GLImmediate.matricesModified = true;"""
+MATRIX_LOAD_REPLACEMENT = """function _glLoadMatrixf(matrix) {
+  matrix >>>= 0;
+  // COD2_UNCHANGED_MATRIX: preserve versions and inverse/transpose caches.
+  // Compare values, never pointers: callers reuse mutable WASM storage.
+  var current = GLImmediate.matrix[GLImmediate.currentMatrix];
+  var equal = true;
+  for (var i = 0; i < 16; ++i) {
+    var value = HEAPF32[(matrix >>> 2) + i];
+    if (current[i] !== value || (value === 0 && !Object.is(current[i], value))) { equal = false; break; }
+  }
+  if (equal) return;
+  GLImmediate.matricesModified = true;"""
+MATRIX_IDENTITY_ORIGINAL = """var _glLoadIdentity = () => {
+  GLImmediate.matricesModified = true;"""
+MATRIX_IDENTITY_REPLACEMENT = """var _glLoadIdentity = () => {
+  // An identity load must still replace signed zeros and nonfinite values.
+  var current = GLImmediate.matrix[GLImmediate.currentMatrix];
+  var equal = true;
+  for (var i = 0; i < 16; ++i) {
+    if (!Object.is(current[i], i % 5 === 0 ? 1 : 0)) { equal = false; break; }
+  }
+  if (equal) return;
+  GLImmediate.matricesModified = true;"""
+TEXTURE_MATRIX_CACHE_ORIGINAL = "        this.textureMatrixVersion = [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ];"
+TEXTURE_MATRIX_CACHE_REPLACEMENT = "        this.textureMatrixVersion = new Array(2 + GLImmediate.MAX_TEXTURES).fill(-1);"
+NORMAL_MATRIX_ORIGINAL = "          if (GLEmulation.lightEnabled) {"
+NORMAL_MATRIX_REPLACEMENT = "          if (this.normalMatrixLocation !== null) {"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("javascript", type=Path)
@@ -362,7 +411,10 @@ def main():
         start = source.index(upload_marker)
         end = source.index(POINT_UPLOAD_ORIGINAL, start)
         source = source[:start] + source[end:]
-    for legacy, original in ((POINT_DEFS_LEGACY, POINT_DEFS_ORIGINAL),
+    for legacy, original in ((LIGHT_COLOR_LEGACY, LIGHT_COLOR_ORIGINAL),
+                             (POINT_VERTEX_LEGACY, POINT_VERTEX_ORIGINAL),
+                             (POINT_POSITION_LEGACY, POINT_POSITION_ORIGINAL),
+                             (POINT_DEFS_LEGACY, POINT_DEFS_ORIGINAL),
                              (POINT_UNIFORMS_LEGACY, POINT_UNIFORMS_ORIGINAL),
                              (POINT_UPLOAD_LEGACY, POINT_UPLOAD_ORIGINAL)):
         if source.count(legacy) == 1:
@@ -385,7 +437,11 @@ def main():
                                   (POINT_FS_UPLOAD_ORIGINAL, POINT_FS_UPLOAD_REPLACEMENT),
                                   (TEXTURE_LIMIT_ORIGINAL, TEXTURE_LIMIT_REPLACEMENT),
                                   (TEXTURE_ATTRIBUTES_ORIGINAL, TEXTURE_ATTRIBUTES_REPLACEMENT),
-                                  (COLOR_ATTRIBUTE_ORIGINAL, COLOR_ATTRIBUTE_REPLACEMENT)):
+                                  (COLOR_ATTRIBUTE_ORIGINAL, COLOR_ATTRIBUTE_REPLACEMENT),
+                                  (MATRIX_LOAD_ORIGINAL, MATRIX_LOAD_REPLACEMENT),
+                                  (MATRIX_IDENTITY_ORIGINAL, MATRIX_IDENTITY_REPLACEMENT),
+                                  (NORMAL_MATRIX_ORIGINAL, NORMAL_MATRIX_REPLACEMENT),
+                                  (TEXTURE_MATRIX_CACHE_ORIGINAL, TEXTURE_MATRIX_CACHE_REPLACEMENT)):
         if source.count(replacement) == 1:
             continue
         if source.count(original) != 1:

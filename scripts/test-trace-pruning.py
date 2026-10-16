@@ -133,7 +133,18 @@ static void checkBrushBlocks(void) {
  CM_TraceLeafBrushNode_r(&tw,&node,&ref,0,NULL);unsigned long exhaustive=brushTests;
  byte seen[8192]={0};brushTests=0;CM_TraceLeafBrushNode_r(&tw,&node,&fast,0,seen);equal(ref,fast);
  assert(exhaustive==1024 && brushTests<=8);
- printf("PASS: 4000 ordered brush-block comparisons, partial/max/uncached lists, masks, overlaps, duplicate/invalid entries and reloads; distant brush visits %lu -> %lu\n",exhaustive,brushTests);
+ unsigned long separatedVisits=brushTests;
+ // Broad swept bounds contain these off-axis groups, but the ray misses all.
+ for(int i=0;i<1024;i++)brushes[i]=(cbrush_t){.contents=1,
+  .mins={i*4.f,i*4.f+128,0},.maxs={i*4.f+2,i*4.f+130,20}};
+ CM_ClearWorldTraceCache();a[0]=a[1]=-10;b[0]=b[1]=8192;a[2]=b[2]=10;
+ CM_InitTraceWork(&tw,a,b,z,z,1);ref=(trace_t){.fraction=1};fast=ref;
+ CM_TraceLeafBrushNode_r(&tw,&node,&ref,0,NULL);
+ memset(seen,0,sizeof(seen));brushTests=0;
+ CM_TraceLeafBrushNode_r(&tw,&node,&fast,0,seen);equal(ref,fast);
+ assert(brushTests==0);
+ puts("PASS: off-axis brush groups rejected before all 1024 individual brush visits; exact miss retained");
+ printf("PASS: 4000 ordered brush-block comparisons, partial/max/uncached lists, masks, overlaps, duplicate/invalid entries and reloads; distant brush visits %lu -> %lu\n",exhaustive,separatedVisits);
 }
 int main(void) {
  cplane_t face; cbrushside_t side={.plane=&face,.materialNum=13};
@@ -243,9 +254,10 @@ int main(void) {
  puts("PASS: 40000 cached/uncached exact-hit comparisons, 1000-to-1 repeated sweeps, dynamic box exclusion, map invalidation and independent thread caches");
 }
 """
-with tempfile.TemporaryDirectory(prefix='cod2-trace-pruning-') as directory:
-    d = Path(directory)
-    (d / 'test.c').write_text(support + code + clip + plane + axial + axialReference + bounds + planes + brush + reference + world + checks)
-    subprocess.run(['cc', '-std=c99', '-O1', '-g', '-fsanitize=address,undefined',
-                    str(d / 'test.c'), '-o', str(d / 'test'), '-lm', '-pthread'], check=True)
-    subprocess.run([str(d / 'test')], check=True)
+if __name__ == "__main__":
+    with tempfile.TemporaryDirectory(prefix='cod2-trace-pruning-') as directory:
+        d = Path(directory)
+        (d / 'test.c').write_text(support + code + clip + plane + axial + axialReference + bounds + planes + brush + reference + world + checks)
+        subprocess.run(['cc', '-std=c99', '-O1', '-g', '-fsanitize=address,undefined',
+                        str(d / 'test.c'), '-o', str(d / 'test'), '-lm', '-pthread'], check=True)
+        subprocess.run([str(d / 'test')], check=True)

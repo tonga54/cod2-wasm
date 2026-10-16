@@ -7,7 +7,7 @@
 EM_JS(void, WebDrawPerfAdd, (const char *name, double elapsed), {
     Module.cod2Performance.add(UTF8ToString(name), elapsed);
 });
-extern void WebPointLights_Draw(const float *view, int enabled, int worldShadowEnabled);
+extern void WebPointLights_Draw(const float *view, int enabled, int worldShadowEnabled, int colorOrder);
 #endif
 
 /* This reconstructed translation unit doesn't include the GL header. Keep
@@ -557,40 +557,6 @@ static int CDirect3DDevice_ColorByteOrder(UINT stride, int positionComponents)
         return COLOR_BYTES_ARGB;
     return COLOR_BYTES_BGRA;
 }
-
-#ifdef __EMSCRIPTEN__
-/* Keep converted model/UI colors in the same stride as positions and UVs.
- * Separate arrays make the legacy WebGL bridge reshuffle every vertex in JS. */
-static const byte *CDirect3DDevice_InterleavedColors(const byte *vertices,
-    UINT stride, int colorOffset, UINT count, int byteOrder)
-{
-    static byte *scratch;
-    static size_t capacity;
-    size_t bytes;
-    UINT i;
-    if (byteOrder == COLOR_BYTES_RGBA || colorOffset < 0 ||
-        (UINT)colorOffset + 4 > stride || !count || count > SIZE_MAX / stride)
-        return NULL;
-    bytes = (size_t)stride * count;
-    if (bytes > capacity) {
-        byte *grown = realloc(scratch, bytes);
-        if (!grown) return NULL;
-        scratch = grown;
-        capacity = bytes;
-    }
-    memcpy(scratch, vertices, bytes);
-    for (i = 0; i < count; ++i) {
-        const byte *src = vertices + (size_t)i * stride + colorOffset;
-        byte *dst = scratch + (size_t)i * stride + colorOffset;
-        if (byteOrder == COLOR_BYTES_ARGB) {
-            dst[0] = src[1]; dst[1] = src[2]; dst[2] = src[3]; dst[3] = src[0];
-        } else {
-            dst[0] = src[2]; dst[1] = src[1]; dst[2] = src[0]; dst[3] = src[3];
-        }
-    }
-    return scratch;
-}
-#endif
 
 /* The engine derives up to eight directional lights from its original light
  * grid. Upload them in view space; normals use the full model-view matrix.
@@ -1890,6 +1856,7 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
     int staticIndexRange = 0;
     int staticVertexBuffer = 0;
     int staticIndexBuffer = 0;
+    int webColorOrder = 0;
 #define WEB_STATE_CHECK(stage) do { if (webCheck) fprintf(stdout, "[web-state] %s error=0x%x\n", stage, glGetError()); } while (0)
 #else
 #define WEB_DRAW_PERF(name) do {} while (0)
@@ -2287,26 +2254,17 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
     attributeBase = vertBase;
 #ifdef __EMSCRIPTEN__
     {
-        extern unsigned CDirect3DVertexBuffer_BindStaticWebColors(
-            const CDirect3DVertexBuffer *, UINT, int, int, UINT);
+        extern unsigned CDirect3DVertexBuffer_BindStaticWeb(const CDirect3DVertexBuffer *);
         extern void glBindBuffer(unsigned target, unsigned buffer);
         glBindBuffer(0x8892, 0);
-        /* Immutable geometry and its exact converted colors stay on the GPU.
-         * A format/offset change or a write refreshes the original buffer. */
+        /* Reorder only the four color channels in the vertex shader. Preserve
+         * original interleaved bytes instead of copying an entire mesh. */
+        webColorOrder = colorOffset >= 0 ? colorByteOrder : COLOR_BYTES_RGBA;
+        colorByteOrder = COLOR_BYTES_RGBA;
         if (!is2D && stage0Target == 0x0DE1 &&
-            CDirect3DVertexBuffer_BindStaticWebColors(
-                (const CDirect3DVertexBuffer *)dev->streams[0], stride,
-                colorOffset, colorByteOrder, offset % stride)) {
+            CDirect3DVertexBuffer_BindStaticWeb((const CDirect3DVertexBuffer *)dev->streams[0])) {
             attributeBase = (const byte *)(uintptr_t)firstByte;
-            colorByteOrder = COLOR_BYTES_RGBA;
             staticVertexBuffer = 1;
-        } else if (stage0Target == 0x0DE1) {
-            const byte *converted = CDirect3DDevice_InterleavedColors(
-                vertBase, stride, colorOffset, drawVertexCount, colorByteOrder);
-            if (converted) {
-                attributeBase = converted;
-                colorByteOrder = COLOR_BYTES_RGBA;
-            }
         }
         if (staticIndexRange) {
             staticIndexBuffer = CDirect3DDevice_BindStaticWebIndices(
@@ -2415,12 +2373,23 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
             int worldShadow = !is2D && dev->zWriteEnable && !dev->alphaBlendEnable &&
                 stage0Target == 0x0DE1 && usesLightmap;
             WebPointLights_Draw(pointLightViewValid ? pointLightView : NULL,
-                pointLight, worldShadow);
+                pointLight, worldShadow, webColorOrder);
         }
 #endif
+#ifdef __EMSCRIPTEN__
+        /* The validated native range already exists. Pass it to legacy GL so
+         * it does not scan the same index list again before uploading. */
+        {
+            extern void glDrawRangeElements(unsigned, unsigned, unsigned, int, unsigned, const void *);
+            UINT rangeStart = staticIndexBuffer ? firstVertex : 0;
+            glDrawRangeElements(0x0004, rangeStart, rangeStart + drawVertexCount - 1,
+                indexCount, 0x1403, drawIndices);
+        }
+#else
         glDrawElements(0x0004 , indexCount,
                        0x1403 ,
                        drawIndices);
+#endif
     }
 
     WEB_STATE_CHECK("draw");

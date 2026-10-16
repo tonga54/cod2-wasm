@@ -162,6 +162,13 @@ retail CoD2:
   and active texture attributes avoid redundant browser work; resolution,
   texture detail, particle counts and simulation rules are unchanged.
   See [graphics validation and limits](docs/GRAPHICS_2026-10-16.md).
+- **Rendering and collision efficiency:** the browser decodes vertex color
+  order in the vertex shader instead of copying complete meshes, reuses
+  validated index ranges and keeps unchanged matrix versions cached. Collision
+  traces reject whole brush groups that the actual segment cannot reach before
+  the nearest hit. Resolution, effects, geometry, collision results and server
+  tickrate retain their original settings. See
+  [performance measurements](docs/PERFORMANCE_2026-10-16.md).
 - **Remote player poses:** other players see vertical aim in the correct
   direction and Q/E as a lateral lean. Controllers rotate in model axes after
   skeletal composition, preserving movement animations. The respawn/teleport

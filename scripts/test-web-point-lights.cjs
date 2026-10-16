@@ -11,7 +11,7 @@ function emjs(name, args) {
   return Function('Module', 'HEAPF32', ...args, bridge.slice(pos + 1, end - 1)).bind(null, Module, HEAPF32);
 }
 const set = emjs('WebPointLights_Set', ['packed', 'count']);
-const drawScene = emjs('WebPointLights_Draw', ['view', 'enabled', 'worldShadowEnabled']);
+const drawScene = emjs('WebPointLights_Draw', ['view', 'enabled', 'worldShadowEnabled', 'colorOrder']);
 const draw = (view, enabled) => drawScene(view, enabled, 0);
 draw(0, 0);
 HEAPF32.set([100, 20, 60, 200, 1, .7, .3, 0, -10, 30, 90, 100, .2, .3, 1, 0], 8);
@@ -158,3 +158,20 @@ for(let i=0;i<1000;i++)drawScene(256,1,1);
 assert.deepEqual([lights.eyeRevision,lights.shadowEyeRevision],revisions);
 drawScene(0,0,0); assert.equal(lights.drawCount,0); assert.equal(lights.shadowDrawCount,0);
 console.log('PASS: shared camera transform cache survives inactive light/shadow channels and 1000 combined draws');
+
+// Vertex format is independent of FX existence and is consumed by one draw.
+let colorUploads=0;const colorRenderer={cod2ColorOrderLocation:7,cod2ColorOrder:-1,cod2LightCountLocation:null};
+const colorGL={uniform1i(loc,value){assert.equal(loc,7);assert(value>=0&&value<=2);colorUploads++;}};
+const savedLights=Module.cod2PointLights;delete Module.cod2PointLights;
+for(const order of [0,2,1,0]){
+ for(let i=0;i<600;i++){
+  drawScene(0,0,0,order);assert.equal(Module.cod2VertexColorOrder,order);
+  upload.call(colorRenderer,Module,colorGL);assert.equal(colorRenderer.cod2ColorOrder,order);
+  assert.equal(Module.cod2VertexColorOrder,0);
+ }
+}
+assert.equal(colorUploads,4);
+drawScene(0,0,0,2);upload.call(colorRenderer,Module,colorGL);
+upload.call(colorRenderer,Module,colorGL);assert.equal(colorRenderer.cod2ColorOrder,0,'generic subsequent GL draws use RGBA');
+Module.cod2PointLights=savedLights;
+console.log('PASS: 2400 RGBA/BGRA/ARGB draws with no FX lights; cached uploads and generic-draw reset');

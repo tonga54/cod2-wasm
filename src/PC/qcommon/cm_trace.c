@@ -524,7 +524,10 @@ static void CM_TraceLeafBrushNode_r(const traceWork_t *tw, cLeafBrushNode_t *nod
             unsigned short brushIndex;
             if (blocks && !(i % CM_BRUSH_BLOCK_WIDTH)) {
                 const cmBrushBlock_t *block = &blocks[i / CM_BRUSH_BLOCK_WIDTH];
-                if (!CM_TraceBoundsOverlap(tw, block->mins, block->maxs, block->contents)) {
+                /* Reject the whole group against the actual segment and nearest
+                 * hit, using the same conservative expansion as each brush. */
+                if (!CM_TraceBoundsOverlap(tw, block->mins, block->maxs, block->contents) ||
+                    !CM_TraceMayHitBounds(tw, block->mins, block->maxs, trace)) {
                     i += CM_BRUSH_BLOCK_WIDTH - 1;
                     continue;
                 }
