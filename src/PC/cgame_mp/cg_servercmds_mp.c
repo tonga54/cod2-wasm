@@ -1004,6 +1004,11 @@ void CG_ServerCommand(void)
         return;
     }
 
+    /* The retail commands below are told apart by their first letter alone,
+     * so an unknown cod2_ command would reach the 'c' announcement. */
+    if (!strncmp(cmd, "cod2_", 5))
+        return;
+
     switch (cmd[0]) {
     case 'B':
         CG_MapRestart(0);
