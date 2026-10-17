@@ -51,37 +51,44 @@ try {
     const scene = gl.createProgram();
     gl.attachShader(scene, shader(gl.VERTEX_SHADER, '#version 300 es\nuniform vec4 u_rect;uniform float u_z;uniform float u_tilt;\n' +
       'void main(){vec2 p=vec2((gl_VertexID&1)==1?u_rect.z:u_rect.x,(gl_VertexID&2)==2?u_rect.w:u_rect.y);p.x+=u_tilt*p.y;gl_Position=vec4(p,u_z,1.0);}'));
-    gl.attachShader(scene, shader(gl.FRAGMENT_SHADER, '#version 300 es\nprecision highp float;uniform vec4 u_color;uniform float u_checker;out vec4 o;\n' +
-      'void main(){vec2 p=floor(gl_FragCoord.xy/2.0);float c=mod(p.x+p.y,2.0);o=vec4(mix(u_color.rgb,u_color.rgb*0.2,c*u_checker),1.0);}'));
+    gl.attachShader(scene, shader(gl.FRAGMENT_SHADER, '#version 300 es\nprecision highp float;uniform vec4 u_color;uniform float u_checker;uniform float u_cell;out vec4 o;\n' +
+      'void main(){vec2 p=floor(gl_FragCoord.xy/u_cell);float c=mod(p.x+p.y,2.0);o=vec4(mix(u_color.rgb,u_color.rgb*0.2,c*u_checker),1.0);}'));
     gl.linkProgram(scene);
     check(gl.getProgramParameter(scene, gl.LINK_STATUS), 'fixture program linked');
     const sceneVao = gl.createVertexArray();
     const location = {};
-    for (const name of ['u_rect', 'u_z', 'u_tilt', 'u_color', 'u_checker']) location[name] = gl.getUniformLocation(scene, name);
-    const rect = (x0, y0, x1, y1, z, color, checker, tilt = 0) => {
+    for (const name of ['u_rect', 'u_z', 'u_tilt', 'u_color', 'u_checker', 'u_cell']) location[name] = gl.getUniformLocation(scene, name);
+    const rect = (x0, y0, x1, y1, z, color, checker, tilt = 0, cell = 2) => {
       gl.uniform4f(location.u_rect, x0, y0, x1, y1); gl.uniform1f(location.u_z, z); gl.uniform1f(location.u_tilt, tilt);
       gl.uniform4f(location.u_color, color[0], color[1], color[2], 1); gl.uniform1f(location.u_checker, checker);
+      gl.uniform1f(location.u_cell, cell);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     };
-    // Window depth of the DX7 viewmodel pass: depth range [0, 0.2], 0.1 near clip.
-    const c = 0.9995002746582031, near = 0.1;
+    // Window depths of the infinite projection: the world with r_znear 4, and the
+    // DX7 viewmodel pass in depth range [0, 0.2] with a 0.1 near clip.
+    const c = 0.9995002746582031, near = 0.1, worldNear = c * 4;
     const vmDepth = z => 2 * (0.2 * (c - near / z)) - 1;
+    const worldDepth = z => 2 * (c - worldNear / z) - 1;
     function drawScene() {
       gl.useProgram(scene); gl.bindVertexArray(sceneVao);
       gl.viewport(0, 0, W, H);
       gl.disable(gl.BLEND); gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LESS); gl.depthMask(true); gl.colorMask(true, true, true, true);
       gl.clearColor(0, 0, 0, 1); gl.clearDepth(1); gl.clearStencil(0);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
-      rect(-1, -1, 1, 1, 0.8, [0.55, 0.5, 0.42], 1);                    // world texture detail
-      rect(0.55, 0.55, 0.75, 0.8, 0.79, [1, 1, 1], 0);                  // sky highlight
-      rect(-1, -1, -0.3, -0.3, 0.79, [0.08, 0.08, 0.08], 0);            // dark wall
-      rect(-0.7, -0.9, -0.45, -0.4, 0.78, [0.9, 0.9, 0.9], 0, 0.3);     // slanted edge on it
-      rect(0.15, -1, 0.95, -0.25, vmDepth(5), [0.4, 0.33, 0.25], 1);    // receiver near the eye
-      rect(-0.012, -0.25, 0.012, -0.02, vmDepth(20), [0.6, 0.6, 0.6], 1); // front sight post
+      rect(-1, -1, 1, 1, worldDepth(2000), [0.55, 0.5, 0.42], 1);                // distant world texture detail
+      rect(0.55, 0.55, 0.75, 0.8, worldDepth(1800), [1, 1, 1], 0);              // sky highlight
+      rect(-1, -1, -0.3, -0.3, worldDepth(1500), [0.08, 0.08, 0.08], 0);        // dark wall
+      rect(-0.7, -0.9, -0.45, -0.4, worldDepth(1400), [0.9, 0.9, 0.9], 0, 0.3); // slanted edge on it
+      rect(-0.28, -1, 0.12, -0.85, worldDepth(120), [0.5, 0.45, 0.35], 1, 0, 6);  // ground at the feet
+      rect(-0.28, -0.85, 0.12, -0.7, worldDepth(380), [0.5, 0.45, 0.35], 1, 0, 6); // ground further out
+      rect(0.15, -1, 0.95, -0.25, vmDepth(5), [0.4, 0.33, 0.25], 1, 0, 6);      // receiver near the eye
+      rect(0.4, -0.15, 0.95, 0.15, vmDepth(9.6), [0.62, 0.5, 0.42], 1, 0, 6);   // trigger hand ahead of it
+      rect(-0.012, -0.25, 0.012, -0.02, vmDepth(20), [0.6, 0.6, 0.6], 1);       // front sight post
     }
-    function params(ads, {glow = 1, film = 1} = {}) {
-      HEAPF32.set([0.42 * glow, 0.30 * glow, 0.9, 0.75, 5, 12, ads, 6, 15, near, 6,
-        film ? 0.147 : 0, 0.96, film ? 0.35 : 0, film], 16);
+    // The production viewmodel range for a muzzle 28 units out (a Thompson).
+    function params(ads, {glow = 1, film = 1, nearEnd = 512} = {}) {
+      HEAPF32.set([0.42 * glow, 0.30 * glow, 0.9, 0.75, 5, 12, ads, 4.55, 17.5, near, 3,
+        film ? 0.147 : 0, 0.96, film ? 0.35 : 0, film, worldNear, nearEnd, 1], 16);
       return 64;
     }
     function read() {
@@ -113,15 +120,24 @@ try {
     const graded = render(4, 0); snapshot('hipfire');
     const aim = render(4, 1); snapshot('aim');
     const noGlow = render(4, 1, {glow: 0});
-    const receiver = [0.3, -0.9, 0.85, -0.35], post = [-0.008, -0.2, 0.008, -0.05];
+    const receiver = [0.3, -0.9, 0.85, -0.35], hand = [0.45, -0.1, 0.9, 0.1], post = [-0.008, -0.2, 0.008, -0.05];
     const centreWorld = [-0.05, 0.02, 0.05, 0.12], edgeWorld = [0.0, -0.6, 0.14, -0.3];
+    const feet = [-0.26, -0.98, 0.0, -0.87], ground = [-0.26, -0.83, 0.0, -0.72];
+    const kept = (px, r) => region(px, ...r).variance / region(graded, ...r).variance;
     check(region(graded, ...receiver).variance > region(raw, ...receiver).variance * 0.8, 'hip fire keeps receiver texture detail');
     check(region(graded, -0.4, 0.1, 0.4, 0.5).variance > region(raw, -0.4, 0.1, 0.4, 0.5).variance * 0.8, 'hip fire keeps world detail');
-    check(region(aim, ...receiver).variance < region(graded, ...receiver).variance * 0.1, 'aiming blurs the receiver near the eye');
+    check(region(graded, ...feet).variance > region(raw, ...feet).variance * 0.8, 'hip fire keeps the ground at the feet detailed');
+    check(kept(aim, receiver) < 0.1, 'aiming blurs the receiver near the eye');
+    check(kept(aim, hand) > 0.1 && kept(aim, hand) < 0.9 && kept(aim, hand) > 20 * kept(aim, receiver),
+      'the hand ahead of the receiver softens far less than the receiver');
     check(same(aim, graded, post), 'aiming keeps the front sight beyond the viewmodel focus range sharp');
+    check(kept(aim, feet) < 0.2, 'aiming blurs the ground at the feet');
+    check(!same(aim, graded, ground) && kept(aim, ground) < 0.97 && kept(aim, ground) > 3 * kept(aim, feet),
+      'ground further out softens less, easing into focus');
     check(same(aim, graded, centreWorld), 'aiming keeps the target at the screen centre sharp');
     check(!same(aim, graded, edgeWorld), 'the blurred receiver softens its silhouette over the world');
-    check(same(aim, graded, [-0.95, 0.2, -0.6, 0.9]), 'world away from the viewmodel stays sharp');
+    check(same(aim, graded, [-0.95, 0.2, -0.6, 0.9]), 'the distant world stays sharp');
+    check(same(render(4, 1, {nearEnd: 100}), graded, feet), 'ground beyond a nearer crosshair focus stays sharp');
     const halo = [0.50, 0.6, 0.545, 0.75];
     check(region(graded, ...halo).mean > region(raw, ...halo).mean + 6, 'r_glow blooms around bright highlights');
     check(region(aim, ...halo).mean > region(noGlow, ...halo).mean + 6, 'r_glowBloomIntensity scales the bloom');

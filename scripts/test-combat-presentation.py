@@ -40,7 +40,9 @@ typedef struct {void *viewModelDObj;} weaponInfo_t;
 typedef struct {int leType,endTime;float tracerClipDist;struct {int trType,trTime;float trBase[3],trDelta[3];} pos;} localEntity_t;
 #define LE_MOVING_TRACER 4
 #define TR_LINEAR 2
-static struct {struct {float vieworg[3],viewaxis[3][3];} refdef;int time,frametime;float gunPitch,gunYaw,viewModelAxis[3][3];} cgState,*cg=&cgState;
+static struct {struct {float vieworg[3],viewaxis[3][3],fov_x,fov_y;} refdef;int time,frametime;float gunPitch,gunYaw,viewModelAxis[3][3];} cgState,*cg=&cgState;
+typedef struct {struct {int eType,clientNum;} nextState;int nextValid;float lerpOrigin[3];} centity_t;
+static centity_t entities[64],*cg_entities=entities;
 static dvar_t width,scale,minDist,range,chance,blood,speed;
 static dvar_t *cg_tracerWidth=&width,*cg_tracerScale=&scale,*cg_tracerScaleMinDist=&minDist,*cg_tracerScaleDistRange=&range,*cg_tracerChance=&chance,*cg_blood=&blood,*cg_tracerSpeed=&speed;
 static struct {struct {int tracerMaterial; snd_alias_list_t *bulletHitSmallSound[23],*bulletHitLargeSound[23],*shotgunHitSound[23]; struct {void *table;} *fx; void *fxNoBloodFleshHit;}media;} cgsState,*cgs=&cgsState;
@@ -50,8 +52,8 @@ static localEntity_t immediateLe;
 static unsigned short tag;static void *s_barrelTags[]={&tag,&tag,&tag,&tag};
 static weaponInfo_t weapInfos[4];static weaponInfo_t *weapInfoPtr=weapInfos;static void *imp_cg_weapons=&weapInfoPtr;
 static WeaponDef testWeapon={.weapType=0,.weapClass=0,.shotCount=1,.fAdsSpread=0.5f,.fMinDamageRange=1500.f};
-static float traceFraction=0.25f;
-static float g_webAdsDofFrac,g_webAdsViewmodelStart=6.f,g_webAdsViewmodelEnd=15.f;
+static float traceFraction=0.25f,traceEnd[3];static int traceSkip,traceMask;
+static float g_webAdsDofFrac,g_webAdsViewmodelStart=6.f,g_webAdsViewmodelEnd=15.f,g_webAdsNearEnd=512.f;
 static int s_pendingLocalFireWeapon,s_pendingLocalFireBarrel,s_pendingLocalFireTime,s_localTracerSpawnedTime;
 static localEntity_t *CG_AllocLocalEntity(void){immediateSpawns++;return &immediateLe;}
 static int BG_IsAimDownSightWeapon(int w){return w==1;}
@@ -60,7 +62,7 @@ static int CG_DObjGetViewModelTagPos(void *obj,unsigned t,float *out){out[0]=cg-
 static void AngleVectors(const float *ang,float *f,float *r,float *u){f[0]=1;f[1]=f[2]=0;r[0]=r[2]=0;r[1]=1;u[0]=u[1]=0;u[2]=1;}
 static void BG_GetSpreadForWeapon(const playerState_t *ps,int w,float *lo,float *hi){*lo=1.f;*hi=4.f;}
 static float randomf(void){return 0.5f;}
-static void CG_TraceCapsule(trace_t *tr,const float *s,const float *mn,const float *mx,const float *e,int skip,int mask){traces++;tr->fraction=traceFraction;}
+static void CG_TraceCapsule(trace_t *tr,const float *s,const float *mn,const float *mx,const float *e,int skip,int mask){traces++;memcpy(traceEnd,e,12);traceSkip=skip;traceMask=mask;tr->fraction=traceFraction;}
 static float Vec3Normalize(float *v){float len=sqrtf(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);if(len)for(int i=0;i<3;i++)v[i]/=len;return len;}
 static float Vec3Distance(const float *a,const float *b){float s=0;for(int i=0;i<3;i++)s+=(a[i]-b[i])*(a[i]-b[i]);return sqrtf(s);}
 static void Vec3Cross(const float *a,const float *b,float *c){c[0]=a[1]*b[2]-a[2]*b[1];c[1]=a[2]*b[0]-a[0]*b[2];c[2]=a[0]*b[1]-a[1]*b[0];}
@@ -83,7 +85,8 @@ static const void *imp_r_dlightLimit=&limitPtr;
 weapon = 'src/PC/cgame_mp/cg_weapons.c'
 code = ''.join(function(weapon, name) for name in (
     'CG_TracerScaleForDistance', 'CG_SetTracerVertex', 'CG_DrawTracer', 'CG_BulletHitClientEvent',
-    'CG_BulletHitEvent', 'CG_SpawnTracerImmediate', 'CG_UpdateWebWeaponPresentation'))
+    'CG_BulletHitEvent', 'CG_SpawnTracerImmediate', 'CG_WebAdsNearEnd', 'CG_WebAdsDofApproach',
+    'CG_WebAdsNearestPlayer', 'CG_UpdateWebWeaponPresentation'))
 code += function('src/PC/gfx_d3d/r_scene.c', 'R_AddLightToScene')
 checks = r'''
 int main(void){
@@ -160,22 +163,26 @@ int main(void){
  playerState_t ps={.clientNum=0,.fWeaponPosFrac=1.f,.aimSpreadScale=0.f};
  traceFraction=0.125f;
  s_pendingLocalFireWeapon=1;s_pendingLocalFireBarrel=0;s_pendingLocalFireTime=5000;
- immediateSpawns=0;
+ immediateSpawns=0;g_webAdsNearEnd=77.f;
  CG_UpdateWebWeaponPresentation(&ps,1,1);
  assert(immediateSpawns==1 && s_localTracerSpawnedTime==5000);
  assert(immediateLe.pos.trTime==5000 && immediateLe.pos.trBase[0]==18.f);
- // Blur the viewmodel from the eye to just short of the muzzle; the 12-unit
- // fixture muzzle clamps to the 12.5-unit minimum sharp front sight distance.
- assert(fabsf(g_webAdsDofFrac-1.f)<1e-6f && g_webAdsViewmodelEnd==12.5f);
- assert(fabsf(g_webAdsViewmodelStart-5.f)<1e-6f);
- // Aiming alone traces nothing: the resolved scene depth does the focusing.
+ // The viewmodel is sharp from 5/8 of the muzzle distance on; the 12-unit
+ // fixture muzzle clamps to the 10-unit minimum.
+ assert(fabsf(g_webAdsDofFrac-1.f)<1e-6f && g_webAdsViewmodelEnd==10.f);
+ assert(fabsf(g_webAdsViewmodelStart-2.6f)<1e-6f);
+ // A wall 1024 units down the crosshair with nobody on screen: the world blurs
+ // up to 512 units, entered at once rather than eased from the last aim.
+ assert(g_webAdsNearEnd==512.f);
+ // Aiming traces once for focus, 8192 units down the view axis past the player.
  traces=0;cg->time=5016;CG_UpdateWebWeaponPresentation(&ps,1,1);
- assert(traces==0 && immediateSpawns==1 && g_webAdsDofFrac==1.f);
+ assert(traces==1 && immediateSpawns==1 && g_webAdsDofFrac==1.f && g_webAdsNearEnd==512.f);
+ assert(traceEnd[0]==8192.f && traceEnd[1]==0.f && traceEnd[2]==0.f && traceSkip==0 && traceMask==0x2802831);
  // A round that rolls above the tracer chance draws nothing, and the late
  // server copy of the shot stays suppressed.
  chance.current.value=0.25f;cg->time=5032;s_pendingLocalFireWeapon=1;s_pendingLocalFireTime=5032;
- immediateSpawns=0;CG_UpdateWebWeaponPresentation(&ps,1,1);
- assert(immediateSpawns==0 && traces==0 && s_localTracerSpawnedTime==5032);
+ traces=0;immediateSpawns=0;CG_UpdateWebWeaponPresentation(&ps,1,1);
+ assert(immediateSpawns==0 && traces==1 && s_localTracerSpawnedTime==5032);
  chance.current.value=0.85f;
  testWeapon.weapClass=3;testWeapon.shotCount=8;
  cg->time=5050;s_pendingLocalFireWeapon=1;s_pendingLocalFireTime=5050;immediateSpawns=0;
@@ -183,7 +190,41 @@ int main(void){
  assert(immediateSpawns==3);
  ps.fWeaponPosFrac=0.f;CG_UpdateWebWeaponPresentation(&ps,1,1);
  assert(g_webAdsDofFrac==0.f);
- puts("PASS: 1512 translated/off-axis tracer streaks and head glows, immediate first-person tracers at the tracer chance, trace-free ADS viewmodel focus, audio independent of visuals, 100 light-selection frames, all 0-32 limits and nonfinite rejection");
+ // Only other live players around the view keep the near blur short of them.
+ testWeapon.weapClass=0;testWeapon.shotCount=1;
+ cg->refdef.fov_x=80.f;cg->refdef.fov_y=64.f;traceFraction=1.f;
+ centity_t ignored[]={
+  {{1,3},0,{150,0,-32}},    // stale
+  {{2,4},1,{150,0,-32}},    // not a player
+  {{1,0},1,{150,0,-32}},    // the local player
+  {{1,6},1,{-150,0,-32}},   // behind the eye
+  {{1,7},1,{150,400,-32}},  // well off the side of the view
+ };
+ for(int i=0;i<5;i++)entities[i]=ignored[i];
+ ps.fWeaponPosFrac=0.5f;CG_UpdateWebWeaponPresentation(&ps,1,1);
+ assert(g_webAdsNearEnd==512.f);
+ // Still aiming in: the focus follows a player 200 units away straight away.
+ entities[8]=(centity_t){{1,8},1,{200,60,-32}};
+ CG_UpdateWebWeaponPresentation(&ps,1,1);assert(g_webAdsNearEnd==170.f);
+ // Fully aimed in, it eases: half the gap per frame, at most 50 units per 50 ms.
+ ps.fWeaponPosFrac=1.f;cg->frametime=16;
+ CG_UpdateWebWeaponPresentation(&ps,1,1);assert(g_webAdsNearEnd==170.f);
+ entities[8].lerpOrigin[0]=400.f;
+ CG_UpdateWebWeaponPresentation(&ps,1,1);assert(fabsf(g_webAdsNearEnd-186.f)<1e-3f);
+ float last=g_webAdsNearEnd;
+ for(int frame=0;frame<40;frame++){
+  CG_UpdateWebWeaponPresentation(&ps,1,1);
+  assert(g_webAdsNearEnd>=last && g_webAdsNearEnd<=370.f);last=g_webAdsNearEnd;
+ }
+ assert(g_webAdsNearEnd==370.f);
+ // A surface under the crosshair nearer than the player stays sharp as well.
+ traceFraction=100.f/8192.f;ps.fWeaponPosFrac=0.9f;
+ CG_UpdateWebWeaponPresentation(&ps,1,1);assert(fabsf(g_webAdsNearEnd-70.f)<1e-3f);
+ assert(CG_WebAdsNearEnd(1000.f,60.f)==50.f && CG_WebAdsNearEnd(1000.f,2000.f)==512.f);
+ assert(CG_WebAdsNearEnd(20.f,1.0e30f)==1.f && CG_WebAdsNearEnd(NAN,NAN)==512.f);
+ assert(CG_WebAdsDofApproach(100.f,100.4f,50.f,.016f)==100.4f && CG_WebAdsDofApproach(100.f,99.6f,50.f,.016f)==99.6f);
+ assert(fabsf(CG_WebAdsDofApproach(0.f,1000.f,50.f,.016f)-16.f)<1e-3f && CG_WebAdsDofApproach(100.f,200.f,50.f,0.f)==100.f);
+ puts("PASS: 1512 translated/off-axis tracer streaks and head glows, immediate first-person tracers at the tracer chance, CoD4 ADS focus from the crosshair trace and on-screen players eased once aimed in, audio independent of visuals, 100 light-selection frames, all 0-32 limits and nonfinite rejection");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='cod2-combat-presentation-') as tmp:

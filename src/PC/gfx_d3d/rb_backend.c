@@ -1415,9 +1415,10 @@ static void RB_BeginViewCmd(GfxRenderCommandExecState *execState)
 
 #ifdef __EMSCRIPTEN__
     {
-        extern void WebSceneFx_BeginView(int, int, int, int, int, int, float);
+        extern void WebSceneFx_BeginView(int, int, int, int, int, int, float, float);
         WebSceneFx_BeginView(vp->viewport.X, vp->viewport.Y, vp->viewport.Width, vp->viewport.Height,
-                             backEnd.width, backEnd.height, vp->depthHackNearClip);
+                             backEnd.width, backEnd.height, vp->depthHackNearClip,
+                             -((const float *)&vp->projectionMatrix)[14]);
     }
 #endif
 

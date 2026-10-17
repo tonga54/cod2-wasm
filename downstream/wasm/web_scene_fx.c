@@ -4,9 +4,10 @@
 
 /* The first full-screen 3D view of a frame renders into an offscreen target
  * (multisampled when r_aaSamples > 1). Before the first 2D draw it is composed
- * into the canvas: CoD2's DX9 glow (r_glow*), a CoD4-style viewmodel depth of
- * field while aiming, contrast adaptive sharpening and a light film grade.
- * The HUD and any later view draw straight into the canvas. */
+ * into the canvas: CoD2's DX9 glow (r_glow*), a CoD4-style depth of field on
+ * the viewmodel and the near world while aiming, contrast adaptive sharpening
+ * and a light film grade. The HUD and any later view draw straight into the
+ * canvas. */
 
 extern const dvar_t *r_glow;
 extern const dvar_t *r_glowRadius[2];
@@ -34,13 +35,21 @@ enum {
     SCENE_FX_SATURATION,
     SCENE_FX_CONTRAST,
     SCENE_FX_FILM,
+    SCENE_FX_WORLD_NEAR_CLIP,
+    SCENE_FX_NEAR_END,
+    SCENE_FX_WORLD_BLUR,
     SCENE_FX_PARAM_COUNT
 };
+
+/* InfinitePerspectiveMatrix's depth scale times the default r_znear of 4. */
+#define SCENE_FX_DEFAULT_WORLD_NEAR_CLIP (0.9995002746582031f * 4.0f)
 
 static float s_adsFrac;
 static float s_vmStart = 6.0f;
 static float s_vmEnd = 15.0f;
+static float s_nearEnd = 512.0f;
 static float s_nearClip = 0.1f;
+static float s_worldNearClip = SCENE_FX_DEFAULT_WORLD_NEAR_CLIP;
 static int s_active;
 static int s_frameUsed;
 
@@ -132,13 +141,22 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples), {
                 "      sum += texture(u_src, v_uv + vec2(d[x], d[y]) * u_step) * (k[x] * k[y]);\n" +
                 "  o = sum;\n}\n",
                 ["u_src"], ["u_step"]);
-            var coc = "float coc(highp float d) {\n" +
+            /* Blur radius as a fraction of the largest. CoD4's r_dof_bias of 0.5
+             * squares the viewmodel's circle of confusion, so the hand ahead of
+             * the receiver stays crisper than the receiver. The viewmodel draws
+             * into depth [0, 0.2] with the depth hack near clip. */
+            var coc = "float vmBlur(highp float d) {\n" +
                 "  if (d >= 0.2) return 0.0;\n" +
                 "  highp float z = u_dof.y / max(u_dof.x - d * 5.0, 0.00001);\n" +
-                "  return clamp((u_dof.z - z) * u_dof.w, 0.0, 1.0);\n}\n";
+                "  float c = clamp((u_dof.z - z) * u_dof.w, 0.0, 1.0);\n" +
+                "  return c * c;\n}\n";
+            var nearWorld = "float worldBlur(highp float d) {\n" +
+                "  highp float z = u_near.x / max(u_dof.x - d, 0.000001);\n" +
+                "  float c = clamp((u_near.y - z) * u_near.z, 0.0, 1.0);\n" +
+                "  return c * c * u_near.w;\n}\n";
             link("dof", "uniform sampler2D u_src;\nuniform highp sampler2D u_depth;\n" +
                 "uniform highp vec2 u_texel;\nuniform highp vec4 u_dof;\n" + coc +
-                "float cocAt(ivec2 p, ivec2 m) { return coc(texelFetch(u_depth, min(p, m), 0).r); }\n" +
+                "float cocAt(ivec2 p, ivec2 m) { return vmBlur(texelFetch(u_depth, min(p, m), 0).r); }\n" +
                 "void main() {\n" + quarter +
                 "  ivec2 b = ivec2(gl_FragCoord.xy) * 4;\n" +
                 "  ivec2 m = textureSize(u_depth, 0) - 1;\n" +
@@ -149,7 +167,8 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples), {
             link("compose", "uniform sampler2D u_scene;\nuniform sampler2D u_bloom;\n" +
                 "uniform highp sampler2D u_depth;\nuniform sampler2D u_dofMed;\nuniform sampler2D u_dofLarge;\n" +
                 "uniform highp vec4 u_px;\nuniform vec4 u_glow;\nuniform highp vec4 u_dof;\nuniform vec4 u_dof2;\nuniform vec4 u_film;\n" +
-                coc +
+                "uniform highp vec4 u_near;\nuniform vec2 u_tier;\n" +
+                coc + nearWorld +
                 "void main() {\n" +
                 "  vec3 c = texture(u_scene, v_uv).rgb;\n" +
                 "  vec3 col = c;\n" +
@@ -168,10 +187,11 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples), {
                 "    vec4 large = texture(u_dofLarge, v_uv);\n" +
                 "    float k;\n" +
                 "    if (depth < 0.2) {\n" +
-                "      k = coc(depth);\n" +
+                "      k = vmBlur(depth);\n" +
                 "    } else {\n" +
                 "      vec2 centered = (v_uv - 0.5) * vec2(u_px.z, 1.0);\n" +
-                "      k = clamp(2.0 * large.a, 0.0, 1.0) * smoothstep(u_dof2.y, u_dof2.z, length(centered));\n" +
+                "      k = max(worldBlur(depth),\n" +
+                "        clamp(2.0 * large.a, 0.0, 1.0) * smoothstep(u_dof2.y, u_dof2.z, length(centered)));\n" +
                 "    }\n" +
                 "    k *= u_dof2.x;\n" +
                 "    if (k > 0.003) {\n" +
@@ -180,8 +200,9 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples), {
                 "        texture(u_scene, v_uv + u_px.xy * vec2(-0.5, -1.5)).rgb +\n" +
                 "        texture(u_scene, v_uv + u_px.xy * vec2(1.5, -0.5)).rgb);\n" +
                 "      vec3 med = texture(u_dofMed, v_uv).rgb;\n" +
-                "      col = k < 0.25 ? mix(col, small, k * 4.0) :\n" +
-                "        (k < 0.55 ? mix(small, med, (k - 0.25) * 3.3333333) : mix(med, large.rgb, (k - 0.55) * 2.2222222));\n" +
+                "      col = k < u_tier.x ? mix(col, small, k / u_tier.x) :\n" +
+                "        (k < u_tier.y ? mix(small, med, (k - u_tier.x) / (u_tier.y - u_tier.x)) :\n" +
+                "          mix(med, large.rgb, (k - u_tier.y) / (1.0 - u_tier.y)));\n" +
                 "    }\n" +
                 "  }\n" +
                 "  if (u_glow.x > 0.0)\n" +
@@ -194,7 +215,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples), {
                 "  }\n" +
                 "  o = vec4(col, 1.0);\n}\n",
                 ["u_scene", "u_bloom", "u_depth", "u_dofMed", "u_dofLarge"],
-                ["u_px", "u_glow", "u_dof", "u_dof2", "u_film"]);
+                ["u_px", "u_glow", "u_dof", "u_dof2", "u_film", "u_near", "u_tier"]);
             gl.useProgram(previous);
             if (!ok) return false;
             fx.programs = programs;
@@ -353,8 +374,16 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples), {
                 fx.texture(0, t.e[0]);
                 fx.pass(B, t.eFbo[1], ew, eh);
             }
-            var vmStart = H[o + 7], vmEnd = H[o + 8];
+            var vmStart = H[o + 7], vmEnd = H[o + 8], nearEnd = H[o + 16];
             var invRange = 1 / Math.max(vmEnd - vmStart, 0.5);
+            /* The largest blur in quarter texels for a 480-line radius. Its
+             * folded binomial deviates 1.414 steps, on top of the quarter image's
+             * own 2 pixels; the four scene taps deviate 1.2 pixels. Each tier
+             * starts where its image matches that fraction of the largest. */
+            var near = Math.min(Math.max(H[o + 10] * lines * 0.6 / 4 / 1.4142, 0.25), 2.5);
+            var largest = Math.sqrt(32 * near * near + 4);
+            var smallTier = Math.min(1.2 / largest, 0.45);
+            var medTier = Math.min(Math.max(2 / largest, smallTier + 0.05), 0.9);
             if (dof) {
                 gl.useProgram(P.dof.program);
                 gl.uniform2f(P.dof.u_texel, 1 / w, 1 / h);
@@ -362,7 +391,6 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples), {
                 fx.texture(0, t.color);
                 fx.texture(1, t.depth);
                 fx.pass(P.dof, t.qFbo[0], qw, qh);
-                var near = Math.min(Math.max(H[o + 10] * lines * 0.6 / 4 / 1.4142, 0.25), 2.5);
                 gl.useProgram(P.dofBlur.program);
                 gl.uniform2f(P.dofBlur.u_step, near / qw, near / qh);
                 fx.texture(0, t.q[0]);
@@ -375,6 +403,9 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples), {
             gl.uniform4f(C.u_dof, 0.9995002746582031, H[o + 9], vmEnd, invRange);
             gl.uniform4f(C.u_dof2, dof ? ads : 0, 0.07, 0.17, 0);
             gl.uniform4f(C.u_film, H[o + 11], H[o + 12], H[o + 13], H[o + 14]);
+            /* CoD4 blurs the near world from one unit up to nearEnd. */
+            gl.uniform4f(C.u_near, H[o + 15], nearEnd, 1 / Math.max(nearEnd - 1, 1), H[o + 17]);
+            gl.uniform2f(C.u_tier, smallTier, medTier);
             var sources = [t.color, t.e[1], t.depth, t.q[0], t.q[1]];
             for (var s = 0; s < sources.length; ++s) fx.texture(s, sources[s]);
             fx.pass(C, null, w, h);
@@ -429,11 +460,12 @@ static int WebSceneFx_Samples(void)
     return r_aaSamples ? r_aaSamples->current.integer : 1;
 }
 
-void WebSceneFx_SetAds(float adsFrac, float viewmodelStart, float viewmodelEnd)
+void WebSceneFx_SetAds(float adsFrac, float viewmodelStart, float viewmodelEnd, float nearEnd)
 {
     s_adsFrac = WebSceneFx_Clamp(adsFrac, 0.0f, 1.0f);
     s_vmEnd = WebSceneFx_Clamp(viewmodelEnd, 2.0f, 64.0f);
     s_vmStart = WebSceneFx_Clamp(viewmodelStart, 0.0f, s_vmEnd - 0.5f);
+    s_nearEnd = WebSceneFx_Clamp(nearEnd, 1.0f, 1024.0f);
 }
 
 static void WebSceneFx_FillParams(float *params)
@@ -458,11 +490,14 @@ static void WebSceneFx_FillParams(float *params)
     params[SCENE_FX_VM_START] = s_vmStart;
     params[SCENE_FX_VM_END] = s_vmEnd;
     params[SCENE_FX_NEAR_CLIP] = s_nearClip;
-    params[SCENE_FX_NEAR_BLUR] = 6.0f;
+    params[SCENE_FX_NEAR_BLUR] = 3.0f;
     params[SCENE_FX_SHARPEN] = film ? 0.147f : 0.0f;
     params[SCENE_FX_SATURATION] = 0.96f;
     params[SCENE_FX_CONTRAST] = film ? 0.35f : 0.0f;
     params[SCENE_FX_FILM] = film ? 1.0f : 0.0f;
+    params[SCENE_FX_WORLD_NEAR_CLIP] = s_worldNearClip;
+    params[SCENE_FX_NEAR_END] = s_nearEnd;
+    params[SCENE_FX_WORLD_BLUR] = 1.0f;
 }
 
 void WebSceneFx_EndView(void)
@@ -477,7 +512,7 @@ void WebSceneFx_EndView(void)
 }
 
 void WebSceneFx_BeginView(int x, int y, int width, int height, int screenWidth, int screenHeight,
-                          float depthHackNearClip)
+                          float depthHackNearClip, float worldNearClip)
 {
     int samples;
 
@@ -493,6 +528,7 @@ void WebSceneFx_BeginView(int x, int y, int width, int height, int screenWidth, 
         !(WebSceneFx_Enabled(r_dof_enable) && s_adsFrac > 0.0f))
         return;
     s_nearClip = isfinite(depthHackNearClip) && depthHackNearClip > 0.0f ? depthHackNearClip : 0.1f;
+    s_worldNearClip = isfinite(worldNearClip) && worldNearClip > 0.0f ? worldNearClip : SCENE_FX_DEFAULT_WORLD_NEAR_CLIP;
     s_active = WebSceneFx_Bind(width, height, samples);
 }
 

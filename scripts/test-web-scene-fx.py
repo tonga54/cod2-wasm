@@ -11,6 +11,13 @@ backend = (root / 'src/PC/gfx_d3d/rb_backend.c').read_text()
 # always finishes before Present.
 begin = backend.index('WebSceneFx_BeginView(vp->viewport.X')
 assert begin < backend.index('RB_Set3D();', begin)
+# The world depth is linearized with the view's own infinite projection, and
+# the aim focus comes from the cgame each scene.
+assert backend.index('vp->depthHackNearClip,', begin) < \
+    backend.index('-((const float *)&vp->projectionMatrix)[14]);', begin) < backend.index('RB_Set3D();', begin)
+scene = (root / 'src/PC/gfx_d3d/r_scene.c').read_text()
+assert 'WebSceneFx_SetAds(g_webAdsDofFrac, g_webAdsViewmodelStart, g_webAdsViewmodelEnd, g_webAdsNearEnd);' in scene
+assert 'mtx[2][2] = c;' in (root / 'src/PC/universal/com_math.c').read_text()
 set2d = backend.index('static void RB_Set2D(void)')
 assert set2d < backend.index('WebSceneFx_EndView();', set2d) < backend.index('backEnd.projection2D = 1;', set2d)
 end_frame = backend.index('static void RB_EndFrame_real(void)')
@@ -70,22 +77,27 @@ static void defaults(void)
     desaturation.current.value = 0.75f; fullbright.current.enabled = 0; samples.current.integer = 4;
     dof.current.enabled = 1; film.current.enabled = 1;
 }
-static void frame(int x, int width, float nearClip)
+static void frameNear(int x, int width, float nearClip, float worldNearClip)
 {
-    WebSceneFx_BeginView(x, 0, width, 720, 1280, 720, nearClip);
+    WebSceneFx_BeginView(x, 0, width, 720, 1280, 720, nearClip, worldNearClip);
     WebSceneFx_EndView();
     WebSceneFx_EndFrame();
 }
+static void frame(int x, int width, float nearClip)
+{
+    frameNear(x, width, nearClip, 4.0f);
+}
 int main(void)
 {
+    const float defaultWorldNearClip = 0.9995002746582031f * 4.0f;
     defaults();
     for (int i = 0; i < 600; ++i) {
         binds = composes = 0;
-        WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f);
+        WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 7.996f);
         assert(binds == 1 && boundWidth == 1280 && boundHeight == 720 && boundSamples == 4 && !composes);
         /* RB_Set2D composes once; later 2D batches and views draw directly. */
         WebSceneFx_EndView(); WebSceneFx_EndView();
-        WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f);
+        WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 2.0f);
         WebSceneFx_EndView();
         WebSceneFx_EndFrame();
         assert(binds == 1 && composes == 1);
@@ -93,18 +105,22 @@ int main(void)
     assert(fabsf(composed[SCENE_FX_GLOW0] - 0.42f) < 1e-6f && fabsf(composed[SCENE_FX_GLOW1] - 0.30f) < 1e-6f);
     assert(composed[SCENE_FX_CUTOFF] == 0.9f && composed[SCENE_FX_DESATURATION] == 0.75f);
     assert(composed[SCENE_FX_RADIUS0] == 5 && composed[SCENE_FX_RADIUS1] == 12);
-    assert(composed[SCENE_FX_ADS] == 0 && composed[SCENE_FX_NEAR_CLIP] == 0.1f && composed[SCENE_FX_NEAR_BLUR] == 6);
+    assert(composed[SCENE_FX_ADS] == 0 && composed[SCENE_FX_NEAR_CLIP] == 0.1f && composed[SCENE_FX_NEAR_BLUR] == 3);
     assert(composed[SCENE_FX_SHARPEN] > 0 && composed[SCENE_FX_FILM] == 1);
+    /* The composed view's own projection linearizes the world; until the
+     * cgame aims, the near world blur reaches 512 units at full strength. */
+    assert(composed[SCENE_FX_WORLD_NEAR_CLIP] == 7.996f);
+    assert(composed[SCENE_FX_NEAR_END] == 512 && composed[SCENE_FX_WORLD_BLUR] == 1);
 
     /* A view left open without a 2D pass still composes before Present. */
     binds = composes = 0;
-    WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f);
+    WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 4.0f);
     WebSceneFx_EndFrame();
     assert(binds == 1 && composes == 1);
     /* A second full-screen view composes the first before drawing directly. */
     binds = composes = 0;
-    WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f);
-    WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f);
+    WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 4.0f);
+    WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 4.0f);
     assert(binds == 1 && composes == 1);
     WebSceneFx_EndFrame();
     assert(composes == 1);
@@ -123,14 +139,15 @@ int main(void)
 
     /* With every effect and MSAA off nothing changes, until the player aims. */
     glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1;
-    WebSceneFx_SetAds(0, 6, 15);
+    WebSceneFx_SetAds(0, 6, 15, 512);
     frame(0, 1280, 0.1f);
     assert(!binds && !composes);
-    WebSceneFx_SetAds(0.5f, 6, 15);
+    WebSceneFx_SetAds(0.5f, 6, 15, 170);
     frame(0, 1280, 0.1f);
     assert(binds == 1 && composes == 1 && boundSamples == 1);
     assert(composed[SCENE_FX_GLOW0] == 0 && composed[SCENE_FX_GLOW1] == 0 && composed[SCENE_FX_SHARPEN] == 0);
     assert(composed[SCENE_FX_FILM] == 0 && composed[SCENE_FX_CONTRAST] == 0 && composed[SCENE_FX_ADS] == 0.5f);
+    assert(composed[SCENE_FX_NEAR_END] == 170);
     dof.current.enabled = 0;
     frame(0, 1280, 0.1f);
     assert(binds == 1 && composes == 1);
@@ -154,17 +171,28 @@ int main(void)
     defaults();
     frame(0, 1280, 0.25f);
     assert(composed[SCENE_FX_NEAR_CLIP] == 0.25f);
+    /* A projection without a usable near plane falls back to r_znear 4. */
+    frameNear(0, 1280, 0.1f, NAN);
+    assert(composed[SCENE_FX_WORLD_NEAR_CLIP] == defaultWorldNearClip);
+    frameNear(0, 1280, 0.1f, -3.998f);
+    assert(composed[SCENE_FX_WORLD_NEAR_CLIP] == defaultWorldNearClip);
+    frameNear(0, 1280, 0.1f, 0.4f);
+    assert(composed[SCENE_FX_WORLD_NEAR_CLIP] == 0.4f);
 
-    /* Viewmodel focus ranges are clamped to a valid, non-empty interval. */
-    WebSceneFx_SetAds(NAN, NAN, NAN);
+    /* Focus ranges are clamped to valid, non-empty intervals; without a
+     * finite near world focus nothing past the eye blurs. */
+    WebSceneFx_SetAds(NAN, NAN, NAN, NAN);
     frame(0, 1280, 0.1f);
     assert(composed[SCENE_FX_ADS] == 0 && composed[SCENE_FX_VM_END] == 2 && composed[SCENE_FX_VM_START] == 0);
-    WebSceneFx_SetAds(4, 30, 12);
+    assert(composed[SCENE_FX_NEAR_END] == 1);
+    WebSceneFx_SetAds(4, 30, 12, 5000);
     frame(0, 1280, 0.1f);
     assert(composed[SCENE_FX_ADS] == 1 && composed[SCENE_FX_VM_END] == 12 && composed[SCENE_FX_VM_START] == 11.5f);
-    WebSceneFx_SetAds(0.25f, 5, 500);
+    assert(composed[SCENE_FX_NEAR_END] == 1024);
+    WebSceneFx_SetAds(0.25f, 5, 500, 0.5f);
     frame(0, 1280, 0.1f);
     assert(composed[SCENE_FX_ADS] == 0.25f && composed[SCENE_FX_VM_END] == 64 && composed[SCENE_FX_VM_START] == 5);
+    assert(composed[SCENE_FX_NEAR_END] == 1);
 
     /* A failed offscreen target never composes stale state. */
     bindResult = 0; composes = 0;
@@ -174,7 +202,7 @@ int main(void)
     bindResult = 1;
     frame(0, 1280, 0.1f);
     assert(composes == 1);
-    puts("PASS: 600 composed frames, single compose per frame before Present, partial/fullbright/disabled views drawn directly, bounded glow and focus parameters");
+    puts("PASS: 600 composed frames, single compose per frame before Present, partial/fullbright/disabled views drawn directly, bounded glow, viewmodel and near world focus parameters");
     return 0;
 }
 '''

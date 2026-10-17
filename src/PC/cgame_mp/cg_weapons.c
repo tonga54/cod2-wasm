@@ -1355,6 +1355,7 @@ extern float randomf(void);
 float g_webAdsDofFrac = 0.0f;
 float g_webAdsViewmodelStart = 6.0f;
 float g_webAdsViewmodelEnd = 15.0f;
+float g_webAdsNearEnd = 512.0f;
 int s_pendingLocalFireWeapon = 0;
 int s_pendingLocalFireBarrel = 0;
 int s_pendingLocalFireTime = 0;
@@ -1389,33 +1390,104 @@ static void CG_SpawnTracerImmediate(const vec_t *pstart, const vec_t *pend)
     le->pos.trDelta[2] = speed * dir[2];
 }
 
+/* CoD4 CG_UpdateAdsDof: the world blurs from the eye up to nearEnd, which stays
+ * 30 units short of the nearest player on screen within 50..512 units and of
+ * the surface under the crosshair. CoD4 falls back to 256 units with nobody on
+ * screen; 512 also softens the ground across the bottom of the view. */
+static float CG_WebAdsNearEnd(float traceDist, float nearestPlayer)
+{
+    float nearEnd = nearestPlayer - 30.0f;
+
+    if (!(nearEnd < 512.0f))
+        nearEnd = 512.0f;
+    if (nearEnd < 50.0f)
+        nearEnd = 50.0f;
+    if (traceDist < nearEnd)
+        nearEnd = traceDist - 30.0f;
+    return nearEnd < 1.0f ? 1.0f : nearEnd;
+}
+
+/* CoD4 CG_UpdateAdsDofValue: half the remaining distance per frame, at least
+ * one unit and at most maxChange per 50 ms. */
+static float CG_WebAdsDofApproach(float current, float target, float maxChange, float seconds)
+{
+    float limit = maxChange / 0.05f * seconds;
+    float step = fabsf(target - current) * 0.5f;
+
+    if (step > limit)
+        step = limit;
+    else if (step < 1.0f)
+        step = 1.0f;
+    if (target > current)
+        return current + step < target ? current + step : target;
+    return current - step > target ? current - step : target;
+}
+
+/* View depth of the nearest other player around the screen, or 1e30. */
+static float CG_WebAdsNearestPlayer(int skipClient)
+{
+    float tanX = tanf(cg->refdef.fov_x * 0.00872664626f) * 1.25f;
+    float tanY = tanf(cg->refdef.fov_y * 0.00872664626f) * 1.25f;
+    float nearest = 1.0e30f;
+    int i, axis;
+
+    for (i = 0; i < 64; ++i) {
+        const centity_t *cent = &cg_entities[i];
+        float delta[3], depth = 0.0f, side = 0.0f, up = 0.0f;
+
+        if (!cent->nextValid || cent->nextState.eType != 1 || cent->nextState.clientNum == skipClient)
+            continue;
+        for (axis = 0; axis < 3; ++axis)
+            delta[axis] = cent->lerpOrigin[axis] - cg->refdef.vieworg[axis];
+        delta[2] += 32.0f;
+        for (axis = 0; axis < 3; ++axis) {
+            depth += delta[axis] * cg->refdef.viewaxis[0][axis];
+            side += delta[axis] * cg->refdef.viewaxis[1][axis];
+            up += delta[axis] * cg->refdef.viewaxis[2][axis];
+        }
+        if (depth > 1.0f && depth < nearest && fabsf(side) <= depth * tanX && fabsf(up) <= depth * tanY)
+            nearest = depth;
+    }
+    return nearest;
+}
+
 static void CG_UpdateWebWeaponPresentation(playerState_t *ps, int weaponIndex, qboolean drawGun)
 {
     static const vec3_t zeroBounds = { 0.0f, 0.0f, 0.0f };
 
     if (ps->fWeaponPosFrac > 0.0f && drawGun) {
-        /* CoD4 blurs the viewmodel from the eye up to just short of the
-         * muzzle, so the receiver softens while the front sight stays sharp.
-         * The world stays sharp in multiplayer. */
+        /* Like CoD4's adsDofStart/End, the viewmodel blurs from the eye and is
+         * sharp from 5/8 of the muzzle distance on: the receiver blurs, the
+         * trigger hand ahead of it about half as much, and the forearm and
+         * front sight stay sharp. The world blurs short of the aim point. */
         struct DObj_s *viewModel = (*(weaponInfo_t **)imp_cg_weapons)[weaponIndex].viewModelDObj;
         unsigned int flashTag = *(unsigned short *)s_barrelTags[0];
-        vec3_t muzzle;
-        float vmEnd = 15.0f;
+        vec3_t muzzle, end;
+        trace_t trace;
+        float vmEnd = 15.0f, nearEnd;
+        int axis;
         if (viewModel && CG_DObjGetViewModelTagPos(viewModel, flashTag, muzzle)) {
             float fwd = (muzzle[0] - cg->refdef.vieworg[0]) * cg->refdef.viewaxis[0][0] +
                         (muzzle[1] - cg->refdef.vieworg[1]) * cg->refdef.viewaxis[0][1] +
                         (muzzle[2] - cg->refdef.vieworg[2]) * cg->refdef.viewaxis[0][2];
             if (isfinite(fwd) && fwd > 6.0f) {
-                vmEnd = fwd * 0.88f;
-                if (vmEnd < 12.5f)
-                    vmEnd = 12.5f;
-                if (vmEnd > 19.5f)
-                    vmEnd = 19.5f;
+                vmEnd = fwd * 0.625f;
+                if (vmEnd < 10.0f)
+                    vmEnd = 10.0f;
+                if (vmEnd > 17.5f)
+                    vmEnd = 17.5f;
             }
         }
+        for (axis = 0; axis < 3; ++axis)
+            end[axis] = cg->refdef.vieworg[axis] + 8192.0f * cg->refdef.viewaxis[0][axis];
+        CG_TraceCapsule(&trace, cg->refdef.vieworg, zeroBounds, zeroBounds, end, ps->clientNum, 0x2802831);
+        nearEnd = CG_WebAdsNearEnd(trace.fraction * 8192.0f, CG_WebAdsNearestPlayer(ps->clientNum));
+        /* CoD4 eases the focus only once fully aimed in. */
+        g_webAdsNearEnd = ps->fWeaponPosFrac >= 1.0f && g_webAdsDofFrac >= 1.0f ?
+            CG_WebAdsDofApproach(g_webAdsNearEnd, nearEnd, 50.0f, (float)cg->frametime * 0.001f) : nearEnd;
         g_webAdsDofFrac = ps->fWeaponPosFrac;
         g_webAdsViewmodelEnd = vmEnd;
-        g_webAdsViewmodelStart = vmEnd * 0.4f;
+        g_webAdsViewmodelStart = vmEnd * 0.26f;
     } else {
         g_webAdsDofFrac = 0.0f;
     }
