@@ -138,6 +138,8 @@ static int UI_TextWidth(const char*t,int n,int f,float s){return 0;}
 static float GetVirtualWidthFromRealWidth(float x){return x;}
 static float GetVirtualHeightFromRealHeight(float x){return x;}
 static void UI_DrawText(const char*t,int n,int f,float x,float y,int ha,int va,float s,const float*c,int style){texts++;tx=x;ty=y;assert(!strcmp(t,"Friend")&&ha==7&&va==7);}
+static int tags,tagDrawn;static float tagX,tagY;
+static int CG_DrawTeammateName(const char*n,float x,float y){tags++;tagX=x;tagY=y;assert(!strcmp(n,"Friend"));return tagDrawn;}
 ''' + function(hud,'CG_DrawDamageIndicators') + function(hud,'CG_DrawFriendlyNames') + r'''
 int main(void){
  cg->time=1100;cg->viewDamage[0]=(viewDamage_t){1000,2000,180}; // A source in front produces a backward travel vector.
@@ -150,6 +152,8 @@ int main(void){
  cg->bgs.clientinfo[0].team=1;cg->bgs.clientinfo[63]=(clientInfo_t){1,1,"Friend"};
  cg_entities[63]=(centity_t){.nextValid=1,.nextState={1,63,0},.lerpOrigin={1000,200,0}};
  CG_DrawFriendlyNames();assert(texts==1&&tx<0&&ty<0); // Visible while away from the crosshair.
+ assert(tags==1&&tagX==tx&&tagY==ty); // The stock label stands in when the WWII one is not drawn.
+ tagDrawn=1;CG_DrawFriendlyNames();assert(tags==2&&texts==1&&tagX==tx&&tagY==ty);tagDrawn=0;
  cg->bgs.clientinfo[63].team=2;CG_DrawFriendlyNames();assert(texts==1);
  cg->bgs.clientinfo[63].team=1;cg_entities[63].lerpOrigin[0]=-1000;CG_DrawFriendlyNames();assert(texts==1);
  cg_entities[63].lerpOrigin[0]=1000;cg_entities[63].nextValid=0;CG_DrawFriendlyNames();assert(texts==1);

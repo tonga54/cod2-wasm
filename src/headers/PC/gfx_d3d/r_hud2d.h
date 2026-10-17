@@ -17,7 +17,8 @@ typedef struct HudVertex2D {
 #define R_HUD_IMAGE_MINIMAP 0
 #define R_HUD_IMAGE_MINIMAP_ARROW 1
 #define R_HUD_IMAGE_MINIMAP_DOT 2
-#define R_HUD_IMAGE_COUNT 3
+#define R_HUD_IMAGE_NAME_FONT 3
+#define R_HUD_IMAGE_COUNT 4
 
 /* Icons whose white silhouette or emblem has been built; each is read once. */
 #define R_HUD_SILHOUETTE_COUNT 64

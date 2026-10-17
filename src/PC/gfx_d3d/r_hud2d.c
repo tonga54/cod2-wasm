@@ -29,6 +29,7 @@ static const char *const s_hudImageNames[R_HUD_IMAGE_COUNT] = {
     "*hud_minimap",
     "*hud_minimap_arrow",
     "*hud_minimap_dot",
+    "*hud_name_font",
 };
 
 static GfxImage s_hudImages[R_HUD_IMAGE_COUNT];

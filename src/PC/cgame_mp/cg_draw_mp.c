@@ -9,6 +9,7 @@
 #include "headers/PC/cgame_mp/cg_scorepopup.h"
 #include "headers/PC/cgame_mp/cg_killfeed.h"
 #include "headers/PC/cgame_mp/cg_scorepanel.h"
+#include "headers/PC/cgame_mp/cg_teamnames.h"
 
 extern const dvar_t *cg_centerPrintY;
 extern const dvar_t *cg_centertime;
@@ -1259,6 +1260,7 @@ static void CG_DrawFriendlyNames(void)
         x = -halfWidth * side / (depth * tanX);
         y = -halfHeight * up / (depth * tanY);
         if (fabsf(x) > halfWidth || fabsf(y) > halfHeight) continue;
+        if (CG_DrawTeammateName(ci->name, x, y)) continue;
         UI_DrawText(ci->name, 32, font, x - UI_TextWidth(ci->name, 32, font, .23f) * .5f,
                     y, 7, 7, .23f, color, 3);
     }
