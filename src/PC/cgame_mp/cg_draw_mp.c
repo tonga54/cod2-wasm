@@ -1,7 +1,6 @@
 #include "common_types.h"
 #include "headers/cod2_chat.h"
 #include "cod2_grenade.h"
-#include "cod2_sprint.h"
 #include "imports.h"
 #include "bytematch.h"
 #include "headers/PC/cgame_mp/cg_local.h"
@@ -1561,6 +1560,13 @@ float CG_DrawWeapReticle(void)
     return 1.0f - zoomFrac;
 }
 
+/* Sprinting opens the side marks past the hip spread. Movement spread fades
+ * them only down to this fraction of the crosshair alpha. */
+#define CG_CROSSHAIR_SPRINT_SPREAD 1.4f
+#define CG_CROSSHAIR_SPREAD_ALPHA_MIN 0.6f
+
+extern float CG_SprintCarryBlend(const playerState_t *ps);
+
 unsigned int CG_DrawCrosshair(void)
 {
     playerState_t *ps = &cg->predictedPlayerState;
@@ -1579,7 +1585,7 @@ unsigned int CG_DrawCrosshair(void)
     int pmFlags;
     int weaponstate;
 
-    if (cg->renderingThirdPerson || (ps->pm_flags & PMF_SPRINT))
+    if (cg->renderingThirdPerson)
         return 0;
 
     drawHudMenus = !CG_AreHudMenusHidden();
@@ -1708,7 +1714,8 @@ unsigned int CG_DrawCrosshair(void)
     {
         float alpha = transScale * cg_crosshairAlpha->current.value *
                       (ps->aimSpreadScale / -255.0f + 1.0f);
-        float alphaMin = (cg_crosshairAlphaMin)->current.value;
+        float alphaMin = fmaxf(cg_crosshairAlphaMin->current.value,
+                               CG_CROSSHAIR_SPREAD_ALPHA_MIN * cg_crosshairAlpha->current.value);
         reticleColor[3] = (alpha >= alphaMin ? alpha : alphaMin) * reticleVisibility;
     }
 
@@ -1730,6 +1737,7 @@ unsigned int CG_DrawCrosshair(void)
 
         BG_GetSpreadForWeapon(ps, weapIndex, &spreadMin, &spreadMax);
         spread = ((spreadMax - spreadMin) * (ps->aimSpreadScale / 255.0f) + spreadMin) * transScale;
+        spread *= 1.0f + (CG_CROSSHAIR_SPRINT_SPREAD - 1.0f) * CG_SprintCarryBlend(ps);
         spreadTan = tan((double)spread * 0.017453292519943295);
         fovTan = tan((double)cg->refdef.fov_y * 0.017453292519943295 * 0.5);
         minOfs = fmaxf((float)weapDef->iReticleMinOfs, (float)(spreadTan * 240.0 / fovTan));

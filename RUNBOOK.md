@@ -1179,7 +1179,10 @@ In the deployed Toujane match, all four white side marks were visible with the
 Sten at the hip, disappeared in ADS, and returned when leaving ADS. Evidence:
 `out/hip-crosshair-deployed.jpg`. The browser reported no console errors. The
 temporary viewport override was cleared and the test client disconnected and
-closed after verification.
+closed after verification. Since October 17, sprinting keeps the marks
+visible and opens them further, and movement spread fades them only to 60
+percent; see `docs/GRAPHICS_2026-10-16.md`. The test now also covers sprint
+and is in `scripts/test-static.sh`.
 
 ## 2026-10-09: restore climbing onto marked ledges and roofs
 

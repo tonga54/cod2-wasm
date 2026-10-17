@@ -73,7 +73,8 @@ static void BG_CalculateWeaponAngles(weaponState_t *ws,vec_t *angles) {
 }
 '''
 viewbody = ''.join(function('src/PC/cgame_mp/cg_weapons.c', name) for name in [
-    'CG_Madd','CG_ResetViewWeaponOffsets','CG_ResetSprintView','CG_SprintViewBlend','CG_AddViewWeapon'])
+    'CG_Madd','CG_ResetViewWeaponOffsets','CG_ResetSprintView','CG_SprintViewBlend','CG_SprintCarryBlend',
+    'CG_AddViewWeapon'])
 viewchecks = r'''
 int main(void) {
     playerState_t ps={.weapon=1,.fWeaponPosFrac=1};cg->frametime=16;cg->time=10000;

@@ -1582,6 +1582,16 @@ static float CG_SprintViewBlend(const playerState_t *ps, int time)
     return sprintViewBlend;
 }
 
+/* The lowered carry pose and the sprint crosshair share one eased weight. */
+float CG_SprintCarryBlend(const playerState_t *ps)
+{
+    float blend = CG_SprintViewBlend(ps, cg->time);
+#ifdef __EMSCRIPTEN__
+    blend = blend * blend * (3.0f - 2.0f * blend);
+#endif
+    return blend;
+}
+
 void CG_AddViewWeapon(playerState_t *ps)
 {
     playerState_t *playerState;
@@ -1679,10 +1689,7 @@ void CG_AddViewWeapon(playerState_t *ps)
 
     /* Compose a lowered, swinging carry pose with the original hand/weapon
      * animation. Body running clips already scale their playback to speed. */
-    sprintBlend = CG_SprintViewBlend(playerState, cg->time);
-#ifdef __EMSCRIPTEN__
-    sprintBlend = sprintBlend * sprintBlend * (3.0f - 2.0f * sprintBlend);
-#endif
+    sprintBlend = CG_SprintCarryBlend(playerState);
     sprintCycle = (float)cg->time * 0.012f;
     weaponAngles[0] += sprintBlend * (10.0f + 2.0f * sinf(sprintCycle));
     weaponAngles[1] += sprintBlend * (-10.0f + 2.0f * cosf(sprintCycle));
