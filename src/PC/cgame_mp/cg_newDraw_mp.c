@@ -3,6 +3,7 @@
 #include "imports.h"
 #include "bytematch.h"
 #include "headers/PC/cgame_mp/cg_local.h"
+#include "headers/PC/cgame_mp/cg_ammocounter.h"
 #include "headers/PC/cgame_mp/cg_minimap.h"
 #include <math.h>
 #include <string.h>
@@ -158,6 +159,7 @@ void CG_DrawHoldBreathHint(const rectDef_t *rect, struct Font_s *font, float fon
 float CG_FadeHudMenu(const dvar_t *fadeDvar, int displayStartTime, int duration);
 Bool CG_CheckPlayerForLowAmmo(void);
 Bool CG_CheckPlayerForLowClip(void);
+int CG_GetHudWeaponIndex(void);
 void CG_DrawPlayerCompassBack(const rectDef_t *rect, MaterialHandle material, vec_t *color);
 static void CG_DrawPlayerStance(const rectDef_t *rect, vec_t *color, struct Font_s *font, float scale, int textStyle);
 static void CG_DrawPlayerAmmoValue(const rectDef_t *rect, struct Font_s *font, float scale, vec_t *color, MaterialHandle material, int textStyle, int type);
@@ -1020,6 +1022,11 @@ static inline __attribute__((always_inline)) int CG_GetDrawWeaponIndex(void)
     return weaponIndex;
 }
 
+int CG_GetHudWeaponIndex(void)
+{
+    return CG_GetDrawWeaponIndex();
+}
+
 static inline __attribute__((always_inline)) weaponInfo_t *CG_GetDrawWeaponInfo(int weaponIndex)
 {
     weaponInfo_t *weapons;
@@ -1521,13 +1528,16 @@ void CG_OwnerDraw(float x, float y, float w, float h, int horzAlign, int vertAli
 
     switch (ownerDraw) {
     case CG_PLAYER_AMMO_VALUE:
-        CG_DrawPlayerAmmoValue(&rect, font, scale, color, material, textStyle, 0);
+        if (!CG_AmmoCounterActive())
+            CG_DrawPlayerAmmoValue(&rect, font, scale, color, material, textStyle, 0);
         break;
     case CG_PLAYER_AMMOCLIP_VALUE:
-        CG_DrawPlayerAmmoValue(&rect, font, scale, color, material, textStyle, 1);
+        if (!CG_AmmoCounterActive())
+            CG_DrawPlayerAmmoValue(&rect, font, scale, color, material, textStyle, 1);
         break;
     case CG_PLAYER_AMMO_BACKDROP:
-        CG_DrawPlayerAmmoBackdrop(&rect, material, color);
+        if (!CG_AmmoCounterActive())
+            CG_DrawPlayerAmmoBackdrop(&rect, material, color);
         break;
     case CG_PLAYER_STANCE:
         CG_DrawPlayerStance(&rect, color, font, scale, textStyle);
@@ -1570,12 +1580,16 @@ void CG_OwnerDraw(float x, float y, float w, float h, int horzAlign, int vertAli
         CG_DrawMantleHint(&rect, font, scale, textStyle);
         break;
     case CG_PLAYER_WEAPON_NAME:
+        if (CG_AmmoCounterActive())
+            CG_AmmoCounterPlaceWeaponName(&rect, &scale);
         CG_DrawPlayerWeaponName(&rect, font, scale, color, textStyle);
         break;
     case CG_PLAYER_WEAPON_NAME_BACK:
         CG_DrawPlayerWeaponNameBack(&rect, font, scale, color, material);
         break;
     case CG_PLAYER_WEAPON_MODE_ICON:
+        if (CG_AmmoCounterActive())
+            CG_AmmoCounterPlaceModeIcon(&rect);
         CG_DrawPlayerWeaponModeIcon(&rect, material, color);
         break;
     case CG_PLAYER_COMPASS:
@@ -1602,22 +1616,28 @@ void CG_OwnerDraw(float x, float y, float w, float h, int horzAlign, int vertAli
         CG_DrawPlayerHealthBack(&rect, material, color);
         break;
     case CG_OFFHAND_WEAPON_ICON_FRAG:
-        CG_DrawOffHandIcon(&rect, scale, color, material, 1);
+        if (!CG_AmmoCounterActive())
+            CG_DrawOffHandIcon(&rect, scale, color, material, 1);
         break;
     case CG_OFFHAND_WEAPON_ICON_SMOKE:
-        CG_DrawOffHandIcon(&rect, scale, color, material, 2);
+        if (!CG_AmmoCounterActive())
+            CG_DrawOffHandIcon(&rect, scale, color, material, 2);
         break;
     case CG_OFFHAND_WEAPON_AMMO_FRAG:
-        CG_DrawOffHandAmmo(&rect, font, scale, color, textStyle, 1);
+        if (!CG_AmmoCounterActive())
+            CG_DrawOffHandAmmo(&rect, font, scale, color, textStyle, 1);
         break;
     case CG_OFFHAND_WEAPON_AMMO_SMOKE:
-        CG_DrawOffHandAmmo(&rect, font, scale, color, textStyle, 2);
+        if (!CG_AmmoCounterActive())
+            CG_DrawOffHandAmmo(&rect, font, scale, color, textStyle, 2);
         break;
     case CG_OFFHAND_WEAPON_NAME_FRAG:
-        CG_DrawOffHandName(&rect, font, scale, color, textStyle, 1);
+        if (!CG_AmmoCounterActive())
+            CG_DrawOffHandName(&rect, font, scale, color, textStyle, 1);
         break;
     case CG_OFFHAND_WEAPON_NAME_SMOKE:
-        CG_DrawOffHandName(&rect, font, scale, color, textStyle, 2);
+        if (!CG_AmmoCounterActive())
+            CG_DrawOffHandName(&rect, font, scale, color, textStyle, 2);
         break;
     case CG_OFFHAND_WEAPON_SELECT_FRAG:
         CG_DrawOffHandHighlight(&rect, scale, color, material, 1);

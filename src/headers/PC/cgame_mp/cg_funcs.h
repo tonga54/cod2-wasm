@@ -148,6 +148,7 @@ void CG_DrawHoldBreathHint(const rectDef_t *rect, struct Font_s *font, float fon
 float CG_FadeHudMenu(const dvar_t *fadeDvar, int displayStartTime, int duration);
 Bool CG_CheckPlayerForLowAmmo(void);
 Bool CG_CheckPlayerForLowClip(void);
+int CG_GetHudWeaponIndex(void);
 void CG_DrawPlayerCompassBack(const rectDef_t *rect, MaterialHandle material, vec_t *color);
 void CG_OwnerDraw(float x, float y, float w, float h, int horzAlign, int vertAlign, float text_x, float text_y, int ownerDraw, int ownerDrawFlags, int align, float special, struct Font_s *font, float scale, vec_t *color, MaterialHandle material, int textStyle);
 
@@ -242,5 +243,6 @@ void CG_SwitchOffHandCmd(void);
 void CG_DrawOffHandIcon(rectDef_s *rect, float scale, vec_t *color, MaterialHandle material, int weaponType);
 void CG_DrawOffHandHighlight(rectDef_s *rect, float scale, vec_t *color, MaterialHandle material, int weaponType);
 void CG_DrawOffHandAmmo(rectDef_s *rect, struct Font_s *font, float scale, vec_t *color, int textStyle, int weaponType);
+MaterialHandle CG_GetOffHandIcon(int weaponType, int *count);
 
 #endif

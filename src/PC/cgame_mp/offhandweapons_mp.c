@@ -55,6 +55,7 @@ void CG_SwitchOffHandCmd(void);
 void CG_DrawOffHandIcon(rectDef_s *rect, float scale, vec_t *color, MaterialHandle material, int weaponType);
 void CG_DrawOffHandHighlight(rectDef_s *rect, float scale, vec_t *color, MaterialHandle material, int weaponType);
 void CG_DrawOffHandAmmo(rectDef_s *rect, struct Font_s *font, float scale, vec_t *color, int textStyle, int weaponType);
+MaterialHandle CG_GetOffHandIcon(int weaponType, int *count);
 
 void CG_OffhandRegisterDvars(void)
 {
@@ -92,6 +93,7 @@ void CG_DrawOffHandName(rectDef_s *rect, struct Font_s *font, float scale, vec_t
     *(int *)&drawColor[0] = *(int *)&color[0];
     *(int *)&drawColor[1] = *(int *)&color[1];
     *(int *)&drawColor[2] = *(int *)&color[2];
+    drawColor[3] = fade;
 
     text = UI_SafeTranslateString(offhandStrings[weaponType]);
 
@@ -212,6 +214,7 @@ void CG_DrawOffHandIcon(rectDef_s *rect, float scale, vec_t *color, MaterialHand
     *(int *)&drawColor[0] = *(int *)&color[0];
     *(int *)&drawColor[1] = *(int *)&color[1];
     *(int *)&drawColor[2] = *(int *)&color[2];
+    drawColor[3] = fade;
 
     if (cg->equippedOffHand != 0) {
         weapDef = BG_GetWeaponDef(cg->equippedOffHand);
@@ -374,9 +377,44 @@ void CG_DrawOffHandAmmo(rectDef_s *rect, struct Font_s *font, float scale, vec_t
         *(int *)&drawColor[1] = *(int *)&color[1];
         *(int *)&drawColor[2] = *(int *)&color[2];
     }
+    drawColor[3] = fade;
 
     UI_DrawText(text, 0x7fffffff, font,
                 rect->x, rect->y,
                 rect->horzAlign, rect->vertAlign,
                 scale, drawColor, textStyle);
+}
+
+/* The icon CG_DrawOffHandIcon would draw and the count CG_DrawOffHandAmmo
+ * would print; NULL when the player has no grenade of the class. */
+MaterialHandle CG_GetOffHandIcon(int weaponType, int *count)
+{
+    playerState_t *ps = &cg->predictedPlayerState;
+    int weapCount;
+    int weapon;
+    int i;
+
+    *count = 0;
+    if (ps->pm_type > 5)
+        return NULL;
+
+    weapon = BG_GetFirstAvailableOffhand((void *)ps, weaponType);
+    if (weapon == 0)
+        weapon = BG_GetFirstEquippedOffhand((void *)ps, weaponType);
+    if (weapon == 0)
+        return NULL;
+    if (cg->equippedOffHand != 0 &&
+        ((WeaponDef *)BG_GetWeaponDef(cg->equippedOffHand))->offhandClass == weaponType)
+        weapon = cg->equippedOffHand;
+
+    weapCount = BG_GetNumWeapons();
+    for (i = 1; i <= weapCount; i++) {
+        if (!((ps->weapons[i >> 5] >> (i & 0x1f)) & 1))
+            continue;
+        if (((WeaponDef *)BG_GetWeaponDef(i))->offhandClass != weaponType)
+            continue;
+        *count += ps->ammoclip[BG_ClipForWeapon(i)];
+    }
+
+    return ((*(weaponInfo_s **)imp_cg_weapons))[weapon].hHudIcon;
 }

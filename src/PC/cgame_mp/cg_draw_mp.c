@@ -4,6 +4,7 @@
 #include "imports.h"
 #include "bytematch.h"
 #include "headers/PC/cgame_mp/cg_local.h"
+#include "headers/PC/cgame_mp/cg_ammocounter.h"
 #include "headers/PC/cgame_mp/cg_minimap.h"
 #include "headers/PC/cgame_mp/cg_scorepopup.h"
 #include "headers/PC/cgame_mp/cg_killfeed.h"
@@ -1902,6 +1903,7 @@ unsigned int CG_Draw2D(void)
         if (drawHudMenus) {
             CG_DrawScorePanel();
             CG_DrawKillFeed();
+            CG_DrawAmmoCounter();
             CG_DrawScorePopup();
         }
     }

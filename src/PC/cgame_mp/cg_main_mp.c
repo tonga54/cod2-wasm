@@ -1,6 +1,7 @@
 #include "common_types.h"
 #include "imports.h"
 #include "headers/PC/cgame_mp/cg_local.h"
+#include "headers/PC/cgame_mp/cg_ammocounter.h"
 #include "headers/PC/cgame_mp/cg_minimap.h"
 #include "headers/PC/cgame_mp/cg_scorepopup.h"
 #include "headers/PC/cgame_mp/cg_killfeed.h"
@@ -1214,6 +1215,7 @@ void CG_Init(int serverMessageNum, int serverCommandSequence, int clientNum)
     CG_ScorePopupInit();
     CG_KillFeedInit();
     CG_ScorePanelInit();
+    CG_AmmoCounterInit();
     CG_LoadingString("sounds");
     CG_RegisterSounds();
     CG_LoadingString("clients");
