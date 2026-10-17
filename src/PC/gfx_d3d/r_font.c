@@ -1,5 +1,6 @@
 #include "common_types.h"
 #include "imports.h"
+#include "headers/PC/gfx_d3d/r_font_wwii.h"
 
 extern int I_stricmp(const char *s1, const char *s2);
 extern void R_Error(int code, const char *fmt, ...);
@@ -98,7 +99,9 @@ FontHandle R_RegisterFont(const char *fontName, int imageTrack)
         return 0;
     }
 
-    font = R_LoadFont(fontName, imageTrack);
+    font = R_LoadWwiiFont(fontName);
+    if (!font)
+        font = R_LoadFont(fontName, imageTrack);
     if (!font) {
         R_Error(1, (const char *)"R_RegisterFont: Error while reading font '%s'", fontName);
     }
@@ -155,6 +158,7 @@ int R_InitFonts(void)
 void R_ShutdownFonts(void)
 {
     registeredFontCount = 0;
+    R_ShutdownWwiiFonts();
 }
 
 float R_NormalizedTextScale(FontHandle font, float scale)
