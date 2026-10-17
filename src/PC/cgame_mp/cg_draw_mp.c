@@ -1678,13 +1678,16 @@ unsigned int CG_DrawCrosshair(void)
     if (!drawHudMenus)
         return 0;
 
-    /* Teammates turn the crosshair green. Enemies leave it white; the red hit
-     * marker confirms hits instead. */
+    /* Teammates turn the crosshair the color of their labels, the stock green
+     * with the stock labels. Enemies leave it white; the red hit marker
+     * confirms hits instead. */
     pmFlags = ps->pm_flags;
     if (pmFlags & 0x100000) {
-        color[0] = 0.25f;
-        color[1] = 1.0f;
-        color[2] = 0.25f;
+        if (!CG_GetTeammateNameColor(color)) {
+            color[0] = 0.25f;
+            color[1] = 1.0f;
+            color[2] = 0.25f;
+        }
     } else {
         color[0] = 1.0f;
         color[1] = 1.0f;

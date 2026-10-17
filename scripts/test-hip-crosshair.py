@@ -56,7 +56,15 @@ static weaponInfo_t weapons[2]={{0},{.hReticleSide=1}};
 static weaponInfo_t *weaponArray=weapons;static void *imp_cg_weapons=&weaponArray;
 static float sprintViewBlend;static int sprintViewTime;
 static int hudHidden,overlayCalls,draws,centerDraws;
-static float visibility=1,centerAlpha;
+static float visibility=1,centerAlpha,centerRgb[3];
+/* The teammate labels' color, while labelsDrawn says the WWII labels are drawn. */
+static const float labelColor[3]={.386f,.552f,.495f};
+static int labelsDrawn=1;
+static int CG_GetTeammateNameColor(float *color) {
+    if(!labelsDrawn)return 0;
+    for(int i=0;i<3;i++)color[i]=labelColor[i];
+    return 1;
+}
 static struct {float x,y,w,h,angle,alpha,rgb[3];} pics[4];
 static int CG_AreHudMenusHidden(void) {return hudHidden;}
 static void CG_DrawTurretCrossHair(void) {}
@@ -68,6 +76,7 @@ static int CL_IsRenderingSplitScreen(void) {return 0;}
 static void CL_DrawStretchPic(float x,float y,float w,float h,int ax,int ay,
     float s0,float t0,float s1,float t1,const vec_t *color,MaterialHandle material) {
     centerDraws++;centerAlpha=color[3];
+    for(int i=0;i<3;i++)centerRgb[i]=color[i];
 }
 static void BG_GetSpreadForWeapon(playerState_t *ps,int index,float *lo,float *hi) {*lo=1;*hi=5;}
 static float GetRealWidthFromVirtualWidth(float x) {return x;}
@@ -109,6 +118,9 @@ static void visible(float alpha) {
 }
 static void tint(float r,float g,float b) {
     for(int i=0;i<4;i++)assert(pics[i].rgb[0]==r&&pics[i].rgb[1]==g&&pics[i].rgb[2]==b);
+}
+static void center(float r,float g,float b) {
+    assert(centerDraws==1&&centerRgb[0]==r&&centerRgb[1]==g&&centerRgb[2]==b);
 }
 int main(void) {
     playerState_t *ps=&cg->predictedPlayerState;
@@ -161,11 +173,16 @@ int main(void) {
     ps->weaponstate=0;
     /* Standing still afterwards restores the normal size and full alpha. */
     ps->aimSpreadScale=0;assert(fabsf(frame(1300)-expected(1))<1e-3f);visible(1);tint(1,1,1);
-    /* An enemy under the crosshair (0x200000) leaves it white; a teammate
-     * (0x100000) still turns it green. */
-    ps->pm_flags=0x200000;frame(1300);visible(1);tint(1,1,1);
-    ps->pm_flags=0x100000;frame(1300);visible(1);tint(.25f,1,.25f);
-    ps->pm_flags=0;
+    /* An enemy under the crosshair (0x200000) leaves the marks and the center
+     * white; a teammate (0x100000) turns them the teammate labels' color, or
+     * the stock green while the stock labels are drawn. */
+    weapons[1].hReticleCenter=2;
+    ps->pm_flags=0x200000;frame(1300);visible(1);tint(1,1,1);center(1,1,1);
+    ps->pm_flags=0x100000;frame(1300);visible(1);
+    tint(labelColor[0],labelColor[1],labelColor[2]);center(labelColor[0],labelColor[1],labelColor[2]);
+    labelsDrawn=0;frame(1300);visible(1);tint(.25f,1,.25f);center(.25f,1,.25f);labelsDrawn=1;
+    ps->pm_flags=0;frame(1300);tint(1,1,1);center(1,1,1);
+    weapons[1].hReticleCenter=0;
     /* Both the side and center fade with the weapon-overlay transition. */
     ps->fWeaponPosFrac=.5f;visibility=.4f;
     weapons[1].hReticleCenter=2;reset();CG_DrawCrosshair();
@@ -195,7 +212,12 @@ white = ('    } else {\n'
          '        color[2] = 1.0f;\n'
          '    }\n')
 assert body.count(white) == 1
+teammate_color = '        if (!CG_GetTeammateNameColor(color)) {\n'
+assert body.count(teammate_color) == 1
 mutants = [
+    body.replace(teammate_color, '        if (1) {\n'),
+    body.replace(teammate_color, '        CG_GetTeammateNameColor(color);\n        {\n'),
+    body.replace('if (pmFlags & 0x100000) {', 'if (pmFlags & 0x300000) {'),
     body.replace(white, '    } else if (pmFlags & 0x200000) {\n'
                         '        color[0] = 1.0f;\n'
                         '        color[1] = 0.25f;\n'
@@ -224,5 +246,6 @@ with tempfile.TemporaryDirectory(prefix='cod2-crosshair-') as directory:
         result = subprocess.run([str(binary)], capture_output=True, text=True)
         assert (result.returncode == 0) == (index < 2), (index, result.stderr)
 print('PASS: four visible hip-fire marks at 18 spread levels with a 0.6 alpha floor, sprint opening/closing '
-      'over 66 frame intervals (linear and eased), firing out of sprint, white over enemies and green over '
-      f'teammates, ADS fade, five HUD gates and {len(mutants)} failing regression mutants')
+      'over 66 frame intervals (linear and eased), firing out of sprint, white over enemies, the teammate '
+      'labels\' color over teammates (green with the stock labels), ADS fade, five HUD gates and '
+      f'{len(mutants)} failing regression mutants')

@@ -4,7 +4,8 @@ the WWII captures, then the production module, compiled with the engine's real
 glyph lookup, text width and fade and the real friendly and enemy name loops:
 the atlas it uploads, the font it builds, the cleaned names it draws in teal
 above teammates and in red above the enemy the server flags under the
-crosshair, and what stays when they are switched off or without their image."""
+crosshair, the teal it lends the crosshair over a teammate, and what stays
+when they are switched off or without their image."""
 from pathlib import Path
 import hashlib
 import re
@@ -294,15 +295,16 @@ int main(void) {
     const char *capture = "[FaZe] matZiin_GOD";
     char longName[41];
     FontHandle font;
-    float width, stockWidth, scale, anchorX, anchorY;
+    float width, stockWidth, scale, anchorX, anchorY, rgb[3] = { -1.0f, -1.0f, -1.0f };
     int i, x, y;
 
     for (i = 0; i < 96; i++)
         stockGlyphs[i] = (Glyph){ (unsigned short)(0x20 + i), 0, -11, 10, 9, 12, 0, 0, 1, 1 };
 
     /* Before the level registers the dvars the stock teammate label is
-     * drawn, and no enemy label. */
+     * drawn, with the stock crosshair, and no enemy label. */
     assert(!CG_DrawTeammateName("Friend", 0.0f, 0.0f) && !creates && !draws);
+    assert(!CG_GetTeammateNameColor(rgb) && !creates && rgb[0] == -1.0f && rgb[1] == -1.0f && rgb[2] == -1.0f);
     CG_DrawEnemyName("Enemy", 0.0f, 0.0f, 1.0f);
     assert(!creates && !draws);
     CG_PlayerNamesInit();
@@ -371,11 +373,20 @@ int main(void) {
     teamNames.current.enabled = 1;
     assert(CG_DrawTeammateName("Friend", 0.0f, 0.0f) && draws == 4 && creates == 1);
 
-    /* Without its image the stock label stays, without a retry each frame,
-     * until the next level. */
+    /* The crosshair over a teammate takes the label's color while the label
+     * is drawn, and keeps its stock green with the stock label. */
+    assert(CG_GetTeammateNameColor(rgb) && !memcmp(rgb, drawn[3].color, sizeof(rgb)));
+    teamNames.current.enabled = 0;
+    rgb[0] = rgb[1] = rgb[2] = -1.0f;
+    assert(!CG_GetTeammateNameColor(rgb) && rgb[0] == -1.0f && rgb[1] == -1.0f && rgb[2] == -1.0f);
+    teamNames.current.enabled = 1;
+
+    /* Without its image the stock label stays, with the stock crosshair,
+     * without a retry each frame, until the next level. */
     CG_PlayerNamesInit();
     createFails = 1;
     assert(!CG_DrawTeammateName("Friend", 0.0f, 0.0f) && !CG_DrawTeammateName("Friend", 0.0f, 0.0f));
+    assert(!CG_GetTeammateNameColor(rgb) && rgb[0] == -1.0f && rgb[1] == -1.0f && rgb[2] == -1.0f);
     assert(creates == 2 && draws == 4);
     CG_PlayerNamesInit();
     createFails = 0;
@@ -539,7 +550,11 @@ mutants = [
     ('    color[3] = alpha;\n', '    color[3] = 1.0f;\n'),
     ('#define NAME_STYLE 3', '#define NAME_STYLE 0'),
     ('#define NAME_ALIGN 7', '#define NAME_ALIGN 1'),
-    ('!cg_hudTeammateNames->current.enabled || ', ''),
+    ('cg_hudTeammateNames && cg_hudTeammateNames->current.enabled && ', 'cg_hudTeammateNames && '),
+    ('cg_hudTeammateNames->current.enabled && CG_NameFontReady()', 'cg_hudTeammateNames->current.enabled'),
+    ('    if (!CG_TeammateNamesDrawn())\n        return 0;\n    color[0]', '    color[0]'),
+    ('    color[2] = s_teammateColor[2];\n', '    color[2] = s_teammateColor[1];\n'),
+    ('    color[2] = s_teammateColor[2];\n    return 1;', '    color[2] = s_teammateColor[2];\n    return 0;'),
     ('!cg_hudEnemyNames->current.enabled || ', ''),
     ('!cg_hudEnemyNames->current.enabled || !CG_NameFontReady())', '!cg_hudEnemyNames->current.enabled)'),
     ('Dvar_RegisterBool_mac("cg_hudEnemyNames", 1, 0x1001)', 'Dvar_RegisterBool_mac("cg_hudEnemyNames", 0, 0x1001)'),
@@ -624,7 +639,8 @@ print(f'PASS: the name font holds {len(glyph_rows)} Windows-1252 glyphs of the c
       'R_GetCharacterGlyph searches, padded and apart in its atlas, with capitals 0.7 em tall and the WWII capture\'s '
       'width for their height; while cg_hudTeammateNames is on, the friendly name loop draws each teammate\'s name '
       'without color codes, centred where the stock label was, in the capture\'s teal with capitals 7 units tall and '
-      'the stock shadow, building the atlas once per level; off or without its image the stock label stays; while '
+      'the stock shadow, building the atlas once per level, and lends the crosshair that teal; off or without its '
+      'image the stock label and crosshair stay; while '
       'cg_hudEnemyNames is on and the server flags an enemy under the crosshair, the enemy the view ray hits, unless '
       'smoke leaves less than a fifth visible, is named above his head in the same letters in the enemy capture\'s '
       'red, held 50 ms and faded over 100 once the aim '

@@ -1185,7 +1185,8 @@ percent; see `docs/GRAPHICS_2026-10-16.md`. The test now also covers sprint
 and is in `scripts/test-static.sh`. Also since October 17, an enemy under the
 crosshair no longer turns it red. Hits show the scripts' damage-feedback X in
 red, larger and for about 300 ms, and scripted HUD fades run in the original
-direction again; see the same document.
+direction again; see the same document. A teammate under it now turns it the
+teal of the WWII teammate labels instead of green.
 
 ## 2026-10-09: restore climbing onto marked ledges and roofs
 

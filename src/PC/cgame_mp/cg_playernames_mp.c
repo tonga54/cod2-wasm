@@ -127,11 +127,26 @@ void CG_PlayerNamesInit(void)
     s_nameFontState = NAME_FONT_UNTRIED;
 }
 
+static int CG_TeammateNamesDrawn(void)
+{
+    return cg_hudTeammateNames && cg_hudTeammateNames->current.enabled && CG_NameFontReady();
+}
+
 int CG_DrawTeammateName(const char *name, float x, float y)
 {
-    if (!cg_hudTeammateNames || !cg_hudTeammateNames->current.enabled || !CG_NameFontReady())
+    if (!CG_TeammateNamesDrawn())
         return 0;
     CG_DrawPlayerName(name, x, y, s_teammateColor);
+    return 1;
+}
+
+int CG_GetTeammateNameColor(float *color)
+{
+    if (!CG_TeammateNamesDrawn())
+        return 0;
+    color[0] = s_teammateColor[0];
+    color[1] = s_teammateColor[1];
+    color[2] = s_teammateColor[2];
     return 1;
 }
 
