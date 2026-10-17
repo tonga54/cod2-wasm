@@ -7,6 +7,7 @@
 #include "headers/PC/cgame_mp/cg_minimap.h"
 #include "headers/PC/cgame_mp/cg_scorepopup.h"
 #include "headers/PC/cgame_mp/cg_killfeed.h"
+#include "headers/PC/cgame_mp/cg_scorepanel.h"
 
 extern const dvar_t *cg_centerPrintY;
 extern const dvar_t *cg_centertime;
@@ -1874,6 +1875,10 @@ unsigned int CG_Draw2D(void)
             CG_Draw2dHudElems(0);
             CG_Draw2dHudElems(1);
         }
+        if (drawHudMenus) {
+            CG_DrawScorePanel();
+            CG_DrawKillFeed();
+        }
     } else {
         if (pm_type <= 5)
             CG_DrawCrosshair();
@@ -1895,6 +1900,7 @@ unsigned int CG_Draw2D(void)
             Menu_PaintAll((void *)imp_cgDC);
         CG_Draw2dHudElems(1);
         if (drawHudMenus) {
+            CG_DrawScorePanel();
             CG_DrawKillFeed();
             CG_DrawScorePopup();
         }

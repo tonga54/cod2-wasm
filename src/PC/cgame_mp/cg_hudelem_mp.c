@@ -2,6 +2,7 @@
 #include "imports.h"
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_minimap.h"
+#include "headers/PC/cgame_mp/cg_scorepanel.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -348,6 +349,16 @@ static void CG_GetHudElemColor(const hudelem_t *elem, vec4_t color)
         color[2] = (float)(int)toColor[2] * (1.0f / 255.0f);
         color[3] = (float)(int)toColor[3] * (1.0f / 255.0f);
     }
+}
+
+/* The text and color a timer element would be drawn with, or NULL for any
+ * other element. */
+const char *CG_GetHudElemTimer(const hudelem_t *elem, vec4_t color)
+{
+    if (elem->type < HE_TYPE_TIMER_DOWN || elem->type > HE_TYPE_TENTHS_TIMER_UP)
+        return NULL;
+    CG_GetHudElemColor(elem, color);
+    return CG_FormatTimerString(elem, elem->type >= HE_TYPE_TENTHS_TIMER_DOWN);
 }
 
 static void CG_GetHudElemInfo(const hudelem_t *elem, cg_hudelem_t *cghe, char *hudElemString)
@@ -713,6 +724,9 @@ void CG_Draw2dHudElems(qboolean foreground)
             continue;
 
         if (elem->type == HE_TYPE_WAYPOINT)
+            continue;
+
+        if (CG_ScorePanelHidesHudElem(elem))
             continue;
 
         CG_GetHudElemInfo(elem, &cghe, hudElemString);

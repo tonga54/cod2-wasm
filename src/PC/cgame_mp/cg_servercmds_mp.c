@@ -4,6 +4,7 @@
 #include "headers/cod2_chat.h"
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_scorepopup.h"
+#include "headers/PC/cgame_mp/cg_scorepanel.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -1001,6 +1002,18 @@ void CG_ServerCommand(void)
     if (!strcmp(cmd, "cod2_points")) {
         if (Cmd_Argc() == 3)
             CG_ScorePopupAdd(atoi(CG_Argv(1)), atoi(CG_Argv(2)));
+        return;
+    }
+    if (!strcmp(cmd, "cod2_dmscore")) {
+        if (Cmd_Argc() == 3)
+            CG_ScorePanelSetDmScore(atoi(CG_Argv(1)), atoi(CG_Argv(2)));
+        return;
+    }
+    if (!strcmp(cmd, "cod2_dmscores")) {
+        int i;
+        CG_ScorePanelClearDmScores();
+        for (i = 1; i + 1 < Cmd_Argc(); i += 2)
+            CG_ScorePanelSetDmScore(atoi(CG_Argv(i)), atoi(CG_Argv(i + 1)));
         return;
     }
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Run the production start of CG_ServerCommand: our cod2_ commands must never
-reach the retail handlers, which dispatch on the first letter alone."""
+"""Run the production start of CG_ServerCommand: our cod2_ commands reach their
+handlers and never the retail ones, which dispatch on the first letter alone."""
 from pathlib import Path
 import subprocess
 import tempfile
@@ -22,6 +22,12 @@ static int Cmd_Argc(void) { return argc; }
 static const char *CG_Argv(int i) { return i < argc ? argv[i] : ""; }
 static void CG_ScorePopupAdd(int event, int points) { assert(event == 0 && points == 100); popups++; }
 void CG_QueueObituary(int victim, int attacker, int weapon, int headshotWeapon) { obituaries++; }
+/* The deathmatch scores the panel received, "C" for a clear. */
+static char scores[64];
+static void CG_ScorePanelClearDmScores(void) { strcat(scores, "C"); }
+static void CG_ScorePanelSetDmScore(int clientNum, int score) {
+    snprintf(scores + strlen(scores), sizeof(scores) - strlen(scores), "%d=%d,", clientNum, score);
+}
 '''
 
 checks = r'''
@@ -38,8 +44,17 @@ static int run(const char *line) {
 }
 int main(void) {
     /* Commands this client does not handle are dropped, not announced. */
-    assert(!run("cod2_dmscore 5 3") && !run("cod2_dmscores 0 1 2 3") && !run("cod2_future"));
-    assert(!run("cod2_obituary 1 2") && !run("cod2_points 1"));
+    assert(!run("cod2_future") && !run("cod2_obituary 1 2") && !run("cod2_points 1"));
+    /* Deathmatch scores reach the panel: one score, or the whole table, which
+     * replaces the old one; a malformed one changes nothing. */
+    assert(!run("cod2_dmscore 5 3") && !strcmp(scores, "5=3,"));
+    scores[0] = 0;
+    assert(!run("cod2_dmscore 5") && !run("cod2_dmscore 5 3 1") && !scores[0]);
+    assert(!run("cod2_dmscores 0 1 2 -3") && !strcmp(scores, "C0=1,2=-3,"));
+    scores[0] = 0;
+    assert(!run("cod2_dmscores") && !strcmp(scores, "C"));
+    scores[0] = 0;
+    assert(!run("cod2_dmscores 0 4 7") && !strcmp(scores, "C0=4,"));
     assert(!run("cod2_points 0 100") && popups == 1);
 #ifdef __EMSCRIPTEN__
     assert(!run("cod2_obituary 1 2 3") && obituaries == 1);
@@ -54,6 +69,12 @@ mutants = [
     ('    if (!strncmp(cmd, "cod2_", 5))\n        return;\n', ''),
     ('if (!strncmp(cmd, "cod2_", 5))', 'if (!strncmp(cmd, "cod2", 4))'),
     ('if (!strncmp(cmd, "cod2_", 5))', 'if (!strcmp(cmd, "cod2_dmscore"))'),
+    ('        if (Cmd_Argc() == 3)\n            CG_ScorePanelSetDmScore',
+     '        if (Cmd_Argc() >= 3)\n            CG_ScorePanelSetDmScore'),
+    ('        CG_ScorePanelClearDmScores();\n', ''),
+    ('for (i = 1; i + 1 < Cmd_Argc(); i += 2)', 'for (i = 1; i < Cmd_Argc(); i += 2)'),
+    ('CG_ScorePanelSetDmScore(atoi(CG_Argv(i)), atoi(CG_Argv(i + 1)));',
+     'CG_ScorePanelSetDmScore(atoi(CG_Argv(i + 1)), atoi(CG_Argv(i)));'),
 ]
 
 with tempfile.TemporaryDirectory(prefix='cod2-command-prefix-') as directory:
@@ -73,5 +94,6 @@ with tempfile.TemporaryDirectory(prefix='cod2-command-prefix-') as directory:
             failed |= result.returncode != 0
         assert index == 0 or failed, index
 print('PASS: unhandled cod2_ commands return before the retail first-letter handlers, natively and in the browser; '
-      'cod2_points and cod2_obituary still reach their handlers and retail commands their letter; '
+      'cod2_points, cod2_obituary and the deathmatch scores (one score, or a whole table that replaces the old one) '
+      'still reach their handlers and retail commands their letter; '
       f'{len(mutants)} failing mutants')

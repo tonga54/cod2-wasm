@@ -21,6 +21,9 @@ extern int Com_sprintf(char *dest, int size, const char *fmt, ...);
 #define DXT_BLOCK_BYTES 16
 /* Fainter texels do not count as part of a silhouette's shape. */
 #define HUD_SILHOUETTE_ALPHA_MIN 16
+/* The darkest parts of an emblem keep this much of their alpha, so the whole
+ * shape stays faintly visible around its brighter design. */
+#define HUD_EMBLEM_LUMA_FLOOR 96
 
 static const char *const s_hudImageNames[R_HUD_IMAGE_COUNT] = {
     "*hud_minimap",
@@ -34,8 +37,9 @@ static Material s_hudMaterials[R_HUD_IMAGE_COUNT];
 
 typedef struct HudSilhouette {
     char imageName[64];
-    /* "*" + imageName, the name of the generated image. */
-    char name[65];
+    /* The generated image: "*" + imageName, then "_emblem" for an emblem. */
+    char name[72];
+    int emblem;
     /* NULL when the icon could not be decoded, so the file is not read again. */
     MaterialHandle material;
     float aspect;
@@ -134,7 +138,33 @@ static void R_DecodeBlockAlpha(const byte *block, int format, byte *alpha)
         alpha[i] = palette[(bits >> (3 * i)) & 7];
 }
 
-int R_DecodeIconAlpha(const byte *file, int fileLen, byte *bgra, int maxSize, int *width, int *height)
+/* Rec. 709 luma of each texel of a DXT3 or DXT5 color block, which always
+ * holds four colors. */
+static void R_DecodeBlockLuma(const byte *block, byte *luma)
+{
+    int palette[4];
+    unsigned int bits;
+    int i;
+
+    for (i = 0; i < 2; i++) {
+        int color = block[8 + 2 * i] | (block[9 + 2 * i] << 8);
+        int r = ((color >> 11) & 31) * 255 / 31;
+        int g = ((color >> 5) & 63) * 255 / 63;
+        int b = (color & 31) * 255 / 31;
+        palette[i] = (r * 54 + g * 183 + b * 19) >> 8;
+    }
+    palette[2] = (2 * palette[0] + palette[1]) / 3;
+    palette[3] = (palette[0] + 2 * palette[1]) / 3;
+    bits = (unsigned int)block[12] | ((unsigned int)block[13] << 8) | ((unsigned int)block[14] << 16) |
+           ((unsigned int)block[15] << 24);
+    for (i = 0; i < 16; i++)
+        luma[i] = (byte)palette[(bits >> (2 * i)) & 3];
+}
+
+/* luminance scales each texel's alpha by its brightness, from
+ * HUD_EMBLEM_LUMA_FLOOR for black up to 255 for white. */
+static int R_DecodeIcon(const byte *file, int fileLen, byte *bgra, int maxSize, int *width, int *height,
+                        int luminance)
 {
     const GfxImageFileHeader *header = (const GfxImageFileHeader *)file;
     const byte *block;
@@ -158,8 +188,11 @@ int R_DecodeIconAlpha(const byte *file, int fileLen, byte *bgra, int maxSize, in
     for (by = 0; by < blocksH; by++) {
         for (bx = 0; bx < blocksW; bx++, block += DXT_BLOCK_BYTES) {
             byte alpha[16];
+            byte luma[16];
 
             R_DecodeBlockAlpha(block, header->format, alpha);
+            if (luminance)
+                R_DecodeBlockLuma(block, luma);
             for (i = 0; i < 16; i++) {
                 int x = bx * 4 + (i & 3);
                 int y = by * 4 + (i >> 2);
@@ -170,12 +203,20 @@ int R_DecodeIconAlpha(const byte *file, int fileLen, byte *bgra, int maxSize, in
                 texel = bgra + (y * w + x) * 4;
                 texel[0] = texel[1] = texel[2] = 255;
                 texel[3] = alpha[i];
+                if (luminance)
+                    texel[3] = (byte)(alpha[i] *
+                                      (HUD_EMBLEM_LUMA_FLOOR + luma[i] * (255 - HUD_EMBLEM_LUMA_FLOOR) / 255) / 255);
             }
         }
     }
     *width = w;
     *height = h;
     return 1;
+}
+
+int R_DecodeIconAlpha(const byte *file, int fileLen, byte *bgra, int maxSize, int *width, int *height)
+{
+    return R_DecodeIcon(file, fileLen, bgra, maxSize, width, height, 0);
 }
 
 /* Trims the transparent margin but one texel and packs the remaining rows at
@@ -224,9 +265,11 @@ static MaterialHandle R_BuildHudSilhouette(HudSilhouette *entry, const Material 
     fileLen = FS_ReadFile(path, &file);
     if (fileLen < 0)
         return NULL;
-    decoded = R_DecodeIconAlpha((const byte *)file, fileLen, s_silhouettePixels, R_HUD_SILHOUETTE_MAX_SIZE, &width, &height);
+    decoded = R_DecodeIcon((const byte *)file, fileLen, s_silhouettePixels, R_HUD_SILHOUETTE_MAX_SIZE, &width, &height,
+                           entry->emblem);
     FS_FreeFile(file);
-    if (!decoded || !R_CropToAlpha(s_silhouettePixels, width, height, &width, &height))
+    /* An emblem keeps its whole frame, so it stays centred where it is drawn. */
+    if (!decoded || (!entry->emblem && !R_CropToAlpha(s_silhouettePixels, width, height, &width, &height)))
         return NULL;
 
     entry->aspect = (float)width / (float)height;
@@ -243,7 +286,7 @@ static MaterialHandle R_HudSilhouetteResult(const HudSilhouette *entry, float *a
     return entry->material;
 }
 
-MaterialHandle R_GetHudSilhouetteMaterial(MaterialHandle icon, float *aspect)
+static MaterialHandle R_GetHudIconCopy(MaterialHandle icon, int emblem, float *aspect)
 {
     const Material *material = (const Material *)icon;
     const Material *raw = R_HudRawMaterial();
@@ -259,7 +302,7 @@ MaterialHandle R_GetHudSilhouetteMaterial(MaterialHandle icon, float *aspect)
         return NULL;
 
     for (i = 0; i < s_silhouetteCount; i++) {
-        if (!strcmp(s_silhouettes[i].imageName, image->name))
+        if (s_silhouettes[i].emblem == emblem && !strcmp(s_silhouettes[i].imageName, image->name))
             return R_HudSilhouetteResult(&s_silhouettes[i], aspect);
     }
     if (s_silhouetteCount == R_HUD_SILHOUETTE_COUNT)
@@ -268,10 +311,25 @@ MaterialHandle R_GetHudSilhouetteMaterial(MaterialHandle icon, float *aspect)
     entry = &s_silhouettes[s_silhouetteCount++];
     memset(entry, 0, sizeof(*entry));
     strcpy(entry->imageName, image->name);
+    entry->emblem = emblem;
     entry->name[0] = '*';
     strcpy(entry->name + 1, image->name);
+    if (emblem)
+        strcat(entry->name, "_emblem");
     entry->material = R_BuildHudSilhouette(entry, raw);
     return R_HudSilhouetteResult(entry, aspect);
+}
+
+MaterialHandle R_GetHudSilhouetteMaterial(MaterialHandle icon, float *aspect)
+{
+    return R_GetHudIconCopy(icon, 0, aspect);
+}
+
+MaterialHandle R_GetHudEmblemMaterial(MaterialHandle icon)
+{
+    float aspect;
+
+    return R_GetHudIconCopy(icon, 1, &aspect);
 }
 
 void R_ShutdownHudImages(void)

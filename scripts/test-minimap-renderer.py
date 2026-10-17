@@ -437,6 +437,44 @@ static void silhouettes(void) {
     assert(!R_GetHudSilhouetteMaterial(&extra, &aspect) && reads == full + 2);
     R_ShutdownHudImages();
     assert(released == 3);
+
+    /* Emblems: an 8x4 DXT5 icon, opaque white to black in the first block and
+     * half-transparent red and blue in the second. */
+    static byte topLuma[32], fileLuma[256];
+    const int flatAlpha[16] = {0};
+    dxt5(topLuma, 255, 255, flatAlpha); dxt5(topLuma + 16, 128, 128, flatAlpha);
+    const byte grey[8] = {0xff, 0xff, 0x00, 0x00, 0xe4, 0, 0, 0}, redBlue[8] = {0x00, 0xf8, 0x1f, 0x00, 0x04, 0, 0, 0};
+    memcpy(topLuma + 8, grey, 8); memcpy(topLuma + 24, redBlue, 8);
+    int lenLuma = iwi(fileLuma, 5, 0x0d, 8, 4, topLuma, 32);
+    /* Black keeps 96 of 255, white all of it; the two DXT midpoints and the
+     * Rec. 709 luma of pure red and blue scale in between. */
+    assert(R_DecodeIcon(fileLuma, lenLuma, out, 128, &w, &h, 1) && w == 8 && h == 4);
+    const int lumaRow0[8] = {255, 96, 202, 149, 64, 53, 64, 64};
+    for (int x = 0; x < 8; x++) assert(alphaAt(out, 8, x, 0) == lumaRow0[x]);
+    assert(alphaAt(out, 8, 3, 3) == 255 && alphaAt(out, 8, 7, 3) == 64);
+    assert(R_DecodeIconAlpha(fileLuma, lenLuma, out, 128, &w, &h) && alphaAt(out, 8, 1, 0) == 255 && alphaAt(out, 8, 5, 0) == 128);
+
+    fileNames[0] = "images/hud_test.iwi"; fileData[0] = fileLuma; fileLens[0] = lenLuma;
+    reads = frees = 0;
+    int built = generated;
+    Material *emblem = R_GetHudEmblemMaterial(&icon);
+    assert(emblem && reads == 1 && frees == 1 && generated == built + 1 && lastWidth == 8 && lastHeight == 4);
+    for (int x = 0; x < 8; x++) assert(alphaAt(lastPixels, 8, x, 0) == lumaRow0[x]);
+    assert(!strcmp(emblem->textures[0].u.image->name, "*hud_test_emblem") && !strcmp(emblem->info.name, "hud_test_emblem"));
+    assert(emblem->techniqueSet == raw.techniqueSet && emblem->textures[0].samplerState == 0x32);
+    /* The whole frame is kept, so an emblem stays centred where it is drawn. */
+    Material *uncropped = R_GetHudEmblemMaterial(&crop);
+    assert(uncropped && uncropped != emblem && lastWidth == 8 && lastHeight == 8 && reads == 2);
+    /* One emblem per image, apart from the image's silhouette. */
+    assert(R_GetHudEmblemMaterial(&icon) == emblem && R_GetHudEmblemMaterial(&alias) == emblem && reads == 2);
+    Material *outline = R_GetHudSilhouetteMaterial(&icon, &aspect);
+    assert(outline && outline != emblem && reads == 3 && !strcmp(outline->textures[0].u.image->name, "*hud_test"));
+    assert(alphaAt(lastPixels, 8, 1, 0) == 255 && R_GetHudSilhouetteMaterial(&icon, &aspect) == outline);
+    assert(R_GetHudEmblemMaterial(&icon) == emblem && reads == 3);
+    assert(!R_GetHudEmblemMaterial(&missing) && !R_GetHudEmblemMaterial(&missing) && reads == 4);
+    assert(!R_GetHudEmblemMaterial(NULL) && !R_GetHudEmblemMaterial(&fallback));
+    R_ShutdownHudImages();
+    assert(released == 6);
 }
 
 int main(void) {
@@ -471,8 +509,17 @@ mutants = [
     mutate('w > maxSize || h > maxSize', 'h > maxSize'),
     mutate(' || header->version != IWI_VERSION', ''),
     mutate('    if (fileLen - (int)sizeof(*header) < blocksW * blocksH * DXT_BLOCK_BYTES)\n        return 0;\n', ''),
-    mutate('        if (!strcmp(s_silhouettes[i].imageName, image->name))',
-           '        if (!strcmp(s_silhouettes[i].imageName, image->name) && s_silhouettes[i].material)'),
+    mutate('        if (s_silhouettes[i].emblem == emblem && !strcmp(s_silhouettes[i].imageName, image->name))',
+           '        if (s_silhouettes[i].emblem == emblem && !strcmp(s_silhouettes[i].imageName, image->name) && '
+           's_silhouettes[i].material)'),
+    mutate('s_silhouettes[i].emblem == emblem && ', ''),
+    mutate('    entry->emblem = emblem;\n', ''),
+    mutate('    if (emblem)\n        strcat(entry->name, "_emblem");\n', ''),
+    mutate('(!entry->emblem && !R_CropToAlpha(', '(!R_CropToAlpha('),
+    mutate('    palette[2] = (2 * palette[0] + palette[1]) / 3;', '    palette[2] = (palette[0] + 2 * palette[1]) / 3;'),
+    mutate('palette[i] = (r * 54 + g * 183 + b * 19) >> 8;', 'palette[i] = (r * 19 + g * 183 + b * 54) >> 8;'),
+    mutate('luma[i] = (byte)palette[(bits >> (2 * i)) & 3];', 'luma[i] = (byte)palette[(bits >> i) & 3];'),
+    mutate('(HUD_EMBLEM_LUMA_FLOOR + luma[i] * (255 - HUD_EMBLEM_LUMA_FLOOR) / 255)', '(luma[i])'),
     mutate('    if (s_silhouetteCount == R_HUD_SILHOUETTE_COUNT)\n        return NULL;\n', ''),
     mutate('        R_ReleaseImage(&s_silhouettes[slot].image);\n', ''),
     mutate('    s_silhouetteCount = 0;\n', ''),
@@ -481,7 +528,7 @@ mutants = [
     mutate('    maxY = maxY < height - 1 ? maxY + 1 : maxY;\n', ''),
     mutate('maxX = maxX < width - 1 ? maxX + 1 : maxX;', 'maxX = maxX + 1;'),
     mutate('memmove(bgra + y * *cropWidth * 4,', 'memmove(bgra + y * width * 4,'),
-    mutate('    if (!decoded || !R_CropToAlpha(s_silhouettePixels, width, height, &width, &height))',
+    mutate('    if (!decoded || (!entry->emblem && !R_CropToAlpha(s_silhouettePixels, width, height, &width, &height)))',
            '    if (!decoded)'),
     mutate('    entry->aspect = (float)width / (float)height;\n', ''),
     mutate('*aspect = entry->material ? entry->aspect : 0.0f;', '*aspect = entry->aspect;'),
@@ -500,5 +547,6 @@ print('PASS: render command 6 carries per-vertex positions, texture coordinates 
       'a full surface and rejects bad counts; HUD images copy $raw with their own clamped texture, rebuild and shut '
       'down cleanly; icon silhouettes decode the top DXT3/DXT5 mip as white texels with its alpha, are trimmed to '
       'their visible texels plus one, report their proportions, are built once per image, remember failures, cap '
-      'the cache and empty it on shutdown; world bounds skip the sky; '
+      'the cache and empty it on shutdown; emblems keep the whole icon with an opacity that follows its Rec. 709 '
+      'brightness from a floor, cached apart from silhouettes; world bounds skip the sky; '
       f'{len(mutants)} failing regression mutants')

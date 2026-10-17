@@ -83,6 +83,9 @@ static void CL_DrawStretchPicPhysical(float x,float y,float w,float h,float s0,f
     memcpy(draws[drawCount].color,*color,sizeof(vec4_t));draws[drawCount++].material=material;
 }
 static void CG_DrawRotatedPicPhysical(float x,float y,float w,float h,float angle,vec4_t *color,void *material) {abort();}
+/* The score panel stands in for elements of this material. */
+static int panelMaterial;
+static int CG_ScorePanelHidesHudElem(const hudelem_t *elem) {return panelMaterial&&elem->materialIndex==panelMaterial;}
 static void CG_DrawHudElemString(const char *text,const hudelem_t *elem,cg_hudelem_t *cghe) {abort();}
 /* Center-aligned elements, as the scripts create them; color comes from the real fade. */
 static void CG_GetHudElemInfo(const hudelem_t *elem,cg_hudelem_t *cghe,char *hudElemString) {
@@ -173,6 +176,10 @@ int main(void) {
     setColor(&hud[0].color,255,255,255,153);hud[0].fadeTime=0;
     assert(frame(9000)==2);marker(.6f);
     setColor(&hud[0].color,255,255,255,0);assert(frame(9000)==1);
+    /* Elements the score panel replaces are not drawn; the others still are. */
+    panelMaterial=2;assert(frame(9000)==0);
+    setColor(&hud[0].color,255,255,255,153);assert(frame(9000)==1&&find(1)==0);
+    panelMaterial=0;assert(frame(9000)==2);
     return 0;
 }
 '''
@@ -193,6 +200,7 @@ mutants = [
     body.replace('x = floorf(x - (markerWidth - width) * 0.5f + 0.5f);', 'x = floorf(x + 0.5f);'),
     body.replace('vec4_t color = {1.0f, 0.2f, 0.15f, alpha};', 'vec4_t color = {1.0f, 0.2f, 0.15f, 1.0f};'),
     body.replace('float markerWidth = width * CG_HIT_MARKER_SCALE;', 'float markerWidth = width;'),
+    body.replace('        if (CG_ScorePanelHidesHudElem(elem))\n            continue;\n', ''),
 ]
 assert marker_body in body and all(mutant != body for mutant in mutants)
 with tempfile.TemporaryDirectory(prefix='cod2-hit-marker-') as directory:
@@ -206,4 +214,5 @@ with tempfile.TemporaryDirectory(prefix='cod2-hit-marker-') as directory:
         assert (result.returncode == 0) == (index == 0), (index, result.stderr)
 print('PASS: script fades run from the start color to the target (CTF flag fade-in and color blend); '
       'each hit draws a red, centered marker that holds, fades out within 300 ms and restarts on the next '
-      f'hit; other material elements are unchanged; {len(mutants)} failing regression mutants')
+      'hit; other material elements are unchanged and those the score panel replaces are skipped; '
+      f'{len(mutants)} failing regression mutants')

@@ -26,9 +26,10 @@ def block(text, start_text, declaration=False):
 
 
 # Obituaries reach the feed (test-kill-feed.py runs that path); the HUD draws
-# it with the menus and every level starts with an empty feed.
+# it with the menus, for players and free spectators, and every level starts
+# with an empty feed.
 assert event.count('CG_KillFeedAdd(attackerName[0] ? attacker : -1, target, feedIcon, feedWide, feedFlip, headshot);') == 1
-assert draw.count('        if (drawHudMenus) {\n            CG_DrawKillFeed();\n') == 1
+assert draw.count('        if (drawHudMenus) {\n            CG_DrawScorePanel();\n            CG_DrawKillFeed();\n') == 2
 assert main.count('    CG_ScorePopupInit();\n    CG_KillFeedInit();\n') == 1
 
 defines = '\n'.join(re.findall(r'^#define KILLFEED_\w+ .*$', source, re.M))

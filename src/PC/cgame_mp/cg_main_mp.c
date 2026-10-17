@@ -4,6 +4,7 @@
 #include "headers/PC/cgame_mp/cg_minimap.h"
 #include "headers/PC/cgame_mp/cg_scorepopup.h"
 #include "headers/PC/cgame_mp/cg_killfeed.h"
+#include "headers/PC/cgame_mp/cg_scorepanel.h"
 #include <float.h>
 
 extern const dvar_t *com_sv_running;
@@ -1212,6 +1213,7 @@ void CG_Init(int serverMessageNum, int serverCommandSequence, int clientNum)
     CG_MinimapInit(cgs->mapname);
     CG_ScorePopupInit();
     CG_KillFeedInit();
+    CG_ScorePanelInit();
     CG_LoadingString("sounds");
     CG_RegisterSounds();
     CG_LoadingString("clients");

@@ -19,7 +19,7 @@ typedef struct HudVertex2D {
 #define R_HUD_IMAGE_MINIMAP_DOT 2
 #define R_HUD_IMAGE_COUNT 3
 
-/* Icons whose white silhouette has been built; each image is read once. */
+/* Icons whose white silhouette or emblem has been built; each is read once. */
 #define R_HUD_SILHOUETTE_COUNT 64
 #define R_HUD_SILHOUETTE_MAX_SIZE 128
 
@@ -32,6 +32,9 @@ MaterialHandle R_CreateHudImageMaterial(int slot, const byte *bgra, int width, i
  * height. Returns NULL, with aspect 0, unless the icon's image is a DXT3 or
  * DXT5 IWi of at most R_HUD_SILHOUETTE_MAX_SIZE texels a side. */
 MaterialHandle R_GetHudSilhouetteMaterial(MaterialHandle icon, float *aspect);
+/* A white copy of the whole icon whose opacity follows its brightness, for a
+ * faint one-color emblem. Built under the same conditions as a silhouette. */
+MaterialHandle R_GetHudEmblemMaterial(MaterialHandle icon);
 /* The top mip of a DXT3 or DXT5 IWi file as white BGRA texels with its alpha. */
 int R_DecodeIconAlpha(const byte *file, int fileLen, byte *bgra, int maxSize, int *width, int *height);
 void R_ShutdownHudImages(void);
