@@ -140,7 +140,7 @@ static float GetVirtualHeightFromRealHeight(float x){return x;}
 static void UI_DrawText(const char*t,int n,int f,float x,float y,int ha,int va,float s,const float*c,int style){texts++;tx=x;ty=y;assert(!strcmp(t,"Friend")&&ha==7&&va==7);}
 static int tags,tagDrawn;static float tagX,tagY;
 static int CG_DrawTeammateName(const char*n,float x,float y){tags++;tagX=x;tagY=y;assert(!strcmp(n,"Friend"));return tagDrawn;}
-''' + function(hud,'CG_DrawDamageIndicators') + function(hud,'CG_DrawFriendlyNames') + r'''
+''' + function(hud,'CG_DrawDamageIndicators') + function(hud,'CG_GetPlayerNamePosition') + function(hud,'CG_DrawFriendlyNames') + r'''
 int main(void){
  cg->time=1100;cg->viewDamage[0]=(viewDamage_t){1000,2000,180}; // A source in front produces a backward travel vector.
  CG_DrawDamageIndicators();assert(pics==1&&fabsf(px)<.01&&fabsf(py+128)<.01&&fabsf(alpha-.95f)<.01);

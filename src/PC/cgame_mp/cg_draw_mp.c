@@ -9,7 +9,7 @@
 #include "headers/PC/cgame_mp/cg_scorepopup.h"
 #include "headers/PC/cgame_mp/cg_killfeed.h"
 #include "headers/PC/cgame_mp/cg_scorepanel.h"
-#include "headers/PC/cgame_mp/cg_teamnames.h"
+#include "headers/PC/cgame_mp/cg_playernames.h"
 
 extern const dvar_t *cg_centerPrintY;
 extern const dvar_t *cg_centertime;
@@ -118,6 +118,7 @@ extern void UI_DrawText(const char *text, int maxChars, FontHandle font, float x
 extern MaterialHandle CL_RegisterMaterial(const char *name, int flags);
 extern void CG_TranslateHudElemMessage(const char *message, const char *messageType, char *hudElemString);
 extern void CG_TraceCapsule(trace_t *result, const vec_t *start, const vec_t *mins, const vec_t *maxs, const vec_t *end, int skipNumber, int mask);
+extern float FX_GetServerVisibility(const vec_t *start, const vec_t *end);
 extern int BG_GetViewmodelWeaponIndex(void *ps);
 extern void *BG_GetWeaponDef(int weapIndex);
 extern int BG_GetNumWeapons(void);
@@ -1225,45 +1226,109 @@ static void CG_DrawGrenadeIndicators(void)
     }
 }
 
+/* Above the player's head, in center_safearea units; 0 behind the view or off
+ * the screen. */
+static int CG_GetPlayerNamePosition(const centity_t *cent, float *x, float *y)
+{
+    float tanX = (float)tan(cg->refdef.fov_x * 0.00872664626f);
+    float tanY = (float)tan(cg->refdef.fov_y * 0.00872664626f);
+    float halfWidth = GetVirtualWidthFromRealWidth(cg->refdef.width) * .5f;
+    float halfHeight = GetVirtualHeightFromRealHeight(cg->refdef.height) * .5f;
+    float depth = 0, side = 0, up = 0;
+    vec3_t delta;
+    int axis;
+    if (tanX <= 0 || tanY <= 0) return 0;
+    for (axis = 0; axis < 3; ++axis) {
+        delta[axis] = cent->lerpOrigin[axis] - cg->refdef.vieworg[axis];
+    }
+    /* Player stance flags: standing, crouching and prone head heights. */
+    delta[2] += cent->nextState.eFlags & 8 ? 24 : cent->nextState.eFlags & 4 ? 48 : 76;
+    for (axis = 0; axis < 3; ++axis) {
+        depth += delta[axis] * cg->refdef.viewaxis[0][axis];
+        side += delta[axis] * cg->refdef.viewaxis[1][axis];
+        up += delta[axis] * cg->refdef.viewaxis[2][axis];
+    }
+    if (depth <= 1) return 0;
+    *x = -halfWidth * side / (depth * tanX);
+    *y = -halfHeight * up / (depth * tanY);
+    return fabsf(*x) <= halfWidth && fabsf(*y) <= halfHeight;
+}
+
 static void CG_DrawFriendlyNames(void)
 {
     int i, team = cg->bgs.clientinfo[cg->predictedPlayerState.clientNum].team;
-    float tanX = (float)tan(cg->refdef.fov_x * 0.00872664626f);
-    float tanY = (float)tan(cg->refdef.fov_y * 0.00872664626f);
     FontHandle font = UI_GetFontHandle(0, .23f);
     vec4_t color = {.55f, 1.0f, .55f, 1.0f};
-    if ((team != 1 && team != 2) || tanX <= 0 || tanY <= 0) return;
+    if (team != 1 && team != 2) return;
     for (i = 0; i < 64; ++i) {
         centity_t *cent = &cg_entities[i];
         clientInfo_t *ci;
-        vec3_t delta;
-        float depth = 0, side = 0, up = 0, x, y;
-        float halfWidth = GetVirtualWidthFromRealWidth(cg->refdef.width) * .5f;
-        float halfHeight = GetVirtualHeightFromRealHeight(cg->refdef.height) * .5f;
-        int axis;
+        float x, y;
         if (!cent->nextValid || cent->nextState.eType != 1 ||
             (unsigned)cent->nextState.clientNum >= 64 ||
             cent->nextState.clientNum == cg->predictedPlayerState.clientNum) continue;
         ci = &cg->bgs.clientinfo[cent->nextState.clientNum];
         if (!ci->infoValid || ci->team != team || !ci->name[0]) continue;
-        for (axis = 0; axis < 3; ++axis) {
-            delta[axis] = cent->lerpOrigin[axis] - cg->refdef.vieworg[axis];
-        }
-        /* Player stance flags: standing, crouching and prone head heights. */
-        delta[2] += cent->nextState.eFlags & 8 ? 24 : cent->nextState.eFlags & 4 ? 48 : 76;
-        for (axis = 0; axis < 3; ++axis) {
-            depth += delta[axis] * cg->refdef.viewaxis[0][axis];
-            side += delta[axis] * cg->refdef.viewaxis[1][axis];
-            up += delta[axis] * cg->refdef.viewaxis[2][axis];
-        }
-        if (depth <= 1) continue;
-        x = -halfWidth * side / (depth * tanX);
-        y = -halfHeight * up / (depth * tanY);
-        if (fabsf(x) > halfWidth || fabsf(y) > halfHeight) continue;
+        if (!CG_GetPlayerNamePosition(cent, &x, &y)) continue;
         if (CG_DrawTeammateName(ci->name, x, y)) continue;
         UI_DrawText(ci->name, 32, font, x - UI_TextWidth(ci->name, 32, font, .23f) * .5f,
                     y, 7, 7, .23f, color, 3);
     }
+}
+
+/* The enemy under the crosshair is named above the head, once the server
+ * flags an enemy there (0x200000) within the weapon's enemyCrosshairRange, as
+ * the stock red crosshair was. The name lingers and fades like a crosshair
+ * name. Free-for-all players have team 0. */
+static void CG_DrawEnemyNames(void)
+{
+    static int lastClient, lastTime;
+    const playerState_t *ps = &cg->predictedPlayerState;
+    int team = cg->bgs.clientinfo[ps->clientNum].team;
+    vec3_t start, end, contact;
+    vec3_t traceMins = { 0.0f, 0.0f, 0.0f };
+    vec3_t traceMaxs = { 0.0f, 0.0f, 0.0f };
+    trace_t trace;
+    const float *fade;
+    centity_t *cent;
+    clientInfo_t *ci;
+    float x, y;
+    int axis;
+
+    /* Another server's clock can start behind the last sighting. */
+    if (lastTime > cg->time)
+        lastTime = 0;
+    if (cg->renderingThirdPerson)
+        return;
+    if (ps->pm_flags & 0x200000) {
+        for (axis = 0; axis < 3; ++axis) {
+            start[axis] = cg->refdef.vieworg[axis];
+            end[axis] = start[axis] + cg->refdef.viewaxis[0][axis] * 8192.0f;
+        }
+        CG_TraceCapsule(&trace, start, traceMins, traceMaxs, end, ps->clientNum, 0x2000001);
+        if (trace.entityNum < 64) {
+            ci = &cg->bgs.clientinfo[trace.entityNum];
+            for (axis = 0; axis < 3; ++axis) {
+                contact[axis] = start[axis] + (end[axis] - start[axis]) * trace.fraction;
+            }
+            /* A dedicated server runs no effects, so the flag ignores smoke;
+             * the server's smoke test runs here on the client's particles. */
+            if (ci->infoValid && (!team || ci->team != team) && FX_GetServerVisibility(start, contact) >= 0.2f) {
+                lastClient = trace.entityNum;
+                lastTime = cg->time;
+            }
+        }
+    }
+    fade = CG_FadeColor(lastTime, 150, 100);
+    if (!fade)
+        return;
+    cent = &cg_entities[lastClient];
+    ci = &cg->bgs.clientinfo[lastClient];
+    if (!cent->nextValid || cent->nextState.eType != 1 || cent->nextState.clientNum != lastClient ||
+        !ci->infoValid || (team && ci->team == team) || !ci->name[0])
+        return;
+    if (CG_GetPlayerNamePosition(cent, &x, &y))
+        CG_DrawEnemyName(ci->name, x, y, fade[3]);
 }
 
 static unsigned int CG_DrawSpectatorMessage(void)
@@ -1891,6 +1956,7 @@ unsigned int CG_Draw2D(void)
                 CG_DrawCrosshairNames();
             if (pm_type <= 1) {
                 CG_DrawFriendlyNames();
+                CG_DrawEnemyNames();
                 CG_DrawDamageIndicators();
                 CG_DrawGrenadeIndicators();
             }
