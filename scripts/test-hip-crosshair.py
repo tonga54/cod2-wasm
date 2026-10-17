@@ -49,7 +49,7 @@ static struct {int viewWidth,viewHeight;} cgsStorage,*cgs=&cgsStorage;
 static dvar_t enabled={.current={.enabled=1,.value=1}},disabled,paused,highMin={.current={.value=.8f}};
 static dvar_t *cg_crosshairAlpha=&enabled,*cg_crosshairAlphaMin=&disabled;
 static dvar_t *cg_drawGun=&enabled,*cg_drawCrosshair=&enabled,*cg_paused=&paused;
-static dvar_t *cg_crosshairDynamic=&disabled,*cg_crosshairEnemyColor=&enabled;
+static dvar_t *cg_crosshairDynamic=&disabled;
 static WeaponDef weapon={.fAdsCrosshairInFrac=.5f,.fAdsCrosshairOutFrac=.5f,
     .iReticleSideSize=8,.iReticleMinOfs=10};
 static weaponInfo_t weapons[2]={{0},{.hReticleSide=1}};
@@ -57,7 +57,7 @@ static weaponInfo_t *weaponArray=weapons;static void *imp_cg_weapons=&weaponArra
 static float sprintViewBlend;static int sprintViewTime;
 static int hudHidden,overlayCalls,draws,centerDraws;
 static float visibility=1,centerAlpha;
-static struct {float x,y,w,h,angle,alpha;} pics[4];
+static struct {float x,y,w,h,angle,alpha,rgb[3];} pics[4];
 static int CG_AreHudMenusHidden(void) {return hudHidden;}
 static void CG_DrawTurretCrossHair(void) {}
 static int BG_GetViewmodelWeaponIndex(playerState_t *ps) {return ps->weapon;}
@@ -78,7 +78,9 @@ static void CG_DrawRotatedPic(float x,float y,float w,float h,int ax,int ay,
     float angle,const vec_t *color,MaterialHandle material) {
     assert(draws<4);assert(ax==2&&ay==2&&material==1);
     pics[draws].x=x;pics[draws].y=y;pics[draws].w=w;pics[draws].h=h;
-    pics[draws].angle=angle;pics[draws].alpha=color[3];draws++;
+    pics[draws].angle=angle;pics[draws].alpha=color[3];
+    for(int i=0;i<3;i++)pics[draws].rgb[i]=color[i];
+    draws++;
 }
 '''
 body = ''.join([
@@ -104,6 +106,9 @@ static void visible(float alpha) {
         assert(isfinite(pics[i].x)&&isfinite(pics[i].y));
     }
     assert(pics[0].y+8<0&&pics[1].x>0&&pics[2].y>0&&pics[3].x+8<0);
+}
+static void tint(float r,float g,float b) {
+    for(int i=0;i<4;i++)assert(pics[i].rgb[0]==r&&pics[i].rgb[1]==g&&pics[i].rgb[2]==b);
 }
 int main(void) {
     playerState_t *ps=&cg->predictedPlayerState;
@@ -155,7 +160,12 @@ int main(void) {
     assert(fabsf(frame(1216)-walk)<1e-3f);
     ps->weaponstate=0;
     /* Standing still afterwards restores the normal size and full alpha. */
-    ps->aimSpreadScale=0;assert(fabsf(frame(1300)-expected(1))<1e-3f);visible(1);
+    ps->aimSpreadScale=0;assert(fabsf(frame(1300)-expected(1))<1e-3f);visible(1);tint(1,1,1);
+    /* An enemy under the crosshair (0x200000) leaves it white; a teammate
+     * (0x100000) still turns it green. */
+    ps->pm_flags=0x200000;frame(1300);visible(1);tint(1,1,1);
+    ps->pm_flags=0x100000;frame(1300);visible(1);tint(.25f,1,.25f);
+    ps->pm_flags=0;
     /* Both the side and center fade with the weapon-overlay transition. */
     ps->fWeaponPosFrac=.5f;visibility=.4f;
     weapons[1].hReticleCenter=2;reset();CG_DrawCrosshair();
@@ -179,7 +189,18 @@ int main(void) {
 blend_call = 'spread *= 1.0f + (CG_CROSSHAIR_SPRINT_SPREAD - 1.0f) * CG_SprintCarryBlend(ps);'
 alpha_floor = ('fmaxf(cg_crosshairAlphaMin->current.value,\n'
                '                               CG_CROSSHAIR_SPREAD_ALPHA_MIN * cg_crosshairAlpha->current.value)')
+white = ('    } else {\n'
+         '        color[0] = 1.0f;\n'
+         '        color[1] = 1.0f;\n'
+         '        color[2] = 1.0f;\n'
+         '    }\n')
+assert body.count(white) == 1
 mutants = [
+    body.replace(white, '    } else if (pmFlags & 0x200000) {\n'
+                        '        color[0] = 1.0f;\n'
+                        '        color[1] = 0.25f;\n'
+                        '        color[2] = 0.25f;\n' + white),
+    body.replace('if (pmFlags & 0x100000) {', 'if (0) {'),
     body.replace('color[3] = reticleVisibility *', 'color[3] = posLerp *'),
     body.replace('(alpha >= alphaMin ? alpha : alphaMin) * reticleVisibility',
                  '(alpha >= alphaMin ? alpha : alphaMin)'),
@@ -203,5 +224,5 @@ with tempfile.TemporaryDirectory(prefix='cod2-crosshair-') as directory:
         result = subprocess.run([str(binary)], capture_output=True, text=True)
         assert (result.returncode == 0) == (index < 2), (index, result.stderr)
 print('PASS: four visible hip-fire marks at 18 spread levels with a 0.6 alpha floor, sprint opening/closing '
-      'over 66 frame intervals (linear and eased), firing out of sprint, ADS fade, five HUD gates and '
-      f'{len(mutants)} failing regression mutants')
+      'over 66 frame intervals (linear and eased), firing out of sprint, white over enemies and green over '
+      f'teammates, ADS fade, five HUD gates and {len(mutants)} failing regression mutants')

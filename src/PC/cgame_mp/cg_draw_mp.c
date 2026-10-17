@@ -12,7 +12,6 @@ extern const dvar_t *cg_chatTime;
 extern const dvar_t *cg_crosshairAlpha;
 extern const dvar_t *cg_crosshairAlphaMin;
 extern const dvar_t *cg_crosshairDynamic;
-extern const dvar_t *cg_crosshairEnemyColor;
 extern const dvar_t *cg_draw2D;
 extern const dvar_t *cg_drawCrosshair;
 extern const dvar_t *cg_drawCrosshairNames;
@@ -1607,21 +1606,13 @@ unsigned int CG_DrawCrosshair(void)
     if (!drawHudMenus)
         return 0;
 
+    /* Teammates turn the crosshair green. Enemies leave it white; the red hit
+     * marker confirms hits instead. */
     pmFlags = ps->pm_flags;
     if (pmFlags & 0x100000) {
         color[0] = 0.25f;
         color[1] = 1.0f;
         color[2] = 0.25f;
-    } else if (pmFlags & 0x200000) {
-        if (!cg_crosshairEnemyColor->current.enabled) {
-            color[0] = 1.0f;
-            color[1] = 1.0f;
-            color[2] = 1.0f;
-        } else {
-            color[0] = 1.0f;
-            color[1] = 0.25f;
-            color[2] = 0.25f;
-        }
     } else {
         color[0] = 1.0f;
         color[1] = 1.0f;

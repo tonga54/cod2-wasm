@@ -25,6 +25,7 @@ extern void *CL_RegisterMaterialNoMip(const char *name, int imageTrack);
 extern const char *CL_GetConfigString(int index);
 extern void I_strncpyz(char *dest, const char *src, int destsize);
 extern void I_strncat(char *dest, int maxlen, const char *src);
+extern int I_stricmp(const char *s1, const char *s2);
 extern const char *va(const char *format, ...);
 extern float AngleNormalize360(float angle);
 
@@ -316,6 +317,38 @@ static void CG_DrawHudElemString(const char *text, const hudelem_t *elem, cg_hud
     CL_DrawTextPhysical(text, 0x7fffffff, cghe->font, cghe->x, yPos + dy, scaleX, scaleY, &cghe->color, 3);
 }
 
+/* fadeOverTime stores the starting color in fromColor and the script then sets
+ * the target color, so a fade runs from fromColor to color. */
+static void CG_GetHudElemColor(const hudelem_t *elem, vec4_t color)
+{
+    int serverTime = cg_time();
+    int fadeElapsed = serverTime - elem->fadeStartTime;
+    int fadeTime = elem->fadeTime;
+    byte *toColor = (byte *)&elem->color;
+
+    if (fadeTime > 0 && fadeTime > fadeElapsed) {
+
+        float lerp;
+        if (fadeElapsed <= 0) {
+            lerp = 0.0f;
+        } else {
+            lerp = (float)fadeElapsed / (float)fadeTime;
+        }
+
+        byte *fromColor = (byte *)&elem->fromColor;
+
+        color[0] = ((float)(int)fromColor[0] + ((float)(int)toColor[0] - (float)(int)fromColor[0]) * lerp) * (1.0f / 255.0f);
+        color[1] = ((float)(int)fromColor[1] + ((float)(int)toColor[1] - (float)(int)fromColor[1]) * lerp) * (1.0f / 255.0f);
+        color[2] = ((float)(int)fromColor[2] + ((float)(int)toColor[2] - (float)(int)fromColor[2]) * lerp) * (1.0f / 255.0f);
+        color[3] = ((float)(int)fromColor[3] + ((float)(int)toColor[3] - (float)(int)fromColor[3]) * lerp) * (1.0f / 255.0f);
+    } else {
+        color[0] = (float)(int)toColor[0] * (1.0f / 255.0f);
+        color[1] = (float)(int)toColor[1] * (1.0f / 255.0f);
+        color[2] = (float)(int)toColor[2] * (1.0f / 255.0f);
+        color[3] = (float)(int)toColor[3] * (1.0f / 255.0f);
+    }
+}
+
 static void CG_GetHudElemInfo(const hudelem_t *elem, cg_hudelem_t *cghe, char *hudElemString)
 {
     const char *strResult;
@@ -605,36 +638,35 @@ static void CG_GetHudElemInfo(const hudelem_t *elem, cg_hudelem_t *cghe, char *h
         cghe->y = (float)(int)(floorf(cghe->y + 0.5f));
     }
 
-    {
-        int serverTime = cg_time();
-        int fadeElapsed = serverTime - elem->fadeStartTime;
-        int fadeTime = elem->fadeTime;
+    CG_GetHudElemColor(elem, cghe->color);
+}
 
-        if (fadeTime > 0 && fadeTime > fadeElapsed) {
+/* The gametype scripts confirm each hit by showing the white damage_feedback X
+ * and fading it out over a second. Like CoD WWII, draw it larger and red, and
+ * only briefly. */
+#define CG_HIT_MARKER_MATERIAL "damage_feedback"
+#define CG_HIT_MARKER_SCALE 1.8f
+#define CG_HIT_MARKER_HOLD_MS 80
+#define CG_HIT_MARKER_FADE_MS 220
 
-            float lerp;
-            if (fadeElapsed <= 0) {
-                lerp = 0.0f;
-            } else {
-                lerp = (float)fadeElapsed / (float)fadeTime;
-            }
+static void CG_DrawHitMarker(const hudelem_t *elem, float x, float y, float width, float height, float alpha, void *material)
+{
+    vec4_t color = {1.0f, 0.2f, 0.15f, alpha};
+    int fadeElapsed = cg_time() - elem->fadeStartTime;
 
-            byte *fromColor = (byte *)&elem->fromColor;
-            byte *toColor = (byte *)&elem->color;
-
-            cghe->color[0] = ((float)(int)toColor[0] + ((float)(int)fromColor[0] - (float)(int)toColor[0]) * lerp) * (1.0f / 255.0f);
-            cghe->color[1] = ((float)(int)toColor[1] + ((float)(int)fromColor[1] - (float)(int)toColor[1]) * lerp) * (1.0f / 255.0f);
-            cghe->color[2] = ((float)(int)toColor[2] + ((float)(int)fromColor[2] - (float)(int)toColor[2]) * lerp) * (1.0f / 255.0f);
-            cghe->color[3] = ((float)(int)toColor[3] + ((float)(int)fromColor[3] - (float)(int)toColor[3]) * lerp) * (1.0f / 255.0f);
-        } else {
-
-            byte *color = (byte *)&elem->color;
-            cghe->color[0] = (float)(int)color[0] * (1.0f / 255.0f);
-            cghe->color[1] = (float)(int)color[1] * (1.0f / 255.0f);
-            cghe->color[2] = (float)(int)color[2] * (1.0f / 255.0f);
-            cghe->color[3] = (float)(int)color[3] * (1.0f / 255.0f);
-        }
+    /* While the script's fade runs the hit is fresh: hold, then fade out early. */
+    if (fadeElapsed < elem->fadeTime) {
+        fadeElapsed -= CG_HIT_MARKER_HOLD_MS;
+        if (fadeElapsed >= CG_HIT_MARKER_FADE_MS)
+            return;
+        color[3] = fadeElapsed > 0 ? 1.0f - (float)fadeElapsed / (float)CG_HIT_MARKER_FADE_MS : 1.0f;
     }
+
+    float markerWidth = width * CG_HIT_MARKER_SCALE;
+    float markerHeight = height * CG_HIT_MARKER_SCALE;
+    x = floorf(x - (markerWidth - width) * 0.5f + 0.5f);
+    y = floorf(y - (markerHeight - height) * 0.5f + 0.5f);
+    CL_DrawStretchPicPhysical(x, y, markerWidth, markerHeight, 0.0f, 0.0f, 1.0f, 1.0f, &color, material);
 }
 
 void CG_Draw2dHudElems(qboolean foreground)
@@ -668,7 +700,7 @@ void CG_Draw2dHudElems(qboolean foreground)
         }
     }
 
-    qsort(elems, elemCount, 4, (int (*)(const void *, const void *))compare_hudelems);
+    qsort(elems, elemCount, sizeof(elems[0]), (int (*)(const void *, const void *))compare_hudelems);
 
     if (elemCount <= 0)
         return;
@@ -737,7 +769,10 @@ void CG_Draw2dHudElems(qboolean foreground)
                 int alignScreen = elem->alignScreen;
                 CalcScreenPlacement(&dummyX, &dummyY, &width, &height, (alignScreen >> 3) & 7, alignScreen & 7);
 
-                CL_DrawStretchPicPhysical(cghe.x, yPos, width, height, 0.0f, 0.0f, 1.0f, 1.0f, &cghe.color, material);
+                if (!I_stricmp(materialName, CG_HIT_MARKER_MATERIAL))
+                    CG_DrawHitMarker(elem, cghe.x, yPos, width, height, cghe.color[3], material);
+                else
+                    CL_DrawStretchPicPhysical(cghe.x, yPos, width, height, 0.0f, 0.0f, 1.0f, 1.0f, &cghe.color, material);
             } else if (typeMask & 0x1800) {
 
                 char materialName[64];
@@ -860,7 +895,7 @@ void CG_Draw3dHudElems(void)
         }
     }
 
-    qsort(elems, elemCount, 4, (int (*)(const void *, const void *))compare_hudelems);
+    qsort(elems, elemCount, sizeof(elems[0]), (int (*)(const void *, const void *))compare_hudelems);
 
     if (elemCount <= 0)
         return;

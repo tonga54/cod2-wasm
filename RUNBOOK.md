@@ -1182,7 +1182,10 @@ temporary viewport override was cleared and the test client disconnected and
 closed after verification. Since October 17, sprinting keeps the marks
 visible and opens them further, and movement spread fades them only to 60
 percent; see `docs/GRAPHICS_2026-10-16.md`. The test now also covers sprint
-and is in `scripts/test-static.sh`.
+and is in `scripts/test-static.sh`. Also since October 17, an enemy under the
+crosshair no longer turns it red. Hits show the scripts' damage-feedback X in
+red, larger and for about 300 ms, and scripted HUD fades run in the original
+direction again; see the same document.
 
 ## 2026-10-09: restore climbing onto marked ledges and roofs
 
