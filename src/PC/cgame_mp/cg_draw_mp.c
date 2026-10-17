@@ -5,6 +5,7 @@
 #include "bytematch.h"
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_ammocounter.h"
+#include "headers/PC/cgame_mp/cg_breathprompt.h"
 #include "headers/PC/cgame_mp/cg_grenadewarning.h"
 #include "headers/PC/cgame_mp/cg_minimap.h"
 #include "headers/PC/cgame_mp/cg_scorepopup.h"
@@ -1966,6 +1967,7 @@ unsigned int CG_Draw2D(void)
                 CG_DrawEnemyNames();
                 CG_DrawDamageIndicators();
                 CG_DrawGrenadeIndicators();
+                CG_DrawBreathPrompt();
             }
             CG_DrawChatMessages();
         }
