@@ -5,6 +5,7 @@
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_ammocounter.h"
 #include "headers/PC/cgame_mp/cg_minimap.h"
+#include "headers/PC/cgame_mp/cg_weaponprompt.h"
 #include <math.h>
 #include <string.h>
 
@@ -410,6 +411,11 @@ static void CG_DrawCursorhint(const rectDef_t *rect, struct Font_s *font, float 
         } else {
 
             WeaponDef *pickupWeapDef;
+
+            if (CG_WeaponPromptActive()) {
+                CG_DrawWeaponPrompt(rect, textStyle, weapIdx, hintIcon, fadeColor);
+                return;
+            }
 
             weapIdx = cg->cursorHintIcon - 4;
             pickupWeapDef = (WeaponDef *)BG_GetWeaponDef(weapIdx);
