@@ -34,6 +34,7 @@ for include in ('#include "common_types.h"\n', '#include "imports.h"\n', '#inclu
 body = module.replace('#include "common_types.h"\n', '').replace('#include "imports.h"\n', '')
 body = body.replace('#include "headers/PC/game_mp/g_points.h"\n', header)
 scoreboard = function(commands, 'void DeathmatchScoreboardMessage(gentity_t *ent)\n{')
+scores_limit = re.search(r'^    GCMDS_SCORES_LIMIT = (\d+)$', commands, re.M).group(1)
 
 # Every hook sits where the gameplay event happens.
 hooks = [
@@ -68,12 +69,13 @@ support = r'''
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 enum { TEAM_FREE = 0, TEAM_AXIS = 1, TEAM_ALLIES = 2, TEAM_SPECTATOR = 3 };
 enum { CON_DISCONNECTED = 0, CON_CONNECTING = 1, CON_CONNECTED = 2 };
 enum { SV_CMD_CAN_IGNORE = 0, SV_CMD_RELIABLE = 1 };
-enum { GCMDS_MAX_CLIENTS = 64 };
+enum { GCMDS_MAX_CLIENTS = 64, GCMDS_SCORES_LIMIT = ''' + scores_limit + r''' };
 typedef struct { int team; } clientState_t;
 typedef struct { int score; int deaths; int status_icon; int connected; clientState_t cs; } clientSession_t;
 typedef struct gclient_s { clientSession_t sess; } gclient_t;
@@ -156,6 +158,7 @@ int main(void) {
     expect(2, "cod2_points 0 100");
     quiet();
     assert(G_PointsGet(1) == 350 && G_PointsGet(2) == 100);
+    assert(G_PointsKills(1) == 3 && G_PointsKills(2) == 1 && G_PointsKills(0) == 0);
 
     /* Assisted kill and assisted headshot. */
     damage(3, 2, 30);
@@ -183,6 +186,8 @@ int main(void) {
     kill(2, 1, RIFLE, HEAD);
     kill(3, 3, RIFLE, HEAD);
     quiet();
+    /* Only enemies count as kills: not a teammate, yourself or the world. */
+    assert(G_PointsKills(0) == 1 && G_PointsKills(1) == 5 && G_PointsKills(3) == 0);
 
     /* Death clears the damage, with or without a killer, and so does a spawn. */
     damage(0, 1, 60);
@@ -208,9 +213,9 @@ int main(void) {
     kill(0, 2, RIFLE, TORSO);
     expect(2, "cod2_points 0 100");
     G_PointsClientConnect(2, 100 + 2);
-    assert(G_PointsGet(2) == 100);
+    assert(G_PointsGet(2) == 100 && G_PointsKills(2) == 1);
     G_PointsClientConnect(2, 900);
-    assert(G_PointsGet(2) == 0);
+    assert(G_PointsGet(2) == 0 && G_PointsKills(2) == 0);
     quiet();
 
     /* Retail score changes only matter in CTF and DM; team score zeroing at
@@ -220,29 +225,30 @@ int main(void) {
     quiet();
     level.initializing = 1;
     G_PointsTeamScoresChanged(level.initializing, 0, 0);
-    assert(G_PointsGet(1) > 0);
+    assert(G_PointsGet(1) > 0 && G_PointsKills(1) > 0);
     level.initializing = 0;
     G_PointsTeamScoresChanged(level.initializing, 0, 3);
     G_PointsTeamScoresChanged(level.initializing, 2, 0);
     assert(G_PointsGet(1) > 0);
     G_PointsTeamScoresChanged(level.initializing, 0, 0);
     assert(G_PointsGet(0) == 0 && G_PointsGet(1) == 0 && G_PointsGet(2) == 0);
+    assert(G_PointsKills(0) == 0 && G_PointsKills(1) == 0);
 
     /* Points survive SD rounds, nothing else. */
     kill(0, 1, RIFLE, TORSO);
     expect(1, "cod2_points 0 100");
     G_PointsInitGame(1, "tdm");
-    assert(G_PointsGet(1) == 0);
+    assert(G_PointsGet(1) == 0 && G_PointsKills(1) == 0);
     G_PointsInitGame(0, "sd");
     kill(0, 1, RIFLE, TORSO);
     expect(1, "cod2_points 0 100");
     damage(0, 2, 20);
     G_PointsInitGame(1, "SD");
-    assert(G_PointsGet(1) == 100);
+    assert(G_PointsGet(1) == 100 && G_PointsKills(1) == 1);
     kill(0, 1, RIFLE, TORSO);
     expect(1, "cod2_points 0 100");
     G_PointsInitGame(0, "sd");
-    assert(G_PointsGet(1) == 0);
+    assert(G_PointsGet(1) == 0 && G_PointsKills(1) == 0);
     quiet();
 
     /* SD plants and defuses come from the script log line. */
@@ -293,7 +299,8 @@ int main(void) {
     G_PointsScoreChanged(1, 0, 1);
     quiet();
 
-    /* The scoreboard sends points in the score field, players first, best first. */
+    /* The scoreboard sends points in the score field, players first, best
+     * first, then the same players' kills for our client. */
     setup("tdm", teams, 5);
     kill(0, 1, RIFLE, HEAD);
     kill(1, 3, RIFLE, TORSO);
@@ -308,8 +315,40 @@ int main(void) {
     int retailOrder[] = { 4, 3, 2, 1, 0 };
     memcpy(level.sortedClients, retailOrder, sizeof(retailOrder));
     DeathmatchScoreboardMessage(ent(2));
-    expect(2, "b 5 2 1 1 150 60 2 0 3 100 -1 0 0 0 100 40 1 0 2 0 80 0 3 4 200 20 0 0");
+    expect(2, "b 5 2 1 1 150 60 2 0 3 100 -1 0 0 0 100 40 1 0 2 0 80 0 3 4 200 20 0 0 1 1 1 0 0");
     quiet();
+
+    /* A full server stays within one reliable command; the players that do not
+     * fit are left out with their kills. */
+    int many[64];
+    for (int i = 0; i < 64; ++i)
+        many[i] = (i & 1) ? TEAM_ALLIES : TEAM_AXIS;
+    setup("tdm", many, 64);
+    level.maxclients = 64;
+    for (int i = 0; i < 64; ++i) {
+        clients[i].sess.deaths = 123456789;
+        pings[i] = 999;
+        level.sortedClients[i] = 63 - i;
+    }
+    for (int i = 0; i < 12; ++i)
+        kill(2 * i, 2 * i + 1, RIFLE, TORSO);
+    kill(2, 1, RIFLE, TORSO);
+    level.numConnectedClients = 64;
+    sentCount = sentIndex = 0;
+    DeathmatchScoreboardMessage(ent(0));
+    assert(sentCount == 1 && sentTo[0] == 0 && strlen(sent[0]) < 1024);
+    char copy[1400];
+    char *tokens[512];
+    int tokenCount = 0;
+    snprintf(copy, sizeof(copy), "%s", sent[0]);
+    for (char *t = strtok(copy, " "); t; t = strtok(NULL, " "))
+        tokens[tokenCount++] = t;
+    int listed = atoi(tokens[1]);
+    assert(listed > 30 && listed < 64 && tokenCount == 4 + 6 * listed);
+    assert(!strcmp(tokens[4], "1") && !strcmp(tokens[4 + 5 * listed], "2"));
+    for (int i = 0; i < listed; ++i)
+        assert(atoi(tokens[4 + 5 * listed + i]) == G_PointsKills(atoi(tokens[4 + 5 * i])));
+    sentCount = sentIndex = 0;
     return 0;
 }
 '''
@@ -361,11 +400,20 @@ module_mutants = [
     ('otherSpectator < spectator || (otherSpectator == spectator && G_PointsGet(other) >= points)',
      'G_PointsGet(other) >= points'),
     ('return teamA == TEAM_FREE || teamA != G_PointsTeam(b);', 'return teamA != G_PointsTeam(b);'),
+    ('    ++s_pointsClients[attackerNum].kills;\n', ''),
+    ('            s_pointsClients[i].kills = 0;\n', ''),
+    ('        s_pointsClients[i].points = 0;\n        s_pointsClients[i].kills = 0;\n    }',
+     '        s_pointsClients[i].points = 0;\n    }'),
+    ('        slot->kills = 0;\n', ''),
+    ('return s_pointsClients[clientNum].kills;', 'return s_pointsClients[clientNum].points;'),
 ]
 scoreboard_mutants = [
     ('order[i] = lvl->sortedClients[i];\n    G_PointsSortClients(order, numSorted);', 'order[i] = lvl->sortedClients[i];'),
     ('clientNum, G_PointsGet(clientNum), ping,', 'clientNum, client->sess.score, ping,'),
     ('clientNum, G_PointsGet(clientNum), -1,', 'clientNum, client->sess.score, -1,'),
+    ('lvl->teamScores[TEAM_ALLIES], string, kills);', 'lvl->teamScores[TEAM_ALLIES], string, "");'),
+    ('if (stringlength + j + killslength + k > GCMDS_SCORES_LIMIT)', 'if (stringlength + j > GCMDS_SCORES_LIMIT)'),
+    ('" %i", G_PointsKills(clientNum));', '" %i", G_PointsGet(clientNum));'),
 ]
 variants = [(body, scoreboard)]
 variants += [(mutate(body, old, new), scoreboard) for old, new in module_mutants]
@@ -381,4 +429,5 @@ with tempfile.TemporaryDirectory(prefix='cod2-points-') as directory:
         assert (result.returncode == 0) == (index == 0), (index, result.stderr[-2000:])
 print('PASS: kills earn 100, assisted kills 75, headshots 150 and assists 25 in team modes; DM has no assists and shares '
       'retail scores; CTF captures/returns and SD plants/defuses score; points survive only SD rounds; the scoreboard '
-      f'sends points ranked players first; {len(hooks) + 1} hooks wired; {len(variants) - 1} failing regression mutants')
+      f'sends points ranked players first, then their kills of enemies (kept with the points), and fits a full '
+      f'server in one reliable command; {len(hooks) + 1} hooks wired; {len(variants) - 1} failing regression mutants')

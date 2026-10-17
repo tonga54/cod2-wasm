@@ -2,6 +2,7 @@
 #include "imports.h"
 #include "bytematch.h"
 #include "headers/PC/cgame_mp/cg_local.h"
+#include "headers/PC/cgame_mp/cg_scoretable.h"
 
 extern const dvar_t *cg_scoreboardBannerHeight;
 
@@ -704,6 +705,7 @@ qboolean CG_DrawScoreboard(void)
     float y;
     float *fadePtr;
 
+    CG_ScoreTablePrepare();
     if (cg_paused->current.integer != 0 &&
         !(cg->nextSnap && cg->nextSnap->ps.pm_type == 5))
         return 0;
@@ -736,6 +738,11 @@ qboolean CG_DrawScoreboard(void)
                 CL_AddReliableCommand((const char *)"score");
             }
         }
+    }
+
+    if (CG_ScoreTableEnabled()) {
+        CG_DrawScoreTable(fade);
+        return 1;
     }
 
     {

@@ -9,6 +9,8 @@ void CG_ScorePanelInit(void);
 void CG_ScorePanelClearDmScores(void);
 void CG_ScorePanelSetDmScore(int clientNum, int score);
 int CG_ScorePanelHidesHudElem(const hudelem_t *elem);
+/* The stock clock's text and color, for the scoreboard; NULL without one. */
+const char *CG_ScorePanelClock(vec4_t color);
 void CG_DrawScorePanel(void);
 
 #endif

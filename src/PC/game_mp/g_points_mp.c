@@ -26,6 +26,7 @@ enum {
 
 typedef struct {
     int points;
+    int kills;
     int persId;
     int inUse;
     unsigned long long damagedBy;
@@ -114,8 +115,10 @@ void G_PointsInitGame(int restart, const char *gametype)
     /* SD plays every round as a map_restart and keeps the match going. */
     for (i = 0; i < POINTS_MAX_CLIENTS; ++i) {
         s_pointsClients[i].damagedBy = 0;
-        if (!restart || s_pointsGametype != POINTS_GT_SD)
+        if (!restart || s_pointsGametype != POINTS_GT_SD) {
             s_pointsClients[i].points = 0;
+            s_pointsClients[i].kills = 0;
+        }
     }
 }
 
@@ -128,8 +131,10 @@ void G_PointsClientConnect(int clientNum, int scriptPersId)
     if (clientNum < 0 || clientNum >= POINTS_MAX_CLIENTS)
         return;
     slot = &s_pointsClients[clientNum];
-    if (!slot->inUse || slot->persId != scriptPersId)
+    if (!slot->inUse || slot->persId != scriptPersId) {
         slot->points = 0;
+        slot->kills = 0;
+    }
     slot->inUse = 1;
     slot->persId = scriptPersId;
     slot->damagedBy = 0;
@@ -201,6 +206,7 @@ void G_PointsPlayerKilled(gentity_t *victim, gentity_t *attacker, int meansOfDea
     attackerNum = attacker->s.number;
     if (attackerNum == victimNum || !G_PointsValidClient(attackerNum) || !G_PointsEnemies(attackerNum, victimNum))
         return;
+    ++s_pointsClients[attackerNum].kills;
 
     /* Free-for-all has no teammates to assist. */
     if (s_pointsGametype != POINTS_GT_DM) {
@@ -244,8 +250,10 @@ void G_PointsTeamScoresChanged(int initializing, int axisScore, int alliesScore)
 
     if (initializing || axisScore != 0 || alliesScore != 0)
         return;
-    for (i = 0; i < POINTS_MAX_CLIENTS; ++i)
+    for (i = 0; i < POINTS_MAX_CLIENTS; ++i) {
         s_pointsClients[i].points = 0;
+        s_pointsClients[i].kills = 0;
+    }
 }
 
 /* SD logs "A;<guid>;<entnum>;<team>;<name>;bomb_plant" and "...;bomb_defuse". */
@@ -284,6 +292,13 @@ int G_PointsGet(int clientNum)
     if (clientNum < 0 || clientNum >= POINTS_MAX_CLIENTS)
         return 0;
     return s_pointsClients[clientNum].points;
+}
+
+int G_PointsKills(int clientNum)
+{
+    if (clientNum < 0 || clientNum >= POINTS_MAX_CLIENTS)
+        return 0;
+    return s_pointsClients[clientNum].kills;
 }
 
 /* Players before spectators, then by points. The input is the retail rank

@@ -5,6 +5,7 @@
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_scorepopup.h"
 #include "headers/PC/cgame_mp/cg_scorepanel.h"
+#include "headers/PC/cgame_mp/cg_scoretable.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -813,6 +814,13 @@ static void CG_ParseScores(void)
         } else {
             cg->teamPings[i] = 0;
         }
+    }
+
+    /* Our server follows the players with their kills, in the same order. */
+    CG_ScoreTableClearKills();
+    if (Cmd_Argc() >= 4 + scoreCount * 6) {
+        for (i = 0; i < scoreCount; ++i)
+            CG_ScoreTableSetKills(cg->scores[i].client, atoi(CG_Argv(4 + scoreCount * 5 + i)));
     }
 }
 

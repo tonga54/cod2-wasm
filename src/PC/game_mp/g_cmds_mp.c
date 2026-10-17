@@ -80,7 +80,10 @@ extern int atoi(const char *nptr);
 extern void Scr_PlayerVote(gentity_t *self, char *option);
 
 enum {
-    GCMDS_MAX_CLIENTS = 64
+    GCMDS_MAX_CLIENTS = 64,
+    /* Room for the players' fields once the header is added: a reliable
+     * command keeps 1024 characters. */
+    GCMDS_SCORES_LIMIT = 990
 };
 
 void DeathmatchScoreboardMessage(gentity_t *ent);
@@ -115,9 +118,15 @@ void DeathmatchScoreboardMessage(gentity_t *ent)
     int order[GCMDS_MAX_CLIENTS];
     char string[1400];
     int stringlength;
+    char kill[16];
+    char kills[GCMDS_SCORES_LIMIT];
+    int killslength;
+    int k;
 
     string[0] = '\0';
     stringlength = 0;
+    kills[0] = '\0';
+    killslength = 0;
 
     numSorted = lvl->numConnectedClients;
     if (numSorted > GCMDS_MAX_CLIENTS) {
@@ -145,17 +154,22 @@ void DeathmatchScoreboardMessage(gentity_t *ent)
         }
 
         j = strlen(entry);
-        if (stringlength + j > 1024) {
+        k = Com_sprintf(kill, sizeof(kill), " %i", G_PointsKills(clientNum));
+        if (stringlength + j + killslength + k > GCMDS_SCORES_LIMIT) {
             break;
         }
 
         strcpy(string + stringlength, entry);
         stringlength += j;
+        strcpy(kills + killslength, kill);
+        killslength += k;
     }
 
-    SV_GameSendServerCommand(ent - g_entities, SV_CMD_RELIABLE,
-                             va("%c %i %i %i%s", 98, i, lvl->teamScores[TEAM_AXIS],
-                                lvl->teamScores[TEAM_ALLIES], string));
+    /* Retail clients read only the five fields of each listed player; the
+     * kills of the same players follow them, in the same order. */
+    Com_sprintf(entry, sizeof(entry), "%c %i %i %i%s%s", 98, i, lvl->teamScores[TEAM_AXIS],
+                lvl->teamScores[TEAM_ALLIES], string, kills);
+    SV_GameSendServerCommand(ent - g_entities, SV_CMD_RELIABLE, entry);
 }
 
 void Cmd_Score_f(gentity_t *ent)

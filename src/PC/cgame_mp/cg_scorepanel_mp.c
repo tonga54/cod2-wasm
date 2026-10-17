@@ -435,6 +435,16 @@ int CG_ScorePanelHidesHudElem(const hudelem_t *elem)
     return CG_ScorePanelActiveGametype() >= 0 && CG_ScorePanelRetailElem(elem) != SCORE_PANEL_ELEM_NONE;
 }
 
+const char *CG_ScorePanelClock(vec4_t color)
+{
+    CG_ScorePanelRetail retail;
+
+    if (!cg->snap)
+        return NULL;
+    CG_ScorePanelFindRetail(&cg->snap->ps, &retail);
+    return retail.clock ? CG_GetHudElemTimer(retail.clock, color) : NULL;
+}
+
 void CG_DrawScorePanel(void)
 {
     CG_ScorePanelRetail retail;

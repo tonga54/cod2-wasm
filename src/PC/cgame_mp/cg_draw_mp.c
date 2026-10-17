@@ -11,6 +11,7 @@
 #include "headers/PC/cgame_mp/cg_scorepopup.h"
 #include "headers/PC/cgame_mp/cg_killfeed.h"
 #include "headers/PC/cgame_mp/cg_scorepanel.h"
+#include "headers/PC/cgame_mp/cg_scoretable.h"
 #include "headers/PC/cgame_mp/cg_playernames.h"
 
 extern const dvar_t *cg_centerPrintY;
@@ -1862,6 +1863,7 @@ unsigned int CG_Draw2D(void)
     qboolean drawHudMenus;
     qboolean drawHudElems;
     qboolean drewScoreboard;
+    int hudCovered;
     float debugY = 0.0f;
     int pm_type;
     byte *cls = (byte *)imp_cls;
@@ -1921,6 +1923,12 @@ unsigned int CG_Draw2D(void)
 
     drawHudMenus = !CG_AreHudMenusHidden();
     drawHudElems = !CG_AreHudElemsHidden();
+    /* The WWII scoreboard covers the screen in place of the HUD. */
+    hudCovered = CG_ScoreTableHidesHud();
+    if (hudCovered) {
+        drawHudMenus = 0;
+        drawHudElems = 0;
+    }
 
     pm_type = cg->nextSnap->ps.pm_type;
     /* The compass menu, and with it the minimap, is painted for players, not
@@ -1956,7 +1964,7 @@ unsigned int CG_Draw2D(void)
             CG_DrawKillFeed();
         }
     } else {
-        if (pm_type <= 5)
+        if (pm_type <= 5 && !hudCovered)
             CG_DrawCrosshair();
 
         if (drawHudMenus) {
@@ -1976,7 +1984,8 @@ unsigned int CG_Draw2D(void)
             CG_Draw2dHudElems(0);
         if (drawHudMenus)
             Menu_PaintAll((void *)imp_cgDC);
-        CG_Draw2dHudElems(1);
+        if (!hudCovered)
+            CG_Draw2dHudElems(1);
         if (drawHudMenus) {
             CG_DrawScorePanel();
             CG_DrawKillFeed();

@@ -435,6 +435,17 @@ int main(void) {
     e.type = HE_TYPE_MATERIAL;
     assert(!CG_GetHudElemTimer(&e, color));
 
+    /* The scoreboard reads the same clock: 8:03 in the stock gold. */
+    stockHud();
+    cg->time = 10000;
+    assert(!strcmp(CG_ScorePanelClock(color), "8:03") && colored(color, goldRgb, 1));
+    memset(&snapState.ps.hud.archival[0], 0, sizeof(snapState.ps.hud.archival[0]));
+    assert(!CG_ScorePanelClock(color));
+    stockHud();
+    cg->snap = NULL;
+    assert(!CG_ScorePanelClock(color));
+    cg->snap = &snapState;
+
     /* An Allied player winning 21 to 11 toward 75, with 8:03 left. */
     CG_ScorePanelInit();
     snprintf(cgs->gametype, sizeof(cgs->gametype), "tdm");
