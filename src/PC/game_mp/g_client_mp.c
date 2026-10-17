@@ -2,6 +2,7 @@
 #include "imports.h"
 #include <string.h>
 #include <stdlib.h>
+#include "headers/PC/game_mp/g_points.h"
 
 vec3_t playerMaxs = { 15.0f, 15.0f, 70.0f };
 
@@ -109,6 +110,7 @@ void ClientBegin(int clientNum)
     client->ps.pm_type = 4;
 
     CalculateRanks();
+    G_PointsClientBegin(clientNum);
 
     if (getenv("DBGSPAM"))
         Com_Printf("[team-trace] ClientBegin client=%d ent=%p begin=%u\n",
@@ -156,6 +158,7 @@ void ClientDisconnect(int clientNum)
 
     client->sess.connected = 0;
     memset(&client->sess.cs, 0, sizeof(clientState_t));
+    G_PointsClientDisconnect(clientNum);
 
     CalculateRanks();
 }
@@ -446,6 +449,7 @@ void ClientSpawn(gentity_t *ent, const vec_t *spawn_origin, const vec_t *spawn_a
     vec_t *pMaxs;
 
     clientNum = ent - (gentity_s *)imp_g_entities;
+    G_PointsClientSpawn(clientNum);
 
     client = ent->client;
     lev = G_Level();
@@ -852,6 +856,7 @@ char *ClientConnect(int clientNum, int scriptPersId)
     client = G_ClientForNum(clientNum);
 
     memset(client, 0, CLIENT_STRIDE);
+    G_PointsClientConnect(clientNum, scriptPersId);
 
     ci = &level_bgs.clientinfo[clientNum];
 

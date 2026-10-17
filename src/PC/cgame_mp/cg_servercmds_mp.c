@@ -3,6 +3,7 @@
 #include "bytematch.h"
 #include "headers/cod2_chat.h"
 #include "headers/PC/cgame_mp/cg_local.h"
+#include "headers/PC/cgame_mp/cg_scorepopup.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -993,6 +994,12 @@ void CG_ServerCommand(void)
             CG_QueueObituary(victim, attacker, weapon);
         }
 #endif
+        return;
+    }
+
+    if (!strcmp(cmd, "cod2_points")) {
+        if (Cmd_Argc() == 3)
+            CG_ScorePopupAdd(atoi(CG_Argv(1)), atoi(CG_Argv(2)));
         return;
     }
 

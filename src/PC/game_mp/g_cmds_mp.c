@@ -1,6 +1,7 @@
 #include "common_types.h"
 #include "imports.h"
 #include "bytematch.h"
+#include "headers/PC/game_mp/g_points.h"
 
 extern void Com_Error(int code, const char *fmt, ...);
 
@@ -111,6 +112,7 @@ void DeathmatchScoreboardMessage(gentity_t *ent)
     int j;
     int numSorted;
     int ping;
+    int order[GCMDS_MAX_CLIENTS];
     char string[1400];
     int stringlength;
 
@@ -122,18 +124,23 @@ void DeathmatchScoreboardMessage(gentity_t *ent)
         numSorted = GCMDS_MAX_CLIENTS;
     }
 
+    for (i = 0; i < numSorted; ++i)
+        order[i] = lvl->sortedClients[i];
+    G_PointsSortClients(order, numSorted);
+
+    /* The score field carries match points, not the retail kill score. */
     for (i = 0; i < numSorted; ++i) {
-        clientNum = lvl->sortedClients[i];
+        clientNum = order[i];
         client = &lvl->clients[clientNum];
 
         if (client->sess.connected == CON_CONNECTING) {
             Com_sprintf(entry, sizeof(entry), " %i %i %i %i %i",
-                        lvl->sortedClients[i], client->sess.score, -1,
+                        clientNum, G_PointsGet(clientNum), -1,
                         client->sess.deaths, client->sess.status_icon);
         } else {
             ping = SV_GetClientPing(clientNum);
             Com_sprintf(entry, sizeof(entry), " %i %i %i %i %i",
-                        lvl->sortedClients[i], client->sess.score, ping,
+                        clientNum, G_PointsGet(clientNum), ping,
                         client->sess.deaths, client->sess.status_icon);
         }
 

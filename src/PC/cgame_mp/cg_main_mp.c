@@ -2,6 +2,7 @@
 #include "imports.h"
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_minimap.h"
+#include "headers/PC/cgame_mp/cg_scorepopup.h"
 #include <float.h>
 
 extern const dvar_t *com_sv_running;
@@ -1208,6 +1209,7 @@ void CG_Init(int serverMessageNum, int serverCommandSequence, int clientNum)
     Com_StripExtension((const char *)&((cgs_t *)cgsBase)->mapname[5], mapname);
     CG_RegisterGraphics(mapname);
     CG_MinimapInit(cgs->mapname);
+    CG_ScorePopupInit();
     CG_LoadingString("sounds");
     CG_RegisterSounds();
     CG_LoadingString("clients");

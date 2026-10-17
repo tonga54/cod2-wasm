@@ -1,6 +1,7 @@
 #include "common_types.h"
 #include "imports.h"
 #include "bytematch.h"
+#include "headers/PC/game_mp/g_points.h"
 extern char *getenv(const char *name);
 extern scr_const_t scr_const;
 extern scr_data_t g_scr_data;
@@ -1490,6 +1491,7 @@ void PlayerCmd_finishPlayerDamage(scr_entref_t entref)
         client->ps.damageTimer = (int)maxDamageTime;
 
     client->ps.damageDuration = client->ps.damageTimer;
+    G_PointsPlayerDamaged(pSelf, attacker, damage);
     pSelf->health -= damage;
 
     Scr_AddEntity(attacker);

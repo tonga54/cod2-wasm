@@ -3,6 +3,7 @@
 #include "bytematch.h"
 #include <stdlib.h>
 #include <string.h>
+#include "headers/PC/game_mp/g_points.h"
 extern scr_const_t scr_const;
 
 extern BuiltinMethod Player_GetMethod(const char **pName);
@@ -999,6 +1000,7 @@ void GScr_LogPrint(void)
         I_strncat(string, sizeof(string), argString);
     }
 
+    G_PointsLogLine(string);
     G_LogPrintf(string);
     return;
 }
@@ -1913,6 +1915,7 @@ void GScr_SetTeamScore(void)
         SV_GameSendServerCommand(-1, 0, va("%c %i", 'G', score));
     }
 
+    G_PointsTeamScoresChanged(level.initializing, level.teamScores[TEAM_AXIS], level.teamScores[TEAM_ALLIES]);
     level.bUpdateScoresForIntermission = 1;
 }
 

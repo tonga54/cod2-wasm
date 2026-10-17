@@ -1730,6 +1730,13 @@ Since October 17, objectives without a team (CTF flags at base, SD bomb sites,
 an unheld HQ radio) reach every player, and a team's objective only that team;
 the reconstructed server had this reversed. The new minimap draws them; see
 `docs/GRAPHICS_2026-10-16.md`.
+Also since October 17, the scoreboard's Score column shows match points: 100
+per kill, 75 when another player helped, 150 per headshot, 25 per assist, 300
+per flag capture, 100 per return and 200 per bomb plant or defuse. A "Kill
++100" notice shows each award (`cg_hudScorePopup`). The retail score still
+decides Deathmatch, SD and CTF, and team scores are unchanged. Points last
+through SD rounds and reset on a new level or match. This needs the updated
+native server; see the same document.
 
 
 The tested web/server/gateway images and matching staged archives were installed

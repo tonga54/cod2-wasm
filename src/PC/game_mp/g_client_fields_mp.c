@@ -1,5 +1,6 @@
 #include "common_types.h"
 #include "imports.h"
+#include "headers/PC/game_mp/g_points.h"
 
 extern const char *va(const char *fmt, ...);
 extern void Scr_Error(const char *msg);
@@ -193,7 +194,9 @@ static void ClientScr_SetMaxHealth(gclient_t *pSelf, const client_fields_s *pFie
 static void ClientScr_SetScore(gclient_t *pSelf, const client_fields_s *pField)
 {
     gclient_s *client = (gclient_s *)pSelf;
+    int oldScore = client->sess.score;
     client->sess.score = Scr_GetInt(0);
+    G_PointsScoreChanged(client->ps.clientNum, oldScore, client->sess.score);
     { (void)(CalculateRanks()); return; }
 }
 

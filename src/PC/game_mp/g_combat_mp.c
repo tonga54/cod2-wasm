@@ -1,6 +1,7 @@
 #include "common_types.h"
 #include "imports.h"
 #include <string.h>
+#include "headers/PC/game_mp/g_points.h"
 
 unsigned char riflePriorityMap[19] = { 0x1, 0x9, 0x9, 0x9, 0x8, 0x7, 0x6, 0x6, 0x6, 0x6, 0x5, 0x5, 0x4, 0x4, 0x4, 0x4, 0x3, 0x3, 0x0 };
 
@@ -641,6 +642,7 @@ void player_die(gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int 
 
     animResult = BG_AnimScriptEvent(&cl->ps, 1, 0, 1);
 
+    G_PointsPlayerKilled(self, attacker, meansOfDeath, hitLoc);
     Scr_PlayerKilled(self, inflictor, attacker, damage, meansOfDeath,
                      iWeapon, vDir, hitLoc, psTimeOffset, animResult);
 

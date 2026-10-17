@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <float.h>
+#include "headers/PC/game_mp/g_points.h"
 extern void G_ParseHitLocDmgTable(void);
 
 extern void BodyEnd();
@@ -608,6 +609,7 @@ void G_InitGame(int levelTime, int randomSeed, qboolean restart, qboolean savepe
     SV_LocateGameData((gentity_t *)g_entities, 0x48, sizeof(gentity_t), (playerState_t *)g_clients, sizeof(gclient_t));
 
     G_LogPrintf("gametype: %s\n", g_gametype->current.string);
+    G_PointsInitGame(restart, g_gametype->current.string);
 
     G_InitTurrets();
     GScr_PostResetTimeout();
@@ -887,6 +889,7 @@ void G_InitGame(int levelTime, int randomSeed, qboolean restart, qboolean savepe
     SV_LocateGameData((gentity_t *)g_entities, 0x48, sizeof(gentity_t), (playerState_t *)g_clients, sizeof(gclient_t));
 
     G_LogPrintf("gametype: %s\n", g_gametype->current.string);
+    G_PointsInitGame(restart, g_gametype->current.string);
 
     G_InitTurrets();
     GScr_PostResetTimeout();
