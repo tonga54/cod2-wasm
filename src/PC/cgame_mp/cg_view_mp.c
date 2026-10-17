@@ -156,6 +156,52 @@ static void CG_ApplyDeathView(void)
     deathView.valid = 1;
 }
 
+#ifdef __EMSCRIPTEN__
+/* Mantle_Start places the player at the start of the authored climb in a
+ * single move. Carry the eye across that jump instead of cutting to it. */
+static struct {
+    vec3_t offset;
+    vec3_t lastOrigin;
+    int offsetTime;
+    int lastTime;
+    qboolean wasMantling;
+    qboolean valid;
+} mantleView;
+
+static void CG_SmoothMantleView(const playerState_t *ps, int time, vec_t *vieworg)
+{
+    const qboolean mantling = (ps->pm_flags & 4) != 0;
+    int elapsed;
+
+    if (mantleView.valid && time < mantleView.lastTime)
+        memset(&mantleView, 0, sizeof(mantleView));
+    if (mantleView.valid && mantling && !mantleView.wasMantling && time - mantleView.lastTime <= 100) {
+        vec3_t jump;
+        float lengthSq = 0.0f;
+        for (int i = 0; i < 3; ++i) {
+            jump[i] = mantleView.lastOrigin[i] - ps->origin[i];
+            lengthSq += jump[i] * jump[i];
+        }
+        if (lengthSq > 0.25f && lengthSq < 48.0f * 48.0f) {
+            memcpy(mantleView.offset, jump, sizeof(vec3_t));
+            mantleView.offsetTime = time;
+        }
+    }
+    mantleView.wasMantling = mantling;
+    mantleView.lastTime = time;
+    mantleView.valid = 1;
+    memcpy(mantleView.lastOrigin, ps->origin, sizeof(vec3_t));
+
+    elapsed = time - mantleView.offsetTime;
+    if (elapsed >= 0 && elapsed < 200) {
+        float t = 1.0f - (float)elapsed / 200.0f;
+        t = t * t * (3.0f - 2.0f * t);
+        for (int i = 0; i < 3; ++i)
+            vieworg[i] += t * mantleView.offset[i];
+    }
+}
+#endif
+
 void CG_FxRestart(void)
 {
     Com_Printf((const char *)"FX Restarting so off-line changes are loaded.\n");
@@ -667,6 +713,9 @@ static void CG_CalcViewValues(void)
                 cg->refdef.vieworg[2] -= t * cg->stepChange;
             }
         }
+#ifdef __EMSCRIPTEN__
+        CG_SmoothMantleView(ps, cg->time, cg->refdef.vieworg);
+#endif
 
         AddLeanToPosition(cg->refdef.vieworg, cg->refdefViewAngles[1],
                           ps->leanf, 16.0f, 20.0f);

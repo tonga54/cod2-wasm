@@ -42,6 +42,7 @@ list(APPEND COD2_CLIENT_SOURCES
   "${CMAKE_CURRENT_LIST_DIR}/web_main.c"
   "${CMAKE_CURRENT_LIST_DIR}/web_gl_compat.c"
   "${CMAKE_CURRENT_LIST_DIR}/web_point_lights.c"
+  "${CMAKE_CURRENT_LIST_DIR}/web_scene_fx.c"
   "${CMAKE_CURRENT_LIST_DIR}/web_jpeg_compat.c")
 
 add_library(cod2_client_objects OBJECT ${COD2_CLIENT_SOURCES})

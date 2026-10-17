@@ -1576,26 +1576,30 @@ void MSG_WriteDeltaUsercmdKey(msg_t *msg, int key, usercmd_t *from, usercmd_t *t
     int fromMoveBits;
     int toMoveBits;
     int fieldKey;
+    qboolean extraChanged;
 
     serverTimeDelta = to->serverTime - from->serverTime;
 
     if ((unsigned int)serverTimeDelta <= 0xff) {
         MSG_WriteBit1_core(msg);
         MSG_WriteByte_core(msg, serverTimeDelta);
-        fieldKey = key ^ to->serverTime;
     } else {
         MSG_WriteBit0_core(msg);
         MSG_WriteLong_core(msg, to->serverTime);
-        fieldKey = key;
     }
 
     toMoveBits = MSG_UsercmdMoveBits(to->forwardmove, to->rightmove);
     fromMoveBits = MSG_UsercmdMoveBits(from->forwardmove, from->rightmove);
 
-    if ((from->buttons >> 1) == (to->buttons >> 1) &&
-        from->weapon == to->weapon &&
-        from->offHandIndex == to->offHandIndex &&
-        from->angles[2] == to->angles[2] &&
+    /* Only the long form carries the buttons above attack (sprint, stance,
+     * jump, ADS, use...), weapons and roll, so it is selected by those fields
+     * and not by the time encoding, which consecutive commands keep short. */
+    extraChanged = (from->buttons >> 1) != (to->buttons >> 1) ||
+                   from->weapon != to->weapon ||
+                   from->offHandIndex != to->offHandIndex ||
+                   from->angles[2] != to->angles[2];
+
+    if (!extraChanged &&
         from->angles[0] == to->angles[0] &&
         from->angles[1] == to->angles[1] &&
         ((from->buttons ^ to->buttons) & 1) == 0 &&
@@ -1606,17 +1610,19 @@ void MSG_WriteDeltaUsercmdKey(msg_t *msg, int key, usercmd_t *from, usercmd_t *t
 
     MSG_WriteBits_core(msg, key ^ 1, 1);
 
-    if ((unsigned int)serverTimeDelta > 0xff) {
+    if (extraChanged) {
         MSG_WriteBits_core(msg, key ^ 1, 1);
+        fieldKey = key;
     } else {
         MSG_WriteBits_core(msg, key, 1);
+        fieldKey = key ^ to->serverTime;
     }
     MSG_WriteBits_core(msg, fieldKey ^ to->buttons, 1);
     MSG_WriteDeltaKeyShort(msg, fieldKey, from->angles[0], to->angles[0]);
     MSG_WriteDeltaKeyShort(msg, fieldKey, from->angles[1], to->angles[1]);
     MSG_WriteDeltaKeyBits(msg, fieldKey, fromMoveBits, toMoveBits, 4);
 
-    if ((unsigned int)serverTimeDelta > 0xff) {
+    if (extraChanged) {
         int serverTimeKey = key ^ to->serverTime;
 
         MSG_WriteDeltaKeyShort(msg, serverTimeKey, from->angles[2], to->angles[2]);

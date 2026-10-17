@@ -1353,7 +1353,7 @@ extern void CG_TraceCapsule(trace_t *result, const vec_t *start, const vec_t *mi
 extern void BG_GetSpreadForWeapon(const playerState_t *ps, int weaponIndex, float *minSpread, float *maxSpread);
 extern float randomf(void);
 float g_webAdsDofFrac = 0.0f;
-float g_webAdsFocusDist = 256.0f;
+float g_webAdsViewmodelStart = 6.0f;
 float g_webAdsViewmodelEnd = 15.0f;
 int s_pendingLocalFireWeapon = 0;
 int s_pendingLocalFireBarrel = 0;
@@ -1392,65 +1392,30 @@ static void CG_SpawnTracerImmediate(const vec_t *pstart, const vec_t *pend)
 static void CG_UpdateWebWeaponPresentation(playerState_t *ps, int weaponIndex, qboolean drawGun)
 {
     static const vec3_t zeroBounds = { 0.0f, 0.0f, 0.0f };
-    static int lastTraceTime = 0;
-    static vec3_t lastTraceOrg = { 0.0f, 0.0f, 0.0f };
-    static vec3_t lastTraceDir = { 0.0f, 0.0f, 0.0f };
-    static float targetFocusDist = 256.0f;
 
     if (ps->fWeaponPosFrac > 0.0f && drawGun) {
-        float dot = cg->refdef.viewaxis[0][0] * lastTraceDir[0] +
-                    cg->refdef.viewaxis[0][1] * lastTraceDir[1] +
-                    cg->refdef.viewaxis[0][2] * lastTraceDir[2];
-        float dx = cg->refdef.vieworg[0] - lastTraceOrg[0];
-        float dy = cg->refdef.vieworg[1] - lastTraceOrg[1];
-        float dz = cg->refdef.vieworg[2] - lastTraceOrg[2];
+        /* CoD4 blurs the viewmodel from the eye up to just short of the
+         * muzzle, so the receiver softens while the front sight stays sharp.
+         * The world stays sharp in multiplayer. */
+        struct DObj_s *viewModel = (*(weaponInfo_t **)imp_cg_weapons)[weaponIndex].viewModelDObj;
+        unsigned int flashTag = *(unsigned short *)s_barrelTags[0];
+        vec3_t muzzle;
+        float vmEnd = 15.0f;
+        if (viewModel && CG_DObjGetViewModelTagPos(viewModel, flashTag, muzzle)) {
+            float fwd = (muzzle[0] - cg->refdef.vieworg[0]) * cg->refdef.viewaxis[0][0] +
+                        (muzzle[1] - cg->refdef.vieworg[1]) * cg->refdef.viewaxis[0][1] +
+                        (muzzle[2] - cg->refdef.vieworg[2]) * cg->refdef.viewaxis[0][2];
+            if (isfinite(fwd) && fwd > 6.0f) {
+                vmEnd = fwd * 0.88f;
+                if (vmEnd < 12.5f)
+                    vmEnd = 12.5f;
+                if (vmEnd > 19.5f)
+                    vmEnd = 19.5f;
+            }
+        }
         g_webAdsDofFrac = ps->fWeaponPosFrac;
-        {
-            struct DObj_s *viewModel = (*(weaponInfo_t **)imp_cg_weapons)[weaponIndex].viewModelDObj;
-            unsigned int flashTag = *(unsigned short *)s_barrelTags[0];
-            vec3_t muzzle;
-            float vmEnd = 15.0f;
-            if (viewModel && CG_DObjGetViewModelTagPos(viewModel, flashTag, muzzle)) {
-                float fwd = (muzzle[0] - cg->refdef.vieworg[0]) * cg->refdef.viewaxis[0][0] +
-                            (muzzle[1] - cg->refdef.vieworg[1]) * cg->refdef.viewaxis[0][1] +
-                            (muzzle[2] - cg->refdef.vieworg[2]) * cg->refdef.viewaxis[0][2];
-                if (isfinite(fwd) && fwd > 6.0f) {
-                    vmEnd = fwd * 0.88f;
-                    if (vmEnd < 12.5f)
-                        vmEnd = 12.5f;
-                    if (vmEnd > 19.5f)
-                        vmEnd = 19.5f;
-                }
-            }
-            g_webAdsViewmodelEnd = vmEnd;
-        }
-        if (cg->time - lastTraceTime > 32 || cg->time < lastTraceTime ||
-            dot < 0.9995f || dx * dx + dy * dy + dz * dz > 16.0f) {
-            vec3_t traceEnd;
-            trace_t trace;
-            for (int i = 0; i < 3; ++i) {
-                traceEnd[i] = cg->refdef.vieworg[i] + 4096.0f * cg->refdef.viewaxis[0][i];
-                lastTraceOrg[i] = cg->refdef.vieworg[i];
-                lastTraceDir[i] = cg->refdef.viewaxis[0][i];
-            }
-            lastTraceTime = cg->time;
-            CG_TraceCapsule(&trace, cg->refdef.vieworg, zeroBounds, zeroBounds,
-                            traceEnd, ps->clientNum, 0x2802831);
-            targetFocusDist = 4096.0f * trace.fraction;
-            if (targetFocusDist < 48.0f)
-                targetFocusDist = 48.0f;
-            if (targetFocusDist > 2500.0f)
-                targetFocusDist = 2500.0f;
-        }
-        {
-            float dt = (float)cg->frametime * 0.001f;
-            if (dt > 0.0f && dt < 0.25f) {
-                float blend = 1.0f - expf(-14.0f * dt);
-                g_webAdsFocusDist += (targetFocusDist - g_webAdsFocusDist) * blend;
-            } else {
-                g_webAdsFocusDist = targetFocusDist;
-            }
-        }
+        g_webAdsViewmodelEnd = vmEnd;
+        g_webAdsViewmodelStart = vmEnd * 0.4f;
     } else {
         g_webAdsDofFrac = 0.0f;
     }
@@ -1505,6 +1470,8 @@ static void CG_UpdateWebWeaponPresentation(playerState_t *ps, int weaponIndex, q
                     end[i] = cg->refdef.vieworg[i] + range * forward[i] +
                              rightOfs * right[i] + upOfs * up[i];
                 }
+                if (randomf() >= cg_tracerChance->current.value)
+                    continue;
                 CG_TraceCapsule(&trace, cg->refdef.vieworg, zeroBounds, zeroBounds,
                                 end, ps->clientNum, 0x2802831);
                 for (int i = 0; i < 3; ++i)
@@ -1806,6 +1773,20 @@ static float CG_TracerScaleForDistance(float dist, float width, float tracerScal
     return width * tracerScale;
 }
 
+#ifdef __EMSCRIPTEN__
+static void CG_SetTracerVertex(GfxWorldVertex *vert, const vec_t *center, const vec_t *axis, float offset,
+                               unsigned int color, float s, float t)
+{
+    for (int i = 0; i < 3; ++i)
+        vert->xyz[i] = center[i] + axis[i] * offset;
+    vert->color.packed = color;
+    vert->texCoord[0] = s;
+    vert->texCoord[1] = t;
+    vert->lmapCoord[0] = s;
+    vert->lmapCoord[1] = t;
+}
+#endif
+
 void CG_DrawTracer(vec_t *start, vec_t *finish)
 {
     vec3_t dir;
@@ -1852,6 +1833,35 @@ void CG_DrawTracer(vec_t *start, vec_t *finish)
 
     startWidth *= 0.35f;
 
+#ifdef __EMSCRIPTEN__
+    /* The additive tracer image is a white-hot radial blob. Its centre
+     * column gives the streak a hot core across its width, and a small glow
+     * marks the round itself. Like the COD4 beam, the streak stays white along
+     * its length: seen from the gun, most of the line on screen is the few
+     * units nearest the muzzle, so any fade there hides the shot leaving the
+     * barrel. */
+    CG_SetTracerVertex(&verts[0], finish, right, finishWidth, 0xffffffff, 0.5f, 1.0f);
+    CG_SetTracerVertex(&verts[1], finish, right, -finishWidth, 0xffffffff, 0.5f, 0.0f);
+    CG_SetTracerVertex(&verts[2], start, right, -startWidth, 0xffffffff, 0.5f, 0.0f);
+    CG_SetTracerVertex(&verts[3], start, right, startWidth, 0xffffffff, 0.5f, 1.0f);
+    CL_DefaultVertexFrames(4, verts);
+    CL_AddPolyToScene(cgs->media.tracerMaterial, 0x1f, 4, verts);
+
+    {
+        const float glow = finishWidth * 2.0f;
+        vec3_t corner;
+        for (int i = 0; i < 3; ++i)
+            corner[i] = finish[i] + cg->refdef.viewaxis[2][i] * glow;
+        CG_SetTracerVertex(&verts[0], corner, cg->refdef.viewaxis[1], glow, 0xc0c0c0c0, 1.0f, 0.0f);
+        CG_SetTracerVertex(&verts[1], corner, cg->refdef.viewaxis[1], -glow, 0xc0c0c0c0, 0.0f, 0.0f);
+        for (int i = 0; i < 3; ++i)
+            corner[i] = finish[i] - cg->refdef.viewaxis[2][i] * glow;
+        CG_SetTracerVertex(&verts[2], corner, cg->refdef.viewaxis[1], -glow, 0xc0c0c0c0, 0.0f, 1.0f);
+        CG_SetTracerVertex(&verts[3], corner, cg->refdef.viewaxis[1], glow, 0xc0c0c0c0, 1.0f, 1.0f);
+        CL_DefaultVertexFrames(4, verts);
+        CL_AddPolyToScene(cgs->media.tracerMaterial, 0x1f, 4, verts);
+    }
+#else
     verts[0].xyz[0] = finish[0] + right[0] * finishWidth;
     verts[0].xyz[1] = finish[1] + right[1] * finishWidth;
     verts[0].xyz[2] = finish[2] + right[2] * finishWidth;
@@ -1891,6 +1901,7 @@ void CG_DrawTracer(vec_t *start, vec_t *finish)
     CL_DefaultVertexFrames(4, verts);
 
     CL_AddPolyToScene(cgs->media.tracerMaterial, 0x1f, 4, verts);
+#endif
 }
 
 void CG_WeaponSlot_f(qboolean next, qboolean ignoreEmpty)

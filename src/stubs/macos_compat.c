@@ -577,11 +577,11 @@ ContextRef MacDisplay_CreateScreenContext(int inDepthSize, int inUseStencil,
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
-    // Browser MSAA smooths silhouette/fence edges without altering textures.
-    extern int Dvar_GetInt(const char *name);
-    int samples = Dvar_GetInt("r_aaSamples");
-    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, samples > 1);
-    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, samples > 1 ? samples : 0);
+    // r_aaSamples multisamples the offscreen 3D scene target instead
+    // (downstream/wasm/web_scene_fx.c). A multisampled canvas would only
+    // resolve the composed frame and the HUD a second time.
+    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 0);
+    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
 #    else
 
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);

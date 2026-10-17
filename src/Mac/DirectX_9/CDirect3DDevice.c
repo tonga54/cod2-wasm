@@ -2425,12 +2425,8 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
         WEB_DRAW_PERF("backendAttributes");
 #ifdef __EMSCRIPTEN__
         {
-            int isViewmodel = !is2D && dev->viewportMinZ == 0.0f &&
-                dev->viewportMaxZ > 0.0f && dev->viewportMaxZ <= 0.25f &&
-                dev->lighting && stage0Target == 0x0DE1;
             int pointLight = !is2D && dev->zWriteEnable && !dev->alphaBlendEnable &&
-                stage0Target == 0x0DE1 && (usesLightmap || dev->lighting)
-                ? (isViewmodel ? 2 : 1) : 0;
+                stage0Target == 0x0DE1 && (usesLightmap || dev->lighting);
             int worldShadow = !is2D && dev->zWriteEnable && !dev->alphaBlendEnable &&
                 stage0Target == 0x0DE1 && usesLightmap;
             WebPointLights_Draw(pointLightViewValid ? pointLightView : NULL,

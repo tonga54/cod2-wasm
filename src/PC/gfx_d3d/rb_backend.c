@@ -680,6 +680,12 @@ static void RB_EndFrame_real(void)
         g_rb_dip_calls = 0;
     }
 #endif
+#ifdef __EMSCRIPTEN__
+    {
+        extern void WebSceneFx_EndFrame(void);
+        WebSceneFx_EndFrame();
+    }
+#endif
 #ifdef GFX_REAL_D3D9
 
     if (getenv("REALD3D9_PERFLOG")) {
@@ -1407,6 +1413,14 @@ static void RB_BeginViewCmd(GfxRenderCommandExecState *execState)
     backEnd.codeConsts[17][2] = scale * invVPMatrix[6];
     backEnd.codeConsts[17][3] = 0.0f;
 
+#ifdef __EMSCRIPTEN__
+    {
+        extern void WebSceneFx_BeginView(int, int, int, int, int, int, float);
+        WebSceneFx_BeginView(vp->viewport.X, vp->viewport.Y, vp->viewport.Width, vp->viewport.Height,
+                             backEnd.width, backEnd.height, vp->depthHackNearClip);
+    }
+#endif
+
     RB_Set3D();
 
     cmd = (const GfxCmdBeginView *)execState->cmd;
@@ -1872,9 +1886,9 @@ static void RB_Set2D(void)
         RB_EndSurface();
 
 #ifdef __EMSCRIPTEN__
-    if (!backEnd.projection2D && backEnd.viewParms) {
-        extern void WebPointLights_ApplyAdsPostFx(void);
-        WebPointLights_ApplyAdsPostFx();
+    if (!backEnd.projection2D) {
+        extern void WebSceneFx_EndView(void);
+        WebSceneFx_EndView();
     }
 #endif
 

@@ -45,13 +45,13 @@ static dvar_t width,scale,minDist,range,chance,blood,speed;
 static dvar_t *cg_tracerWidth=&width,*cg_tracerScale=&scale,*cg_tracerScaleMinDist=&minDist,*cg_tracerScaleDistRange=&range,*cg_tracerChance=&chance,*cg_blood=&blood,*cg_tracerSpeed=&speed;
 static struct {struct {int tracerMaterial; snd_alias_list_t *bulletHitSmallSound[23],*bulletHitLargeSound[23],*shotgunHitSound[23]; struct {void *table;} *fx; void *fxNoBloodFleshHit;}media;} cgsState,*cgs=&cgsState;
 typedef struct {char *mEffectName;int mPrimitiveCount;} EffectTemplate;
-static GfxWorldVertex output[4];static int draws,whizzes,spawns,impacts,muzzleReady=1,immediateSpawns;
+static GfxWorldVertex polys[2][4];static int draws,whizzes,spawns,impacts,muzzleReady=1,immediateSpawns,traces;
 static localEntity_t immediateLe;
 static unsigned short tag;static void *s_barrelTags[]={&tag,&tag,&tag,&tag};
 static weaponInfo_t weapInfos[4];static weaponInfo_t *weapInfoPtr=weapInfos;static void *imp_cg_weapons=&weapInfoPtr;
 static WeaponDef testWeapon={.weapType=0,.weapClass=0,.shotCount=1,.fAdsSpread=0.5f,.fMinDamageRange=1500.f};
 static float traceFraction=0.25f;
-static float g_webAdsDofFrac,g_webAdsFocusDist=256.f,g_webAdsViewmodelEnd=15.f;
+static float g_webAdsDofFrac,g_webAdsViewmodelStart=6.f,g_webAdsViewmodelEnd=15.f;
 static int s_pendingLocalFireWeapon,s_pendingLocalFireBarrel,s_pendingLocalFireTime,s_localTracerSpawnedTime;
 static localEntity_t *CG_AllocLocalEntity(void){immediateSpawns++;return &immediateLe;}
 static int BG_IsAimDownSightWeapon(int w){return w==1;}
@@ -60,12 +60,12 @@ static int CG_DObjGetViewModelTagPos(void *obj,unsigned t,float *out){out[0]=cg-
 static void AngleVectors(const float *ang,float *f,float *r,float *u){f[0]=1;f[1]=f[2]=0;r[0]=r[2]=0;r[1]=1;u[0]=u[1]=0;u[2]=1;}
 static void BG_GetSpreadForWeapon(const playerState_t *ps,int w,float *lo,float *hi){*lo=1.f;*hi=4.f;}
 static float randomf(void){return 0.5f;}
-static void CG_TraceCapsule(trace_t *tr,const float *s,const float *mn,const float *mx,const float *e,int skip,int mask){tr->fraction=traceFraction;}
+static void CG_TraceCapsule(trace_t *tr,const float *s,const float *mn,const float *mx,const float *e,int skip,int mask){traces++;tr->fraction=traceFraction;}
 static float Vec3Normalize(float *v){float len=sqrtf(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);if(len)for(int i=0;i<3;i++)v[i]/=len;return len;}
 static float Vec3Distance(const float *a,const float *b){float s=0;for(int i=0;i<3;i++)s+=(a[i]-b[i])*(a[i]-b[i]);return sqrtf(s);}
 static void Vec3Cross(const float *a,const float *b,float *c){c[0]=a[1]*b[2]-a[2]*b[1];c[1]=a[2]*b[0]-a[0]*b[2];c[2]=a[0]*b[1]-a[1]*b[0];}
 static void CL_DefaultVertexFrames(int count,GfxWorldVertex *v){assert(count==4);}
-static void CL_AddPolyToScene(int mat,int flags,int count,GfxWorldVertex *v){assert(count==4);draws++;memcpy(output,v,sizeof(output));}
+static void CL_AddPolyToScene(int mat,int flags,int count,GfxWorldVertex *v){assert(count==4&&draws<2);memcpy(polys[draws++],v,sizeof(polys[0]));}
 static void CG_PlaySoundAlias(int ent,float *pos,snd_alias_list_t *alias){impacts++;}
 static int CG_CalcMuzzlePoint(int ent,float *out,unsigned tag){memset(out,0,12);return muzzleReady;}
 static void CG_WhizbySound(float *a,float *b){whizzes++;}
@@ -82,7 +82,7 @@ static const void *imp_r_dlightLimit=&limitPtr;
 '''
 weapon = 'src/PC/cgame_mp/cg_weapons.c'
 code = ''.join(function(weapon, name) for name in (
-    'CG_TracerScaleForDistance', 'CG_DrawTracer', 'CG_BulletHitClientEvent',
+    'CG_TracerScaleForDistance', 'CG_SetTracerVertex', 'CG_DrawTracer', 'CG_BulletHitClientEvent',
     'CG_BulletHitEvent', 'CG_SpawnTracerImmediate', 'CG_UpdateWebWeaponPresentation'))
 code += function('src/PC/gfx_d3d/r_scene.c', 'R_AddLightToScene')
 checks = r'''
@@ -94,21 +94,39 @@ int main(void){
    float a=angle*.01745329252f;
    float start[3]={translation+20,translation+5*cosf(a),translation+5*sinf(a)};
    float end[3]={translation+180,start[1],start[2]};
-   draws=0;CG_DrawTracer(start,end);assert(draws==1);
-   float w=Vec3Distance(output[0].xyz,output[1].xyz);
+   draws=0;CG_DrawTracer(start,end);assert(draws==2);
+   GfxWorldVertex *streak=polys[0],*glow=polys[1];
+   float w=Vec3Distance(streak[0].xyz,streak[1].xyz);
    assert(fabsf(w-1.6f)<.003f);
-   assert(Vec3Distance(output[2].xyz,output[3].xyz)<w);
+   assert(Vec3Distance(streak[2].xyz,streak[3].xyz)<w);
    float toward[3]={start[0]-translation,start[1]-translation,start[2]-translation};
-   float side[3];for(int i=0;i<3;i++)side[i]=output[0].xyz[i]-end[i];
+   float side[3];for(int i=0;i<3;i++)side[i]=streak[0].xyz[i]-end[i];
    assert(fabsf(side[0]*toward[0]+side[1]*toward[1]+side[2]*toward[2])<.01f);
-   for(int v=0;v<4;v++)for(int i=0;i<3;i++)assert(isfinite(output[v].xyz[i]));
-   assert(output[0].color.packed==0xffffffff && output[2].color.packed==0x80808080);
+   // A hot core along the whole streak, across the image's centre column.
+   for(int v=0;v<4;v++)assert(streak[v].color.packed==0xffffffff);
+   for(int v=0;v<4;v++){
+    assert(streak[v].texCoord[0]==.5f && streak[v].lmapCoord[0]==.5f);
+    assert(streak[v].texCoord[1]==(v==0||v==3) && streak[v].lmapCoord[1]==streak[v].texCoord[1]);
+   }
+   // The round itself: a screen-aligned glow centred on the head.
+   float centre[3]={0,0,0};
+   for(int v=0;v<4;v++)for(int i=0;i<3;i++)centre[i]+=glow[v].xyz[i]*.25f;
+   assert(Vec3Distance(centre,end)<.002f);
+   assert(fabsf(Vec3Distance(glow[0].xyz,glow[1].xyz)-3.2f)<.003f);
+   assert(fabsf(Vec3Distance(glow[1].xyz,glow[2].xyz)-3.2f)<.003f);
+   for(int v=0;v<4;v++){
+    assert(fabsf(glow[v].xyz[0]-end[0])<.002f);
+    assert(glow[v].color.packed==0xc0c0c0c0);
+    assert((glow[v].texCoord[0]==0||glow[v].texCoord[0]==1)&&(glow[v].texCoord[1]==0||glow[v].texCoord[1]==1));
+   }
+   assert(glow[0].texCoord[0]!=glow[1].texCoord[0] && glow[1].texCoord[1]!=glow[2].texCoord[1]);
+   for(int p=0;p<2;p++)for(int v=0;v<4;v++)for(int i=0;i<3;i++)assert(isfinite(polys[p][v].xyz[i]));
   }
  }
  memset(cg->refdef.vieworg,0,12);
  float start[3]={20,0,0},end[3]={180,0,0},normal[3]={0,0,1};
- draws=0;CG_DrawTracer(start,end);assert(draws==1);assert(Vec3Distance(output[0].xyz,output[1].xyz)>1.59f);
- CG_DrawTracer(start,start);assert(draws==1);
+ draws=0;CG_DrawTracer(start,end);assert(draws==2);assert(Vec3Distance(polys[0][0].xyz,polys[0][1].xyz)>1.59f);
+ draws=0;CG_DrawTracer(start,start);assert(draws==0);
  for(int event=0;event<2;event++)for(int enabled=0;enabled<2;enabled++){
   chance.current.value=enabled;whizzes=spawns=impacts=0;
   if(event)CG_BulletHitEvent(1,end,normal,normal,0,0xb5);else CG_BulletHitClientEvent(1,end,0,0xb9);
@@ -146,14 +164,26 @@ int main(void){
  CG_UpdateWebWeaponPresentation(&ps,1,1);
  assert(immediateSpawns==1 && s_localTracerSpawnedTime==5000);
  assert(immediateLe.pos.trTime==5000 && immediateLe.pos.trBase[0]==18.f);
- assert(fabsf(g_webAdsDofFrac-1.f)<1e-6f && g_webAdsFocusDist>256.f && g_webAdsFocusDist<=512.f && g_webAdsViewmodelEnd>=12.5f);
+ // Blur the viewmodel from the eye to just short of the muzzle; the 12-unit
+ // fixture muzzle clamps to the 12.5-unit minimum sharp front sight distance.
+ assert(fabsf(g_webAdsDofFrac-1.f)<1e-6f && g_webAdsViewmodelEnd==12.5f);
+ assert(fabsf(g_webAdsViewmodelStart-5.f)<1e-6f);
+ // Aiming alone traces nothing: the resolved scene depth does the focusing.
+ traces=0;cg->time=5016;CG_UpdateWebWeaponPresentation(&ps,1,1);
+ assert(traces==0 && immediateSpawns==1 && g_webAdsDofFrac==1.f);
+ // A round that rolls above the tracer chance draws nothing, and the late
+ // server copy of the shot stays suppressed.
+ chance.current.value=0.25f;cg->time=5032;s_pendingLocalFireWeapon=1;s_pendingLocalFireTime=5032;
+ immediateSpawns=0;CG_UpdateWebWeaponPresentation(&ps,1,1);
+ assert(immediateSpawns==0 && traces==0 && s_localTracerSpawnedTime==5032);
+ chance.current.value=0.85f;
  testWeapon.weapClass=3;testWeapon.shotCount=8;
  cg->time=5050;s_pendingLocalFireWeapon=1;s_pendingLocalFireTime=5050;immediateSpawns=0;
  CG_UpdateWebWeaponPresentation(&ps,1,1);
  assert(immediateSpawns==3);
  ps.fWeaponPosFrac=0.f;CG_UpdateWebWeaponPresentation(&ps,1,1);
  assert(g_webAdsDofFrac==0.f);
- puts("PASS: 1512 translated/off-axis tracer ribbons, immediate first-person tracers, ADS focus tracking, audio independent of visuals, 100 light-selection frames, all 0-32 limits and nonfinite rejection");
+ puts("PASS: 1512 translated/off-axis tracer streaks and head glows, immediate first-person tracers at the tracer chance, trace-free ADS viewmodel focus, audio independent of visuals, 100 light-selection frames, all 0-32 limits and nonfinite rejection");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='cod2-combat-presentation-') as tmp:

@@ -185,7 +185,7 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
           var pointVarying = pointLights ? "varying highp vec3 v_cod2Eye;" : "";
           if (pointNormal) pointVarying += "varying mediump vec3 v_cod2Normal;";
           var pointDefs = pointLights ? pointVarying +
-            "uniform int u_cod2LightCount; uniform highp vec4 u_cod2LightEye[4]; uniform vec4 u_cod2LightColor[4]; uniform highp vec4 u_cod2SceneFx;" +
+            "uniform int u_cod2LightCount; uniform highp vec4 u_cod2LightEye[4]; uniform vec4 u_cod2LightColor[4];" +
             (pointNormal ? "" : "uniform int u_cod2ShadowCount; uniform highp vec4 u_cod2ShadowEye[4];") : "";
           var pointPass = "";
           if (pointLights) {
@@ -230,62 +230,6 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
               }
               pointPass += "gl_FragColor.rgb *= cod2Shadow;\n}\n";
             }
-            if (hasBaseTexel) {
-              if (pointNormal) {
-                pointPass += "if (u_cod2SceneFx.x > 0.0) {\n" +
-                  "highp float cod2Depth = max(-v_cod2Eye.z, 0.1);\n" +
-                  "highp float cod2OffAxis = length(v_cod2Eye.xy);\n" +
-                  "highp float cod2Radial = cod2OffAxis / max(cod2Depth, 1.0);\n" +
-                  "float cod2VmEnd = max(u_cod2SceneFx.w, 12.0);\n" +
-                  "float cod2SightKeep = smoothstep(cod2VmEnd * 0.65, cod2VmEnd * 0.88, cod2Depth) * (1.0 - smoothstep(0.20, 0.44, cod2OffAxis));\n" +
-                  "float cod2VmBlur = max(clamp((cod2VmEnd - cod2Depth) / max(cod2VmEnd * 0.36, 3.2), 0.0, 1.0), " +
-                  "smoothstep(0.22, 0.65, cod2OffAxis) * clamp((cod2VmEnd * 1.18 - cod2Depth) / max(cod2VmEnd * 0.42, 3.2), 0.68, 1.0)) * (1.0 - cod2SightKeep);\n" +
-                  "float cod2WorldBlur = max(clamp((cod2Radial - 0.16) * 2.5, 0.0, 0.9), " +
-                  "clamp(abs(cod2Depth - u_cod2SceneFx.y) / max(u_cod2SceneFx.y * 0.8, 160.0), 0.0, 0.85) * clamp((cod2Radial - 0.08) * 3.5, 0.0, 1.0));\n" +
-                  "float cod2Dof = (u_cod2SceneFx.z > 1.5 ? cod2VmBlur : cod2WorldBlur) * u_cod2SceneFx.x;\n" +
-                  "cod2Dof *= cod2Dof * (3.0 - 2.0 * cod2Dof);\n" +
-                  "if (cod2Dof > 0.015) {\n" +
-                  "highp vec2 cod2Uv = " + pointUV + ";\n" +
-                  "highp vec2 cod2Dx = dFdx(cod2Uv) * (cod2Dof * 3.8);\n" +
-                  "highp vec2 cod2Dy = dFdy(cod2Uv) * (cod2Dof * 3.8);\n" +
-                  "float cod2Bias = cod2Dof * 2.8;\n" +
-                  "vec3 cod2Blur = 0.16 * (texture(u_texUnit0, cod2Uv + cod2Dx + cod2Dy * 0.35, cod2Bias).rgb + " +
-                  "texture(u_texUnit0, cod2Uv - cod2Dx - cod2Dy * 0.35, cod2Bias).rgb + " +
-                  "texture(u_texUnit0, cod2Uv + cod2Dy - cod2Dx * 0.35, cod2Bias).rgb + " +
-                  "texture(u_texUnit0, cod2Uv - cod2Dy + cod2Dx * 0.35, cod2Bias).rgb) + " +
-                  "0.12 * (texture(u_texUnit0, cod2Uv + (cod2Dx + cod2Dy) * 0.85, cod2Bias).rgb + " +
-                  "texture(u_texUnit0, cod2Uv - (cod2Dx + cod2Dy) * 0.85, cod2Bias).rgb + " +
-                  "texture(u_texUnit0, cod2Uv + (cod2Dx - cod2Dy) * 0.85, cod2Bias).rgb + " +
-                  "texture(u_texUnit0, cod2Uv - (cod2Dx - cod2Dy) * 0.85, cod2Bias).rgb);\n" +
-                  "vec3 cod2ModelLit = gl_FragColor.rgb / max(cod2BaseTexel.rgb, vec3(0.02));\n" +
-                  "cod2ModelLit = mix(cod2ModelLit, vec3(dot(cod2ModelLit, vec3(0.3333))), cod2Dof * 0.38);\n" +
-                  "gl_FragColor.rgb = mix(gl_FragColor.rgb, cod2Blur * cod2ModelLit, cod2Dof);\n}\n}\n";
-              } else {
-                pointPass += "if (u_cod2SceneFx.z > 0.5) {\n" +
-                  "float cod2Wluma = dot(cod2BaseTexel.rgb, vec3(0.299, 0.587, 0.114));\n" +
-                  "float cod2Wbump = clamp((dFdx(cod2Wluma) + dFdy(cod2Wluma)) * 0.62, -0.08, 0.08);\n" +
-                  "gl_FragColor.rgb *= 1.0 + cod2Wbump;\n" +
-                  "if (u_cod2SceneFx.x > 0.0) {\n" +
-                  "highp float cod2Depth = max(-v_cod2Eye.z, 1.0);\n" +
-                  "highp float cod2Radial = length(v_cod2Eye.xy) / cod2Depth;\n" +
-                  "float cod2Periph = clamp((cod2Radial - 0.16) * 2.5, 0.0, 1.0);\n" +
-                  "float cod2NearW = clamp((min(u_cod2SceneFx.y * 0.65, 220.0) - cod2Depth) * 0.008, 0.0, 0.9) * clamp((cod2Radial - 0.08) * 4.0, 0.0, 1.0);\n" +
-                  "float cod2FarW = clamp((cod2Depth - max(u_cod2SceneFx.y * 1.5, 420.0)) * 0.0012, 0.0, 0.85) * clamp((cod2Radial - 0.10) * 3.5, 0.0, 1.0);\n" +
-                  "float cod2Dof = max(cod2Periph * 0.9, max(cod2NearW, cod2FarW)) * u_cod2SceneFx.x;\n" +
-                  "cod2Dof *= cod2Dof * (3.0 - 2.0 * cod2Dof);\n" +
-                  "if (cod2Dof > 0.015) {\n" +
-                  "highp vec2 cod2Uv = " + pointUV + ";\n" +
-                  "highp vec2 cod2Dx = dFdx(cod2Uv) * (cod2Dof * 2.8);\n" +
-                  "highp vec2 cod2Dy = dFdy(cod2Uv) * (cod2Dof * 2.8);\n" +
-                  "float cod2Bias = cod2Dof * 2.4;\n" +
-                  "vec3 cod2Blur = 0.25 * (texture(u_texUnit0, cod2Uv + cod2Dx + cod2Dy * 0.4, cod2Bias).rgb + " +
-                  "texture(u_texUnit0, cod2Uv - cod2Dx - cod2Dy * 0.4, cod2Bias).rgb + " +
-                  "texture(u_texUnit0, cod2Uv + cod2Dy - cod2Dx * 0.4, cod2Bias).rgb + " +
-                  "texture(u_texUnit0, cod2Uv - cod2Dy + cod2Dx * 0.4, cod2Bias).rgb);\n" +
-                  "vec3 cod2LitRatio = gl_FragColor.rgb / max(cod2BaseTexel.rgb, vec3(0.02));\n" +
-                  "gl_FragColor.rgb = mix(gl_FragColor.rgb, cod2Blur * cod2LitRatio, cod2Dof);\n}\n}\n}\n";
-              }
-            }
           }
           var vsSource = ['''
 POINT_VERTEX_ORIGINAL = 'vsPointSizeDefs, vsClipPlaneDefs, vsLightingDefs, "void main()"'
@@ -315,12 +259,10 @@ POINT_UNIFORMS_REPLACEMENT = r'''        this.normalMatrixLocation = GLctx.getUn
         this.cod2LightColorLocation = GLctx.getUniformLocation(this.program, "u_cod2LightColor[0]");
         this.cod2ShadowCountLocation = GLctx.getUniformLocation(this.program, "u_cod2ShadowCount");
         this.cod2ShadowEyeLocation = GLctx.getUniformLocation(this.program, "u_cod2ShadowEye[0]");
-        this.cod2SceneFxLocation = GLctx.getUniformLocation(this.program, "u_cod2SceneFx");
         this.cod2LightCount = -1;
         this.cod2LightRevision = -1;
         this.cod2ShadowCount = -1;
-        this.cod2ShadowRevision = -1;
-        this.cod2SceneFxRevision = -1;'''
+        this.cod2ShadowRevision = -1;'''
 POINT_UPLOAD_LEGACY = r'''        // COD2_POINT_LIGHT_UNIFORMS: cache per program; no allocation per draw.
         if (this.cod2LightCountLocation !== null) {
           var lights = Module.cod2PointLights;
@@ -371,14 +313,6 @@ POINT_UPLOAD_REPLACEMENT = r'''        // COD2_POINT_LIGHT_UNIFORMS: cache per p
           if (shadowCount && this.cod2ShadowRevision !== shadowLights.shadowEyeRevision) {
             GLctx.uniform4fv(this.cod2ShadowEyeLocation, shadowLights.shadowEye);
             this.cod2ShadowRevision = shadowLights.shadowEyeRevision;
-          }
-        }
-        if (this.cod2SceneFxLocation !== null && this.cod2SceneFxLocation !== undefined) {
-          var sceneFxLights = Module.cod2PointLights;
-          if (sceneFxLights && sceneFxLights.sceneFx &&
-              this.cod2SceneFxRevision !== sceneFxLights.sceneFxRevision) {
-            GLctx.uniform4fv(this.cod2SceneFxLocation, sceneFxLights.sceneFx);
-            this.cod2SceneFxRevision = sceneFxLights.sceneFxRevision;
           }
         }
         if (GLImmediate.mode == GLctx.POINTS) {
