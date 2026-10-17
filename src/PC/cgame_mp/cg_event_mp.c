@@ -17,7 +17,6 @@ extern void Com_Printf(const char *msg, ...);
 extern void Com_DPrintf(const char *msg, ...);
 extern void Com_Error(int level, const char *msg, ...);
 extern void *BG_GetWeaponDef(int weapon);
-extern int BG_GetNumWeapons(void);
 extern int BG_WeaponIsClipOnly(int weapon);
 extern int CG_PlayEntitySoundAlias(int entNum, int alias);
 extern int CG_PlaySoundAlias(int entitynum, const vec_t *origin, snd_alias_list_t *aliasList);
@@ -157,16 +156,11 @@ void CG_CheckEvents(centity_t *cent);
 
 #ifdef __EMSCRIPTEN__
 static qboolean deliveringObituary;
-/* A headshot obituary only carries MOD_HEAD_SHOT, so the server adds the
- * weapon to its command. */
-static int deliveringObituaryWeapon;
-static struct { int victim, attacker, weapon, headshotWeapon; } pendingObituaries[128];
+static struct { int victim, attacker, weapon; } pendingObituaries[128];
 static int pendingObituaryCount;
 
-void CG_QueueObituary(int victim, int attacker, int weapon, int headshotWeapon)
+void CG_QueueObituary(int victim, int attacker, int weapon)
 {
-    if (headshotWeapon <= 0 || headshotWeapon >= 128)
-        headshotWeapon = 0;
     if ((unsigned)victim >= 64 ||
         !((unsigned)attacker < 64 || attacker == 1022) || weapon < 0 || weapon > 255)
         return;
@@ -176,7 +170,6 @@ void CG_QueueObituary(int victim, int attacker, int weapon, int headshotWeapon)
     }
     pendingObituaries[pendingObituaryCount].victim = victim;
     pendingObituaries[pendingObituaryCount].attacker = attacker;
-    pendingObituaries[pendingObituaryCount].headshotWeapon = headshotWeapon;
     pendingObituaries[pendingObituaryCount++].weapon = weapon;
 }
 
@@ -189,10 +182,8 @@ void CG_FlushObituaries(void)
         event.nextState.attackerEntityNum = pendingObituaries[i].attacker;
         event.nextState.eventParm = pendingObituaries[i].weapon;
         deliveringObituary = 1;
-        deliveringObituaryWeapon = pendingObituaries[i].headshotWeapon;
         CG_EntityEvent(&event, 0xc6);
         deliveringObituary = 0;
-        deliveringObituaryWeapon = 0;
     }
     pendingObituaryCount = 0;
 }
@@ -1493,26 +1484,10 @@ void CG_EntityEvent(centity_t *cent, int event)
             )
                 return;
 
-            if (CG_KillFeedEnabled()) {
-                const char *feedIcon = iconShader;
-                int feedWide = iconWidth > 2.0f;
-                int feedFlip = iconHorzFlip;
-                int headshot = 0;
-#ifdef __EMSCRIPTEN__
-                if ((ep & 0x80) && (ep & 0x7f) == 8 && deliveringObituaryWeapon > 0 &&
-                    deliveringObituaryWeapon < BG_GetNumWeapons()) {
-                    WeaponDef *def = (WeaponDef *)BG_GetWeaponDef(deliveringObituaryWeapon);
-
-                    if (def && def->killIcon[0]) {
-                        feedIcon = def->killIcon;
-                        feedWide = def->wideKillIcon != 0;
-                        feedFlip = def->flipKillIcon != 0;
-                        headshot = 1;
-                    }
-                }
-#endif
-                CG_KillFeedAdd(attackerName[0] ? attacker : -1, target, feedIcon, feedWide, feedFlip, headshot);
-            } else
+            if (CG_KillFeedEnabled())
+                CG_KillFeedAdd(attackerName[0] ? attacker : -1, target, iconShader, iconWidth > 2.0f, iconHorzFlip,
+                               (ep & 0x80) && (ep & 0x7f) == 8);
+            else
                 CL_DeathMessagePrint(attackerName, attackerColor, targetName,
                                      victimColor, iconShader, iconWidth, 1.4f, iconColor, iconHorzFlip);
             return;

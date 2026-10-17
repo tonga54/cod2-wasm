@@ -21,7 +21,7 @@ static char argv[8][32];
 static int Cmd_Argc(void) { return argc; }
 static const char *CG_Argv(int i) { return i < argc ? argv[i] : ""; }
 static void CG_ScorePopupAdd(int event, int points) { assert(event == 0 && points == 100); popups++; }
-void CG_QueueObituary(int victim, int attacker, int weapon, int headshotWeapon) { obituaries++; }
+void CG_QueueObituary(int victim, int attacker, int weapon) { obituaries++; }
 /* The deathmatch scores the panel received, "C" for a clear. */
 static char scores[64];
 static void CG_ScorePanelClearDmScores(void) { strcat(scores, "C"); }

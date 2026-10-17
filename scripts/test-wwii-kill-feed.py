@@ -28,7 +28,7 @@ def block(text, start_text, declaration=False):
 # Obituaries reach the feed (test-kill-feed.py runs that path); the HUD draws
 # it with the menus, for players and free spectators, and every level starts
 # with an empty feed.
-assert event.count('CG_KillFeedAdd(attackerName[0] ? attacker : -1, target, feedIcon, feedWide, feedFlip, headshot);') == 1
+assert event.count('CG_KillFeedAdd(attackerName[0] ? attacker : -1, target, iconShader, iconWidth > 2.0f, iconHorzFlip,\n') == 1
 assert draw.count('        if (drawHudMenus) {\n            CG_DrawScorePanel();\n            CG_DrawKillFeed();\n') == 2
 assert main.count('    CG_ScorePopupInit();\n    CG_KillFeedInit();\n') == 1
 
@@ -112,19 +112,27 @@ MaterialHandle CL_RegisterMaterial(const char *name, int imageTrack) {
     return name;
 }
 /* The Kar98 image cannot be decoded, so it keeps its own material. */
-static int noHeadshotSilhouette;
 MaterialHandle R_GetHudSilhouetteMaterial(MaterialHandle icon, float *aspect) {
     static const struct { const char *icon, *flat; float aspect; } flat[] = {
         { "killiconmp40", "flat:killiconmp40", 2.0f }, { "killiconm1garand", "flat:killiconm1garand", 5.0f },
         { "killiconsuicide", "flat:killiconsuicide", 1.0f }, { "killiconheadshot", "flat:killiconheadshot", 1.0f } };
     *aspect = 0.0f;
     for (int i = 0; i < 4; i++) {
-        if (!strcmp(icon, flat[i].icon) && !(i == 3 && noHeadshotSilhouette)) {
+        if (!strcmp(icon, flat[i].icon)) {
             *aspect = flat[i].aspect;
             return flat[i].flat;
         }
     }
     return NULL;
+}
+/* The symbol's image: a quarter wider than its ring for its border. */
+static int symbolInits, noSymbol;
+static float symbolDiameter;
+void CG_HeadshotIconInit(void) { symbolInits++; }
+MaterialHandle CG_HeadshotIconMaterial(float diameter, float *extent) {
+    symbolDiameter = diameter;
+    *extent = 1.25f;
+    return noSymbol ? NULL : "*hud_headshot";
 }
 ''' + defines + '\n' + '\n'.join(pieces) + '\n'
 
@@ -164,7 +172,7 @@ static float width(const char *value) { return (float)(int)(strlen(value) * 20.0
 int main(void) {
     char name[KILLFEED_NAME_LEN];
     CG_KillFeedInit();
-    assert(CG_KillFeedEnabled() && s_killFeed.count == 0);
+    assert(CG_KillFeedEnabled() && s_killFeed.count == 0 && symbolInits == 1);
 
     /* The local player is white, teammates teal and enemies orange; free
      * players are all enemies; spectators see the Allies as friends. */
@@ -249,22 +257,44 @@ int main(void) {
     CG_KillFeedAdd(1, -1, "killiconmp40", 0, 0, 0);
     assert(s_killFeed.count == 5 && s_killFeed.lines[0].time == 1100 && !strcmp(s_killFeed.lines[4].victim, "HUD QA"));
 
-    /* A headshot puts an 11-unit headshot mark after the weapon and widens the
-     * slot by it, keeping the pair centred; the stock mark stands in for a
-     * missing silhouette. */
+    /* A headshot shows the symbol instead of the icon it came with: its ring
+     * 11.75 units wide in a slot 6 units wider each side, centred 6 units
+     * above the baseline in the attacker's color, the image's border around
+     * the ring. Without an attacker the symbol leads, the victim 8 units
+     * after the ring. */
     s_killFeed.count = 0;
     cgState.time = 3000;
-    CG_KillFeedAdd(0, 2, "killiconmp40", 1, 0, 1);
-    noHeadshotSilhouette = 1;
-    CG_KillFeedAdd(0, 2, "killiconmp40", 1, 0, 1);
-    noHeadshotSilhouette = 0;
+    CG_KillFeedAdd(0, 2, "killiconheadshot", 0, 0, 1);
+    CG_KillFeedAdd(2, 1, "killiconheadshot", 0, 0, 1);
+    CG_KillFeedAdd(-1, 3, "killiconheadshot", 0, 0, 1);
+    render(3500);
+    const float side = 11.75f * 1.25f, border = 0.5f * (side - 11.75f);
+    slot = 12.0f + width("HUD QA");
+    assert(drawCount == 4 + 4 + 3 && near(symbolDiameter, 11.75f) && text(0, "HUD QA", 12.0f, -117.0f, self, 1.0f));
+    assert(icon(1, "*hud_headshot", slot + 6.0f - border, -117.0f - 6.0f - 0.5f * side, side, side, 0, self, 1.0f));
+    assert(text(3, "Foe", slot + 23.75f, -117.0f, enemy, 1.0f));
+    slot = 12.0f + width("Foe");
+    assert(text(4, "Foe", 12.0f, -102.0f, enemy, 1.0f));
+    assert(icon(5, "*hud_headshot", slot + 6.0f - border, -102.0f - 6.0f - 0.5f * side, side, side, 0, enemy, 1.0f));
+    assert(text(7, "Mate", slot + 23.75f, -102.0f, friendly, 1.0f));
+    assert(icon(8, "*hud_headshot", 12.0f - border, -87.0f - 6.0f - 0.5f * side, side, side, 0, enemy, 1.0f));
+    assert(text(10, "Other", 12.0f + 11.75f + 8.0f, -87.0f, enemy, 1.0f));
+    /* While there is no symbol to draw, the line keeps its icon and slot. */
+    noSymbol = 1;
     render(3500);
     slot = 12.0f + width("HUD QA");
-    assert(drawCount == 12 && text(0, "HUD QA", 12.0f, -102.0f, self, 1.0f));
-    assert(icon(1, "flat:killiconmp40", slot + 18.0f, -102.0f - 4.0f - 6.5f, 26.0f, 13.0f, 0, self, 1.0f));
-    assert(icon(3, "flat:killiconheadshot", slot + 18.0f + 26.0f + 2.0f, -102.0f - 4.0f - 5.5f, 11.0f, 11.0f, 0, self, 1.0f));
-    assert(text(5, "Foe", slot + 75.0f, -102.0f, enemy, 1.0f));
-    assert(icon(9, "killiconheadshot", slot + 18.0f + 26.0f + 2.0f, -87.0f - 4.0f - 5.5f, 11.0f, 11.0f, 0, self, 1.0f));
+    assert(drawCount == 4 + 4 + 3 && icon(1, "flat:killiconheadshot", slot + 24.5f, -117.0f - 4.0f - 6.5f, 13.0f, 13.0f, 0, self, 1.0f));
+    assert(text(3, "Foe", slot + 62.0f, -117.0f, enemy, 1.0f));
+    assert(icon(8, "flat:killiconheadshot", 12.0f, -87.0f - 4.0f - 6.5f, 13.0f, 13.0f, 0, enemy, 1.0f));
+    assert(text(10, "Other", 12.0f + 13.0f + 8.0f, -87.0f, enemy, 1.0f));
+    noSymbol = 0;
+    /* Only headshots show it. */
+    s_killFeed.count = 0;
+    cgState.time = 3000;
+    CG_KillFeedAdd(0, 2, "killiconheadshot", 0, 0, 0);
+    render(3500);
+    slot = 12.0f + width("HUD QA");
+    assert(drawCount == 4 && icon(1, "flat:killiconheadshot", slot + 24.5f, -87.0f - 4.0f - 6.5f, 13.0f, 13.0f, 0, self, 1.0f));
 
     /* Lines fade in over 150 ms and out over the last 500 ms of 6 s. */
     s_killFeed.count = 0;
@@ -317,19 +347,28 @@ mutants = [
     mutate('    if (aspect > 0.0f) {\n', '    if (1) {\n'),
     mutate('    if (*width > maxWidth) {', '    if (0) {'),
     mutate('*width = maxHeight * aspect;', '*width = maxHeight;'),
-    mutate('aspect > 0.0f ? aspect : 1.0f', 'aspect'),
     mutate('float s1 = flip ? 1.0f : 0.0f;', 'float s1 = 0.0f;'),
     mutate('line->attackerRelation != KILLFEED_NONE ? line->attackerRelation : line->victimRelation;',
            'line->victimRelation;'),
     mutate('    memcpy(color, s_killFeedColors[iconRelation], sizeof(color));\n    color[3] = alpha;\n',
            '    memcpy(color, s_killFeedColors[iconRelation], sizeof(color));\n'),
-    mutate('iconX = x + (slotWidth - contentWidth) * 0.5f;', 'iconX = x;'),
-    mutate('        x += slotWidth;\n', '        x += contentWidth;\n'),
-    mutate('x += contentWidth + KILLFEED_GAP;', 'x += contentWidth;'),
-    mutate('        slotWidth += KILLFEED_HEADSHOT_GAP + line->headshotWidth;\n', ''),
-    mutate('    if (line->headshotIcon)\n        CG_KillFeedDrawIcon(', '    if (0)\n        CG_KillFeedDrawIcon('),
-    mutate('line.headshotIcon = CG_KillFeedIcon("killiconheadshot", &aspect);',
-           'line.headshotIcon = CG_KillFeedIcon(iconShader, &aspect);'),
+    mutate('iconX = x + (slotWidth - iconWidth) * 0.5f;', 'iconX = x;'),
+    mutate('        x += slotWidth;\n', '        x += iconWidth;\n'),
+    mutate('x += iconWidth + KILLFEED_GAP;', 'x += iconWidth;'),
+    mutate('MaterialHandle symbol = line->headshot ? CG_HeadshotIconMaterial',
+           'MaterialHandle symbol = 1 ? CG_HeadshotIconMaterial'),
+    mutate('float iconWidth = symbol ? KILLFEED_HEADSHOT_SIZE : line->iconWidth;',
+           'float iconWidth = line->iconWidth;'),
+    mutate('float slotWidth = symbol ? KILLFEED_HEADSHOT_SIZE + 2.0f * KILLFEED_HEADSHOT_GAP : KILLFEED_SLOT_WIDTH;',
+           'float slotWidth = symbol ? KILLFEED_HEADSHOT_SIZE + KILLFEED_HEADSHOT_GAP : KILLFEED_SLOT_WIDTH;'),
+    mutate('float side = KILLFEED_HEADSHOT_SIZE * extent;', 'float side = KILLFEED_HEADSHOT_SIZE;'),
+    mutate('CG_KillFeedDrawIcon(iconX + 0.5f * (KILLFEED_HEADSHOT_SIZE - side),', 'CG_KillFeedDrawIcon(iconX,'),
+    mutate('side, side,\n                            0, color, symbol);', 'side, side,\n                            0, color, line->icon);'),
+    mutate('#define KILLFEED_HEADSHOT_RISE 6.0f', '#define KILLFEED_HEADSHOT_RISE 4.0f'),
+    mutate('    line.headshot = headshot;\n', ''),
+    mutate('    CG_HeadshotIconInit();\n', ''),
+    mutate('#define KILLFEED_HEADSHOT_SIZE 11.75f', '#define KILLFEED_HEADSHOT_SIZE 11.0f'),
+    mutate('#define KILLFEED_HEADSHOT_GAP 6.0f', '#define KILLFEED_HEADSHOT_GAP 2.0f'),
     mutate('return silhouette ? silhouette : icon;', 'return icon;'),
     mutate('color[3] * KILLFEED_SHADOW_ALPHA', 'KILLFEED_SHADOW_ALPHA'),
     mutate('CL_DrawStretchPic(x + KILLFEED_SHADOW_OFFSET, y + KILLFEED_SHADOW_OFFSET,', 'CL_DrawStretchPic(x, y,'),
@@ -352,6 +391,7 @@ with tempfile.TemporaryDirectory(prefix='cod2-killfeed-') as directory:
 print('PASS: the kill feed draws "attacker [weapon] victim" from the bottom-left with the newest line lowest, colors '
       'the local player white, teammates teal and enemies orange (Allies for spectators), centres the flat icon in a '
       'fixed slot with a shadow and the attacker\'s tint, fits silhouettes into 44 x 13 by their proportions, keeps '
-      'stock icons in a 22-unit box widened and mirrored as the weapon asks, adds an 11-unit headshot mark after the '
-      'weapon, keeps five lines, fades over 6 s and drops lines from an older clock; '
+      'stock icons in a 22-unit box widened and mirrored as the weapon asks, shows a headshot as the WWII symbol '
+      '11.75 units wide in its own slot, keeping the given icon while the symbol cannot be drawn, keeps five lines, '
+      'fades over 6 s and drops lines from an older clock; '
       f'{len(mutants)} failing regression mutants')

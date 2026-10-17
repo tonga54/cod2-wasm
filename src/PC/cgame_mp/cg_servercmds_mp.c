@@ -987,13 +987,13 @@ void CG_ServerCommand(void)
 
     if (!strcmp(cmd, "cod2_obituary")) {
 #ifdef __EMSCRIPTEN__
-        extern void CG_QueueObituary(int victim, int attacker, int weapon, int headshotWeapon);
+        extern void CG_QueueObituary(int victim, int attacker, int weapon);
+        /* Some servers add a headshot's weapon, which is not shown. */
         if (Cmd_Argc() == 4 || Cmd_Argc() == 5) {
             int victim = atoi(CG_Argv(1));
             int attacker = atoi(CG_Argv(2));
             int weapon = atoi(CG_Argv(3));
-            int headshotWeapon = Cmd_Argc() == 5 ? atoi(CG_Argv(4)) : 0;
-            CG_QueueObituary(victim, attacker, weapon, headshotWeapon);
+            CG_QueueObituary(victim, attacker, weapon);
         }
 #endif
         return;

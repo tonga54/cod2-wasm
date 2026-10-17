@@ -21,7 +21,8 @@ typedef struct HudVertex2D {
 #define R_HUD_IMAGE_MANTLE_ARROW 4
 #define R_HUD_IMAGE_GRENADE_RING 5
 #define R_HUD_IMAGE_GRENADE_POINTER 6
-#define R_HUD_IMAGE_COUNT 7
+#define R_HUD_IMAGE_HEADSHOT 7
+#define R_HUD_IMAGE_COUNT 8
 
 /* Icons whose white silhouette or emblem has been built; each is read once. */
 #define R_HUD_SILHOUETTE_COUNT 64

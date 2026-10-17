@@ -1037,15 +1037,9 @@ void GScr_Obituary(void)
 
     /* Obituaries must survive snapshot loss and visibility changes. The web
      * client uses this reliable broadcast; retail clients keep the event.
-     * A headshot event carries MOD_HEAD_SHOT instead of the weapon, so the
-     * weapon follows as a fourth argument; a client that accepts only three
-     * drops the whole obituary. */
-    if (iMODNum == 8 && iWeaponNum > 0)
-        SV_GameSendServerCommand(-1, 1, va("cod2_obituary %d %d %d %d", pEnt->s.otherEntityNum,
-            pEnt->s.attackerEntityNum, pEnt->s.eventParm, iWeaponNum));
-    else
-        SV_GameSendServerCommand(-1, 1, va("cod2_obituary %d %d %d",
-            pEnt->s.otherEntityNum, pEnt->s.attackerEntityNum, pEnt->s.eventParm));
+     * Some clients accept only these three arguments and drop anything more. */
+    SV_GameSendServerCommand(-1, 1, va("cod2_obituary %d %d %d",
+        pEnt->s.otherEntityNum, pEnt->s.attackerEntityNum, pEnt->s.eventParm));
 
     return;
 }

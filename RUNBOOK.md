@@ -1740,10 +1740,10 @@ through SD rounds and reset on a new level or match. This needs the updated
 native server; see the same document.
 Kills now show in a WWII-style feed at the bottom left: attacker, weapon
 silhouette and victim, in white, teal or orange (`cg_hudKillFeed`; 0 restores
-CoD2's death messages). A headshot shows the weapon followed by a headshot
-mark. That needs the updated native server, which adds the weapon to
-`cod2_obituary`; browser clients older than this feed drop headshot lines
-until reloaded.
+CoD2's death messages). A headshot shows WWII's headshot symbol, a skull in
+a reticle, in place of the weapon. `cod2_obituary` has three arguments again,
+so browser clients older than the feed keep headshot lines; this client also
+accepts the fourth, a headshot's weapon, from servers that still send it.
 
 
 The tested web/server/gateway images and matching staged archives were installed

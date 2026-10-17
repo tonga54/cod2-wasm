@@ -52,12 +52,12 @@ static void SV_GameSendServerCommand(int client,int type,const char*text){
 }
 '''
 checks=r'''
-static int recording,seen,seenParm[8],seenWeapon[8];
+static int recording,seen,seenParm[8];
 static void CG_EntityEvent(centity_t *event,int code){
  assert(deliveringObituary&&code==198);
- if(recording){assert(seen<8);seenParm[seen]=event->nextState.eventParm;seenWeapon[seen++]=deliveringObituaryWeapon;return;}
- assert(event->nextState.otherEntityNum==63&&event->nextState.attackerEntityNum==62&&event->nextState.eventParm==17);
- assert(!deliveringObituaryWeapon);
+ assert(event->nextState.otherEntityNum==63&&event->nextState.attackerEntityNum==62);
+ if(recording){assert(seen<8);seenParm[seen++]=event->nextState.eventParm;return;}
+ assert(event->nextState.eventParm==17);
  printed[local]++;
 }
 /* What the client does with each broadcast it receives. */
@@ -68,41 +68,40 @@ static void receive(const char *line){
 }
 int main(void){
  GScr_Obituary();assert(broadcasts==1&&destination==-1&&reliability==1&&event.r.svFlags==8);assert(!strcmp(message,"cod2_obituary 63 62 17"));
- /* A headshot carries MOD_HEAD_SHOT, so its weapon follows in a fourth argument. */
+ /* A headshot carries MOD_HEAD_SHOT in the same three arguments, with or
+  * without a weapon. */
  broadcasts=0;modIndex=8;GScr_Obituary();
- assert(broadcasts==1&&reliability==1&&!strcmp(messages[0],"cod2_obituary 63 62 136 17")&&event.s.eventParm==136);
+ assert(broadcasts==1&&reliability==1&&!strcmp(messages[0],"cod2_obituary 63 62 136")&&event.s.eventParm==136);
  broadcasts=0;weaponIndex=0;GScr_Obituary();assert(broadcasts==1&&!strcmp(messages[0],"cod2_obituary 63 62 136"));
  broadcasts=0;weaponIndex=17;modIndex=7;GScr_Obituary();assert(broadcasts==1&&!strcmp(messages[0],"cod2_obituary 63 62 135"));
  for(local=0;local<64;local++){
-  CG_QueueObituary(64,62,17,0);CG_QueueObituary(63,64,17,0);CG_QueueObituary(63,62,256,0);CG_FlushObituaries();assert(!printed[local]);
+  CG_QueueObituary(64,62,17);CG_QueueObituary(63,64,17);CG_QueueObituary(63,62,256);CG_FlushObituaries();assert(!printed[local]);
   for(int i=0;i<10;i++)receive("cod2_obituary 63 62 17");
   CG_FlushObituaries();assert(printed[local]==10&&!deliveringObituary);
   CG_FlushObituaries();assert(printed[local]==10);
  }
  recording=1;
- /* Each obituary keeps its own weapon; one outside the weapon table is dropped. */
+ /* A fourth argument, the weapon some servers add to a headshot, is ignored;
+  * other counts and invalid events are dropped. */
  receive("cod2_obituary 63 62 136 17");receive("cod2_obituary 63 62 136");
  receive("cod2_obituary 63 62 136 17 9");receive("cod2_obituary 63 62");receive("cod2_obituary 64 62 136 21");
- receive("cod2_obituary 63 62 136 128");receive("cod2_obituary 63 62 136 -3");receive("cod2_obituary 63 62 135 0");
- receive("cod2_obituary 63 62 136 127");
+ receive("cod2_obituary 63 62 135 0");receive("cod2_obituary 63 62 255 3");receive("cod2_obituary 63 62 256");
  CG_FlushObituaries();
- const int parms[6]={136,136,136,136,135,136},weapons[6]={17,0,0,0,0,127};
- assert(seen==6&&!deliveringObituary&&!deliveringObituaryWeapon);
- for(int i=0;i<6;i++)assert(seenParm[i]==parms[i]&&seenWeapon[i]==weapons[i]);
+ const int parms[4]={136,136,135,255};
+ assert(seen==4&&!deliveringObituary);
+ for(int i=0;i<4;i++)assert(seenParm[i]==parms[i]);
  return 0;
 }
 '''
 code=queue+server+extract('src/PC/game_mp/g_scr_main_mp.c','GScr_Obituary')+parse
-mutants=[('    if (iMODNum == 8 && iWeaponNum > 0)\n','    if (iMODNum == 8)\n'),
-         ('pEnt->s.eventParm, iWeaponNum));','pEnt->s.eventParm, pEnt->s.eventParm));'),
+mutants=[('SV_GameSendServerCommand(-1, 1,','SV_GameSendServerCommand(-1, 0,'),
+         ('pEnt->s.attackerEntityNum, pEnt->s.eventParm));','pEnt->s.attackerEntityNum, iWeaponNum));'),
          ('Cmd_Argc() == 4 || Cmd_Argc() == 5','Cmd_Argc() == 4'),
          ('Cmd_Argc() == 4 || Cmd_Argc() == 5','Cmd_Argc() >= 4'),
-         ('int headshotWeapon = Cmd_Argc() == 5 ? atoi(CG_Argv(4)) : 0;','int headshotWeapon = 0;'),
-         ('    if (headshotWeapon <= 0 || headshotWeapon >= 128)\n        headshotWeapon = 0;\n',''),
-         ('headshotWeapon >= 128','headshotWeapon > 128'),
-         ('    pendingObituaries[pendingObituaryCount].headshotWeapon = headshotWeapon;\n',''),
-         ('        deliveringObituaryWeapon = 0;\n',''),
-         ('        deliveringObituaryWeapon = pendingObituaries[i].headshotWeapon;\n','')]
+         ('int weapon = atoi(CG_Argv(3));','int weapon = atoi(CG_Argv(Cmd_Argc() - 1));'),
+         ('weapon < 0 || weapon > 255','weapon < 0 || weapon > 256'),
+         ('(unsigned)victim >= 64','(unsigned)victim > 64'),
+         ('    pendingObituaryCount = 0;\n','')]
 with tempfile.TemporaryDirectory(prefix='cod2-reliable-obituary-') as d:
  p=Path(d)
  for index,(old,new) in enumerate([(None,None)]+mutants):
@@ -111,7 +110,6 @@ with tempfile.TemporaryDirectory(prefix='cod2-reliable-obituary-') as d:
   subprocess.run(['cc','-std=c99','-O1','-g','-fsanitize=address,undefined',str(p/'test.c'),'-o',str(p/'test')],check=True)
   result=subprocess.run([str(p/'test')],capture_output=True)
   assert (result.returncode==0)==(index==0),(index,result.stderr.decode()[-1500:])
-print('PASS: reliable broadcast to all clients; a headshot carries its weapon as a fourth argument; the client '
-      'parses three or four arguments only; 10 consecutive kills for each of 64 viewers; invalid events and '
-      'weapons rejected; queue drains without duplicates and keeps each obituary\'s weapon; %d failing mutants'
-      % len(mutants))
+print('PASS: reliable broadcast to all clients in three arguments, headshots included; the client parses three, '
+      'or four ignoring the last, and nothing else; 10 consecutive kills for each of 64 viewers; invalid events '
+      'rejected; queue drains without duplicates; %d failing mutants' % len(mutants))

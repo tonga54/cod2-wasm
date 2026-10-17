@@ -1,6 +1,7 @@
 #include "common_types.h"
 #include "imports.h"
 #include "headers/PC/cgame_mp/cg_local.h"
+#include "headers/PC/cgame_mp/cg_headshoticon.h"
 #include "headers/PC/cgame_mp/cg_killfeed.h"
 #include "headers/PC/gfx_d3d/r_hud2d.h"
 
@@ -29,8 +30,13 @@ extern MaterialHandle CL_RegisterMaterial(const char *name, int imageTrack);
 #define KILLFEED_STOCK_ICON_HEIGHT 22.0f
 /* Distance from the text baseline up to the icon's centre. */
 #define KILLFEED_ICON_RISE 4.0f
-#define KILLFEED_HEADSHOT_SIZE 11.0f
-#define KILLFEED_HEADSHOT_GAP 2.0f
+/* A headshot's symbol stands in for the weapon, its ring as wide as on the
+ * WWII capture, 52.9 pixels at 4.5 a unit, with a gap to each name. It is
+ * centred higher than the weapons, 0.56 of the names' capitals above their
+ * foot as on the capture; that foot is 1.9 units above the baseline. */
+#define KILLFEED_HEADSHOT_SIZE 11.75f
+#define KILLFEED_HEADSHOT_GAP 6.0f
+#define KILLFEED_HEADSHOT_RISE 6.0f
 /* Between a leading icon and the victim when there is no attacker. */
 #define KILLFEED_GAP 8.0f
 #define KILLFEED_SHADOW_OFFSET 1.0f
@@ -62,10 +68,8 @@ typedef struct {
     float iconWidth;
     float iconHeight;
     int flip;
-    /* NULL unless the kill was a headshot. */
-    MaterialHandle headshotIcon;
-    float headshotWidth;
-    float headshotHeight;
+    /* The headshot symbol stands in for the icon whenever it can be drawn. */
+    int headshot;
 } CG_KillFeedLine;
 
 /* Oldest line first. */
@@ -180,15 +184,12 @@ static void CG_KillFeedDrawLine(const CG_KillFeedLine *line, float y, float alph
 {
     vec4_t color;
     float x = KILLFEED_X;
-    float contentWidth = line->iconWidth;
-    float slotWidth = KILLFEED_SLOT_WIDTH;
+    float extent = 1.0f;
+    MaterialHandle symbol = line->headshot ? CG_HeadshotIconMaterial(KILLFEED_HEADSHOT_SIZE, &extent) : NULL;
+    float iconWidth = symbol ? KILLFEED_HEADSHOT_SIZE : line->iconWidth;
+    float slotWidth = symbol ? KILLFEED_HEADSHOT_SIZE + 2.0f * KILLFEED_HEADSHOT_GAP : KILLFEED_SLOT_WIDTH;
     float iconX;
     int iconRelation = line->attackerRelation != KILLFEED_NONE ? line->attackerRelation : line->victimRelation;
-
-    if (line->headshotIcon) {
-        contentWidth += KILLFEED_HEADSHOT_GAP + line->headshotWidth;
-        slotWidth += KILLFEED_HEADSHOT_GAP + line->headshotWidth;
-    }
 
     if (line->attackerRelation != KILLFEED_NONE) {
         memcpy(color, s_killFeedColors[line->attackerRelation], sizeof(color));
@@ -196,20 +197,24 @@ static void CG_KillFeedDrawLine(const CG_KillFeedLine *line, float y, float alph
         UI_DrawText(line->attacker, 0x7fffffff, font, x, y, KILLFEED_ALIGN_LEFT, KILLFEED_ALIGN_BOTTOM,
                     KILLFEED_TEXT_SCALE, color, 3);
         x += (float)UI_TextWidth(line->attacker, 0, font, KILLFEED_TEXT_SCALE);
-        iconX = x + (slotWidth - contentWidth) * 0.5f;
+        iconX = x + (slotWidth - iconWidth) * 0.5f;
         x += slotWidth;
     } else {
         iconX = x;
-        x += contentWidth + KILLFEED_GAP;
+        x += iconWidth + KILLFEED_GAP;
     }
 
     memcpy(color, s_killFeedColors[iconRelation], sizeof(color));
     color[3] = alpha;
-    CG_KillFeedDrawIcon(iconX, y - KILLFEED_ICON_RISE, line->iconWidth, line->iconHeight, line->flip, color,
-                        line->icon);
-    if (line->headshotIcon)
-        CG_KillFeedDrawIcon(iconX + line->iconWidth + KILLFEED_HEADSHOT_GAP, y - KILLFEED_ICON_RISE,
-                            line->headshotWidth, line->headshotHeight, 0, color, line->headshotIcon);
+    if (symbol) {
+        float side = KILLFEED_HEADSHOT_SIZE * extent;
+
+        CG_KillFeedDrawIcon(iconX + 0.5f * (KILLFEED_HEADSHOT_SIZE - side), y - KILLFEED_HEADSHOT_RISE, side, side,
+                            0, color, symbol);
+    } else {
+        CG_KillFeedDrawIcon(iconX, y - KILLFEED_ICON_RISE, line->iconWidth, line->iconHeight, line->flip, color,
+                            line->icon);
+    }
 
     memcpy(color, s_killFeedColors[line->victimRelation], sizeof(color));
     color[3] = alpha;
@@ -237,6 +242,7 @@ void CG_KillFeedInit(void)
 {
     cg_hudKillFeed = Dvar_RegisterBool_mac("cg_hudKillFeed", 1, 0x1001);
     s_killFeed.count = 0;
+    CG_HeadshotIconInit();
 }
 
 int CG_KillFeedEnabled(void)
@@ -274,11 +280,7 @@ void CG_KillFeedAdd(int attacker, int victim, const char *iconShader, int wideIc
         line.iconWidth = KILLFEED_STOCK_ICON_HEIGHT * (wideIcon ? 2.0f : 1.0f);
     }
     line.flip = flipIcon;
-    if (headshot) {
-        line.headshotIcon = CG_KillFeedIcon("killiconheadshot", &aspect);
-        CG_KillFeedFit(aspect > 0.0f ? aspect : 1.0f, KILLFEED_HEADSHOT_SIZE, KILLFEED_HEADSHOT_SIZE,
-                       &line.headshotWidth, &line.headshotHeight);
-    }
+    line.headshot = headshot;
     CG_KillFeedPush(&s_killFeed, &line);
 }
 

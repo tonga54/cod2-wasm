@@ -21,14 +21,13 @@ typedef float vec_t;
 typedef struct {int infoValid,nextValid,clientNum;char name[32];int team,oldteam;char rest[1300];} clientInfo_t;
 typedef struct {int otherEntityNum,attackerEntityNum,eventParm;} entityState_t;
 typedef struct {const char *killIcon;int wideKillIcon,flipKillIcon;} WeaponDef;
-static WeaponDef weapon={"killiconsten",1,1},thompson={"killiconthompson",0,1},noIcon={"",1,1};
+static WeaponDef weapon={"killiconsten",1,1};
 static struct {struct {clientInfo_t clientinfo[64];} bgs;int clientNum,inKillCam;char killerName[32];} state,*cg=&state;
 static const float f_1_4=1.4f,f_2_8=2.8f;
 static char killedBy[34],killed[34],icon[64],center[200];static int printed;
 static int teams[2],teamCount;
 static void Com_Printf(const char *fmt,...){ }
-static WeaponDef *BG_GetWeaponDef(int n){return n==3?&thompson:n==4?&noIcon:&weapon;}
-static int BG_GetNumWeapons(void){return 64;}
+static WeaponDef *BG_GetWeaponDef(int n){return &weapon;}
 static void Com_Error(int n,const char *s){abort();}
 static void I_strncpyz(char *out,const char *in,int n){snprintf(out,n,"%s",in);}
 static void I_strncat(char *out,int n,const char *in){strncat(out,in,n-strlen(out)-1);}
@@ -41,7 +40,7 @@ static void CL_DeathMessagePrint(const char *a,const vec_t *ac,const char *v,con
 static int feedEnabled,fed,fedAttacker,fedVictim,fedWide,fedFlip,fedHeadshot;static char fedIcon[64];
 static int CG_KillFeedEnabled(void){return feedEnabled;}
 static void CG_KillFeedAdd(int a,int v,const char *i,int wide,int flip,int headshot){fed++;fedAttacker=a;fedVictim=v;snprintf(fedIcon,sizeof(fedIcon),"%s",i);fedWide=wide;fedFlip=flip;fedHeadshot=headshot;}
-static int deliveringObituary,deliveringObituaryWeapon;
+static int deliveringObituary;
 static void obituary(entityState_t *es) {
  float attackerColor[4],victimColor[4],iconColor[4],iconWidth;
  int target,attacker,iconHorzFlip;char targetName[34],attackerName[34];const char *iconShader;
@@ -79,21 +78,18 @@ int main(void){
  assert(fed==1 && !printed && fedAttacker==6 && fedVictim==5 && !strcmp(fedIcon,"killiconsten") && fedWide && fedFlip);
  assert(!strcmp(cg->killerName,"Player 6^7"));
  reset();weapon.wideKillIcon=weapon.flipKillIcon=0;obituary(&es);assert(fed==1 && !fedWide && !fedFlip);
- reset();es=(entityState_t){5,1022,0x80|8};obituary(&es);assert(fed==1 && fedAttacker==-1 && !strcmp(fedIcon,"killiconheadshot") && !fedWide && !fedHeadshot);
- reset();es=(entityState_t){5,5,0x80|12};obituary(&es);assert(fed==1 && fedAttacker==-1 && !strcmp(fedIcon,"killiconsuicide"));
- /* The browser learns a headshot's weapon from cod2_obituary's fourth argument
-  * and shows it with the headshot mark; without it the stock headshot icon stays. */
- reset();es=(entityState_t){5,6,0x80|8};deliveringObituaryWeapon=3;obituary(&es);
- if(deliveringObituary)assert(fed==1 && !strcmp(fedIcon,"killiconthompson") && !fedWide && fedFlip && fedHeadshot);
- else assert(fed==1 && !strcmp(fedIcon,"killiconheadshot") && !fedHeadshot);
- int fallbacks[]={0,4,64,-1};
- for(int i=0;i<4;i++){
-  reset();deliveringObituaryWeapon=fallbacks[i];obituary(&es);
-  assert(fed==1 && !strcmp(fedIcon,"killiconheadshot") && !fedWide && !fedFlip && !fedHeadshot);
- }
- reset();es=(entityState_t){5,6,0x80|7};deliveringObituaryWeapon=3;obituary(&es);assert(fed==1 && !strcmp(fedIcon,"killiconmelee") && !fedHeadshot);
+ reset();es=(entityState_t){5,1022,0x80|8};obituary(&es);assert(fed==1 && fedAttacker==-1 && !strcmp(fedIcon,"killiconheadshot") && !fedWide && fedHeadshot);
+ reset();es=(entityState_t){5,5,0x80|12};obituary(&es);assert(fed==1 && fedAttacker==-1 && !strcmp(fedIcon,"killiconsuicide") && !fedHeadshot);
+ /* Every headshot, natively and in the browser, reaches the feed as one with
+  * the stock headshot icon, so the feed shows its symbol; other special deaths
+  * and weapon kills, weapon 8's too, do not. */
+ reset();es=(entityState_t){5,6,0x80|8};obituary(&es);
+ assert(fed==1 && fedAttacker==6 && fedVictim==5 && !strcmp(fedIcon,"killiconheadshot") && !fedWide && !fedFlip && fedHeadshot);
+ reset();es=(entityState_t){5,6,0x80|7};obituary(&es);assert(fed==1 && !strcmp(fedIcon,"killiconmelee") && !fedHeadshot);
+ reset();es=(entityState_t){5,6,0x80|9};obituary(&es);assert(fed==1 && !strcmp(fedIcon,"killiconcrush") && !fedHeadshot);
+ weapon.wideKillIcon=weapon.flipKillIcon=1;
+ reset();es=(entityState_t){5,6,8};obituary(&es);assert(fed==1 && !strcmp(fedIcon,"killiconsten") && fedWide && fedFlip && !fedHeadshot);
  reset();es=(entityState_t){5,6,1};obituary(&es);assert(fed==1 && !strcmp(fedIcon,"killiconsten") && !fedHeadshot);
- deliveringObituaryWeapon=0;
  reset();es=(entityState_t){5,6,1};cg->inKillCam=1;obituary(&es);assert(fed==deliveringObituary && !printed);cg->inKillCam=0;
  return 0;
 }
@@ -111,10 +107,8 @@ with tempfile.TemporaryDirectory(prefix='cod2-obituary-') as directory:
           ('iconShader = (const char *)"killiconheadshot";','iconShader = (const char *)"killiconcrush";'),
           ('                    case 5:\n','                    case 3:\n'),
           ('(ep & 0x7f) == 8','(ep & 0x7f) == 9'),
-          ('deliveringObituaryWeapon < BG_GetNumWeapons()','deliveringObituaryWeapon < 1000'),
-          ('deliveringObituaryWeapon > 0 &&','deliveringObituaryWeapon >= 0 &&'),
-          ('if (def && def->killIcon[0])','if (def)'),
-          ('                        headshot = 1;\n','')]
+          ('(ep & 0x80) && (ep & 0x7f) == 8','(ep & 0x7f) == 8'),
+          ('iconWidth > 2.0f, iconHorzFlip,','iconWidth > 2.0f, 0,')]
  for old,new in mutants:
   assert body.count(old)>=1,old
  for index,variant in enumerate([body]+[body.replace(old,new) for old,new in mutants]):
@@ -123,5 +117,6 @@ with tempfile.TemporaryDirectory(prefix='cod2-obituary-') as directory:
   assert passed==(index==0),(index,[result.stderr.decode()[-1500:] for result in results])
 print('PASS: native and reliable browser feed; 4096 killer/victim combinations, correct names and teams, retail icons for '
       'melee, headshot, crush, falling and suicide deaths, world deaths and no replay duplicate; with cg_hudKillFeed the '
-      'obituary goes to the WWII feed with the weapon icon, its width and mirroring, a headshot shows the announced weapon '
-      'with the headshot mark, and world deaths and suicides have no attacker; all %d mutants fail' % len(mutants))
+      'obituary goes to the WWII feed with the weapon icon, its width and mirroring, every headshot is marked as one '
+      'with the stock headshot icon in both builds, and world deaths and suicides have no attacker; all %d mutants '
+      'fail' % len(mutants))
