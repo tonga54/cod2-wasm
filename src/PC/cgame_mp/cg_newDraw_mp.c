@@ -4,6 +4,7 @@
 #include "bytematch.h"
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_ammocounter.h"
+#include "headers/PC/cgame_mp/cg_mantleprompt.h"
 #include "headers/PC/cgame_mp/cg_minimap.h"
 #include "headers/PC/cgame_mp/cg_weaponprompt.h"
 #include <math.h>
@@ -558,6 +559,8 @@ void CG_DrawMantleHint(const rectDef_t *rect, struct Font_s *font, float fontsca
     Controls_GetConfig();
     if (!GetKeyBindingLocalizedString("+gostand", binding) &&
         !GetKeyBindingLocalizedString("+moveup", binding))
+        return;
+    if (CG_MantlePromptActive() && CG_DrawMantlePrompt(rect, binding))
         return;
 
     text = UI_ReplaceConversionString(UI_SafeTranslateString("PLATFORM_MANTLE"), binding);

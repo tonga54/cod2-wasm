@@ -67,7 +67,7 @@ slot = int(re.search(r'^#define R_HUD_IMAGE_NAME_FONT (\d+)$', hud2d_header, re.
 count = int(re.search(r'^#define R_HUD_IMAGE_COUNT (\d+)$', hud2d_header, re.M).group(1))
 names = re.search(r's_hudImageNames\[R_HUD_IMAGE_COUNT\] = \{(.*?)\};', hud2d, re.S).group(1)
 names = re.findall(r'"([^"]+)"', names)
-assert slot == count - 1 and len(names) == count and names[slot] == '*hud_name_font'
+assert slot < count and len(names) == count and names[slot] == '*hud_name_font'
 
 # The data was baked from the committed font, whose license travels with it.
 font_file = root / 'third_party/barlow/Barlow-SemiBold.ttf'

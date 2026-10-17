@@ -47,14 +47,22 @@ static void UI_DrawHandlePic(float x,float y,float w,float h,int ha,int va,const
  assert(material==7&&w==40&&h==40&&ha==2&&va==2);
  for(int i=0;i<4;i++)assert(tint[i]==1);iconX=x;pics++;
 }
+/* The WWII prompt draws (1) or declines (0) with the key the stock hint found. */
+static int promptActive,promptResult,promptDraws;
+static int CG_MantlePromptActive(void){return promptActive;}
+static int CG_DrawMantlePrompt(const rectDef_t *rect,const char *key){
+ assert(rect->y==130&&!strcmp(key,primary==2?"Mouse 4":"Space"));promptDraws++;return promptResult;
+}
 '''
 checks = r'''
 int main(void){
  rectDef_t rect={0,130,40,40,2,2};
- for(int gate=0;gate<9;gate++){
+ /* The prompt switched off (even if it would draw), drawn, or declining. */
+ for(int mode=0;mode<3;mode++)for(int gate=0;gate<9;gate++){
   memset(&state,0,sizeof(state));state.predictedPlayerState.stats[0]=100;
   state.predictedPlayerState.mantleState.flags=8;enabled.current.enabled=1;
-  graphics.media.mantleHint=7;primary=1;fallback=0;draws=pics=queries=configs=0;
+  graphics.media.mantleHint=7;primary=1;fallback=0;draws=pics=queries=configs=promptDraws=0;
+  promptActive=mode>0;promptResult=mode<2;
   if(gate==1)enabled.current.enabled=0;
   if(gate==2)state.renderingThirdPerson=1;
   if(gate==3)state.predictedPlayerState.pm_type=6;
@@ -63,18 +71,38 @@ int main(void){
   if(gate==6)graphics.media.mantleHint=0;
   if(gate==7)state.predictedPlayerState.mantleState.flags=0;
   if(gate==8)primary=0;
-  CG_DrawMantleHint(&rect,0,.21f,3);assert(draws==(gate==0)&&pics==draws);
+  CG_DrawMantleHint(&rect,0,.21f,3);
+  assert(promptDraws==(gate==0&&mode>0));assert(draws==(gate==0&&mode!=1)&&pics==draws);
  }
+ promptActive=0;promptResult=1;
  primary=0;fallback=1;draws=pics=0;CG_DrawMantleHint(&rect,0,.21f,3);assert(draws==1&&pics==1);
  primary=2;fallback=0;draws=pics=0;CG_DrawMantleHint(&rect,0,.21f,3);assert(draws==1&&pics==1);
  assert(fabsf((textX+iconX+40)*.5f)<.001f);
+ promptActive=1;draws=pics=promptDraws=0;
+ primary=0;fallback=1;CG_DrawMantleHint(&rect,0,.21f,3);assert(promptDraws==1&&!draws&&!pics);
+ primary=2;fallback=0;CG_DrawMantleHint(&rect,0,.21f,3);assert(promptDraws==2&&!draws&&!pics);
 }
 '''
+hand_off = 'if (CG_MantlePromptActive() && CG_DrawMantlePrompt(rect, binding))\n        return;\n'
+assert body.count(hand_off) == 1
+assert body.index('GetKeyBindingLocalizedString("+moveup", binding)') < body.index(hand_off)
+mutants = [
+    ('        hintColor,', '        color,'),
+    ('if (CG_MantlePromptActive() && CG_DrawMantlePrompt(', 'if (CG_DrawMantlePrompt('),
+    (hand_off, 'if (CG_MantlePromptActive() && CG_DrawMantlePrompt(rect, binding))\n        ;\n'),
+    ('CG_DrawMantlePrompt(rect, binding)', '1'),
+]
+variants = [body]
+for old, new in mutants:
+    assert old in body, old
+    variants.append(body.replace(old, new))
 with tempfile.TemporaryDirectory(prefix='cod2-mantle-hint-') as directory:
     path = Path(directory)
-    for variant in (body, body.replace('        hintColor,', '        color,')):
+    for variant in variants:
         (path/'test.c').write_text(support+variant+checks)
         subprocess.run(['cc','-std=c99','-O1','-fsanitize=address,undefined',str(path/'test.c'),'-lm','-o',str(path/'test')],check=True)
         result=subprocess.run([str(path/'test')],capture_output=True,text=True)
         assert (result.returncode==0)==(variant==body),result.stderr
-print('PASS: opaque native mantle text/icon, localized rebound key, fallback binding, centered layout and live first-person guards; invisible-color regression rejected')
+print('PASS: opaque native mantle text/icon, localized rebound key, fallback binding, centered layout and live '
+      'first-person guards; with cg_hudMantlePrompt on the WWII prompt gets the found key behind the same guards, '
+      f'and the stock hint draws only when it is off or declines; {len(mutants)} failing regression mutants')
