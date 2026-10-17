@@ -39,11 +39,13 @@ body = (function(utils, 'R_ConvertColorToBytes') + function(commands, 'R_AddCmdD
 
 support = r'''
 #include <assert.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 typedef unsigned char byte; typedef float vec_t; typedef vec_t vec3_t[3];
+typedef struct GfxImageFileHeader { char tag[3]; byte version, format, flags; short dimensions[3]; int fileSizeForPicmip[4]; } GfxImageFileHeader;
 typedef unsigned int D3DCOLOR; typedef unsigned short r_index_t;
 #define D3DFMT_A8R8G8B8 21
 typedef struct { unsigned short id, byteCount; } GfxCmdHeader;
@@ -108,6 +110,23 @@ static void ExpandBounds(vec3_t addMins, vec3_t addMaxs, vec3_t mins, vec3_t max
         if (addMins[i] < mins[i]) mins[i] = addMins[i];
         if (addMaxs[i] > maxs[i]) maxs[i] = addMaxs[i];
     }
+}
+/* Files are copied to the heap so reads outside them trip the sanitizer. */
+static const char *fileNames[3]; static const byte *fileData[3]; static int fileLens[3], reads, frees;
+static int FS_ReadFile(const char *path, void **buffer) {
+    reads++;
+    for (int i = 0; i < 3; i++) {
+        if (fileNames[i] && !strcmp(path, fileNames[i])) {
+            *buffer = malloc(fileLens[i] ? fileLens[i] : 1); memcpy(*buffer, fileData[i], fileLens[i]); return fileLens[i];
+        }
+    }
+    *buffer = NULL;
+    return -1;
+}
+static void FS_FreeFile(void *buffer) { assert(buffer); frees++; free(buffer); }
+static int Com_sprintf(char *dest, int size, const char *fmt, ...) {
+    va_list args; va_start(args, fmt); int n = vsnprintf(dest, size, fmt, args); va_end(args);
+    return n < size ? n : -1;
 }
 '''
 
@@ -251,8 +270,177 @@ static void worldBounds(void) {
     assert(!R_GetWorldDrawBounds(mins, maxs));
 }
 
+static int iwi(byte *out, int version, int format, int w, int h, const byte *top, int topLen) {
+    GfxImageFileHeader header = {{'I', 'W', 'i'}, (byte)version, (byte)format, 0, {(short)w, (short)h, 1}, {0}};
+    /* A smaller mip comes first; the decoder must skip it. */
+    memcpy(out, &header, sizeof(header));
+    memset(out + sizeof(header), 0xff, 32);
+    memcpy(out + sizeof(header) + 32, top, topLen);
+    return (int)sizeof(header) + 32 + topLen;
+}
+static void dxt5(byte *block, int a0, int a1, const int *index) {
+    unsigned long long bits = 0;
+    for (int i = 0; i < 16; i++) bits |= (unsigned long long)index[i] << (3 * i);
+    block[0] = (byte)a0; block[1] = (byte)a1;
+    for (int i = 0; i < 6; i++) block[2 + i] = (byte)(bits >> (8 * i));
+    memset(block + 8, 0x5a, 8);
+}
+static void dxt3(byte *block, int first) {
+    memset(block, 0, 16);
+    for (int i = 0; i < 16; i++) block[i >> 1] |= (byte)(((first + i) & 15) << ((i & 1) * 4));
+    memset(block + 8, 0xa5, 8);
+}
+static int alphaAt(const byte *bgra, int w, int x, int y) {
+    const byte *t = bgra + (y * w + x) * 4;
+    assert(t[0] == 255 && t[1] == 255 && t[2] == 255);
+    return t[3];
+}
+
+static void silhouettes(void) {
+    static byte top5[48], top3[64], wideTop[33 * 16], file5[256], file3[256], bad[1024], out[128 * 128 * 4 + 16];
+    /* Interpolated alphas in both DXT5 modes, including a0 == a1. */
+    const int i0[16] = {0, 1, 2, 7}, i1[16] = {6, 7, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 5}, i2[16] = {6, 7, 3};
+    dxt5(top5, 255, 0, i0); dxt5(top5 + 16, 0, 200, i1); dxt5(top5 + 32, 100, 100, i2);
+    for (int b = 0; b < 4; b++) dxt3(top3 + 16 * b, b);
+    int len5 = iwi(file5, 5, 0x0d, 12, 4, top5, 48), len3 = iwi(file3, 5, 0x0c, 6, 6, top3, 64), w = -1, h = -1;
+
+    assert(R_DecodeIconAlpha(file5, len5, out, 128, &w, &h) && w == 12 && h == 4);
+    const int row0[12] = {255, 0, 218, 36, 0, 255, 40, 200, 0, 255, 100, 100};
+    for (int x = 0; x < 12; x++) assert(alphaAt(out, 12, x, 0) == row0[x]);
+    assert(alphaAt(out, 12, 0, 1) == 255 && alphaAt(out, 12, 7, 3) == 160 && alphaAt(out, 12, 6, 3) == 200);
+    /* Edge blocks only write the texels inside the image. */
+    memset(out, 0xee, sizeof(out));
+    assert(R_DecodeIconAlpha(file3, len3, out, 128, &w, &h) && w == 6 && h == 6);
+    for (int y = 0; y < 6; y++)
+        for (int x = 0; x < 6; x++)
+            assert(alphaAt(out, 6, x, y) == (((x / 4 + (y / 4) * 2) + (y % 4) * 4 + x % 4) & 15) * 17);
+    assert(out[6 * 6 * 4] == 0xee);
+
+    w = h = -1;
+    memcpy(bad, file5, len5); bad[2] = 'j';
+    assert(!R_DecodeIconAlpha(bad, len5, out, 128, &w, &h));
+    assert(!R_DecodeIconAlpha(bad, iwi(bad, 6, 0x0d, 12, 4, top5, 48), out, 128, &w, &h));
+    assert(!R_DecodeIconAlpha(bad, iwi(bad, 5, 0x0b, 12, 4, top5, 48), out, 128, &w, &h));
+    assert(!R_DecodeIconAlpha(bad, iwi(bad, 5, 0x0d, 132, 4, wideTop, sizeof(wideTop)), out, 128, &w, &h));
+    assert(!R_DecodeIconAlpha(bad, iwi(bad, 5, 0x0d, 4, 132, wideTop, sizeof(wideTop)), out, 128, &w, &h));
+    assert(!R_DecodeIconAlpha(bad, iwi(bad, 5, 0x0d, 12, 0, top5, 48), out, 128, &w, &h));
+    assert(!R_DecodeIconAlpha(file5, 28 + 40, out, 128, &w, &h) && !R_DecodeIconAlpha(file5, 20, out, 128, &w, &h));
+    assert(!R_DecodeIconAlpha(NULL, 100, out, 128, &w, &h) && w == -1 && h == -1);
+
+    /* Cropping keeps one texel around everything above alpha 16 and packs the
+     * rows; the image edge bounds the margin. */
+    memset(out, 0, 8 * 8 * 4);
+    for (int x = 2; x <= 5; x++) out[(3 * 8 + x) * 4 + 3] = 255;
+    out[(4 * 8 + 4) * 4 + 3] = 17;
+    out[(6 * 8 + 6) * 4 + 3] = 16;
+    assert(R_CropToAlpha(out, 8, 8, &w, &h) && w == 6 && h == 4);
+    const int cropped[4][6] = {{0}, {0, 255, 255, 255, 255, 0}, {0, 0, 0, 17, 0, 0}, {0}};
+    for (int y = 0; y < 4; y++)
+        for (int x = 0; x < 6; x++) assert(out[(y * 6 + x) * 4 + 3] == cropped[y][x]);
+    memset(out, 0, 8 * 8 * 4);
+    out[3] = out[(7 * 8 + 7) * 4 + 3] = 255;
+    assert(R_CropToAlpha(out, 8, 8, &w, &h) && w == 8 && h == 8 && out[3] == 255 && out[(7 * 8 + 7) * 4 + 3] == 255);
+    memset(out, 0, 8 * 8 * 4);
+    out[(3 * 8 + 3) * 4 + 3] = 16;
+    w = h = -1;
+    assert(!R_CropToAlpha(out, 8, 8, &w, &h) && w == -1 && h == -1);
+
+    /* An 8x8 DXT5 icon with two visible texels at (5, 1) and (6, 1). */
+    static byte topCrop[64], fileCrop[256];
+    const int none[16] = {0};
+    int two[16];
+    for (int i = 0; i < 16; i++) two[i] = i == 5 || i == 6 ? 0 : 1;
+    dxt5(topCrop, 0, 0, none); dxt5(topCrop + 16, 255, 0, two); dxt5(topCrop + 32, 0, 0, none); dxt5(topCrop + 48, 0, 0, none);
+    int lenCrop = iwi(fileCrop, 5, 0x0d, 8, 8, topCrop, 64);
+
+    static MaterialTextureDef rawTexdef = {"colorMap", 0x11, 1, 0, 0, {NULL}};
+    static Material raw = {{"$raw", 0}, {0x28129165, 7}, 1, 0, (void *)0x1234, &rawTexdef, NULL};
+    static Material fallback = {{"$default", 1}};
+    static GfxImage testImage = {0, {NULL}, 128, 64, "hud_test"}, missingImage = {0, {NULL}, 64, 64, "hud_missing"};
+    static GfxImage failImage = {0, {NULL}, 64, 64, "hud_fail"}, extraImage = {0, {NULL}, 64, 64, "hud_extra"};
+    static GfxImage cropImage = {0, {NULL}, 8, 8, "hud_crop"};
+    static MaterialTextureDef cropTex = {"colorMap", 0x62, 1, 0, 0, {&cropImage}};
+    static Material crop = {{"crop", 0}, {0, 0}, 1, 0, NULL, &cropTex, NULL};
+    static char longText[65];
+    static GfxImage longImage = {0, {NULL}, 64, 64, longText};
+    memset(longText, 'x', 64);
+    static MaterialTextureDef testTex = {"colorMap", 0x62, 1, 0, 0, {&testImage}}, missingTex = {"colorMap", 0x62, 1, 0, 0, {&missingImage}};
+    static MaterialTextureDef failTex = {"colorMap", 0x62, 1, 0, 0, {&failImage}}, extraTex = {"colorMap", 0x62, 1, 0, 0, {&extraImage}};
+    static MaterialTextureDef longTex = {"colorMap", 0x62, 1, 0, 0, {&longImage}};
+    static Material icon = {{"gfx/icons/hud@test.tga", 0}, {0, 0}, 1, 0, (void *)0x99, &testTex, NULL};
+    static Material alias = {{"gfx/icons/hud@alias.tga", 0}, {0, 0}, 1, 0, (void *)0x98, &testTex, NULL};
+    static Material missing = {{"missing", 0}, {0, 0}, 1, 0, NULL, &missingTex, NULL};
+    static Material failing = {{"failing", 0}, {0, 0}, 1, 0, NULL, &failTex, NULL};
+    static Material extra = {{"extra", 0}, {0, 0}, 1, 0, NULL, &extraTex, NULL};
+    static Material longName = {{"long", 0}, {0, 0}, 1, 0, NULL, &longTex, NULL};
+    static Material untextured = {{"untextured", 0}};
+    assert(strlen(longImage.name) == 64);
+    rgp.rawMaterial = &raw; rgp.defaultMaterial = &fallback;
+    fileNames[0] = "images/hud_test.iwi"; fileData[0] = file5; fileLens[0] = len5;
+    fileNames[1] = "images/hud_fail.iwi"; fileData[1] = file3; fileLens[1] = len3;
+    fileNames[2] = "images/hud_crop.iwi"; fileData[2] = fileCrop; fileLens[2] = lenCrop;
+    generated = released = unbound = reads = frees = 0;
+    float aspect = -1.0f;
+
+    Material *flat = R_GetHudSilhouetteMaterial(&icon, &aspect);
+    assert(flat && flat != &icon && reads == 1 && frees == 1 && generated == 1 && aspect == 3.0f);
+    assert(lastWidth == 12 && lastHeight == 4 && lastFormat == D3DFMT_A8R8G8B8);
+    for (int x = 0; x < 12; x++) assert(alphaAt(lastPixels, 12, x, 0) == row0[x]);
+    /* $raw's 2D technique with the white image, clamped and unfiltered by mips. */
+    assert(flat->techniqueSet == raw.techniqueSet && flat->stateBits[0] == raw.stateBits[0] && flat->stateBits[1] == raw.stateBits[1]);
+    assert(flat->textureCount == 1 && flat->textures[0].samplerState == 0x32 && !strcmp(flat->textures[0].name, "colorMap"));
+    assert(!strcmp(flat->textures[0].u.image->name, "*hud_test") && !strcmp(flat->info.name, "hud_test"));
+    assert(rawTexdef.u.image == NULL && rawTexdef.samplerState == 0x11 && testTex.u.image == &testImage);
+    /* The image is trimmed to what is visible, and its proportions reported. */
+    Material *trimmed = R_GetHudSilhouetteMaterial(&crop, &aspect);
+    assert(trimmed && trimmed != flat && lastWidth == 4 && lastHeight == 3 && aspect == 4.0f / 3.0f);
+    for (int y = 0; y < 3; y++)
+        for (int x = 0; x < 4; x++) assert(alphaAt(lastPixels, 4, x, y) == (y == 1 && (x == 1 || x == 2) ? 255 : 0));
+    /* One silhouette per image, whichever material names it. */
+    aspect = -1.0f;
+    assert(R_GetHudSilhouetteMaterial(&icon, &aspect) == flat && aspect == 3.0f);
+    assert(R_GetHudSilhouetteMaterial(&alias, &aspect) == flat && aspect == 3.0f && reads == 2);
+    /* Failures are remembered, so the file is not read on every kill. */
+    assert(!R_GetHudSilhouetteMaterial(&missing, &aspect) && aspect == 0.0f && reads == 3 && frees == 2);
+    aspect = -1.0f;
+    assert(!R_GetHudSilhouetteMaterial(&missing, &aspect) && aspect == 0.0f && reads == 3);
+    failGenerate = 1;
+    assert(!R_GetHudSilhouetteMaterial(&failing, &aspect) && aspect == 0.0f && reads == 4 && frees == 3 && generated == 3);
+    failGenerate = 0;
+    aspect = -1.0f;
+    assert(!R_GetHudSilhouetteMaterial(&failing, &aspect) && aspect == 0.0f && reads == 4 && generated == 3);
+    assert(!R_GetHudSilhouetteMaterial(NULL, &aspect) && !R_GetHudSilhouetteMaterial(&fallback, &aspect));
+    assert(!R_GetHudSilhouetteMaterial(&untextured, &aspect) && aspect == 0.0f);
+    assert(!R_GetHudSilhouetteMaterial(&longName, &aspect) && reads == 4);
+    rgp.rawMaterial = NULL;
+    assert(!R_GetHudSilhouetteMaterial(&extra, &aspect) && reads == 4);
+    rgp.rawMaterial = &raw;
+
+    /* The cache holds R_HUD_SILHOUETTE_COUNT images, then refuses new ones. */
+    static GfxImage many[R_HUD_SILHOUETTE_COUNT]; static char manyNames[R_HUD_SILHOUETTE_COUNT][16];
+    static MaterialTextureDef manyTex[R_HUD_SILHOUETTE_COUNT]; static Material manyMat[R_HUD_SILHOUETTE_COUNT];
+    for (int i = 0; i < R_HUD_SILHOUETTE_COUNT - 4; i++) {
+        snprintf(manyNames[i], 16, "hud_n%02d", i);
+        many[i].name = manyNames[i];
+        manyTex[i] = (MaterialTextureDef){"colorMap", 0x62, 1, 0, 0, {&many[i]}};
+        manyMat[i] = (Material){{"many", 0}, {0, 0}, 1, 0, NULL, &manyTex[i], NULL};
+        assert(!R_GetHudSilhouetteMaterial(&manyMat[i], &aspect) && reads == 5 + i);
+    }
+    int full = reads;
+    assert(!R_GetHudSilhouetteMaterial(&extra, &aspect) && reads == full && R_GetHudSilhouetteMaterial(&icon, &aspect) == flat);
+
+    /* Shutdown releases the live silhouettes and empties the cache. */
+    R_ShutdownHudImages();
+    assert(released == 2 && unbound == 2);
+    Material *again = R_GetHudSilhouetteMaterial(&icon, &aspect);
+    assert(again && reads == full + 1 && generated == 4);
+    assert(!R_GetHudSilhouetteMaterial(&extra, &aspect) && reads == full + 2);
+    R_ShutdownHudImages();
+    assert(released == 3);
+}
+
 int main(void) {
-    triangles(); hudImages(); worldBounds();
+    triangles(); hudImages(); silhouettes(); worldBounds();
     return 0;
 }
 '''
@@ -271,10 +459,32 @@ mutants = [
     mutate('    byteCount = (byteCount + 3) & ~3;\n', ''),
     mutate('vc = RB_CheckTessOverflow(t, cmd->vertexCount, cmd->indexCount);', 'vc = RB_CheckTessOverflow(t, 4, 6);'),
     mutate('R_ConvertColorToBytes(verts[i].rgba, cmdVerts[i].color.array);', 'R_ConvertColorToBytes(verts[0].rgba, cmdVerts[i].color.array);'),
-    mutate('    s_hudTextures[slot].samplerState = HUD_IMAGE_SAMPLER_STATE;\n', ''),
+    mutate('    texture->samplerState = HUD_IMAGE_SAMPLER_STATE;\n', ''),
     mutate('    R_ReleaseHudImage(slot);\n    image = &s_hudImages[slot];', '    image = &s_hudImages[slot];'),
     mutate('if (!raw || raw == rgp.defaultMaterial ||', 'if (!raw ||'),
     mutate(' || (surf->material->info.gameFlags & 8)', ''),
+    mutate('    block = file + fileLen - blocksW * blocksH * DXT_BLOCK_BYTES;\n', '    block = file + sizeof(*header);\n'),
+    mutate('    if (a0 > a1) {', '    if (a0 >= a1) {'),
+    mutate('((i & 1) * 4)) & 15) * 17);', '((~i & 1) * 4)) & 15) * 17);'),
+    mutate('                if (x >= w || y >= h)\n                    continue;\n', ''),
+    mutate('texel[0] = texel[1] = texel[2] = 255;', 'texel[0] = texel[1] = texel[2] = alpha[i];'),
+    mutate('w > maxSize || h > maxSize', 'h > maxSize'),
+    mutate(' || header->version != IWI_VERSION', ''),
+    mutate('    if (fileLen - (int)sizeof(*header) < blocksW * blocksH * DXT_BLOCK_BYTES)\n        return 0;\n', ''),
+    mutate('        if (!strcmp(s_silhouettes[i].imageName, image->name))',
+           '        if (!strcmp(s_silhouettes[i].imageName, image->name) && s_silhouettes[i].material)'),
+    mutate('    if (s_silhouetteCount == R_HUD_SILHOUETTE_COUNT)\n        return NULL;\n', ''),
+    mutate('        R_ReleaseImage(&s_silhouettes[slot].image);\n', ''),
+    mutate('    s_silhouetteCount = 0;\n', ''),
+    mutate('<= HUD_SILHOUETTE_ALPHA_MIN)', '< HUD_SILHOUETTE_ALPHA_MIN)'),
+    mutate('    minX = minX > 0 ? minX - 1 : 0;\n', ''),
+    mutate('    maxY = maxY < height - 1 ? maxY + 1 : maxY;\n', ''),
+    mutate('maxX = maxX < width - 1 ? maxX + 1 : maxX;', 'maxX = maxX + 1;'),
+    mutate('memmove(bgra + y * *cropWidth * 4,', 'memmove(bgra + y * width * 4,'),
+    mutate('    if (!decoded || !R_CropToAlpha(s_silhouettePixels, width, height, &width, &height))',
+           '    if (!decoded)'),
+    mutate('    entry->aspect = (float)width / (float)height;\n', ''),
+    mutate('*aspect = entry->material ? entry->aspect : 0.0f;', '*aspect = entry->aspect;'),
 ]
 with tempfile.TemporaryDirectory(prefix='cod2-minimap-renderer-') as directory:
     path = Path(directory) / 'renderer.c'
@@ -288,4 +498,7 @@ with tempfile.TemporaryDirectory(prefix='cod2-minimap-renderer-') as directory:
 print('PASS: render command 6 carries per-vertex positions, texture coordinates and A,R,G,B colors from the builder '
       'to the tessellator, offsets and clamps indices, appends to an open surface, flushes on a material change or '
       'a full surface and rejects bad counts; HUD images copy $raw with their own clamped texture, rebuild and shut '
-      f'down cleanly; world bounds skip the sky; {len(mutants)} failing regression mutants')
+      'down cleanly; icon silhouettes decode the top DXT3/DXT5 mip as white texels with its alpha, are trimmed to '
+      'their visible texels plus one, report their proportions, are built once per image, remember failures, cap '
+      'the cache and empty it on shutdown; world bounds skip the sky; '
+      f'{len(mutants)} failing regression mutants')

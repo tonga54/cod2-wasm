@@ -1737,6 +1737,12 @@ per flag capture, 100 per return and 200 per bomb plant or defuse. A "Kill
 decides Deathmatch, SD and CTF, and team scores are unchanged. Points last
 through SD rounds and reset on a new level or match. This needs the updated
 native server; see the same document.
+Kills now show in a WWII-style feed at the bottom left: attacker, weapon
+silhouette and victim, in white, teal or orange (`cg_hudKillFeed`; 0 restores
+CoD2's death messages). A headshot shows the weapon followed by a headshot
+mark. That needs the updated native server, which adds the weapon to
+`cod2_obituary`; browser clients older than this feed drop headshot lines
+until reloaded.
 
 
 The tested web/server/gateway images and matching staged archives were installed

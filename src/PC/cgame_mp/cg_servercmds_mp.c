@@ -986,12 +986,13 @@ void CG_ServerCommand(void)
 
     if (!strcmp(cmd, "cod2_obituary")) {
 #ifdef __EMSCRIPTEN__
-        extern void CG_QueueObituary(int victim, int attacker, int weapon);
-        if (Cmd_Argc() == 4) {
+        extern void CG_QueueObituary(int victim, int attacker, int weapon, int headshotWeapon);
+        if (Cmd_Argc() == 4 || Cmd_Argc() == 5) {
             int victim = atoi(CG_Argv(1));
             int attacker = atoi(CG_Argv(2));
             int weapon = atoi(CG_Argv(3));
-            CG_QueueObituary(victim, attacker, weapon);
+            int headshotWeapon = Cmd_Argc() == 5 ? atoi(CG_Argv(4)) : 0;
+            CG_QueueObituary(victim, attacker, weapon, headshotWeapon);
         }
 #endif
         return;

@@ -6,6 +6,7 @@
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_minimap.h"
 #include "headers/PC/cgame_mp/cg_scorepopup.h"
+#include "headers/PC/cgame_mp/cg_killfeed.h"
 
 extern const dvar_t *cg_centerPrintY;
 extern const dvar_t *cg_centertime;
@@ -1893,8 +1894,10 @@ unsigned int CG_Draw2D(void)
         if (drawHudMenus)
             Menu_PaintAll((void *)imp_cgDC);
         CG_Draw2dHudElems(1);
-        if (drawHudMenus)
+        if (drawHudMenus) {
+            CG_DrawKillFeed();
             CG_DrawScorePopup();
+        }
     }
 
     drewScoreboard = CG_DrawScoreboard();

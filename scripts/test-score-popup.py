@@ -38,7 +38,8 @@ body = '\n'.join([
 # The server command reaches the popup and the HUD draws it after the menus.
 assert commands.count('if (!strcmp(cmd, "cod2_points")) {\n        if (Cmd_Argc() == 3)\n'
                       '            CG_ScorePopupAdd(atoi(CG_Argv(1)), atoi(CG_Argv(2)));\n        return;\n    }') == 1
-assert draw.count('        CG_Draw2dHudElems(1);\n        if (drawHudMenus)\n            CG_DrawScorePopup();\n    }') == 1
+assert draw.count('        CG_Draw2dHudElems(1);\n        if (drawHudMenus) {\n            CG_DrawKillFeed();\n'
+                  '            CG_DrawScorePopup();\n        }\n    }') == 1
 assert main.count('    CG_MinimapInit(cgs->mapname);\n    CG_ScorePopupInit();\n') == 1
 
 support = r'''
