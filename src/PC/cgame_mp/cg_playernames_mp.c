@@ -162,3 +162,8 @@ void CG_DrawEnemyName(const char *name, float x, float y, float alpha)
     color[3] = alpha;
     CG_DrawPlayerName(name, x, y, color);
 }
+
+struct Font_s *CG_GetPlayerNameFont(void)
+{
+    return CG_NameFontReady() ? &s_nameFont : NULL;
+}

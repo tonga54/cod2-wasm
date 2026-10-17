@@ -2,6 +2,7 @@
 #include "imports.h"
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_ammocounter.h"
+#include "headers/PC/cgame_mp/cg_playernames.h"
 #include "headers/PC/gfx_d3d/r_hud2d.h"
 
 #include <string.h>
@@ -58,9 +59,16 @@ extern const dvar_t *hud_fade_offhand;
 #define AMMO_COUNTER_MODE_GAP 3.0f
 #define AMMO_COUNTER_MODE_Y -41.0f
 #define AMMO_COUNTER_MODE_SIZE 12.0f
-/* The hint's baseline, below the screen centre, in the bold font. */
-#define AMMO_COUNTER_HINT_Y 128.0f
+/* The hint's baseline, below the screen centre. In the WWII lettering its
+ * capitals stand 8.4 units tall and RELOAD spans 43.4 units. */
+#define AMMO_COUNTER_HINT_Y 126.0f
 #define AMMO_COUNTER_HINT_SCALE 0.25f
+/* Milliseconds of the hint's blink, from its first frame: red, a fade up to
+ * the light pink, the light pink, and a fade back. */
+#define AMMO_COUNTER_BLINK_RED 300
+#define AMMO_COUNTER_BLINK_FADE 50
+#define AMMO_COUNTER_BLINK_LIGHT 100
+#define AMMO_COUNTER_BLINK_PERIOD (AMMO_COUNTER_BLINK_RED + 2 * AMMO_COUNTER_BLINK_FADE + AMMO_COUNTER_BLINK_LIGHT)
 #define AMMO_COUNTER_ALIGN_CENTER 2
 #define AMMO_COUNTER_ALIGN_RIGHT 3
 #define AMMO_COUNTER_ALIGN_BOTTOM 3
@@ -99,9 +107,15 @@ static const vec4_t s_ammoCounterReserve = { 0.75f, 0.75f, 0.73f, 1.0f };
 static const vec4_t s_ammoCounterLow = { 0.95f, 0.6f, 0.6f, 1.0f };
 static const vec4_t s_ammoCounterRule = { 0.75f, 0.75f, 0.73f, 0.8f };
 static const vec4_t s_ammoCounterIcon = { 1.0f, 1.0f, 1.0f, 1.0f };
+/* The WWII captures' low clip and hint, (218, 148, 150), and halfway from it
+ * to white, each half a level up as R_ConvertColorToBytes truncates. */
+static const vec3_t s_ammoCounterHintRed = { 218.5f / 255.0f, 148.5f / 255.0f, 150.5f / 255.0f };
+static const vec3_t s_ammoCounterHintLight = { 236.5f / 255.0f, 201.5f / 255.0f, 202.5f / 255.0f };
 
 static const dvar_t *cg_hudAmmoCounter;
 static FontHandle s_ammoCounterHintFont;
+static int s_ammoCounterHintShown;
+static int s_ammoCounterHintStart;
 
 static void CG_AmmoCounterColor(vec4_t out, const vec4_t in, float alpha)
 {
@@ -236,13 +250,37 @@ static void CG_AmmoCounterDrawOffhand(int offhandClass, float centerX, float alp
     }
 }
 
+/* 0 while red, 1 while light. */
+static float CG_AmmoCounterBlink(int elapsed)
+{
+    int t = elapsed % AMMO_COUNTER_BLINK_PERIOD;
+
+    if (t < AMMO_COUNTER_BLINK_RED)
+        return 0.0f;
+    t -= AMMO_COUNTER_BLINK_RED;
+    if (t < AMMO_COUNTER_BLINK_FADE)
+        return (float)t / AMMO_COUNTER_BLINK_FADE;
+    t -= AMMO_COUNTER_BLINK_FADE;
+    if (t < AMMO_COUNTER_BLINK_LIGHT)
+        return 1.0f;
+    t -= AMMO_COUNTER_BLINK_LIGHT;
+    return 1.0f - (float)t / AMMO_COUNTER_BLINK_FADE;
+}
+
+/* In the labels' lettering, else in CoD2's bold font. */
 static void CG_AmmoCounterDrawHint(int hint, float alpha)
 {
     const char *text = s_ammoCounterHints[hint];
-    FontHandle font = s_ammoCounterHintFont ? s_ammoCounterHintFont : UI_GetFontHandle(4, AMMO_COUNTER_HINT_SCALE);
+    FontHandle font = CG_GetPlayerNameFont();
+    float blink = CG_AmmoCounterBlink(cg->time - s_ammoCounterHintStart);
     vec4_t color;
+    int i;
 
-    CG_AmmoCounterColor(color, s_ammoCounterLow, alpha);
+    if (!font)
+        font = s_ammoCounterHintFont ? s_ammoCounterHintFont : UI_GetFontHandle(4, AMMO_COUNTER_HINT_SCALE);
+    for (i = 0; i < 3; i++)
+        color[i] = s_ammoCounterHintRed[i] + (s_ammoCounterHintLight[i] - s_ammoCounterHintRed[i]) * blink;
+    color[3] = alpha;
     UI_DrawText(text, 0x7fffffff, font, -0.5f * (float)UI_TextWidth(text, 0, font, AMMO_COUNTER_HINT_SCALE),
                 AMMO_COUNTER_HINT_Y, AMMO_COUNTER_ALIGN_CENTER, AMMO_COUNTER_ALIGN_CENTER, AMMO_COUNTER_HINT_SCALE,
                 color, 3);
@@ -252,6 +290,7 @@ void CG_AmmoCounterInit(void)
 {
     cg_hudAmmoCounter = Dvar_RegisterBool_mac("cg_hudAmmoCounter", 1, 0x1001);
     s_ammoCounterHintFont = CL_RegisterFont("$boldfont", 0);
+    s_ammoCounterHintShown = AMMO_COUNTER_HINT_NONE;
 }
 
 int CG_AmmoCounterActive(void)
@@ -293,7 +332,7 @@ void CG_DrawAmmoCounter(void)
     const playerState_t *ps = &cg->predictedPlayerState;
     CG_AmmoCounterView view;
     float alpha;
-    int hint;
+    int hint = AMMO_COUNTER_HINT_NONE;
 
     if (!CG_AmmoCounterActive())
         return;
@@ -301,9 +340,14 @@ void CG_DrawAmmoCounter(void)
     if (alpha > 0.0f && CG_AmmoCounterGetView(ps, &view)) {
         CG_AmmoCounterDrawAmmo(&view, alpha);
         hint = CG_AmmoCounterHint(ps, &view);
-        if (hint != AMMO_COUNTER_HINT_NONE)
-            CG_AmmoCounterDrawHint(hint, alpha);
     }
+    /* Each hint blinks from red, also when the server's clock starts over. */
+    if (hint != s_ammoCounterHintShown || s_ammoCounterHintStart > cg->time) {
+        s_ammoCounterHintShown = hint;
+        s_ammoCounterHintStart = cg->time;
+    }
+    if (hint != AMMO_COUNTER_HINT_NONE)
+        CG_AmmoCounterDrawHint(hint, alpha);
     alpha = CG_AmmoCounterFade(hud_fade_offhand, cg->offhandFadeTime);
     if (alpha > 0.0f) {
         CG_AmmoCounterDrawOffhand(AMMO_COUNTER_SMOKE, AMMO_COUNTER_SMOKE_X, alpha);

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Run the production WWII ammo counter with the real offhand icon lookup: the
 stock items it replaces or moves, the clip and reserve layout, low colors, the
-RELOAD / LOW AMMO / NO AMMO hint, grenade icons, fades, and the stock offhand
-draws' alpha."""
+RELOAD / LOW AMMO / NO AMMO hint in the WWII lettering and its blink, grenade
+icons, fades, and the stock offhand draws' alpha."""
 from pathlib import Path
 import re
 import subprocess
@@ -74,6 +74,7 @@ support = r'''
 typedef int qboolean;
 typedef int Bool;
 typedef float vec_t;
+typedef vec_t vec3_t[3];
 typedef vec_t vec4_t[4];
 typedef const char *MaterialHandle;
 struct Font_s { int bold; float scale; };
@@ -112,9 +113,11 @@ static const dvar_t *Dvar_RegisterBool_mac(const char *name, int value, int flag
     return &counterDvar;
 }
 /* One font per enum and scale, so a width is always measured with the drawn
- * font; the bold font is registered by name. */
-static struct Font_s fonts[16], boldFont = { 1, 0 };
-static int fontEnums[16], fontCount, boldRegistered;
+ * font; the bold font is registered by name, and the labels lend theirs while
+ * its image exists. */
+static struct Font_s fonts[16], boldFont = { 1, 0 }, nameFont = { 2, 0 };
+static int fontEnums[16], fontCount, boldRegistered, nameFontReady = 1;
+static struct Font_s *CG_GetPlayerNameFont(void) { return nameFontReady ? &nameFont : NULL; }
 static FontHandle UI_GetFontHandle(int fontEnum, float scale) {
     for (int i = 0; i < fontCount; i++)
         if (fonts[i].scale == scale && fontEnums[i] == fontEnum) return &fonts[i];
@@ -129,7 +132,7 @@ static FontHandle CL_RegisterFont(const char *name, int imageTrack) {
 }
 static int UI_TextWidth(const char *text, int maxChars, FontHandle font, float scale) {
     assert(maxChars == 0 && (font->bold || font->scale == scale));
-    return (int)(strlen(text) * (font->bold ? 30.0f : 20.0f) * scale);
+    return (int)(strlen(text) * (font->bold == 2 ? 25.0f : font->bold ? 30.0f : 20.0f) * scale);
 }
 typedef struct { int pic; char text[32]; MaterialHandle material; FontHandle font; float x, y, w, h, s0, t0, s1, t1, scale;
                  vec4_t color; int horz, vert, style; } Drawn;
@@ -222,19 +225,34 @@ static int text(int i, const char *value, float x, float y, float scale, const f
            near(d->scale, scale) && !d->font->bold && fontEnums[d->font - fonts] == 0 && d->horz == 3 &&
            d->vert == 3 && d->style == 3 && colored(d->color, rgb, alpha);
 }
-static int hint(int i, const char *value, float alpha) {
+/* The WWII captures' red and halfway to white, half a level up. */
+static const float hintRed[3] = { 218.5f / 255, 148.5f / 255, 150.5f / 255 },
+                   hintLight[3] = { 236.5f / 255, 201.5f / 255, 202.5f / 255 };
+/* The hint centred under the crosshair in the given lettering, blend of the
+ * way from the red to the light pink. */
+static int hintIn(int i, const char *value, FontHandle font, float blend, float alpha) {
     const Drawn *d = &drawn[i];
-    return i < drawCount && !d->pic && !strcmp(d->text, value) && d->font == &boldFont &&
-           near(d->x, -0.5f * (int)(strlen(value) * 30.0f * 0.25f)) && near(d->y, 128) && near(d->scale, 0.25f) &&
-           d->horz == 2 && d->vert == 2 && d->style == 3 && colored(d->color, pink, alpha);
+    float rgb[3];
+    for (int k = 0; k < 3; k++) rgb[k] = hintRed[k] + (hintLight[k] - hintRed[k]) * blend;
+    return i < drawCount && !d->pic && !strcmp(d->text, value) && d->font == font &&
+           near(d->x, -0.5f * UI_TextWidth(value, 0, font, 0.25f)) && near(d->y, 126) && near(d->scale, 0.25f) &&
+           d->horz == 2 && d->vert == 2 && d->style == 3 && colored(d->color, rgb, alpha);
 }
+static int blinked(int i, const char *value, float blend) { return hintIn(i, value, &nameFont, blend, 1); }
+static int hint(int i, const char *value, float alpha) { return hintIn(i, value, &nameFont, 0, alpha); }
 static int hints(void) {
     int n = 0;
-    for (int i = 0; i < drawCount; i++) n += !drawn[i].pic && drawn[i].font == &boldFont;
+    for (int i = 0; i < drawCount; i++) n += !drawn[i].pic && (drawn[i].font == &nameFont || drawn[i].font == &boldFont);
     return n;
+}
+/* The bytes R_ConvertColorToBytes makes, truncating. */
+static int bytes(int i, int r, int g, int b) {
+    return (int)(drawn[i].color[0] * 255) == r && (int)(drawn[i].color[1] * 255) == g &&
+           (int)(drawn[i].color[2] * 255) == b;
 }
 static float width(const char *value, float scale) { return (float)(int)(strlen(value) * 20.0f * scale); }
 static void render(void) { drawCount = 0; CG_DrawAmmoCounter(); }
+static int at(int time) { cg->time = time; render(); return drawCount; }
 static void give(int weapon, int ammo) {
     playerState_t *ps = &cg->predictedPlayerState;
     ps->weapons[weapon >> 5] |= 1 << (weapon & 31);
@@ -439,9 +457,52 @@ int main(void) {
     render();
     assert(drawCount == 0 && !CG_AmmoCounterActive());
     counterDvar.current.enabled = 1;
-    s_ammoCounterHintFont = NULL; lowClip = 1;
+
+    /* Without the labels' lettering, the hint takes CoD2's bold font, and
+     * failing that the UI's font 4. */
+    nameFontReady = 0; lowClip = 1;
     render();
-    assert(drawn[3].font != &boldFont && fontEnums[drawn[3].font - fonts] == 4 && !strcmp(drawn[3].text, "RELOAD"));
+    assert(hintIn(3, "RELOAD", &boldFont, 0, 1));
+    s_ammoCounterHintFont = NULL;
+    render();
+    assert(drawn[3].font != &boldFont && drawn[3].font != &nameFont && fontEnums[drawn[3].font - fonts] == 4);
+    assert(hintIn(3, "RELOAD", drawn[3].font, 0, 1));
+    nameFontReady = 1; s_ammoCounterHintFont = &boldFont;
+
+    /* The hint blinks from its first frame: 300 ms red, 50 ms up to the light
+     * pink, 100 ms there and 50 ms back, every 500 ms. */
+    reset();
+    assert(at(10000) == 6 && !hints());
+    lowClip = 1; cg->predictedPlayerState.ammoclip[23] = 8;
+    {
+        static const int times[] = { 0, 299, 300, 325, 349, 350, 449, 450, 475, 499, 500, 799, 825, 850, 2350 };
+        static const float blends[] = { 0, 0, 0, 0.5f, 0.98f, 1, 1, 1, 0.5f, 0.02f, 0, 0, 0.5f, 1, 1 };
+        for (int k = 0; k < 15; k++)
+            assert(at(10040 + times[k]) == 7 && blinked(3, "RELOAD", blends[k]));
+    }
+    assert(at(10040) == 7 && blinked(3, "RELOAD", 0) && bytes(3, 218, 148, 150));
+    assert(at(10390) == 7 && blinked(3, "RELOAD", 1) && bytes(3, 236, 201, 202));
+    /* A new hint starts red, as does one that comes back, also behind a
+     * faded counter. */
+    lowClip = 0; lowAmmo = 1; reserve = 20;
+    assert(at(12400) == 7 && blinked(3, "LOW AMMO", 0));
+    assert(at(12750) == 7 && blinked(3, "LOW AMMO", 1));
+    lowAmmo = 0;
+    assert(at(12760) == 6 && !hints());
+    lowAmmo = 1;
+    assert(at(12770) == 7 && blinked(3, "LOW AMMO", 0));
+    ammoAlpha = 0;
+    assert(at(12780) == 3 && !hints());
+    ammoAlpha = 1;
+    assert(at(13120) == 7 && blinked(3, "LOW AMMO", 0));
+    assert(at(13470) == 7 && blinked(3, "LOW AMMO", 1));
+    /* So does a server whose clock starts over, and a new level. */
+    assert(at(1000) == 7 && blinked(3, "LOW AMMO", 0));
+    assert(at(1325) == 7 && blinked(3, "LOW AMMO", 0.5f));
+    CG_AmmoCounterInit();
+    assert(at(1350) == 7 && blinked(3, "LOW AMMO", 0));
+    assert(at(1700) == 7 && blinked(3, "LOW AMMO", 1));
+    cg->time = 0;
 
     /* The stock offhand items take the offhand fade as their alpha. Each call
      * has a fade no earlier draw used, so an alpha left unset cannot pass with
@@ -498,10 +559,27 @@ mutants = [
     ('    if (aspect > 1.0f)\n        h /= aspect;\n    else\n        w *= aspect;\n', '    w *= aspect;\n'),
     ('count > 0 ? alpha : alpha * AMMO_COUNTER_EMPTY_ALPHA', 'alpha'),
     ('if (count > 1) {', 'if (count > 0) {'),
-    ('CG_AmmoCounterColor(color, s_ammoCounterLow, alpha);', 'CG_AmmoCounterColor(color, s_ammoCounterLow, 1.0f);'),
+    ('    color[3] = alpha;\n', '    color[3] = 1.0f;\n'),
     ('s_ammoCounterHintFont ? s_ammoCounterHintFont : UI_GetFontHandle(4, AMMO_COUNTER_HINT_SCALE)',
      'UI_GetFontHandle(4, AMMO_COUNTER_HINT_SCALE)'),
     ('    s_ammoCounterHintFont = CL_RegisterFont("$boldfont", 0);\n', ''),
+    ('    FontHandle font = CG_GetPlayerNameFont();\n', '    FontHandle font = NULL;\n'),
+    ('    if (!font)\n        font = s_ammoCounterHintFont', '    font = s_ammoCounterHintFont'),
+    ('#define AMMO_COUNTER_HINT_Y 126.0f', '#define AMMO_COUNTER_HINT_Y 128.0f'),
+    ('#define AMMO_COUNTER_BLINK_RED 300', '#define AMMO_COUNTER_BLINK_RED 250'),
+    ('#define AMMO_COUNTER_BLINK_FADE 50', '#define AMMO_COUNTER_BLINK_FADE 100'),
+    ('#define AMMO_COUNTER_BLINK_LIGHT 100', '#define AMMO_COUNTER_BLINK_LIGHT 150'),
+    ('        return (float)t / AMMO_COUNTER_BLINK_FADE;\n', '        return 1.0f;\n'),
+    ('    return 1.0f - (float)t / AMMO_COUNTER_BLINK_FADE;\n', '    return 0.0f;\n'),
+    ('{ 218.5f / 255.0f, 148.5f / 255.0f, 150.5f / 255.0f }', '{ 0.95f, 0.6f, 0.6f }'),
+    ('{ 218.5f / 255.0f, 148.5f / 255.0f, 150.5f / 255.0f }', '{ 218.0f / 255.0f, 148.0f / 255.0f, 150.0f / 255.0f }'),
+    ('{ 236.5f / 255.0f, 201.5f / 255.0f, 202.5f / 255.0f }', '{ 1.0f, 1.0f, 1.0f }'),
+    ('s_ammoCounterHintRed[i] + (s_ammoCounterHintLight[i] - s_ammoCounterHintRed[i]) * blink', 's_ammoCounterHintRed[i]'),
+    ('hint != s_ammoCounterHintShown || ', ''),
+    (' || s_ammoCounterHintStart > cg->time', ''),
+    ('        s_ammoCounterHintStart = cg->time;\n', ''),
+    ('    s_ammoCounterHintShown = AMMO_COUNTER_HINT_NONE;\n', ''),
+    ('    int hint = AMMO_COUNTER_HINT_NONE;\n', '    int hint = AMMO_COUNTER_HINT_RELOAD;\n'),
     ('rect->x = AMMO_COUNTER_NAME_RIGHT - rect->w;', 'rect->x = AMMO_COUNTER_NAME_RIGHT;'),
     ('    rect->horzAlign = AMMO_COUNTER_ALIGN_RIGHT;\n    rect->vertAlign = AMMO_COUNTER_ALIGN_BOTTOM;\n    *scale', '    *scale'),
     ('        rect->w = 0.0f;\n        rect->h = 0.0f;\n', ''),
@@ -512,7 +590,7 @@ mutants = [
      'alpha = CG_AmmoCounterFade(hud_fade_ammodisplay, cg->ammoFadeTime);'),
     ('if (alpha > 0.0f && CG_AmmoCounterGetView(ps, &view)) {', 'if (CG_AmmoCounterGetView(ps, &view)) {'),
     ('(int)floorf(fadeDvar->current.value * 1000.0f + 0.5f)', '(int)(fadeDvar->current.value * 1000.0f)'),
-    ('        if (hint != AMMO_COUNTER_HINT_NONE)\n', ''),
+    ('    if (hint != AMMO_COUNTER_HINT_NONE)\n', ''),
 ]
 offhand_mutants = [
     ('    if (ps->pm_type > 5)\n        return NULL;\n', ''),
@@ -547,8 +625,9 @@ with tempfile.TemporaryDirectory(prefix='cod2-ammo-counter-') as directory:
 print('PASS: while cg_hudAmmoCounter is on, the stock ammo and offhand items give way and the weapon name and '
       'fire-mode icon move clear; the clip sits right-aligned against a rule with the reserve beside it (a clipless '
       'weapon shows its reserve alone), pink when low; RELOAD, LOW AMMO and NO AMMO show under the crosshair in the '
-      'bold font for a living player\'s guns and launchers outside reloads, mounted weapons and the mantle hint; the '
-      'frag and smoke '
+      'labels\' WWII lettering (else the bold font, else font 4) for a living player\'s guns and launchers outside '
+      'reloads, mounted weapons and the mantle hint, blinking from the WWII red to halfway to white and back every '
+      '500 ms from each new hint, a hint that comes back, a clock reset or a new level; the frag and smoke '
       'grenades the slots would throw show as proportioned silhouettes (or stock icons) with their counts, faint when '
       'empty; each part keeps its stock fade, and the stock offhand items take the offhand fade as their alpha; '
       f'{len(variants) - 1} failing regression mutants')

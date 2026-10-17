@@ -14,5 +14,8 @@ int CG_DrawTeammateName(const char *name, float x, float y);
 int CG_GetTeammateNameColor(float *color);
 /* CoD2 has no enemy label, so nothing stands in while this draws nothing. */
 void CG_DrawEnemyName(const char *name, float x, float y, float alpha);
+/* The labels' lettering, for other WWII text; NULL if its image cannot be
+ * made. */
+struct Font_s *CG_GetPlayerNameFont(void);
 
 #endif

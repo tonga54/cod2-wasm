@@ -324,6 +324,7 @@ int main(void) {
     assert(draws == 1);
     font = drawn[0].font;
     assert(font != &stockFont && font->material == fakeMaterial && font->name && font->name[0]);
+    assert(CG_GetPlayerNameFont() == font && creates == 1);
     assert(font->pixelHeight == CG_NAME_FONT_PIXEL_HEIGHT && font->glyphCount == CG_NAME_FONT_GLYPH_COUNT);
     for (i = 0; i < CG_NAME_FONT_GLYPH_COUNT; i++) {
         const CG_NameFontGlyph *src = &cg_nameFontGlyphs[i];
@@ -387,9 +388,13 @@ int main(void) {
     createFails = 1;
     assert(!CG_DrawTeammateName("Friend", 0.0f, 0.0f) && !CG_DrawTeammateName("Friend", 0.0f, 0.0f));
     assert(!CG_GetTeammateNameColor(rgb) && rgb[0] == -1.0f && rgb[1] == -1.0f && rgb[2] == -1.0f);
-    assert(creates == 2 && draws == 4);
+    assert(!CG_GetPlayerNameFont() && creates == 2 && draws == 4);
     CG_PlayerNamesInit();
     createFails = 0;
+    /* Other WWII text can build the font first, with the labels off. */
+    teamNames.current.enabled = 0;
+    assert(CG_GetPlayerNameFont() == font && creates == 3);
+    teamNames.current.enabled = 1;
     assert(CG_DrawTeammateName("Friend", 0.0f, 0.0f) && creates == 3 && draws == 5);
 
     /* The friendly name loop draws the teal name where the stock label is. */
@@ -575,6 +580,8 @@ mutants = [
     ('glyph->y0 = src->y0;', 'glyph->y0 = 0;'),
     ('glyph->dx = src->dx;', 'glyph->dx = src->width;'),
     ('    if (!material)\n        return 0;\n', ''),
+    ('    return CG_NameFontReady() ? &s_nameFont : NULL;\n', '    return &s_nameFont;\n'),
+    ('    return CG_NameFontReady() ? &s_nameFont : NULL;\n', '    return CG_TeammateNamesDrawn() ? &s_nameFont : NULL;\n'),
 ]
 position_mutants = [
     ('    return fabsf(*x) <= halfWidth && fabsf(*y) <= halfHeight;', '    return 1;'),
@@ -645,5 +652,5 @@ print(f'PASS: the name font holds {len(glyph_rows)} Windows-1252 glyphs of the c
       'smoke leaves less than a fifth visible, is named above his head in the same letters in the enemy capture\'s '
       'red, held 50 ms and faded over 100 once the aim '
       'leaves him, every other player in free-for-all, never a teammate, in third person, after his player leaves or '
-      f'across a clock reset; {len(broken)} broken font tables rejected and {len(variants) - 1} failing regression '
-      'mutants')
+      'across a clock reset; the font is lent to other WWII text, labels on or off, while its image exists; '
+      f'{len(broken)} broken font tables rejected and {len(variants) - 1} failing regression mutants')
