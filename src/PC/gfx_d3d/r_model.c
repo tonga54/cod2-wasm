@@ -575,9 +575,8 @@ void R_UpdateXModelBounds(GfxSceneEntity *sceneEnt, GfxEntity *ent)
     }
 
     if (((GfxEntity *)e)->reType != 0) {
-        void *defaultModel = rgg->modelDObj;
-        obj = (void *)((GfxSceneEntity *)se)->u.data;
-        DObjSetModel(defaultModel, obj);
+        obj = rgg->modelDObj;
+        DObjSetModel(obj, (void *)((GfxSceneEntity *)se)->u.data);
     } else {
         obj = (void *)((GfxSceneEntity *)se)->u.data;
     }

@@ -162,7 +162,10 @@ use each axis's bounds, and allocate all 64 `DSurface` entries. The former code
 read pointer storage as floats and could overwrite its undersized surface array.
 `python3 scripts/test-model-bounds.py` checks 40 rotated 61/128-bone cases with
 ASan/UBSan, compares against independently transformed corners, and rejects all
-three old behaviors. Visual multiplayer validation is still required.
+three old behaviors. Visual multiplayer validation is still required. Loose
+models (`reType` 1, such as ejected casings) now pass the renderer's shared
+model DObj instead of the `XModel` itself, which overran the bone pointer
+array; the test also covers that case.
 
 Both test clients also disconnected at the round end with `Server Disconnected -
 595`. `CL_GetServerCommand` had incorrect command letters: it interpreted the

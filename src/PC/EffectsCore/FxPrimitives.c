@@ -401,9 +401,30 @@ unsigned char Cylinder_TypeID(const Cylinder *_this)
     return 4;
 }
 
+extern unsigned char FxHelper_CullSphere(void *helper, float *origin, float radius, int cullType);
+/* Like the other primitives, a model is culled by the view frustum, with a
+ * sphere about its origin that holds the model in any orientation. */
 Bool Emitter_Cull(const Emitter *_this)
 {
-    return 0;
+    byte *p = (byte *)_this;
+    FxHelper *helper = *(FxHelper **)imp_theFxHelper;
+    const struct XModel *model = ((Effect *)p)->mModelPtr;
+    int cullType = (helper->mCamera.numPlanes);
+    float radiusSq = 0.0f;
+    int i;
+
+    if (!model)
+        return 0;
+    if (*(byte *)(p + 0xab) & 2) {
+        if (cullType >= 5)
+            cullType = 5;
+    }
+    for (i = 0; i < 3; ++i) {
+        float extent = fmaxf(fabsf(model->mins[i]), fabsf(model->maxs[i]));
+        radiusSq += extent * extent;
+    }
+    return (Bool)FxHelper_CullSphere(helper, ((float *)((byte *)(p) + offsetof(Effect, mRefEnt.origin))),
+                                     sqrtf(radiusSq) * (((Effect *)(p))->mRefEnt.scale), cullType);
 }
 
 unsigned char Emitter_TypeID(const Emitter *_this)
@@ -1877,6 +1898,30 @@ Bool Particle_UpdateOrigin(const Particle *_this, const orientation_t *or_)
     return 1;
 }
 
+extern void AnglesToAxis(const vec_t *angles, vec3_t *axis);
+
+/* Raven's CEmitter::UpdateAngles: the attached model, such as an ejected
+ * casing, turns by its angle delta in degrees per 100 ms, and the turn dies
+ * down once the model stops moving. The model draws at the size curve's
+ * scale; Emitter_Draw skips a model with scale 0. */
+static void Emitter_UpdateModel(byte *self, float size, Bool moved)
+{
+    /* FX_AddEmitter stores the angles at spawnSize and their deltas at
+     * spawnDensity, three floats each. */
+    float *angles = (float *)(self + offsetof(Emitter, spawnSize));
+    float *angleDelta = (float *)(self + offsetof(Emitter, spawnDensity));
+    float frameTime = (float)(*(FxHelper **)imp_theFxHelper)->mFrameTime;
+    float decay = moved ? 1.0f : powf(0.7f, frameTime / 16.0f);
+    int i;
+
+    for (i = 0; i < 3; ++i) {
+        angleDelta[i] *= decay;
+        angles[i] += angleDelta[i] * frameTime * 0.01f;
+    }
+    AnglesToAxis(angles, ((Effect *)self)->mRefEnt.axis);
+    ((Effect *)self)->mRefEnt.scale = size;
+}
+
 Bool Emitter_Update(const Emitter *_this)
 {
     byte *self = (byte *)_this;
@@ -1915,6 +1960,8 @@ Bool Emitter_Update(const Emitter *_this)
     if (!Particle_UpdateOrigin((const Particle *)_this, (const orientation_t *)orient))
         return 0;
 
+    vec3_t lastOrigin;
+    memcpy(lastOrigin, ((Effect *)self)->mRefEnt.origin, sizeof(lastOrigin));
     vec3_t bindVelocity = { 0, 0, 0 };
     if (orient) {
 
@@ -1955,6 +2002,7 @@ Bool Emitter_Update(const Emitter *_this)
         return 1;
     }
 
+    Emitter_UpdateModel(self, radius, memcmp(lastOrigin, ((Effect *)self)->mRefEnt.origin, sizeof(lastOrigin)) != 0);
     Particle_UpdateRGB((const Particle *)_this);
     Particle_UpdateAlpha((const Particle *)_this);
 

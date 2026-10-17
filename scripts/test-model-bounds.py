@@ -25,22 +25,27 @@ static struct { struct { int integer; } current; } dev, *developer = &dev;
 static XBoneInfo bones[128];
 static DObjAnimMat mats[128];
 static int boneCount = 128, surfaceCount = 64;
+/* A loose model (reType != 0) is posed through the renderer's shared DObj;
+ * every DObj helper must see that DObj, never the XModel itself. */
+static char entityObj, sharedObj, looseModel;
+static void *expectedObj, *setModelObj, *setModelModel;
 static int InterlockedCompareExchange(int *p, int exchange, int compare) { int old=*p; if(old==compare)*p=exchange; return old; }
-static void DObjSetModel(void *o, void *m) {}
-static int DObjBad(void *o) { return 0; }
+static void DObjSetModel(void *o, void *m) { setModelObj=o; setModelModel=m; }
+static int DObjBad(void *o) { assert(o==expectedObj); return 0; }
 static void R_XModelDebugBoxes_impl(const byte *s, const byte *e, void *o) {}
 static void R_XModelDebugAxes_impl(const byte *s, const byte *e, void *o) {}
 static int R_GetSurfaceData_impl(const byte *e, void *o, void *surfs, int *bits, char *lods) {
     DSurface *surfaces = surfs;
+    assert(o==expectedObj);
     for(int i=0;i<surfaceCount;i++) surfaces[i]=(DSurface){i/8,i%8};
     for(int i=0;i<4;i++) bits[i]=-1;
     return surfaceCount;
 }
 static void CG_DObjCalcPose(void *c, void *o, int *bits) {}
-static void *DObjGetRotTransArray(void *o) { return mats; }
+static void *DObjGetRotTransArray(void *o) { assert(o==expectedObj); return mats; }
 static void ClearBounds(float *lo, float *hi) { for(int j=0;j<3;j++){lo[j]=1e30f;hi[j]=-1e30f;} }
-static void DObjGetBoneInfo(void *o, void **b) { for(int i=0;i<boneCount;i++)b[i]=&bones[i]; }
-static int DObjNumBones(void *o) { return boneCount; }
+static void DObjGetBoneInfo(void *o, void **b) { assert(o==expectedObj); for(int i=0;i<boneCount;i++)b[i]=&bones[i]; }
+static int DObjNumBones(void *o) { assert(o==expectedObj); return boneCount; }
 static void GetRotatedBounds(float *b, float *org, float *axis, float *out) {
     /* Entity axes are identity here; skeletal rotations are tested below. */
     for(int j=0;j<6;j++) out[j]=b[j]+org[j%3];
@@ -48,10 +53,15 @@ static void GetRotatedBounds(float *b, float *org, float *axis, float *out) {
 '''
 checks = r'''
 int main(void) {
+    rg.modelDObj=&sharedObj;
     for(int trial=0;trial<40;trial++) {
-        GfxEntity ent={.origin={1200,1300,-5}};
+        int loose=trial%4>=2;
+        GfxEntity ent={.reType=loose,.origin={1200,1300,-5}};
         GfxSceneEntity scene={0};
         float expectedLo[3], expectedHi[3]; ClearBounds(expectedLo,expectedHi);
+        scene.u.data=loose ? (void *)&looseModel : (void *)&entityObj;
+        expectedObj=loose ? (void *)&sharedObj : (void *)&entityObj;
+        setModelObj=setModelModel=0;
         boneCount=trial%2 ? 128 : 61;
         for(int i=0;i<boneCount;i++) {
             float q[4]={sinf(i+trial),cosf(i*.7f),sinf(trial*.3f),.6f};
@@ -79,6 +89,8 @@ int main(void) {
         }
         R_UpdateXModelBounds(&scene,&ent);
         assert(scene.cullState==2);
+        assert(setModelObj==(loose ? (void *)&sharedObj : 0));
+        assert(setModelModel==(loose ? (void *)&looseModel : 0));
         for(int j=0;j<3;j++) {
             assert(isfinite(scene.curMins[j]) && isfinite(scene.curMaxs[j]));
             assert(fabsf(scene.curMins[j]-expectedLo[j])<.001f);
@@ -93,7 +105,12 @@ mutations = {
     'undersized_surface_array': body.replace('DSurface surfaces[64]', 'short surfaces[67]'),
     'wrong_bone_pointer': body.replace('const XBoneInfo *bi = boneInfo[i];', 'const XBoneInfo *bi = (const XBoneInfo *)&boneInfo[i * 4];'),
     'wrong_axis': body.replace('[sel][biOfs]', '[sel][0]').replace('[1 - sel][biOfs]', '[1 - sel][0]'),
+    'xmodel_as_dobj': body.replace(
+        'obj = rgg->modelDObj;\n        DObjSetModel(obj, (void *)((GfxSceneEntity *)se)->u.data);',
+        'obj = (void *)((GfxSceneEntity *)se)->u.data;\n        DObjSetModel(rgg->modelDObj, obj);'),
 }
+for name, actual in mutations.items():
+    assert name == 'current' or actual != body, name
 with tempfile.TemporaryDirectory(prefix='cod2-model-bounds-') as directory:
     path=Path(directory)
     for name, actual in mutations.items():
@@ -101,4 +118,4 @@ with tempfile.TemporaryDirectory(prefix='cod2-model-bounds-') as directory:
         subprocess.run(['cc','-std=c99','-O1','-g','-fsanitize=address,undefined','-fno-sanitize-recover=all',str(path/'test.c'),'-lm','-o',str(path/'test')],check=True)
         result=subprocess.run([str(path/'test')],capture_output=True)
         assert (result.returncode==0)==(name=='current'), (name,result.stderr.decode())
-print('PASS: 40 skeletal bounds cases, 61/128 bones, 64 surfaces; all three regressions detected')
+print('PASS: 40 skeletal bounds cases, entity and loose-model DObjs, 61/128 bones, 64 surfaces; all four regressions detected')
