@@ -257,13 +257,6 @@ static int currentHint(void) {
     assert(view(&v));
     return CG_AmmoCounterHint(&cg->predictedPlayerState, &v);
 }
-/* Fills the stack so that a color left unset does not happen to hold the fade. */
-static void __attribute__((noinline)) dirty(void) {
-    volatile float junk[256];
-    for (int i = 0; i < 256; i++) junk[i] = 123.0f;
-    (void)junk[0];
-}
-
 int main(void) {
     CG_AmmoCounterView v;
     rectDef_t rect;
@@ -450,22 +443,27 @@ int main(void) {
     render();
     assert(drawn[3].font != &boldFont && fontEnums[drawn[3].font - fonts] == 4 && !strcmp(drawn[3].text, "RELOAD"));
 
-    /* The stock offhand items take the offhand fade as their alpha. */
+    /* The stock offhand items take the offhand fade as their alpha. Each call
+     * has a fade no earlier draw used, so an alpha left unset cannot pass with
+     * a value an earlier call left on the stack. */
     reset();
     struct Font_s *font = UI_GetFontHandle(0, 0.3f);
     float color[4] = { 0.2f, 0.4f, 0.6f, 0.9f };
     const float itemRgb[3] = { 0.2f, 0.4f, 0.6f }, red[3] = { 0.89f, 0.18f, 0.01f };
     rect.x = 10; rect.y = 20; rect.w = 30; rect.h = 40; rect.horzAlign = 3; rect.vertAlign = 3;
-    offhandAlpha = 0.5f;
-    drawCount = 0; dirty(); CG_DrawOffHandName(&rect, font, 0.3f, color, 3, 1);
-    assert(drawCount == 1 && !strcmp(drawn[0].text, "WEAPON_FRAGGRENADE") && colored(drawn[0].color, itemRgb, 0.5f));
-    drawCount = 0; dirty(); CG_DrawOffHandIcon(&rect, 1, color, "fallback", 1);
-    assert(drawCount == 1 && !strcmp(drawn[0].material, "hud_us_grenade") && colored(drawn[0].color, itemRgb, 0.5f));
-    drawCount = 0; dirty(); CG_DrawOffHandAmmo(&rect, font, 0.3f, color, 3, 1);
-    assert(drawCount == 1 && !strcmp(drawn[0].text, "3") && colored(drawn[0].color, itemRgb, 0.5f));
+    offhandAlpha = 0.3125f;
+    drawCount = 0; CG_DrawOffHandName(&rect, font, 0.3f, color, 3, 1);
+    assert(drawCount == 1 && !strcmp(drawn[0].text, "WEAPON_FRAGGRENADE") && colored(drawn[0].color, itemRgb, 0.3125f));
+    offhandAlpha = 0.4375f;
+    drawCount = 0; CG_DrawOffHandIcon(&rect, 1, color, "fallback", 1);
+    assert(drawCount == 1 && !strcmp(drawn[0].material, "hud_us_grenade") && colored(drawn[0].color, itemRgb, 0.4375f));
+    offhandAlpha = 0.5625f;
+    drawCount = 0; CG_DrawOffHandAmmo(&rect, font, 0.3f, color, 3, 1);
+    assert(drawCount == 1 && !strcmp(drawn[0].text, "3") && colored(drawn[0].color, itemRgb, 0.5625f));
     cg->predictedPlayerState.ammoclip[25] = 0;
-    drawCount = 0; dirty(); CG_DrawOffHandAmmo(&rect, font, 0.3f, color, 3, 1);
-    assert(drawCount == 1 && !strcmp(drawn[0].text, "0") && colored(drawn[0].color, red, 0.5f));
+    offhandAlpha = 0.6875f;
+    drawCount = 0; CG_DrawOffHandAmmo(&rect, font, 0.3f, color, 3, 1);
+    assert(drawCount == 1 && !strcmp(drawn[0].text, "0") && colored(drawn[0].color, red, 0.6875f));
     offhandAlpha = 0;
     drawCount = 0; CG_DrawOffHandIcon(&rect, 1, color, "fallback", 1); CG_DrawOffHandAmmo(&rect, font, 0.3f, color, 3, 1);
     CG_DrawOffHandName(&rect, font, 0.3f, color, 3, 1);
