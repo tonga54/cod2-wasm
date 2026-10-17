@@ -1,6 +1,7 @@
 #include "common_types.h"
 #include "imports.h"
 #include "headers/PC/cgame_mp/cg_local.h"
+#include "headers/PC/cgame_mp/cg_minimap.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -596,7 +597,7 @@ static void CG_GetHudElemInfo(const hudelem_t *elem, cg_hudelem_t *cghe, char *h
             float height = cghe->height;
 
             x = CG_AlignX(elem->alignOrg, x, width);
-            y = CG_AlignY(elem->alignOrg, y, height);
+            y = CG_AlignY(elem->alignOrg, y, height) + CG_MinimapHudElemOffset(elem->alignScreen, elem->x);
 
             cghe->x = x;
             cghe->y = y;
@@ -613,7 +614,7 @@ static void CG_GetHudElemInfo(const hudelem_t *elem, cg_hudelem_t *cghe, char *h
             float fromX = elem->fromX;
             float fromY = elem->fromY;
             fromX = CG_AlignX(elem->fromAlignOrg, fromX, width);
-            fromY = CG_AlignY(elem->fromAlignOrg, fromY, height);
+            fromY = CG_AlignY(elem->fromAlignOrg, fromY, height) + CG_MinimapHudElemOffset(elem->fromAlignScreen, elem->fromX);
 
             float dummyWidth = 0.0f;
             float dummyHeight = 0.0f;
@@ -623,7 +624,7 @@ static void CG_GetHudElemInfo(const hudelem_t *elem, cg_hudelem_t *cghe, char *h
             float toX = elem->x;
             float toY = elem->y;
             toX = CG_AlignX(elem->alignOrg, toX, width);
-            toY = CG_AlignY(elem->alignOrg, toY, height);
+            toY = CG_AlignY(elem->alignOrg, toY, height) + CG_MinimapHudElemOffset(elem->alignScreen, elem->x);
 
             dummyWidth = 0.0f;
             dummyHeight = 0.0f;

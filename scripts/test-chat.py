@@ -47,6 +47,8 @@ static struct { uint64_t first;
 #define cgs (&guarded.data)
 static int texts,pictures;
 static float lastBaseline;
+static float minimapOffset;
+static float CG_MinimapTopLeftOffset(void){return minimapOffset;}
 static char rendered[8][271];
 static FontHandle UI_GetFontHandle(int kind,float scale){return (void *)1;}
 static int UI_TextHeight(FontHandle font,float scale){return (int)(48*scale+.01f);}
@@ -95,6 +97,8 @@ int main(void){
  reset();line("^1Player: WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW ^2green words WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW");
  render();assert(texts>=2);for(int i=1;i<texts;i++)assert(rendered[i][0]=='^');
  reset();line("First\nSecond\nThird");render();assert(texts==3 && !strcmp(rendered[1],"^7Second"));
+ /* The chat moves down with the top-left column while the minimap is shown. */
+ {float base=lastBaseline;minimapOffset=126;render();assert(texts==3 && lastBaseline==base+126);minimapOffset=0;}
  reset();for(int n=0;n<20;n++)line("Concurrent message");height.current.integer=99;render();assert(texts==5);
  height.current.integer=0;render();assert(texts==0);line("disabled");assert(cgs->teamChatPos==0);
  height.current.integer=5;lifetime.current.integer=0;line("disabled");render();assert(texts==0);
@@ -121,10 +125,11 @@ with tempfile.TemporaryDirectory(prefix='cod2-chat-') as directory:
     for name, body in [('actual', code),
                        ('overlap', code.replace('lineHeight = textHeight + 4;', 'lineHeight = 10;')),
                        ('ring', code.replace('% COD2_CHAT_ROWS', '% chatHeight')),
+                       ('minimap', code.replace(' + CG_MinimapTopLeftOffset()', '')),
                        ('capture', code.replace('if (catchers == 0x10) return 3;', 'if (catchers == 0x10) return 1;'))]:
         (folder / 'test.c').write_text(body)
         subprocess.run(['cc', '-O1', '-fsanitize=address,undefined', str(folder / 'test.c'), '-o', str(folder / 'test')], check=True)
         result = subprocess.run([str(folder / 'test')], capture_output=True, text=True)
         assert (result.returncode == 0) == (name == 'actual'), (name, result.stderr)
         if name == 'actual': print(result.stdout, end='')
-print('PASS: overlapping rows, unstable ring indexing and chat-as-menu regressions fail')
+print('PASS: overlapping rows, unstable ring indexing, chat left under the minimap and chat-as-menu regressions fail')

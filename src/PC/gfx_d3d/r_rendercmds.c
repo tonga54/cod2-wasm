@@ -1,5 +1,6 @@
 #include "common_types.h"
 #include "imports.h"
+#include "headers/PC/gfx_d3d/r_hud2d.h"
 
 extern char *getenv(const char *name);
 
@@ -783,6 +784,42 @@ void R_AddCmdDrawQuadPic(vec2_t *verts, const vec_t *color, MaterialHandle mater
         cmd->verts[cornerIndex][1] = verts[cornerIndex][1];
     }
     R_ConvertColorToBytes(color, cmd->color.array);
+}
+
+void R_AddCmdDrawTriangles2D(const HudVertex2D *verts, int vertexCount, const unsigned short *indices, int indexCount, MaterialHandle material)
+{
+    GfxCmdDrawTriangles2D *cmd;
+    GfxTriangles2DVertex *cmdVerts;
+    unsigned short *cmdIndices;
+    int byteCount;
+    int i;
+
+    if (!material || vertexCount < 3 || vertexCount > R_HUD2D_MAX_VERTICES ||
+        indexCount < 3 || indexCount > R_HUD2D_MAX_INDICES || indexCount % 3)
+        return;
+
+    byteCount = (int)(sizeof(GfxCmdDrawTriangles2D) + vertexCount * sizeof(GfxTriangles2DVertex) +
+                      indexCount * sizeof(unsigned short));
+    byteCount = (byteCount + 3) & ~3;
+    cmd = (GfxCmdDrawTriangles2D *)R_AllocCmd(byteCount, 0, 6);
+    if (cmd == NULL) {
+        return;
+    }
+
+    cmd->material = material;
+    cmd->vertexCount = (unsigned short)vertexCount;
+    cmd->indexCount = (unsigned short)indexCount;
+    cmdVerts = (GfxTriangles2DVertex *)(cmd + 1);
+    for (i = 0; i < vertexCount; ++i) {
+        cmdVerts[i].xy[0] = verts[i].xy[0];
+        cmdVerts[i].xy[1] = verts[i].xy[1];
+        cmdVerts[i].st[0] = verts[i].st[0];
+        cmdVerts[i].st[1] = verts[i].st[1];
+        R_ConvertColorToBytes(verts[i].rgba, cmdVerts[i].color.array);
+    }
+    cmdIndices = (unsigned short *)(cmdVerts + vertexCount);
+    for (i = 0; i < indexCount; ++i)
+        cmdIndices[i] = indices[i] < vertexCount ? indices[i] : 0;
 }
 
 void R_AddCmdDrawSprite(MaterialHandle material, const byte *rgbaColor, const vec_t *pos, float radius, float minScreenRadius, int renderFxFlags)

@@ -1726,6 +1726,10 @@ No browser errors or warnings were recorded. Evidence:
 `out/game-modes-dm-info.png` and `out/game-modes-dm-gameplay.png`.
 This establishes selection, creation, startup, player entry and rotation;
 complete objective rounds with multiple players need separate coverage.
+Since October 17, objectives without a team (CTF flags at base, SD bomb sites,
+an unheld HQ radio) reach every player, and a team's objective only that team;
+the reconstructed server had this reversed. The new minimap draws them; see
+`docs/GRAPHICS_2026-10-16.md`.
 
 
 The tested web/server/gateway images and matching staged archives were installed
@@ -2403,6 +2407,10 @@ sparse/reconnected slot pairs, all 64 players and team/target/spectator filters.
 Mutants with overlapping rows, unstable ring indexing, chat treated as a menu
 or delivery to the first N slots fail. The input contract uses the actual pinned
 framework key guard and adapter to check capture lifecycle and printable keys.
+Since October 17, a minimap replaces the compass in the top-left corner (dvars
+`cg_minimap`, `cg_minimapSize`, `cg_minimapRange`). While it is shown, the chat,
+the say field, the kill feed and the top-left script HUD elements move down
+below it; see `docs/GRAPHICS_2026-10-16.md`.
 Logs: out/chat-web-final-build.log, out/chat-native-build.log,
 out/chat-native-tests.log, out/chat-delivery-tests.log and
 out/chat-focus-tests.log.

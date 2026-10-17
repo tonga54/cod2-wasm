@@ -3,6 +3,7 @@
 #include "imports.h"
 #include "bytematch.h"
 #include "headers/PC/cgame_mp/cg_local.h"
+#include "headers/PC/cgame_mp/cg_minimap.h"
 #include <math.h>
 #include <string.h>
 
@@ -1578,16 +1579,21 @@ void CG_OwnerDraw(float x, float y, float w, float h, int horzAlign, int vertAli
         CG_DrawPlayerWeaponModeIcon(&rect, material, color);
         break;
     case CG_PLAYER_COMPASS:
-        CG_DrawPlayerCompass(&rect, material, color);
+        if (CG_MinimapIsActive())
+            CG_DrawMinimap(cg ? CG_HudFadeAlpha(hud_fade_compass, cg->compassFadeTime) : 0.0f);
+        else
+            CG_DrawPlayerCompass(&rect, material, color);
         break;
     case CG_PLAYER_COMPASS_BACK:
-        CG_DrawPlayerCompassBack(&rect, material, color);
+        if (!CG_MinimapIsActive())
+            CG_DrawPlayerCompassBack(&rect, material, color);
         break;
     case CG_PLAYER_COMPASS_POINTERS:
         CG_UpdateCompPointerOrientation();
         break;
     case CG_PLAYER_COMPASS_FRIENDS:
-        CG_DrawPlayerCompassFriendliesOwnerdraw(&rect, material, color);
+        if (!CG_MinimapIsActive())
+            CG_DrawPlayerCompassFriendliesOwnerdraw(&rect, material, color);
         break;
     case CG_DRAW_SHADER:
         CG_DrawHudPic(&rect, material, color);

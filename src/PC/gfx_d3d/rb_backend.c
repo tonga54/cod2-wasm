@@ -2,6 +2,7 @@
 #include "imports.h"
 extern int alwaysfails;
 #include "bytematch.h"
+#include "headers/PC/gfx_d3d/r_hud2d.h"
 
 extern char *getenv(const char *name);
 
@@ -283,11 +284,11 @@ static inline void RB_SetVertex2D(char *tessBase, int vertIndex, const dvar_t *r
     }
 }
 
-static inline int RB_CheckTessOverflow4(char *t)
+static inline int RB_CheckTessOverflow(char *t, int vertexCount, int indexCount)
 {
     int vc = tess.vertexCount;
     int ic = tess.indexCount;
-    if (vc + 4 > 0x154a || ic + 6 > 0x100000) {
+    if (vc + vertexCount > 0x154a || ic + indexCount > 0x100000) {
         int savedDecl = tess.declType;
         RB_EndSurface();
         RB_BeginSurface(tess.material, tess.techType, tess.lmapIndex);
@@ -299,6 +300,11 @@ static inline int RB_CheckTessOverflow4(char *t)
         vc = tess.vertexCount;
     }
     return vc;
+}
+
+static inline int RB_CheckTessOverflow4(char *t)
+{
+    return RB_CheckTessOverflow(t, 4, 6);
 }
 
 static inline void RB_WriteQuadIndicesAt(char *t, int vc, int ic)
@@ -416,6 +422,7 @@ static void RB_DrawTextCmd(GfxRenderCommandExecState *execState);
 static void RB_ApplyLatePostEffectsCmd(GfxRenderCommandExecState *execState);
 static void RB_StretchPicRotateCmd(GfxRenderCommandExecState *execState);
 static void RB_DrawQuadPicCmd(GfxRenderCommandExecState *execState);
+static void RB_DrawTriangles2DCmd(GfxRenderCommandExecState *execState);
 void RB_DrawLines3D(int count, int width, const GfxPointVertex *verts, int depthTest);
 static void RB_DrawLinesCmd(GfxRenderCommandExecState *execState);
 static void RB_StencilPlanesCmd(GfxRenderCommandExecState *execState);
@@ -428,7 +435,7 @@ void (*const RB_RenderCommandTable[34])(GfxRenderCommandExecState *execState) = 
     RB_ReturnCmd,
     RB_SetMaterialColorCmd,
     RB_SetLightPropertiesCmd,
-    NULL,
+    RB_DrawTriangles2DCmd,
     NULL,
     NULL,
     NULL,
@@ -4064,6 +4071,34 @@ static void RB_DrawQuadPicCmd(GfxRenderCommandExecState *execState)
 
     cmd = (byte *)execState->cmd;
     execState->cmd = (const void *)(cmd + ((const GfxCmdHeader *)cmd)->byteCount);
+}
+
+static void RB_DrawTriangles2DCmd(GfxRenderCommandExecState *execState)
+{
+    const GfxCmdDrawTriangles2D *cmd = (const GfxCmdDrawTriangles2D *)execState->cmd;
+    const GfxTriangles2DVertex *verts = (const GfxTriangles2DVertex *)(cmd + 1);
+    const unsigned short *indices = (const unsigned short *)(verts + cmd->vertexCount);
+    char *t = (char *)&tess;
+    const dvar_t *renderer;
+    int vc;
+    int ic;
+    int i;
+
+    if (!backEnd.projection2D)
+        RB_Set2D();
+
+    RB_BeginSurface2D(t, cmd->material);
+    vc = RB_CheckTessOverflow(t, cmd->vertexCount, cmd->indexCount);
+    ic = tess.indexCount;
+    renderer = r_rendererInUse;
+    for (i = 0; i < cmd->vertexCount; i++)
+        RB_SetVertex2D(t, vc + i, renderer, verts[i].xy[0], verts[i].xy[1], verts[i].st[0], verts[i].st[1], verts[i].color.packed);
+    for (i = 0; i < cmd->indexCount; i++)
+        tess.indices[ic + i] = (r_index_t)(vc + indices[i]);
+    tess.vertexCount = vc + cmd->vertexCount;
+    tess.indexCount = ic + cmd->indexCount;
+
+    execState->cmd = (const void *)((const byte *)cmd + cmd->header.byteCount);
 }
 
 void RB_DrawLines3D(int count, int width, const GfxPointVertex *verts, int depthTest)

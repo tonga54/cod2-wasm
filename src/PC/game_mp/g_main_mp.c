@@ -1366,14 +1366,11 @@ int G_RunFrame(int levelTime)
                 objective_t *srcObj = &level.objectives[j];
                 objective_t *dstObj = &cli->ps.objective[j];
 
-                if (srcObj->state == 0 || srcObj->teamNum == 0) {
-                    if (srcObj->state != 0 && srcObj->teamNum == lastObjId) {
-                        *dstObj = *srcObj;
-                    } else {
-                        dstObj->state = 0;
-                    }
-                } else {
+                /* Team "none" (0) is everyone's: bomb sites, flags at base. */
+                if (srcObj->state != 0 && (srcObj->teamNum == 0 || srcObj->teamNum == lastObjId)) {
                     *dstObj = *srcObj;
+                } else {
+                    dstObj->state = 0;
                 }
             }
         }

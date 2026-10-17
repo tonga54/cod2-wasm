@@ -4,6 +4,7 @@
 #include "imports.h"
 #include "bytematch.h"
 #include "headers/PC/cgame_mp/cg_local.h"
+#include "headers/PC/cgame_mp/cg_minimap.h"
 
 extern const dvar_t *cg_centerPrintY;
 extern const dvar_t *cg_centertime;
@@ -1339,7 +1340,7 @@ unsigned int CG_DrawChatMessages(void)
     int chatTime = cg_chatTime->current.integer;
     int i, count, lineHeight, textHeight, panelWidth = 0;
     float hudChatX = cg_hudChatPosition->current.vector[0];
-    float hudChatY = cg_hudChatPosition->current.vector[1];
+    float hudChatY = cg_hudChatPosition->current.vector[1] + CG_MinimapTopLeftOffset();
     FontHandle font;
     vec4_t color = {0.0f, 0.0f, 0.0f, 0.3f};
 
@@ -1772,7 +1773,7 @@ static void CG_Draw2D_DrawBottomOverlays(cg_t *cg)
                           cg_subtitlePosY->current.integer,
                           cg_subtitleCharHeight->current.integer, 1.0f, 2);
 
-    Con_DrawSay((int)cg_hudSayPosition->current.vector[1] + 24);
+    Con_DrawSay((int)(cg_hudSayPosition->current.vector[1] + CG_MinimapTopLeftOffset()) + 24);
     (void)cg;
 }
 
@@ -1794,6 +1795,7 @@ unsigned int CG_Draw2D(void)
     if (!cg_draw2D->current.enabled)
         return 0;
 
+    CG_MinimapSetHudVisible(0);
     {
         int remaining = CG_GetRespawnRemaining();
         if (remaining >= 0) {
@@ -1842,6 +1844,9 @@ unsigned int CG_Draw2D(void)
     drawHudElems = !CG_AreHudElemsHidden();
 
     pm_type = cg->nextSnap->ps.pm_type;
+    /* The compass menu, and with it the minimap, is painted for players, not
+     * for free spectators or at intermission. */
+    CG_MinimapSetHudVisible(drawHudMenus && pm_type != 4 && pm_type != 5);
     if (pm_type == 5) {
         CL_CloseAllMenus();
         if (!cg->showScores) {
@@ -2100,7 +2105,7 @@ unsigned int CG_Draw2D(void)
             alpha = fade[3];
         }
         /* Keep the kill/server feed below the team scores, at the top left. */
-        Con_DrawNotify(6, 84, alpha, MWM_TOPDOWN);
+        Con_DrawNotify(6, 84 + (int)CG_MinimapTopLeftOffset(), alpha, MWM_TOPDOWN);
         CG_Draw2D_DrawBottomOverlays(cg);
     }
 

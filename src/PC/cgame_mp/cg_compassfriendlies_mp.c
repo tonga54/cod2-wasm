@@ -59,6 +59,7 @@ static inline __attribute__((always_inline)) float dvar_value(const dvar_t **dvp
 
 void CG_ApplyCompassPointerRadiusScale(float *radiusScale);
 void CG_CompassAddWeaponPingInfo(centity_t *cent, const vec_t *origin, int msec);
+int CG_CompassUpdateFriendlies(void);
 void CG_DrawCompassFriendlies(rectDef_t *rect, MaterialHandle material, vec_t *color);
 
 void CG_ApplyCompassPointerRadiusScale(float *radiusScale)
@@ -131,21 +132,12 @@ static float CompassDistToRadius(float dist)
     return (float)((double)compassSize * 43.75 * (double)saturation);
 }
 
-void CG_DrawCompassFriendlies(rectDef_t *rect, MaterialHandle material, vec_t *color)
+/* Refreshes compassActors from the snapshot and the server's packed far-friend
+ * info. Returns the viewed player's team, or -1 when nothing should be shown. */
+int CG_CompassUpdateFriendlies(void)
 {
-    float compassFadeOutAlpha;
-    float centerX, centerY;
     int team;
     int i;
-
-    const dvar_t *fadeDvar = *dvar_compassFade;
-    int duration = (int)floorf(fadeDvar->current.value * 1000.0f + 0.5f);
-
-    int displayStartTime = cg->compassFadeTime;
-    compassFadeOutAlpha = CG_FadeHudMenu(fadeDvar, displayStartTime, duration);
-
-    if (compassFadeOutAlpha == 0.0f)
-        return;
 
     snapshot_t *snapPtr = cg->snap;
     int ourClientNum = snapPtr->ps.clientNum;
@@ -153,24 +145,12 @@ void CG_DrawCompassFriendlies(rectDef_t *rect, MaterialHandle material, vec_t *c
     int infoValid = ourCI->infoValid;
 
     if (infoValid == 0)
-        return;
+        return -1;
 
     team = ourCI->team;
 
     if (team == 3)
-        return;
-
-    CG_UpdateCompPointerOrientation();
-
-    float compassSize = dvar_value(dvar_compassSize);
-    centerX = rect->x + 0.5f * compassSize * rect->w;
-    centerY = rect->y + rect->h + (-0.5f) * compassSize * rect->h;
-
-    vec4_t fadedColor;
-    fadedColor[0] = color[0];
-    fadedColor[1] = color[1];
-    fadedColor[2] = color[2];
-    fadedColor[3] = color[3];
+        return -1;
 
     if (team != 0) {
 
@@ -223,7 +203,7 @@ void CG_DrawCompassFriendlies(rectDef_t *rect, MaterialHandle material, vec_t *c
 
         int compassPacked = snapPtr2->ps.iCompassFriendInfo;
         if (compassPacked == 0)
-            goto draw_friendlies;
+            return team;
 
         int packedClientNum = compassPacked & 0x3f;
 
@@ -272,8 +252,40 @@ void CG_DrawCompassFriendlies(rectDef_t *rect, MaterialHandle material, vec_t *c
             }
         }
     }
+    return team;
+}
 
-draw_friendlies:
+void CG_DrawCompassFriendlies(rectDef_t *rect, MaterialHandle material, vec_t *color)
+{
+    float compassFadeOutAlpha;
+    float centerX, centerY;
+    int team;
+    int i;
+
+    const dvar_t *fadeDvar = *dvar_compassFade;
+    int duration = (int)floorf(fadeDvar->current.value * 1000.0f + 0.5f);
+
+    int displayStartTime = cg->compassFadeTime;
+    compassFadeOutAlpha = CG_FadeHudMenu(fadeDvar, displayStartTime, duration);
+
+    if (compassFadeOutAlpha == 0.0f)
+        return;
+
+    team = CG_CompassUpdateFriendlies();
+    if (team < 0)
+        return;
+
+    CG_UpdateCompPointerOrientation();
+
+    float compassSize = dvar_value(dvar_compassSize);
+    centerX = rect->x + 0.5f * compassSize * rect->w;
+    centerY = rect->y + rect->h + (-0.5f) * compassSize * rect->h;
+
+    vec4_t fadedColor;
+    fadedColor[0] = color[0];
+    fadedColor[1] = color[1];
+    fadedColor[2] = color[2];
+    fadedColor[3] = color[3];
 
     {
         float origAlpha = color[3];
