@@ -5,6 +5,7 @@
 #include "bytematch.h"
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_ammocounter.h"
+#include "headers/PC/cgame_mp/cg_grenadewarning.h"
 #include "headers/PC/cgame_mp/cg_minimap.h"
 #include "headers/PC/cgame_mp/cg_scorepopup.h"
 #include "headers/PC/cgame_mp/cg_killfeed.h"
@@ -1106,11 +1107,11 @@ static void CG_DrawDamageIndicators(void)
     }
 }
 
-static qboolean CG_GrenadeThreatDistance(const centity_t *cent, float *distanceSq)
+static qboolean CG_GrenadeThreatDistance(const centity_t *cent, float *distanceSq, float *range)
 {
     const entityState_t *state = &cent->nextState;
     const WeaponDef *weapon;
-    float range, dx, dy, dz;
+    float dx, dy, dz;
 
     if (!cent->nextValid || state->eType != 4 || (state->eFlags & 0x20) ||
         state->time > cg->time || state->weapon <= 0 || state->weapon > BG_GetNumWeapons())
@@ -1120,10 +1121,10 @@ static qboolean CG_GrenadeThreatDistance(const centity_t *cent, float *distanceS
         weapon->offhandClass != OFFHAND_CLASS_FRAG_GRENADE || weapon->iExplosionRadius <= 0)
         return 0;
 
-    range = (float)weapon->iExplosionRadius;
-    if (range > cg_hudGrenadeIconMaxRange->current.value)
-        range = cg_hudGrenadeIconMaxRange->current.value;
-    if (range <= 0.0f)
+    *range = (float)weapon->iExplosionRadius;
+    if (*range > cg_hudGrenadeIconMaxRange->current.value)
+        *range = cg_hudGrenadeIconMaxRange->current.value;
+    if (*range <= 0.0f)
         return 0;
     dx = cent->lerpOrigin[0] - cg->predictedPlayerState.origin[0];
     dy = cent->lerpOrigin[1] - cg->predictedPlayerState.origin[1];
@@ -1134,13 +1135,13 @@ static qboolean CG_GrenadeThreatDistance(const centity_t *cent, float *distanceS
     /* Splash uses the player's origin and a strict 3D radius. A grenade on
      * another floor must not warn after leaving that sphere. No visibility
      * trace is needed: nearby explosives remain a warning around cover. */
-    return *distanceSq < range * range;
+    return *distanceSq < *range * *range;
 }
 
 static void CG_DrawGrenadeIndicators(void)
 {
     enum { MAX_WARNINGS = 4 };
-    struct { const centity_t *cent; float distanceSq; } threats[MAX_WARNINGS];
+    CG_GrenadeThreat threats[MAX_WARNINGS];
     const snapshot_t *snap = cg->nextSnap ? cg->nextSnap : cg->snap;
     const playerState_t *ps = &cg->predictedPlayerState;
     const WeaponDef *viewWeapon;
@@ -1167,12 +1168,12 @@ static void CG_DrawGrenadeIndicators(void)
     for (i = 0; i < entities; ++i) {
         int number = snap->entities[i].number;
         const centity_t *cent;
-        float distanceSq;
+        float distanceSq, range;
         int slot;
         if (snap->entities[i].eType != 4 || (unsigned)number >= 1022)
             continue;
         cent = &cg_entities[number];
-        if (!CG_GrenadeThreatDistance(cent, &distanceSq) ||
+        if (!CG_GrenadeThreatDistance(cent, &distanceSq, &range) ||
             (count == MAX_WARNINGS && distanceSq >= threats[MAX_WARNINGS - 1].distanceSq))
             continue;
         slot = count < MAX_WARNINGS ? count++ : MAX_WARNINGS - 1;
@@ -1182,8 +1183,11 @@ static void CG_DrawGrenadeIndicators(void)
         }
         threats[slot].cent = cent;
         threats[slot].distanceSq = distanceSq;
+        threats[slot].range = range;
     }
     if (!count)
+        return;
+    if (CG_GrenadeWarningActive() && CG_DrawGrenadeWarnings(threats, count))
         return;
 
     width = cg_hudGrenadeIconWidth->current.value;

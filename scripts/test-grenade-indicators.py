@@ -11,6 +11,9 @@ root = Path(__file__).resolve().parent.parent
 draw_source = (root / 'src/PC/cgame_mp/cg_draw_mp.c').read_text()
 combat_source = (root / 'src/PC/game_mp/g_combat_mp.c').read_text()
 main_source = (root / 'src/PC/cgame_mp/cg_main_mp.c').read_text()
+warning_header = (root / 'src/headers/PC/cgame_mp/cg_grenadewarning.h').read_text()
+threat_type = warning_header[warning_header.index('typedef struct CG_GrenadeThreat'):
+                             warning_header.index('} CG_GrenadeThreat;') + 19]
 
 
 def function(source, name):
@@ -50,6 +53,7 @@ typedef int qboolean,MaterialHandle;
 typedef float vec_t,vec3_t[3],vec4_t[4];
 typedef struct {int number,eType,eFlags,time,weapon;} entityState_t;
 typedef struct {entityState_t nextState;int nextValid;vec3_t lerpOrigin;} centity_t;
+''' + threat_type + r'''
 typedef struct {int pm_type,weapon,stats[1];float fWeaponPosFrac;vec3_t origin;} playerState_t;
 typedef struct {int numEntities;entityState_t entities[256];} snapshot_t;
 typedef struct {snapshot_t *snap,*nextSnap;playerState_t predictedPlayerState;
@@ -82,6 +86,14 @@ static void CG_DrawRotatedPic(float x,float y,float w,float h,int ha,int va,floa
  *p=(pic_t){x,y,w,h,angle};memcpy(p->color,color,sizeof(p->color));
  assert(color[3]>=0&&color[3]<=1&&isfinite(color[3]));
 }
+/* The WWII warning's side of the hand-off: off unless a check switches it on,
+ * and recording the threats it is given. */
+static int warningActive,warningDrawn,warningCalls,warningCount;static CG_GrenadeThreat warningThreats[4];
+static int CG_GrenadeWarningActive(void){return warningActive;}
+static int CG_DrawGrenadeWarnings(const CG_GrenadeThreat *threats,int count){
+ assert(warningActive&&count>=1&&count<=4);warningCalls++;warningCount=count;
+ memcpy(warningThreats,threats,count*sizeof(*threats));return warningDrawn;
+}
 /* Execute the server's actual splash code with a visible target, so HUD and
  * damage sphere boundaries are compared rather than duplicating a formula. */
 typedef struct {int takedamage;void *client;struct {int bmodel;vec3_t currentOrigin,absmin,absmax;} r;} gentity_t;
@@ -109,6 +121,7 @@ static void reset(void){
  iconW.current.value=iconH.current.value=pointerW.current.value=25;pointerH.current.value=12;
  pivot.current.vector[0]=12;pivot.current.vector[1]=27;freq.current.value=1.7f;
  pulseMin.current.value=.3f;pulseMax.current.value=1.85f;iconCount=arrowCount=0;damageCalls=0;
+ warningActive=warningDrawn=warningCalls=warningCount=0;
  g_entities[0].takedamage=1;g_entities[0].client=&g_entities[0];
 }
 static centity_t *grenade(int index,int weapon,float x,float y,float z){
@@ -195,6 +208,25 @@ int main(void){
  nextSnap.numEntities=-1;drawCount(0);nextSnap.numEntities=1;
  snap=nextSnap;cg->nextSnap=NULL;drawCount(1);
  for(int t=0;t<10000;t+=7){cg->time=t;drawCount(1);assert(arrows[0].color[3]>=.299f);}
+ /* While the WWII warning is on it gets the same four nearest threats,
+  * nearest first, each with its range; the stock warning draws only when it
+  * declines. Nothing is handed over without a threat or behind a gate. */
+ reset();for(int i=0;i<9;i++)grenade(64+i,1,(float[]){90,60,20,80,40,10,70,30,50}[i],0,0);
+ warningActive=warningDrawn=1;drawCount(0);assert(warningCalls==1&&warningCount==4);
+ static const int nearest[4]={69,66,71,68};
+ for(int i=0;i<4;i++){
+  assert(warningThreats[i].cent==&entities[nearest[i]]);
+  near(warningThreats[i].distanceSq,(float)((i+1)*(i+1)*100));near(warningThreats[i].range,fminf(retail[0][0],256));
+ }
+ warningDrawn=0;drawCount(4);assert(warningCalls==2);
+ range.current.value=150;warningDrawn=1;drawCount(0);assert(warningCalls==3&&warningCount==4);
+ for(int i=0;i<4;i++)near(warningThreats[i].range,150);
+ reset();grenade(64,1,30,0,0);warningActive=warningDrawn=1;drawCount(0);
+ assert(warningCalls==1&&warningCount==1&&warningThreats[0].cent==&entities[64]);near(warningThreats[0].distanceSq,900);
+ warningActive=0;drawCount(1);assert(warningCalls==1);
+ reset();warningActive=warningDrawn=1;drawCount(0);assert(!warningCalls);
+ reset();grenade(64,1,30,0,0);warningActive=warningDrawn=1;hidden=1;drawCount(0);assert(!warningCalls);
+ puts("PASS: the WWII warning gets the four nearest threats with their ranges behind the same gates; the stock warning draws only when it declines or is off");
  puts("PASS: grenade lifecycle, smoke/rocket exclusion, live HUD/scoped gates, 3D splash boundaries, rotating directions, pulse, closest-four budget and malformed snapshots");
  printf("PASS: %d retail direction/radius cases against production drawing and native splash code\n",cases);
 }
@@ -208,6 +240,13 @@ variants = [
     ('reversed pointer', distance, draw.replace('7, 7, -angle,', '7, 7, angle,')),
     ('unbounded warnings', distance, draw.replace('MAX_WARNINGS = 4', 'MAX_WARNINGS = 6')),
     ('perspective-sized warnings', distance, draw.replace('float iconW = width, iconH = height;', 'float iconW = width * .75f, iconH = height * .75f;')),
+    ('ignored WWII warning', distance,
+     draw.replace('    if (CG_GrenadeWarningActive() && CG_DrawGrenadeWarnings(threats, count))\n        return;\n', '')),
+    ('stock under the WWII warning', distance,
+     draw.replace('CG_DrawGrenadeWarnings(threats, count))\n        return;', 'CG_DrawGrenadeWarnings(threats, count))\n        ;')),
+    ('WWII warning while off', distance, draw.replace('CG_GrenadeWarningActive() && ', '')),
+    ('stale warning range', distance,
+     draw.replace('        threats[slot].range = range;\n', '        threats[slot].range = 256.0f;\n')),
 ]
 with tempfile.TemporaryDirectory(prefix='cod2-grenade-indicators-') as directory:
     path = Path(directory)

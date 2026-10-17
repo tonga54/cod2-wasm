@@ -9,6 +9,7 @@
 #include "headers/PC/cgame_mp/cg_weaponprompt.h"
 #include "headers/PC/cgame_mp/cg_playernames.h"
 #include "headers/PC/cgame_mp/cg_mantleprompt.h"
+#include "headers/PC/cgame_mp/cg_grenadewarning.h"
 #include <float.h>
 
 extern const dvar_t *com_sv_running;
@@ -1222,6 +1223,7 @@ void CG_Init(int serverMessageNum, int serverCommandSequence, int clientNum)
     CG_WeaponPromptInit();
     CG_PlayerNamesInit();
     CG_MantlePromptInit();
+    CG_GrenadeWarningInit();
     CG_LoadingString("sounds");
     CG_RegisterSounds();
     CG_LoadingString("clients");
