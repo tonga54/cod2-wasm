@@ -103,6 +103,27 @@ systemctl --user status cod2-auto-update.service
 systemctl --user start cod2-auto-update.timer
 ```
 
+### Stalled updates
+
+Two statuses keep the Pi on its installed build until someone acts:
+
+- `Prepared owner assets differ from the published build`: the commit changed
+  an input of the private archives without regenerating
+  `site/wasm-game-data.json`. Inputs include the generator scripts, scanned
+  engine sources and `downstream/server/*.gsc`; for example
+  `browser_spawn_safety.gsc` becomes `maps/mp/gametypes/_spawnlogic.gsc`. Run
+  `python3 scripts/prepare-browser-bootstrap.py` on the build machine and
+  commit the manifest. On October 16, 2026 the Pi rejected `428bcbc` and
+  `fd9057b` this way: its renderer archive was 848 bytes larger than the
+  published one, and the build machine produced the same archive once rerun.
+- `At least 1.5 GiB free space is needed for a staged update`: every run
+  downloads only `manifest.json` and waits. Check `df -h /` and
+  `docker system df`. Build cache from manual Pi builds can be removed with
+  `docker builder prune -af` without touching containers or rollback images;
+  this freed 4.9 GB on the configured Pi on October 17, 2026. Rejected
+  releases keep their staging directories (about 440 MB each) until the next
+  successful update.
+
 The [manual Pi deployment procedure](RASPBERRY_PI.md) remains available for
 first installation and recovery. The standard `update-local.py --apply`
 procedure does not build the Pi runtime. HTTPS credentials, certificates and
