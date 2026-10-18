@@ -89,13 +89,17 @@ extern const char *va(const char *format, ...);
 #define TABLE_ACCENT_WIDTH 1.7f
 #define TABLE_MARKER_WIDTH 2.5f
 #define TABLE_MARKER_HEIGHT 5.5f
+#define TABLE_PING_BARS 4
 #define TABLE_PING_BAR_WIDTH 2.1f
 #define TABLE_PING_BAR_GAP 1.0f
 #define TABLE_PING_BOTTOM 0.8f
+/* Pings under these light four, three and two bars; any other, one. */
+#define TABLE_PING_GOOD 60
+#define TABLE_PING_FAIR 120
+#define TABLE_PING_POOR 200
 #define TABLE_STRIPE_LIGHT 0.45f
 #define TABLE_STRIPE_DARK 0.25f
 #define TABLE_CELL_SHADE 0.1f
-#define TABLE_PING_LIT 0.32f
 #define TABLE_PING_UNLIT 0.12f
 #define TABLE_DIM 0.5f
 #define TABLE_TEXT_STYLE 0
@@ -194,7 +198,12 @@ static const float s_tableColumns[TABLE_COLUMN_COUNT + 1] = { 354.0f, 439.0f, 52
  * columns' middles. */
 static const float s_tableCenters[TABLE_COLUMN_COUNT - 1] = { 398.6f, 482.5f, 567.2f };
 static const char *const s_tableHeaders[TABLE_COLUMN_COUNT - 1] = { "Score", "Kills", "Deaths" };
-static const float s_tablePingBars[3] = { 2.45f, 4.5f, 6.55f };
+static const float s_tablePingBars[TABLE_PING_BARS] = { 2.0f, 3.5f, 5.05f, 6.55f };
+/* Lit bars: green for a low ping, yellow for a middling one, red for a high
+ * one. */
+static const vec3_t s_tablePingGood = { 0.36f, 0.72f, 0.33f };
+static const vec3_t s_tablePingFair = { 0.89f, 0.73f, 0.26f };
+static const vec3_t s_tablePingPoor = { 0.82f, 0.26f, 0.21f };
 static const char *const s_tableNations[TABLE_EMBLEM_COUNT] = { "american", "british", "russian", "german" };
 static const vec4_t s_tableText = { 0.82f, 0.79f, 0.74f, 1.0f };
 static const vec3_t s_tableFriendly = { 0.145f, 0.42f, 0.38f };
@@ -962,29 +971,43 @@ static void CG_ScoreTableDrawOwnRow(float y0, float y1, float fade)
     CG_ScoreTableDrawTriangle((const float (*)[2])marker, color);
 }
 
-/* Three bars: all of them under 100 ms, two under 200, then one. */
+/* The bars lit for a ping; a connecting player (ping -1) has none. */
 static int CG_ScoreTablePingBars(int ping)
 {
     if (ping < 0)
         return 0;
-    if (ping < 100)
+    if (ping < TABLE_PING_GOOD)
+        return 4;
+    if (ping < TABLE_PING_FAIR)
         return 3;
-    return ping < 200 ? 2 : 1;
+    return ping < TABLE_PING_POOR ? 2 : 1;
 }
 
+/* Rising bars, every one as wide and as far apart in pixels; the lit ones in
+ * the ping's color, the rest faint. */
 static void CG_ScoreTableDrawPing(int ping, float baseline, float scale, float fade)
 {
     int lit = CG_ScoreTablePingBars(ping);
-    float width = 3.0f * TABLE_PING_BAR_WIDTH + 2.0f * TABLE_PING_BAR_GAP;
+    const float *rgb = lit >= 4 ? s_tablePingGood : lit == 3 ? s_tablePingFair : s_tablePingPoor;
+    float width = TABLE_PING_BARS * TABLE_PING_BAR_WIDTH + (TABLE_PING_BARS - 1) * TABLE_PING_BAR_GAP;
     float x = 0.5f * (s_tableColumns[3] + s_tableColumns[4] - width * scale);
     float bottom = baseline + TABLE_PING_BOTTOM * scale;
+    float left, foot, barRight, nextLeft, top, unused, bar, pitch;
     vec4_t color;
     int i;
 
-    for (i = 0; i < 3; ++i) {
-        CG_ScoreTableColor(color, s_tableText, (i < lit ? TABLE_PING_LIT : TABLE_PING_UNLIT) * fade);
-        CG_ScoreTableFill(x, bottom - s_tablePingBars[i] * scale, x + TABLE_PING_BAR_WIDTH * scale, bottom, color);
-        x += (TABLE_PING_BAR_WIDTH + TABLE_PING_BAR_GAP) * scale;
+    CG_ScoreTablePlace(x, bottom, &left, &foot);
+    CG_ScoreTablePlace(x + TABLE_PING_BAR_WIDTH * scale, bottom, &barRight, &unused);
+    CG_ScoreTablePlace(x + (TABLE_PING_BAR_WIDTH + TABLE_PING_BAR_GAP) * scale, bottom, &nextLeft, &unused);
+    bar = barRight > left ? barRight - left : 1.0f;
+    pitch = nextLeft - left;
+    for (i = 0; i < TABLE_PING_BARS; ++i) {
+        if (i < lit)
+            CG_ScoreTableColor(color, rgb, fade);
+        else
+            CG_ScoreTableColor(color, s_tableText, TABLE_PING_UNLIT * fade);
+        CG_ScoreTablePlace(x, bottom - s_tablePingBars[i] * scale, &unused, &top);
+        CG_ScoreTableFillPixels(left + i * pitch, top, left + i * pitch + bar, foot, color);
     }
 }
 

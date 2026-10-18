@@ -370,6 +370,9 @@ static const float textRgb[3] = { 0.82f, 0.79f, 0.74f };
 static const float teal[3] = { 0.145f, 0.42f, 0.38f };
 static const float red[3] = { 0.67f, 0.185f, 0.16f };
 static const float green[3] = { 0.22f, 0.48f, 0.2f };
+static const float pingGood[3] = { 0.36f, 0.72f, 0.33f };
+static const float pingFair[3] = { 0.89f, 0.73f, 0.26f };
+static const float pingPoor[3] = { 0.82f, 0.26f, 0.21f };
 static const float black[3] = { 0.0f, 0.0f, 0.0f };
 static int colored(const float *color, const float *rgb, float alpha) {
     return near(color[0], rgb[0]) && near(color[1], rgb[1]) && near(color[2], rgb[2]) && near(color[3], alpha);
@@ -584,8 +587,9 @@ int main(void) {
         assert(phys(757, edges1[i], 103, edges1[i + 1] - edges1[i], black, 0.1f));
     }
 
-    /* Chapu54's row: the tag in its column, the numbers centered, all bars,
-     * then the light outline, the green edge and the arrow outside. */
+    /* Chapu54's row: the tag in its column, the numbers centered, all four
+     * bars green for 40 ms, then the light outline, the green edge and the
+     * arrow outside. */
     float base = 90.8f + 0.612f * 17.7f;
     const Draw *tag = text("[UY]");
     assert(textAt(tag, 349.6f - width(tag), base, 7.3f, &nameFont, 0, 1));
@@ -593,8 +597,8 @@ int main(void) {
     assert(textAt(name, 159.5f, base, 7.3f, &nameFont, 0, 1) && name->maxChars == 7);
     assert(textIndex("Chapu54") > 0 && !strcmp(cell(0, base)->text, "300") && !strcmp(cell(1, base)->text, "3") &&
            !strcmp(cell(2, base)->text, "9"));
-    assert(phys(867, 120, 3, 3, textRgb, 0.32f) && phys(871, 118, 2, 5, textRgb, 0.32f) &&
-           phys(874, 115, 3, 8, textRgb, 0.32f));
+    assert(phys(865, 121, 3, 2, pingGood, 1) && phys(869, 119, 3, 4, pingGood, 1) &&
+           phys(873, 117, 3, 6, pingGood, 1) && phys(877, 115, 3, 8, pingGood, 1));
     assert(phys(258, 109, 626, 1, textRgb, 0.9f) && phys(258, 129, 626, 1, textRgb, 0.9f));
     assert(phys(258, 110, 1, 19, textRgb, 0.9f) && phys(883, 110, 1, 19, textRgb, 0.9f));
     assert(phys(258, 109, 2, 21, green, 1));
@@ -627,14 +631,25 @@ int main(void) {
         if (d->kind == PIC && d->material == &voiceOff)
             assert(near(d->x, 124) && near(d->y, 264.1f + 17.7f + 2.85f));
     }
-    int lit = 0, unlit = 0;
+    /* 40 ms lights four bars green, 60 three yellow, 140 two red and 250 one
+     * red; the rest are faint. */
+    int good = 0, fair = 0, poor = 0, unlit = 0;
     for (int i = 0; i < drawCount; ++i) {
-        if (draws[i].kind == PHYS && draws[i].x >= 866 && draws[i].w <= 4 && rgbIs(draws[i].color, textRgb)) {
-            lit += near(draws[i].color[3], 0.32f);
-            unlit += near(draws[i].color[3], 0.12f);
-        }
+        const Draw *d = &draws[i];
+        if (d->kind != PHYS || d->x < 864 || d->w > 4)
+            continue;
+        good += colored(d->color, pingGood, 1);
+        fair += colored(d->color, pingFair, 1);
+        poor += colored(d->color, pingPoor, 1);
+        unlit += colored(d->color, textRgb, 0.12f);
     }
-    assert(lit == 3 + 3 + 2 + 1 && unlit == 1 + 2);
+    assert(good == 4 && fair == 3 && poor == 2 + 1 && unlit == 1 + 2 + 3);
+    {
+        const int pings[][2] = { { -1, 0 }, { 0, 4 }, { 59, 4 }, { 60, 3 }, { 119, 3 }, { 120, 2 }, { 199, 2 },
+                                 { 200, 1 }, { 999, 1 } };
+        for (unsigned k = 0; k < sizeof(pings) / sizeof(pings[0]); ++k)
+            assert(CG_ScoreTablePingBars(pings[k][0]) == pings[k][1]);
+    }
     assert(!text("Ghost") && textAt(text("Spectators: Bob^7"), 9.5f, 446, 7, &nameFont, 0, 0.8f));
 
     /* The stock scoreboard's message has no kills: the column stays empty. */
@@ -872,6 +887,20 @@ int main(void) {
     unitScale = 1.5f;
     render(1.0f);
     assert(emblemBuilds == 5 && emblemHeight == 120 && phys(155, 195, 120, 120, textRgb, 0.55f));
+    {
+        /* Where rounding each edge would make bars of 4 and 3 pixels, the
+         * meter's bars are all as wide and as far apart. */
+        const Draw *bars[4];
+        int n = 0;
+        for (int i = 0; i < drawCount && n < 4; ++i)
+            if (draws[i].kind == PHYS && colored(draws[i].color, pingGood, 1))
+                bars[n++] = &draws[i];
+        assert(n == 4);
+        for (int i = 1; i < 4; ++i)
+            assert(bars[i]->w == bars[0]->w && bars[i]->x - bars[i - 1]->x == bars[1]->x - bars[0]->x &&
+                   bars[i]->h > bars[i - 1]->h && bars[i]->y + bars[i]->h == bars[0]->y + bars[0]->h);
+        assert(bars[0]->w == 4 && bars[1]->x - bars[0]->x == 5);
+    }
     rasterOf(0, AMERICAN);
     unitScale = 0.1f;
     render(1.0f);
@@ -1037,7 +1066,7 @@ module_mutants = [
     ('{ 24, 13.12f, 5.0f }', '{ 24, 13.12f, 3.0f }'),
     ('{ 30, 17.1f, 6.0f }', '{ 30, 17.1f, 5.0f }'),
     ('{ 32, 21.0f, 5.0f }', '{ 32, 20.0f, 5.0f }'),
-    ('{ 2.45f, 4.5f, 6.55f }', '{ 3.0f, 5.5f, 8.0f }'),
+    ('{ 2.0f, 3.5f, 5.05f, 6.55f }', '{ 2.5f, 4.0f, 5.5f, 7.0f }'),
     ('if (size != s_table.emblemSize || allies != s_table.emblemAllies)', 'if (1)'),
     ('float s0 = block->team == TEAM_AXIS ? 0.5f : 0.0f;', 'float s0 = block->team == TEAM_AXIS ? 0.0f : 0.5f;'),
     ('cut = -(star - 0.08f);', 'cut = -1.0f;'),
@@ -1066,7 +1095,12 @@ module_mutants = [
     ('    if (!font)\n        font = UI_GetFontHandle(0, cap / 30.0f);', '    font = UI_GetFontHandle(0, cap / 30.0f);'),
     ('(float)-glyph->y0 : 0.625f * (float)font->pixelHeight;', '(float)-glyph->y0 : 0.5f * (float)font->pixelHeight;'),
     ('*cap = glyph && glyph->y0 < 0 ? (float)-glyph->y0 :', '*cap = glyph && glyph->y0 < 0 ? (float)-glyph->y0 + 1.0f :'),
-    ('    if (ping < 100)\n        return 3;', '    if (ping < 50)\n        return 3;'),
+    ('    if (ping < TABLE_PING_GOOD)\n        return 4;', '    if (ping < 30)\n        return 4;'),
+    ('#define TABLE_PING_FAIR 120', '#define TABLE_PING_FAIR 121'),
+    ('lit >= 4 ? s_tablePingGood : lit == 3 ? s_tablePingFair : s_tablePingPoor', 'lit >= 3 ? s_tablePingGood : s_tablePingPoor'),
+    ('    bar = barRight > left ? barRight - left : 1.0f;', '    bar = 2.0f;'),
+    ('    pitch = nextLeft - left;', '    pitch = nextLeft - left + 1.0f;'),
+    ('        if (i < lit)\n            CG_ScoreTableColor(color, rgb, fade);', '        if (i <= lit)\n            CG_ScoreTableColor(color, rgb, fade);'),
     ('        nameRight = TABLE_TAG_RIGHT - width - TABLE_NAME_GAP;\n', ''),
     ('    CG_ScoreTableDrawTriangle((const float (*)[2])marker, color);\n', ''),
     ('    if ((unsigned)localClient >= TABLE_MAX_CLIENTS)\n        return;\n', '    if (localClient > TABLE_MAX_CLIENTS)\n        return;\n'),
@@ -1116,7 +1150,8 @@ print('PASS: the WWII scoreboard dims the screen and draws the title, clock and 
       'their capitals as tall and on the baselines it measures by the fonts\' own metrics, '
       'the viewer\'s team on top in teal (Allies for spectators) with nine pixel-snapped stripes a team, its name, '
       'score and emblem, rows in server order with clan tags, cut names, voice and status icons, kills only from our '
-      'server, ping bars and the viewer\'s outlined row kept in a crowded team; deathmatch gets one block of eighteen; '
+      'server, a ping meter of four even bars (four green under 60 ms, three yellow under 120, two red under 200, one red '
+      'above) and the viewer\'s outlined row kept in a crowded team; deathmatch gets one block of eighteen; '
       'the star, roundel, red star and iron cross are built once per size and nation; the HUD hides under it; '
       'at the end of a match the result and its reason take the clock\'s place, and the emblems become lit medals '
       'in their enamels and metals; '
