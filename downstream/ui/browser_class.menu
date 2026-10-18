@@ -1,0 +1,19 @@
+// The class choice a match opens where the gametype offered its faction's
+// weapons. The UI's native class screens paint and take every key here.
+{
+	menuDef
+	{
+		name			"browser_class"
+		rect			0 0 640 480
+		style			0
+		blurWorld		5.0
+		onOpen
+		{
+			uiScript classMenuOpen choose;
+		}
+		onEsc
+		{
+			close browser_class;
+		}
+	}
+}

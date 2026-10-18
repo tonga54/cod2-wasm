@@ -48,6 +48,8 @@ static int editingField,waitingForKey;
 static void *imp_g_editingField=&editingField;
 static void *Menu_GetFocused(void *p) {return &controlsMenu;}
 static int Display_KeyBindPending(void) {return waitingForKey;}
+static int classMenuFocused;
+static int UI_ClassMenu_WantsKeys(const menuDef_t *menu) {return menu==&controlsMenu&&classMenuFocused;}
 '''
 body = ''.join(function('src/PC/bgame/bg_pmove.c', n) for n in ('PM_AbsInt','PM_CmdScale','PM_UpdateSprint'))
 body += ''.join(function('src/PC/client_mp/cl_input.c', n) for n in ('IN_Breath_Down','IN_Breath_Up','IN_Sprint_Down','IN_Sprint_Up','IN_Melee_Down','IN_Melee_Up'))
@@ -63,6 +65,10 @@ int main(void) {
         waitingForKey=0;editingField=1;assert(UI_CheckExecKey(key));
         editingField=0;
     }
+    /* A class screen keeps F1 and a name's letters from the binds, as an edit field does. */
+    classMenuFocused=1;
+    for(int key=0;key<256;key++) assert(UI_CheckExecKey(key));
+    classMenuFocused=0;
     assert(!UI_CheckExecKey('j')&&!UI_CheckExecKey(0xa0));
     assert(UI_CheckExecKey(0x0d)&&UI_CheckExecKey(0xc8));
     playerState_t p={.groundEntityNum=1022,.speed=190};

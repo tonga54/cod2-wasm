@@ -2,6 +2,7 @@
 #include "imports.h"
 #include "bytematch.h"
 #include "cod2_feature_config.h"
+#include "headers/PC/ui_mp/ui_class_menu.h"
 #include "headers/PC/ui_mp/ui_wwii_menu.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -735,6 +736,8 @@ qboolean UI_CheckExecKey(int key)
         return 0;
     if (!menu)
         return 0;
+    if (UI_ClassMenu_WantsKeys(menu))
+        return 1;
 
     if ((key >= 0xc8 && key <= 0xce) ||
         key == 0x0d || key == 0xbf ||
@@ -1385,7 +1388,9 @@ static inline __attribute__((always_inline)) void UI_KeyEvent_impl(int key, qboo
         if (Dvar_GetBool("cl_bypassMouseInput"))
             bypassKeyClear = 1;
 
-        if (key == 0x1b && down && !Menus_AnyFullScreenVisible(uiInfo) && menu->onESC == 0) {
+        if (UI_ClassMenu_KeyEvent((displayContextDef_t *)uiInfo, menu, key, down)) {
+            /* The class screens take every key, characters included. */
+        } else if (key == 0x1b && down && !Menus_AnyFullScreenVisible(uiInfo) && menu->onESC == 0) {
 
             Menus_CloseAll(uiInfo);
         } else {
@@ -3323,6 +3328,14 @@ void UI_RunMenuScript(const char **args)
 
     if (!String_Parse(args, name, 0x400))
         return;
+
+    if (I_stricmp(name, "classMenuOpen") == 0) {
+        char mode[32];
+        if (!String_Parse(args, mode, sizeof(mode)))
+            mode[0] = '\0';
+        UI_ClassMenu_Open((displayContextDef_t *)uiInfo, !I_stricmp(mode, "choose"));
+        return;
+    }
 
     if (I_stricmp(name, "ToggleFullscreen") == 0) {
 #ifdef __EMSCRIPTEN__

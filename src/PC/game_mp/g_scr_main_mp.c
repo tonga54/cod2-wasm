@@ -2681,12 +2681,19 @@ void Scr_LoadGameType(void)
 }
 
 static unsigned int s_browserBotsMain;
+static unsigned int s_browserClassesMain;
 
 void Scr_StartupGameType(void)
 {
     unsigned int handle = g_scr_data.gametype.startupgametype;
     unsigned int threadId = Scr_ExecThread(handle, 0);
     Scr_FreeThread((unsigned short)threadId);
+    /* After the gametype's menus and weapon callback exist, still while the
+     * level initializes and may precache. */
+    if (s_browserClassesMain) {
+        threadId = Scr_ExecThread(s_browserClassesMain, 0);
+        Scr_FreeThread((unsigned short)threadId);
+    }
     if (s_browserBotsMain) {
         threadId = Scr_ExecThread(s_browserBotsMain, 0);
         Scr_FreeThread((unsigned short)threadId);
@@ -4479,6 +4486,12 @@ void GScr_LoadScripts(int inst)
         s_browserBotsMain = 0;
         if (Dvar_GetInt("scr_bot_count") > 0)
             s_browserBotsMain = GScr_LoadScriptFunction("maps/mp/browser_bots", "main");
+    }
+    {
+        extern int FS_ReadFile(const char *qpath, void **buffer);
+        s_browserClassesMain = 0;
+        if (FS_ReadFile("maps/mp/browser_classes.gsc", NULL) > 0)
+            s_browserClassesMain = GScr_LoadScriptFunction("maps/mp/browser_classes", "main");
     }
 
     {

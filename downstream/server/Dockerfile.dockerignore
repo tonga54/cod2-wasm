@@ -11,3 +11,4 @@
 !downstream/server/rooms.py
 
 !downstream/server/browser_bots.gsc
+!downstream/server/browser_classes.gsc

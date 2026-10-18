@@ -106,6 +106,12 @@ retail CoD2:
 - **Configurable multiplayer bots:** first-party server AI with per-room quantity
   and difficulty settings, objectives for all five modes, cover, normal weapon
   rules and collision-based navigation.
+- **Custom classes:** **Create a Class** in the main menu keeps five named
+  classes for your gametag, each with a primary from any faction, a pistol, a
+  frag and a smoke grenade. They replace the weapon menu after the team choice
+  and in **Esc → 1. Choose Class**, on either team. The gateway stores them in
+  SQLite; there are no accounts, so a gametag's classes belong to whoever uses
+  it. See [custom classes](docs/CLASSES.md).
 - **Sprint:** Shift + W increases movement speed, lowers and swings the weapon,
   and uses the running body animation. It also stands up from crouch/prone when
   headroom permits. Sprint currently has no stamina limit.
@@ -310,6 +316,7 @@ sheet metal offer less protection than thick masonry or rock. See
 | Public / team chat | T / Y |
 | Send / cancel chat | Enter / Escape |
 | Quick messages | H |
+| Class screens | Enter selects, F1 renames (edits in a match), Escape goes back; 1–5 choose in a match |
 | Enter / exit fullscreen | Main menu's Fullscreen: Off/On text or F10 |
 
 Chat keeps mouse capture while typing and displays five wrapped lines for eight
@@ -363,7 +370,7 @@ startup.
 | Service | Responsibility |
 | --- | --- |
 | `cod2-web` | Framework shell, compiled browser client, private asset delivery |
-| `cod2-gateway` | HTTP/WebSocket entry point on port 8088, room discovery/ownership, UDP forwarding |
+| `cod2-gateway` | HTTP/WebSocket entry point on port 8088, room discovery/ownership, UDP forwarding, custom classes in the `cod2-classes` volume |
 | `cod2-server` | Internal room supervisor and one authoritative engine process per room |
 
 The game network is internal to Docker; raw UDP and the room supervisor are not
@@ -371,8 +378,9 @@ published to the LAN. Private files are mounted read-only. Set `COD2_WEB_PORT`
 to change the public port or `COD2_WEB_DATA_DIR` to use another private-data
 location.
 
-The prepared two-map subset is approximately **275.6 MB**, including 518 original
-sound files. Browsers download it once per site/cache version and keep it in
+The prepared two-map subset is approximately **329.6 MB**, including 442 original
+sound files (the development host's owner sounds add 215 more) and every
+faction's weapons for custom classes. Browsers download it once per site/cache version and keep it in
 IndexedDB. Size/SHA-256 checks verify each archive. Original owner IWDs stay
 untouched in `data/main/`; the prepared copies stay in `data/browser/`. Original
 assets are excluded from Git and image layers. Generated WASM binaries are ignored by Git and shipped
@@ -528,6 +536,10 @@ python3 scripts/test-native-file-listing.py
 # Private assets and balance audit
 python3 scripts/check-private-assets.py
 python3 scripts/test-weapon-balance.py
+
+# Custom classes through the dedicated server (Docker, prepared assets, no network)
+python3 scripts/test-browser-classes-runtime.py --assets data/browser/main
+python3 scripts/test-browser-classes-runtime.py --assets data/browser/main --gametype sd
 
 # Optional GPU fixture from the linked production shaders (after build-web.sh)
 node scripts/prepare-web-lighting-qa.cjs

@@ -36,19 +36,24 @@ with zipfile.ZipFile(root / 'data/browser/main/cod2_browser_renderer.iwd') as ar
         assert fields['weaponType'] == 'grenade' and fields['offhandClass'] == 'Frag Grenade'
         rows.append('{' + ','.join(fields[k] for k in
                     ('explosionRadius', 'explosionInnerDamage', 'explosionOuterDamage')) + '}')
-    assert len(rows) == 3
+    # Every faction's frag ships, for custom classes.
+    assert len(rows) == 4
     for name in ('hud_grenadeicon', 'hud_grenadepointer'):
         assert archive.getinfo('materials/' + name).file_size > 0
     for name in ('grenadeicon', 'grenadepointer'):
         assert archive.read('images/' + name + '.iwi').startswith(b'IWi\x05')
 
-support = r'''
+support = f'#define FRAGS {len(rows)}\n' + r'''
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
 #define WEAPTYPE_GRENADE 1
 #define OFFHAND_CLASS_FRAG_GRENADE 1
+/* The weapon table: the frags, then smoke, a gun and a scoped gun. */
+#define SMOKE (FRAGS+1)
+#define PLAIN (FRAGS+2)
+#define SCOPED (FRAGS+3)
 typedef int qboolean,MaterialHandle;
 typedef float vec_t,vec3_t[3],vec4_t[4];
 typedef struct {int number,eType,eFlags,time,weapon;} entityState_t;
@@ -63,9 +68,9 @@ typedef struct {int weapType,offhandClass,iExplosionRadius,overlayReticle;} Weap
 typedef struct {struct {float value,vector[4];int enabled;} current;} dvar_t;
 static cg_t state,*cg=&state;static cgs_t media,*cgs=&media;
 static centity_t entities[1024],*cg_entities=entities;static snapshot_t snap,nextSnap;
-static WeaponDef defs[7];static int nullWeapon,hidden;
-static int BG_GetNumWeapons(void){return 6;}
-static WeaponDef *BG_GetWeaponDef(int index){assert(index>=1&&index<=6);return index==nullWeapon?NULL:&defs[index];}
+static WeaponDef defs[SCOPED+1];static int nullWeapon,hidden;
+static int BG_GetNumWeapons(void){return SCOPED;}
+static WeaponDef *BG_GetWeaponDef(int index){assert(index>=1&&index<=SCOPED);return index==nullWeapon?NULL:&defs[index];}
 static int CG_AreHudMenusHidden(void){return hidden;}
 static float vectoyaw(const vec_t *v){return atan2f(v[1],v[0])*57.295779513f;}
 static dvar_t range,height,scope,offset,iconW,iconH,pointerW,pointerH,pivot,freq,pulseMax,pulseMin;
@@ -113,10 +118,10 @@ static void reset(void){
  memset(cg,0,sizeof(*cg));memset(&snap,0,sizeof(snap));memset(&nextSnap,0,sizeof(nextSnap));
  memset(entities,0,sizeof(entities));memset(defs,0,sizeof(defs));memset(g_entities,0,sizeof(g_entities));
  cg_entities=entities;cg->snap=&snap;cg->nextSnap=&nextSnap;
- cg->predictedPlayerState=(playerState_t){.weapon=6,.stats={100}};
+ cg->predictedPlayerState=(playerState_t){.weapon=SCOPED,.stats={100}};
  media.media.grenadeIcon=1;media.media.grenadePointer=2;hidden=nullWeapon=0;
- for(int i=1;i<=3;i++)defs[i]=(WeaponDef){WEAPTYPE_GRENADE,1,retail[i-1][0],0};
- defs[4]=(WeaponDef){WEAPTYPE_GRENADE,2,256,0};defs[5]=(WeaponDef){0,1,256,0};defs[6]=defs[1];defs[6].overlayReticle=1;
+ for(int i=1;i<=FRAGS;i++)defs[i]=(WeaponDef){WEAPTYPE_GRENADE,1,retail[i-1][0],0};
+ defs[SMOKE]=(WeaponDef){WEAPTYPE_GRENADE,2,256,0};defs[PLAIN]=(WeaponDef){0,1,256,0};defs[SCOPED]=defs[1];defs[SCOPED].overlayReticle=1;
  range.current.value=height.current.value=256;scope.current.enabled=1;offset.current.value=50;
  iconW.current.value=iconH.current.value=pointerW.current.value=25;pointerH.current.value=12;
  pivot.current.vector[0]=12;pivot.current.vector[1]=27;freq.current.value=1.7f;
@@ -132,7 +137,7 @@ static centity_t *grenade(int index,int weapon,float x,float y,float z){
 static void drawCount(int expected){iconCount=arrowCount=0;CG_DrawGrenadeIndicators();assert(iconCount==expected&&arrowCount==expected);}
 int main(void){
  int cases=0;
- for(int weapon=1;weapon<=3;weapon++)for(int heading=0;heading<360;heading+=15)
+ for(int weapon=1;weapon<=FRAGS;weapon++)for(int heading=0;heading<360;heading+=15)
  for(int turn=0;turn<360;turn+=45)for(int d=0;d<3;d++){
   reset();float r=heading*.01745329252f,dist=(float[]){32,180,255}[d];
   grenade(64,weapon,cosf(r)*dist,sinf(r)*dist,0);cg->refdefViewAngles[1]=turn;drawCount(1);
@@ -149,7 +154,7 @@ int main(void){
   cases++;
  }
  /* Warning and real damage agree across each weapon's 3D blast boundary. */
- for(int weapon=1;weapon<=3;weapon++)for(int axis=0;axis<3;axis++)for(int sign=-1;sign<=1;sign+=2)
+ for(int weapon=1;weapon<=FRAGS;weapon++)for(int axis=0;axis<3;axis++)for(int sign=-1;sign<=1;sign+=2)
  for(int d=0;d<6;d++){
   reset();centity_t *cent=grenade(64,weapon,0,0,0);
   float dist=(float[]){0,104.1f,250.1f,255.9f,256,300}[d];cent->lerpOrigin[axis]=sign*dist;
@@ -157,7 +162,7 @@ int main(void){
   G_RadiusDamage(cent->lerpOrigin,&g_entities[1],&g_entities[1],retail[weapon-1][1],retail[weapon-1][2],retail[weapon-1][0],NULL,4);
   assert(iconCount==damageCalls&&arrowCount==damageCalls);cases++;
  }
- reset();centity_t *cent=grenade(1021,6,200,200,0);drawCount(0);
+ reset();centity_t *cent=grenade(1021,SCOPED,200,200,0);drawCount(0);
  cent->lerpOrigin[0]=cent->lerpOrigin[1]=120;drawCount(1);cent->lerpOrigin[2]=220;drawCount(0);
  /* Lifecycle: explosion, deletion, pickup and invalid/future state clear immediately. */
  for(int reason=0;reason<12;reason++){
@@ -167,9 +172,9 @@ int main(void){
   else if(reason==2)cent->nextValid=0;
   else if(reason==3)nextSnap.numEntities=0;
   else if(reason==4)cent->nextState.weapon=0;
-  else if(reason==5)cent->nextState.weapon=7;
-  else if(reason==6)cent->nextState.weapon=4;
-  else if(reason==7)cent->nextState.weapon=5;
+  else if(reason==5)cent->nextState.weapon=SCOPED+1;
+  else if(reason==6)cent->nextState.weapon=SMOKE;
+  else if(reason==7)cent->nextState.weapon=PLAIN;
   else if(reason==8)nullWeapon=1;
   else if(reason==9)cent->nextState.time=1;
   else if(reason==10)defs[1].iExplosionRadius=0;
@@ -191,7 +196,7 @@ int main(void){
  }
  reset();grenade(64,1,200,0,0);cg->predictedPlayerState.fWeaponPosFrac=1;drawCount(1);
  scope.current.enabled=0;drawCount(0);cg->predictedPlayerState.fWeaponPosFrac=.9f;drawCount(1);
- cg->predictedPlayerState.fWeaponPosFrac=1;cg->predictedPlayerState.weapon=5;drawCount(1);
+ cg->predictedPlayerState.fWeaponPosFrac=1;cg->predictedPlayerState.weapon=PLAIN;drawCount(1);
  range.current.value=150;drawCount(0);range.current.value=0;drawCount(0);
  reset();cent=grenade(64,1,0,0,150);height.current.value=100;drawCount(0);
  /* Fixed draw budget selects the closest warnings in a crowded snapshot. */
@@ -203,7 +208,7 @@ int main(void){
  near(icons[2].x+icons[2].w*.5f,-50);near(icons[3].y+icons[3].h*.5f,-50);
  for(int i=0;i<4;i++){near(icons[i].w,25);near(icons[i].h,25);near(arrows[i].w,25);near(arrows[i].h,12);near(arrows[i].color[0],1);near(arrows[i].color[1],1);near(arrows[i].color[2],1);}
  /* Snapshot limits and identifiers remain safe even on malformed input. */
- reset();grenade(1021,6,30,0,0);nextSnap.numEntities=9999;
+ reset();grenade(1021,SCOPED,30,0,0);nextSnap.numEntities=9999;
  for(int i=1;i<256;i++)nextSnap.entities[i].number=(int[]){-1,1022,1023,9000}[i%4];drawCount(1);
  nextSnap.numEntities=-1;drawCount(0);nextSnap.numEntities=1;
  snap=nextSnap;cg->nextSnap=NULL;drawCount(1);

@@ -40,6 +40,7 @@ services:
     read_only: true
     volumes:
       - "${COD2_WEB_DATA_DIR:-./data/browser}/web:/game-ui:ro"
+      - "cod2-classes:/data"
     ports:
       - "${COD2_WEB_PORT:-8088}:8088"
     depends_on:
@@ -56,3 +57,5 @@ services:
 networks:
   game:
     internal: true
+volumes:
+  cod2-classes:

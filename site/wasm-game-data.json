@@ -1,10 +1,10 @@
 {
   "namespace": "cod2-browser",
-  "version": "bootstrap-87a1f230cd2a2efe",
+  "version": "bootstrap-9d502547b1aa1d82",
   "variants": {
     "cod2-mp": {
       "namespace": "cod2-lan-tdm",
-      "version": "bootstrap-87a1f230cd2a2efe",
+      "version": "bootstrap-9d502547b1aa1d82",
       "phase": "lan-maps-dependencies-unverified",
       "files": [
         {
@@ -37,27 +37,27 @@
           "key": "cod2-browser-renderer",
           "name": "cod2_browser_renderer.iwd",
           "path": "main/cod2_browser_renderer.iwd",
-          "size": 267097188,
+          "size": 270964832,
           "magic": [
             80,
             75,
             3,
             4
           ],
-          "sha256": "a38cd5cf74163220531c5ba50fbe5311ca375faa74f87b85f364c329a30827ef"
+          "sha256": "3ed11586c5b5c6d22ed12fc5600517e9ae5394f2a0b191d43337ee7fe9e91c87"
         },
         {
           "key": "cod2-browser-audio",
           "name": "cod2_browser_audio.iwd",
           "path": "main/cod2_browser_audio.iwd",
-          "size": 56965429,
+          "size": 58566604,
           "magic": [
             80,
             75,
             3,
             4
           ],
-          "sha256": "595e458164fece3bed9d0a5df79579280dd032f3e6303b9116e58003a0ff3448"
+          "sha256": "0beebf3ac71bec0d09227a9704922930ca5345f10df53cbeee30746f24d4c24b"
         }
       ]
     }

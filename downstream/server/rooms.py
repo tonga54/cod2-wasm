@@ -83,9 +83,10 @@ def start_room(room_id, name, mapname='mp_toujane', gametype='tdm', bot_count=0,
     raw = profile / 'raw'
     raw.mkdir(parents=True, exist_ok=True)
     shutil.copyfile('/config/server.cfg', raw / 'server.cfg')
+    scripts = raw / 'maps/mp'
+    scripts.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile('/config/browser_classes.gsc', scripts / 'browser_classes.gsc')
     if bot_count:
-        scripts = raw / 'maps/mp'
-        scripts.mkdir(parents=True, exist_ok=True)
         shutil.copyfile('/config/browser_bots.gsc', scripts / 'browser_bots.gsc')
     # Start the rotation after the selected map so it changes at round end.
     remaining = SUPPORTED_MAPS[SUPPORTED_MAPS.index(mapname) + 1:]

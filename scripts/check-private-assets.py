@@ -11,6 +11,7 @@ import csv
 import io
 from weapon_balance import apply_weapon_balance, load_profile
 from browser_bot_menu import apply_bot_menu
+from browser_class_menus import CLASS_MENU_LINE, class_menus
 from browser_settings_menu import apply_settings_menu
 from browser_objective_assets import objective_asset_roots
 from browser_spawn_safety import apply_spawn_safety
@@ -46,6 +47,9 @@ try:
                 if name in (HIT_SOUND_TABLE, "sound/" + HIT_SOUND_FILE, MENU_MUSIC_TABLE, "sound/" + MENU_MUSIC_FILE):
                     continue
                 if name.startswith(("sound/" + OWNER_SOUNDS_FOLDER, OWNER_SOUNDS_TABLE[:-4])):
+                    continue
+                if name in class_menus():
+                    assert data == class_menus()[name], name
                     continue
                 if name.endswith('.arena'):
                     mapname = 'mp_' + Path(name).stem
@@ -92,7 +96,8 @@ try:
                     assert data[:start] + data[end:] == normalized, name
                 elif name == "ui_mp/menus.txt":
                     original_lines = set(original.splitlines())
-                    assert all(line in original_lines for line in data.splitlines()), name
+                    assert all(line in original_lines or line == CLASS_MENU_LINE for line in data.splitlines()), name
+                    assert data.splitlines().count(CLASS_MENU_LINE) == 1, name
                     assert b"single_player.menu" not in data, name
                 elif name.startswith("soundaliases/") and name.endswith(".csv"):
                     source_rows = [row for row in csv.reader(io.StringIO(original.decode("utf-8-sig", "replace")))
@@ -117,6 +122,12 @@ try:
             assert dependency in entries, "Missing game mode dependency: " + dependency
     for name in objective_asset_roots(index):
         assert name in entries, "Missing dynamic objective resource: " + name
+    # Custom classes carry any faction's weapon on every map.
+    classes = json.loads((root / "downstream/gateway/classes.json").read_text())
+    for weapon in classes["primary"] + classes["secondary"] + classes["lethal"] + classes["tactical"]:
+        assert "weapons/mp/" + weapon.lower() in entries, "Missing class weapon: " + weapon
+    for name in class_menus():
+        assert name in entries, "Missing class menu: " + name
     aliases = {}
     for name, data in entries.items():
         if name.startswith("soundaliases/") and name.endswith(".csv"):

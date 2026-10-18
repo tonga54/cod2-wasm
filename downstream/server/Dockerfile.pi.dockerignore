@@ -13,3 +13,4 @@
 !site/wasm-game-data.json
 
 !downstream/server/browser_bots.gsc
+!downstream/server/browser_classes.gsc

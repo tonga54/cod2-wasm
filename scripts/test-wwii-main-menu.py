@@ -692,6 +692,20 @@ int main(void) {
     assert(!UI_WWIIMenu_PaintItem(&uiDc, bgLogo));
     mainText.window.dynamicFlags[0] = 4;
     cases++;
+    /* Create a Class paints its own page over the backdrop alone; other
+     * submenus keep bg's logo, bars and version. */
+    {
+        menuDef_t page = { .window.name = "create_a_class" };
+
+        uiDc.menuStack[1] = &page;
+        assert(UI_WWIIMenu_PaintItem(&uiDc, bgImage) == 1);
+        for (int i = 1; i < bg.itemCount; i++)
+            assert(UI_WWIIMenu_PaintItem(&uiDc, bgList[i]) == 1);
+        page.window.name = "options_look";
+        assert(!UI_WWIIMenu_PaintItem(&uiDc, bgLogo));
+        uiDc.menuStack[1] = &mainText;
+        cases++;
+    }
     /* An image that cannot be made gray is left to the retail code, and not
      * read again until the background changes. */
     grayFails = 1;
@@ -980,7 +994,8 @@ mutants = [
     [("        if (text[i] != ' ')\n", "        if (1)\n")],
     [('    if ((item->dvarFlags & 3) && !Item_EnableShowViaDvar(item, 1)) {', '    if (0) {')],
     [('WWII_MENU_NOTE_CAP, 0.0f, item->window.foreColor);', 'WWII_MENU_NOTE_CAP, 0.0f, s_wwiiIdle);')],
-    [('    return UI_WWIIMenu_MainOpen(dc);\n}', '    return 1;\n}')],
+    [('    return UI_WWIIMenu_MainOpen(dc) || UI_WWIIMenu_ClassPageOpen(dc);\n}', '    return 1;\n}')],
+    [('!I_stricmp(menu->window.name, "create_a_class")', '0')],
     [('    if (!s_wwiiMenu.backdrop)\n        return 0;', '    if (!s_wwiiMenu.backdrop)\n        return 1;')],
     [('    if (source != s_wwiiMenu.backdropSource) {', '    if (1) {')],
     [('aspect = rect->w > 0.0f && rect->h > 0.0f ? rect->w / rect->h : s_wwiiMenu.backdropAspect;',

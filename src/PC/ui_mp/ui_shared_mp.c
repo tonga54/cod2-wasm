@@ -1,6 +1,7 @@
 #include "common_types.h"
 #include "imports.h"
 #include "bytematch.h"
+#include "headers/PC/ui_mp/ui_class_menu.h"
 #include "headers/PC/ui_mp/ui_wwii_menu.h"
 
 #include <stdlib.h>
@@ -5500,6 +5501,7 @@ paint_content:
         }
     }
     UI_WWIIMenu_PaintMenu(dc, menu);
+    UI_ClassMenu_Paint(dc, menu);
 
     if (debugMode) {
         float color[4] = { 1.0f, 1.0f, 0.0f, 1.0f };

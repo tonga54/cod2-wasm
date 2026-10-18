@@ -5,12 +5,13 @@ import { pathToFileURL } from 'node:url';
 import WebSocket, { WebSocketServer } from 'ws';
 import { createUpdateChecker, readBuildInfo } from './updates.mjs';
 import { createMaintenanceCheck } from './maintenance.mjs';
+import { ClassError, createClassStore, defaultClasses, normalizeClasses, playerKey } from './classes.mjs';
 
 export function createGateway({ webHost = 'cod2-web', webPort = 8088,
   udpHost = 'cod2-server', udpPort = 28960, maxClients = 64,
   iconPath = '/game-ui/cod2.ico', startupPath = '/game-ui/cod2-startup.png',
   roomsEnabled = false, managerPort = 8090, updateChecker, maintenanceCheck = createMaintenanceCheck(),
-  udpSocketFactory = () => dgram.createSocket('udp4') } = {}) {
+  classStore = null, udpSocketFactory = () => dgram.createSocket('udp4') } = {}) {
   const reservations = new Map();
   const artworkCache = new Map();
   const wsBinaryOptions = Object.freeze({ binary: true, compress: false });
@@ -55,7 +56,46 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
     response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     response.end(JSON.stringify(value));
   }
+  async function handleClasses(request, response, url) {
+    if (request.method === 'GET') {
+      const key = playerKey(url.searchParams.get('player'));
+      if (!key) { json(response, 400, {error:'Choose a gametag in Options to save classes.'}); return; }
+      if (!classStore) { json(response, 503, {error:'Classes are unavailable.'}); return; }
+      const classes = classStore.get(key);
+      json(response, 200, {classes:classes || defaultClasses(), saved:Boolean(classes)});
+      return;
+    }
+    if (request.method !== 'PUT') { json(response, 405, {error:'Unsupported method'}); return; }
+    if (!sameOrigin(request)) { json(response, 403, {error:'Invalid origin'}); return; }
+    const chunks = []; let bytes = 0;
+    for await (const chunk of request) {
+      bytes += chunk.length;
+      if (bytes > 4096) { json(response, 413, {error:'Request too large'}); return; }
+      chunks.push(chunk);
+    }
+    let body;
+    try { body = JSON.parse(Buffer.concat(chunks)); }
+    catch { json(response, 400, {error:'Invalid JSON'}); return; }
+    const key = playerKey(body?.player);
+    if (!key) { json(response, 400, {error:'Choose a gametag in Options to save classes.'}); return; }
+    let classes;
+    try { classes = normalizeClasses(body.classes); }
+    catch (error) {
+      if (error instanceof ClassError) { json(response, 400, {error:error.message}); return; }
+      throw error;
+    }
+    if (!classStore) { json(response, 503, {error:'Classes are unavailable.'}); return; }
+    classStore.put(key, classes);
+    json(response, 200, {classes, saved:true});
+  }
   const server = http.createServer((request, response) => {
+    let url = null;
+    try { url = new URL(request.url, 'http://gateway'); } catch {}
+    if (url?.pathname === '/classes') {
+      handleClasses(request, response, url)
+        .catch(() => { if (!response.headersSent) json(response, 503, {error:'Classes are unavailable.'}); });
+      return;
+    }
     if (request.url === '/version') {
       if (request.method !== 'GET') {
         json(response, 405, { error: 'Unsupported method' }); return;
@@ -278,12 +318,16 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  let classStore = null;
+  try { classStore = createClassStore(process.env.COD2_CLASSES_DB || '/data/classes.sqlite'); }
+  catch (error) { console.error('[gateway] classes unavailable:', error.message); }
   const gateway = createGateway({
     webHost: process.env.WEB_HOST || 'cod2-web',
     webPort: Number(process.env.WEB_PORT || 8088),
     udpHost: process.env.UDP_HOST || 'cod2-server',
     udpPort: Number(process.env.UDP_PORT || 28960),
     roomsEnabled: true,
+    classStore,
   });
   gateway.server.listen(Number(process.env.PORT || 8088), '0.0.0.0',
     () => console.log('[gateway] LAN HTTP/WebSocket endpoint ready'));

@@ -10,6 +10,7 @@ import zipfile
 from browser_sound_assets import (HIT_SOUND_OWNER_FILE, MENU_MUSIC_OWNER_FILE, OWNER_SOUNDS_DIR,
                                   collect_sound_assets, load_owner_sounds)
 from browser_bot_menu import apply_bot_menu
+from browser_class_menus import add_class_menu, class_menus
 from browser_settings_menu import apply_settings_menu
 from browser_objective_assets import objective_asset_roots
 from browser_spawn_safety import apply_spawn_safety
@@ -83,6 +84,11 @@ try:
     pending.extend("materials/" + name for name in re.findall(
         r'CL_RegisterMaterialNoMip\("([^\"]+)"', ui_source
     ))
+    # The class screens draw each weapon's menu image and HUD icon.
+    class_source = (root / "src/PC/ui_mp/ui_class_data.c").read_text()
+    pending.extend("materials/" + name for name in re.findall(
+        r'"(weapon_[a-z0-9_]+|gfx/icons/hud@[a-z0-9_]+\.tga|hud_[a-z0-9_]+)"', class_source
+    ))
     # Cgame registers these HUD materials directly, outside menu/BSP assets.
     cgame_source = "\n".join(path.read_text() for path in
                              (root / "src/PC/cgame_mp").glob("*.c"))
@@ -135,7 +141,8 @@ try:
         pending.extend((f"materials/loadscreen_{mapname}",
                         f"materials/background_{mapname}", f"sun/{mapname}.sun"))
     pending.extend(("mp/playeranim.script", "mp/playeranimtypes.txt", "animtrees/multiplayer.atr"))
-    # Original British/Afrika Korps and American/Normandy loadouts.
+    # Original British/Afrika Korps and American/Normandy loadouts, and the
+    # Soviet weapons a custom class may carry on any map.
     weapons = (
         "frag_grenade_british_mp", "smoke_grenade_british_mp", "webley_mp",
         "enfield_mp", "sten_mp", "bren_mp", "enfield_scope_mp", "m1garand_mp",
@@ -145,6 +152,8 @@ try:
         "defaultweapon_mp", "mg42_bipod_stand_mp",
         "frag_grenade_american_mp", "smoke_grenade_american_mp", "colt_mp",
         "m1carbine_mp", "bar_mp", "springfield_mp", "greasegun_mp",
+        "frag_grenade_russian_mp", "smoke_grenade_russian_mp", "TT30_mp", "mosin_nagant_mp",
+        "SVT40_mp", "PPS42_mp", "ppsh_mp", "mosin_nagant_sniper_mp",
     )
     pending.extend("weapons/mp/" + weapon for weapon in weapons)
     renderer = {}
@@ -217,6 +226,7 @@ try:
             data = b"\n".join(line for line in data.splitlines()
                               if not any((stem + ".menu").encode() in line
                                          for stem in excluded)) + b"\n"
+            data = add_class_menu(data)
         renderer[name] = data
         if name.startswith(("images/", "xmodelsurfs/", "xmodelparts/", "xanim/")):
             continue
@@ -314,6 +324,7 @@ try:
                 candidates += ("materials/" + token[:-4],)
             pending.extend(candidate for candidate in candidates
                            if candidate in asset_index and candidate not in renderer)
+    renderer.update(class_menus())
     archives["cod2_browser_renderer.iwd"] = renderer
     hit_sound = root / "data/main" / HIT_SOUND_OWNER_FILE
     menu_music = root / "data/main" / MENU_MUSIC_OWNER_FILE

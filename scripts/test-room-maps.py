@@ -19,7 +19,7 @@ spec.loader.exec_module(rooms)
 with tempfile.TemporaryDirectory(prefix='cod2-room-maps-') as directory:
     profile = Path(directory)
     with patch.object(rooms, 'Path', side_effect=lambda name: profile if name == '/profile' else Path(name)), \
-         patch.object(rooms.shutil, 'copyfile', side_effect=lambda src, dest: Path(dest).write_text((root / ('downstream/server/browser_bots.gsc' if src.endswith('.gsc') else 'server.cfg')).read_text())), \
+         patch.object(rooms.shutil, 'copyfile', side_effect=lambda src, dest: Path(dest).write_text((root / ('downstream/server/' + Path(src).name if src.endswith('.gsc') else 'server.cfg')).read_text())), \
          patch.object(rooms.subprocess, 'Popen') as launch:
         for case, (mapname, gametype) in enumerate((m, g) for m in rooms.SUPPORTED_MAPS for g in rooms.SUPPORTED_GAMETYPES):
             room_id = case % 3
@@ -33,6 +33,9 @@ with tempfile.TemporaryDirectory(prefix='cod2-room-maps-') as directory:
             assert ';' not in args[args.index('sv_hostname') + 1]
             assert '+' not in args[args.index('sv_hostname') + 1]
             config = (profile / f'room-{room_id}/raw/server.cfg').read_text()
+            # Every room offers classes; only bot rooms run the bot script.
+            assert (profile / f'room-{room_id}/raw/maps/mp/browser_classes.gsc').read_text() == (root / 'downstream/server/browser_classes.gsc').read_text()
+            assert not (profile / f'room-{room_id}/raw/maps/mp/browser_bots.gsc').exists()
             assert 'set scr_allies ""' in config and 'set scr_axis ""' in config
             assert 'set scr_tdm_scorelimit "100"' in config
             assert 'set scr_tdm_timelimit "15"' in config

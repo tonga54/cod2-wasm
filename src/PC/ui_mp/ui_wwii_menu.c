@@ -671,6 +671,20 @@ static int UI_WWIIMenu_MainOpen(const displayContextDef_t *dc)
     return 0;
 }
 
+/* Create a Class paints its own page over the backdrop alone. */
+static int UI_WWIIMenu_ClassPageOpen(const displayContextDef_t *dc)
+{
+    int i;
+
+    for (i = 0; i < dc->openMenuCount; i++) {
+        const menuDef_t *menu = dc->menuStack[i];
+
+        if (menu && menu->window.name && !I_stricmp(menu->window.name, "create_a_class"))
+            return 1;
+    }
+    return 0;
+}
+
 static WWIIMenuItem *UI_WWIIMenu_Find(const itemDef_t *item)
 {
     int i;
@@ -876,7 +890,7 @@ int UI_WWIIMenu_PaintItem(displayContextDef_t *dc, itemDef_t *item)
         return 0;
     if (item == s_wwiiMenu.bgImage)
         return UI_WWIIMenu_PaintBackdrop(dc, item);
-    return UI_WWIIMenu_MainOpen(dc);
+    return UI_WWIIMenu_MainOpen(dc) || UI_WWIIMenu_ClassPageOpen(dc);
 }
 
 static void UI_WWIIMenu_Animate(WWIIMenuItem *entry, int time, int focused)
@@ -1077,6 +1091,53 @@ static int UI_WWIIMenu_Before(const menuDef_t *menu, int a, int b)
     if (first && first->wwiiRect.y != second->wwiiRect.y)
         return first->wwiiRect.y < second->wwiiRect.y;
     return a < b;
+}
+
+const float *UI_WWIIMenu_Color(int color)
+{
+    switch (color) {
+    case WWII_COLOR_GOLD:
+        return s_wwiiGold;
+    case WWII_COLOR_TITLE:
+        return s_wwiiTitle;
+    case WWII_COLOR_LABEL:
+        return s_wwiiLabel;
+    case WWII_COLOR_WHITE:
+        return s_wwiiWhite;
+    default:
+        return s_wwiiIdle;
+    }
+}
+
+void UI_WWIIMenu_Text(const char *text, int bold, float x, float baseline, int horzAlign, int vertAlign, float cap,
+                      float tracking, const vec_t *color)
+{
+    UI_WWIIMenu_DrawText(text, bold ? UI_WWIIMenu_Bold(cap) : UI_WWIIMenu_Regular(cap), x, baseline, horzAlign,
+                         vertAlign, cap, tracking, color);
+}
+
+float UI_WWIIMenu_Width(const char *text, int bold, float cap, float tracking)
+{
+    return UI_WWIIMenu_TextWidth(text, bold ? UI_WWIIMenu_Bold(cap) : UI_WWIIMenu_Regular(cap), cap, tracking);
+}
+
+/* The capture's ENTER Select and F1 Personalize stand 9.5 units apart. */
+#define WWII_PROMPT_SPACING 9.5f
+
+void UI_WWIIMenu_Prompts(const char *const *keys, const char *const *labels, int count, const char *rightKey,
+                         const char *rightLabel)
+{
+    float x = WWII_PROMPT_LEFT, keycap;
+    int i;
+
+    UI_WWIIMenu_BuildImages();
+    for (i = 0; i < count; i++) {
+        UI_WWIIMenu_PaintPrompt(x, WWII_ALIGN_LEFT, keys[i], labels[i]);
+        x += UI_WWIIMenu_PromptWidth(keys[i], labels[i], &keycap) + WWII_PROMPT_SPACING;
+    }
+    if (rightKey)
+        UI_WWIIMenu_PaintPrompt(-WWII_PROMPT_RIGHT - UI_WWIIMenu_PromptWidth(rightKey, rightLabel, &keycap),
+                                WWII_ALIGN_RIGHT, rightKey, rightLabel);
 }
 
 int UI_WWIIMenu_NextItem(const menuDef_t *menu, int cursor, int direction)

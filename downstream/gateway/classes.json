@@ -1,0 +1,30 @@
+{
+  "classCount": 5,
+  "nameMaxLength": 20,
+  "primary": [
+    "thompson_mp", "greasegun_mp", "sten_mp", "PPS42_mp", "ppsh_mp", "mp40_mp",
+    "m1garand_mp", "m1carbine_mp", "enfield_mp", "mosin_nagant_mp", "SVT40_mp", "kar98k_mp", "g43_mp",
+    "bar_mp", "bren_mp", "mp44_mp",
+    "springfield_mp", "enfield_scope_mp", "mosin_nagant_sniper_mp", "kar98k_sniper_mp",
+    "shotgun_mp"
+  ],
+  "secondary": ["colt_mp", "webley_mp", "TT30_mp", "luger_mp"],
+  "lethal": [
+    "frag_grenade_american_mp", "frag_grenade_british_mp", "frag_grenade_russian_mp", "frag_grenade_german_mp"
+  ],
+  "tactical": [
+    "smoke_grenade_american_mp", "smoke_grenade_british_mp", "smoke_grenade_russian_mp", "smoke_grenade_german_mp"
+  ],
+  "defaults": [
+    {"name": "Assault", "primary": "mp44_mp", "secondary": "luger_mp",
+     "lethal": "frag_grenade_german_mp", "tactical": "smoke_grenade_german_mp"},
+    {"name": "Submachine Gunner", "primary": "thompson_mp", "secondary": "colt_mp",
+     "lethal": "frag_grenade_american_mp", "tactical": "smoke_grenade_american_mp"},
+    {"name": "Rifleman", "primary": "m1garand_mp", "secondary": "colt_mp",
+     "lethal": "frag_grenade_american_mp", "tactical": "smoke_grenade_american_mp"},
+    {"name": "Sniper", "primary": "kar98k_sniper_mp", "secondary": "luger_mp",
+     "lethal": "frag_grenade_german_mp", "tactical": "smoke_grenade_german_mp"},
+    {"name": "Close Quarters", "primary": "shotgun_mp", "secondary": "webley_mp",
+     "lethal": "frag_grenade_british_mp", "tactical": "smoke_grenade_british_mp"}
+  ]
+}

@@ -1,0 +1,20 @@
+// Create a Class from the main menu. The UI's native class screens paint
+// over the menu background and take every key while this menu is focused.
+{
+	menuDef
+	{
+		name			"create_a_class"
+		fullscreen		0
+		rect			0 0 640 480
+		style			0
+		onOpen
+		{
+			uiScript classMenuOpen create;
+		}
+		onEsc
+		{
+			close create_a_class;
+			open main_text;
+		}
+	}
+}

@@ -31,4 +31,16 @@ int UI_WWIIMenu_CoversScreen(const menuDef_t *menu);
  * laid out, main_text's column goes by its rows. */
 int UI_WWIIMenu_NextItem(const menuDef_t *menu, int cursor, int direction);
 
+/* The layout's lettering, key prompts and colors, for other WWII screens. */
+enum { WWII_COLOR_IDLE, WWII_COLOR_GOLD, WWII_COLOR_TITLE, WWII_COLOR_LABEL, WWII_COLOR_WHITE };
+const float *UI_WWIIMenu_Color(int color);
+/* Barlow Regular or Bold capitals cap units tall, tracking capitals apart. */
+void UI_WWIIMenu_Text(const char *text, int bold, float x, float baseline, int horzAlign, int vertAlign, float cap,
+                      float tracking, const vec_t *color);
+float UI_WWIIMenu_Width(const char *text, int bold, float cap, float tracking);
+/* A row of prompts along the bottom: from the left edge, then one at the
+ * right edge when rightKey is set. */
+void UI_WWIIMenu_Prompts(const char *const *keys, const char *const *labels, int count, const char *rightKey,
+                         const char *rightLabel);
+
 #endif
