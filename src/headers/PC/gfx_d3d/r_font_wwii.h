@@ -8,5 +8,9 @@
  * the font cannot be built. */
 FontHandle R_LoadWwiiFont(const char *fontName);
 void R_ShutdownWwiiFonts(void);
+/* Registers a font only the WWII lettering has, such as "$regularfont":
+ * NULL, where R_RegisterFont would stop on an error, with r_wwiiFonts off or
+ * no font free. */
+FontHandle R_RegisterWwiiFont(const char *fontName);
 
 #endif

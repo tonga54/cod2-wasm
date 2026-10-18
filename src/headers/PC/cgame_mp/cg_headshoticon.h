@@ -8,5 +8,9 @@ void CG_HeadshotIconInit(void);
  * is built once per cgame; a square diameter * *extent a side, centred on the
  * symbol, draws the ring that wide. Returns NULL when there is no image. */
 MaterialHandle CG_HeadshotIconMaterial(float diameter, float *extent);
+/* The symbol for an image of the caller's: size * size BGRA texels, white with
+ * its coverage in alpha, size being 2 * (texels + 1) for a ring of radius
+ * texels. */
+void CG_HeadshotIconRaster(byte *bgra, int size, int texels);
 
 #endif

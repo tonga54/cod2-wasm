@@ -28,6 +28,15 @@ static void CG_ScorePanelClearDmScores(void) { strcat(scores, "C"); }
 static void CG_ScorePanelSetDmScore(int clientNum, int score) {
     snprintf(scores + strlen(scores), sizeof(scores) - strlen(scores), "%d=%d,", clientNum, score);
 }
+/* The attacker lists the killcam received, "killer:other,other;" each. */
+#define KILLCAM_MAX_CLIENTS 64
+static char attackers[64];
+static void CG_KillcamSetAttackers(int killer, const int *others, int count) {
+    snprintf(attackers + strlen(attackers), sizeof(attackers) - strlen(attackers), "%d:", killer);
+    for (int i = 0; i < count; i++)
+        snprintf(attackers + strlen(attackers), sizeof(attackers) - strlen(attackers), "%s%d", i ? "," : "", others[i]);
+    strcat(attackers, ";");
+}
 '''
 
 checks = r'''
@@ -56,6 +65,13 @@ int main(void) {
     scores[0] = 0;
     assert(!run("cod2_dmscores 0 4 7") && !strcmp(scores, "C0=4,"));
     assert(!run("cod2_points 0 100") && popups == 1);
+    /* The killcam gets the killer, then the others in the server's order; a
+     * bare command changes nothing. */
+    assert(!run("cod2_attackers 3 1 2") && !strcmp(attackers, "3:1,2;"));
+    attackers[0] = 0;
+    assert(!run("cod2_attackers 5") && !strcmp(attackers, "5:;"));
+    attackers[0] = 0;
+    assert(!run("cod2_attackers") && !attackers[0]);
 #ifdef __EMSCRIPTEN__
     assert(!run("cod2_obituary 1 2 3") && obituaries == 1);
 #endif
@@ -75,6 +91,9 @@ mutants = [
     ('for (i = 1; i + 1 < Cmd_Argc(); i += 2)', 'for (i = 1; i < Cmd_Argc(); i += 2)'),
     ('CG_ScorePanelSetDmScore(atoi(CG_Argv(i)), atoi(CG_Argv(i + 1)));',
      'CG_ScorePanelSetDmScore(atoi(CG_Argv(i + 1)), atoi(CG_Argv(i)));'),
+    ('for (i = 2; i < Cmd_Argc() && count < KILLCAM_MAX_CLIENTS; ++i)',
+     'for (i = 1; i < Cmd_Argc() && count < KILLCAM_MAX_CLIENTS; ++i)'),
+    ('        if (Cmd_Argc() >= 2)\n            CG_KillcamSetAttackers', '        CG_KillcamSetAttackers'),
 ]
 
 with tempfile.TemporaryDirectory(prefix='cod2-command-prefix-') as directory:
@@ -94,6 +113,6 @@ with tempfile.TemporaryDirectory(prefix='cod2-command-prefix-') as directory:
             failed |= result.returncode != 0
         assert index == 0 or failed, index
 print('PASS: unhandled cod2_ commands return before the retail first-letter handlers, natively and in the browser; '
-      'cod2_points, cod2_obituary and the deathmatch scores (one score, or a whole table that replaces the old one) '
-      'still reach their handlers and retail commands their letter; '
+      'cod2_points, cod2_obituary, the deathmatch scores (one score, or a whole table that replaces the old one) and '
+      'the killcam\'s attackers (killer first) still reach their handlers and retail commands their letter; '
       f'{len(mutants)} failing mutants')

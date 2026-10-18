@@ -1,6 +1,7 @@
 #include "common_types.h"
 #include "imports.h"
 #include "headers/PC/cgame_mp/cg_local.h"
+#include "headers/PC/cgame_mp/cg_killcam.h"
 #include "headers/PC/cgame_mp/cg_killfeed.h"
 #include "bytematch.h"
 
@@ -1484,6 +1485,7 @@ void CG_EntityEvent(centity_t *cent, int event)
             )
                 return;
 
+            CG_KillcamObituary(attackerName[0] ? attacker : -1, target, ep);
             if (CG_KillFeedEnabled())
                 CG_KillFeedAdd(attackerName[0] ? attacker : -1, target, iconShader, iconWidth > 2.0f, iconHorzFlip,
                                (ep & 0x80) && (ep & 0x7f) == 8);

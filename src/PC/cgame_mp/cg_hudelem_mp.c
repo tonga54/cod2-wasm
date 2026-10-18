@@ -2,6 +2,7 @@
 #include "imports.h"
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_minimap.h"
+#include "headers/PC/cgame_mp/cg_killcam.h"
 #include "headers/PC/cgame_mp/cg_scorepanel.h"
 #include <stdlib.h>
 #include <string.h>
@@ -727,6 +728,8 @@ void CG_Draw2dHudElems(qboolean foreground)
             continue;
 
         if (CG_ScorePanelHidesHudElem(elem))
+            continue;
+        if (CG_KillcamHidesHudElem(elem))
             continue;
 
         CG_GetHudElemInfo(elem, &cghe, hudElemString);

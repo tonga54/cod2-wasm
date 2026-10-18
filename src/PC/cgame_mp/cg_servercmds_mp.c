@@ -3,6 +3,7 @@
 #include "bytematch.h"
 #include "headers/cod2_chat.h"
 #include "headers/PC/cgame_mp/cg_local.h"
+#include "headers/PC/cgame_mp/cg_killcam.h"
 #include "headers/PC/cgame_mp/cg_scorepopup.h"
 #include "headers/PC/cgame_mp/cg_scorepanel.h"
 #include "headers/PC/cgame_mp/cg_scoretable.h"
@@ -1022,6 +1023,16 @@ void CG_ServerCommand(void)
         CG_ScorePanelClearDmScores();
         for (i = 1; i + 1 < Cmd_Argc(); i += 2)
             CG_ScorePanelSetDmScore(atoi(CG_Argv(i)), atoi(CG_Argv(i + 1)));
+        return;
+    }
+    if (!strcmp(cmd, "cod2_attackers")) {
+        int others[KILLCAM_MAX_CLIENTS];
+        int count = 0;
+        int i;
+        for (i = 2; i < Cmd_Argc() && count < KILLCAM_MAX_CLIENTS; ++i)
+            others[count++] = atoi(CG_Argv(i));
+        if (Cmd_Argc() >= 2)
+            CG_KillcamSetAttackers(atoi(CG_Argv(1)), others, count);
         return;
     }
 

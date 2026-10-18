@@ -40,10 +40,11 @@ assert fonts.count('#include "headers/PC/gfx_d3d/r_font_wwii.h"\n') == 1
 assert fonts.count('    font = R_LoadWwiiFont(fontName);\n    if (!font)\n        font = R_LoadFont(fontName, imageTrack);\n') == 1
 assert fonts.count('    registeredFontCount = 0;\n    R_ShutdownWwiiFonts();\n') == 1
 assert 'FontHandle R_LoadWwiiFont(const char *fontName);' in header and 'void R_ShutdownWwiiFonts(void);' in header
+assert 'FontHandle R_RegisterWwiiFont(const char *fontName);' in header
 assert static_tests.count('python3 "${repo_root}/scripts/test-wwii-fonts.py"') == 1
 
 # The embedded faces are the committed fonts, under their license.
-for weight in ('Medium', 'SemiBold', 'Bold'):
+for weight in ('Medium', 'SemiBold', 'Bold', 'Regular'):
     ttf = root / f'third_party/barlow/Barlow-{weight}.ttf'
     assert f' *   Barlow-{weight}.ttf, SHA-256 {hashlib.sha256(ttf.read_bytes()).hexdigest()}.' in data, weight
     assert re.search(r'static const unsigned char r_wwiiFont' + weight + r'\[\d+\] = \{', data), weight
@@ -60,7 +61,7 @@ module = module.replace('#include "../../../third_party/stb/stb_truetype.h"', f'
 
 registry = ('static int registeredFontCount;\nstatic Font *registeredFont[16];\n' +
             function(fonts, 'R_GetCharacterGlyph_inl') + function(fonts, 'R_GetCharacterGlyph') +
-            function(fonts, 'R_RegisterFont') + function(fonts, 'R_ShutdownFonts') +
+            function(fonts, 'R_RegisterFont') + function(fonts, 'R_RegisterWwiiFont') + function(fonts, 'R_ShutdownFonts') +
             function(fonts, 'R_NormalizedTextScale') + function(fonts, 'R_TextWidth_inl') + function(fonts, 'R_TextWidth'))
 
 support = r'''
@@ -205,13 +206,15 @@ typedef struct { const char *name; int pixelHeight; double cap; int baseline; do
  * "H" and where it ends above the pen. The width is "The quick brown fox
  * jumps over the lazy dog" in advances over the cap height, and the stem an
  * "I"'s over its height: Barlow SemiBold at 95% 26.33 and 0.157, Bold 28.05
- * and 0.201, Medium 27.45 and 0.137 (Pillow, Barlow's own metrics). */
-static const Expect expect[] = {
+ * and 0.201, Medium 27.45 and 0.137, Regular 27.09 and 0.101 (Pillow,
+ * Barlow's own metrics). Regular has no stock font: the killcam's. */
+#define FONT_CASES 10
+static const Expect expect[FONT_CASES] = {
     { "fonts/smallFont", 12, 7.0, 2, 26.33, 0.157 }, { "fonts/normalFont", 16, 11.0, 2, 26.33, 0.157 },
     { "fonts/bigFont", 24, 13.12, 5, 26.33, 0.157 }, { "fonts/extraBigFont", 32, 21.0, 5, 26.33, 0.157 },
     { "fonts/boldFont", 30, 17.1, 6, 28.05, 0.201 }, { "fonts/consoleFont", 16, 9.0, 3, 27.45, 0.137 },
     { "fonts/smallDevFont", 16, 9.17, 2, 26.33, 0.157 }, { "fonts/bigDevFont", 24, 13.12, 3, 26.33, 0.157 },
-    { "fonts/qerFont", 12, 7.0, 3, 26.33, 0.157 },
+    { "fonts/qerFont", 12, 7.0, 3, 26.33, 0.157 }, { "$regularfont", 32, 21.0, 5, 27.09, 0.101 },
 };
 static const char *sample = "The quick brown fox jumps over the lazy dog";
 
@@ -238,9 +241,9 @@ int main(void) {
         { "$font", "fonts/normalFont" }, { "$smallfont", "fonts/smallFont" }, { "$bigfont", "fonts/bigFont" },
         { "$extrabigfont", "fonts/extraBigFont" }, { "$boldfont", "fonts/boldFont" },
         { "$consolefont", "fonts/consoleFont" }, { "$smalldevfont", "fonts/smallDevFont" },
-        { "$bigdevfont", "FONTS/BIGDEVFONT" }, { "$qerfont", "fonts/qerfont" },
+        { "$bigdevfont", "FONTS/BIGDEVFONT" }, { "$qerfont", "fonts/qerfont" }, { "$regularfont", "fonts/regularFont" },
     };
-    for (int i = 0; i < 9; i++) {
+    for (int i = 0; i < 10; i++) {
         reset(720);
         Font *a = R_RegisterFont(aliases[i][0], 0), *b = R_RegisterFont(aliases[i][1], 0);
         assert(a != &stockFont && b != &stockFont && a != b && !stockLoads);
@@ -273,12 +276,14 @@ int main(void) {
      * shared face. Text width is the advances' sum. */
     for (int h = 0; h < 4; h++) {
         int height = (int[]){ 480, 720, 1080, 2160 }[h];
-        for (int i = 0; i < 9; i++) {
+        for (int i = 0; i < FONT_CASES; i++) {
             reset(height);
             const Font *f = R_RegisterFont(expect[i].name, 0);
             int t = texels(f), sum = 0;
             assert(f->pixelHeight == expect[i].pixelHeight);
-            assert(near(capHeight(f, 'I'), expect[i].cap, 0.08));
+            /* Barlow's I rounds its corners, which takes ink off its end
+             * rows: the thinnest, Regular's, measures 0.085 short. */
+            assert(near(capHeight(f, 'I'), expect[i].cap, 0.1));
             assert(near(inkBottom(f, 'I'), -expect[i].baseline, 0.08));
             assert(near(stemWidth(f) / expect[i].cap, expect[i].stem, 0.005));
             for (const char *c = sample; *c; c++) sum += f->glyphs[*c - 0x20].dx;
@@ -332,7 +337,7 @@ int main(void) {
     /* The atlas: a power-of-two width and whole 4-texel rows, each glyph's
      * texels two apart from the next, a clear texel inside its quad, no ink
      * anywhere else, and a texel to a unit for every quad. */
-    for (int i = 0; i < 9; i++) {
+    for (int i = 0; i < FONT_CASES; i++) {
         reset(1440);
         const Font *f = R_RegisterFont(expect[i].name, 0);
         const Upload *u = atlas(f);
@@ -456,6 +461,23 @@ int main(void) {
         for (int i = 0; i < 16; i++) assert(R_LoadWwiiFont(names[i]) != NULL);
         assert(R_LoadWwiiFont("fonts/qerFont") == NULL);
     }
+
+    /* A font only the WWII lettering has registers once under any case, and
+     * is NULL, without the stock loader or an error, with the setting off,
+     * for a name no WWII font has, and with sixteen fonts registered. */
+    reset(720);
+    stockLoads = 0;
+    font = R_RegisterWwiiFont("$regularfont");
+    assert(font && font != &stockFont && font->pixelHeight == 32 && !stockLoads);
+    assert(R_RegisterWwiiFont("$REGULARFONT") == font && R_RegisterFont("$regularfont", 0) == font);
+    reset(720);
+    fontsDvar.current.enabled = 0;
+    assert(R_RegisterWwiiFont("$regularfont") == NULL && !stockLoads);
+    fontsDvar.current.enabled = 1;
+    assert(R_RegisterWwiiFont("fonts/objectiveFont") == NULL && !stockLoads);
+    reset(720);
+    for (int i = 0; i < 16; i++) R_RegisterFont("fonts/objectiveFont", 0);
+    assert(stockLoads == 16 && R_RegisterWwiiFont("$regularfont") == NULL);
     printf("%d\n", cases);
     return 0;
 }
@@ -504,16 +526,27 @@ mutants = [
     ('            texels[i * 2] = 255;', '            texels[i * 2] = 0;'),
 ]
 
-variants = [module]
+registry_mutants = [
+    ('        if (I_stricmp(fontName, *(const char **)registeredFont[fontIndex]) == 0)\n'
+     '            return registeredFont[fontIndex];\n    }\n    if (registeredFontCount > 15)\n        return 0;\n',
+     '    }\n    if (registeredFontCount > 15)\n        return 0;\n'),
+    ('    if (registeredFontCount > 15)\n        return 0;\n', ''),
+    ('    if (!font)\n        return 0;\n', '    if (!font)\n        font = R_LoadFont(fontName, 0);\n'),
+]
+
+variants = [(module, registry)]
 for old, new in mutants:
     assert module.count(old) == 1, old
-    variants.append(module.replace(old, new))
+    variants.append((module.replace(old, new), registry))
+for old, new in registry_mutants:
+    assert registry.count(old) == 1, old
+    variants.append((module, registry.replace(old, new)))
 
 with tempfile.TemporaryDirectory(prefix='cod2-wwii-fonts-') as directory:
     path = Path(directory) / 'fonts.c'
     binary = Path(directory) / 'fonts'
-    for index, variant in enumerate(variants):
-        path.write_text(support + variant + registry + checks)
+    for index, (variant, fonts_registry) in enumerate(variants):
+        path.write_text(support + variant + fonts_registry + checks)
         flags = ['-Wall', '-Werror', '-Wno-unused-function', '-Wno-unused-but-set-variable', '-Wno-misleading-indentation'] if index == 0 else ['-w']
         subprocess.run(['cc', '-std=gnu99', '-O1', '-g', '-fsanitize=address,undefined', '-fno-sanitize-recover=all']
                        + flags + [str(path), '-lm', '-o', str(binary)], check=True)
@@ -523,9 +556,10 @@ with tempfile.TemporaryDirectory(prefix='cod2-wwii-fonts-') as directory:
             cases = int(result.stdout)
 print('PASS: every stock font (normal, small, big, extra big, bold, console, both dev fonts and qer, by their UI aliases '
       'or their files in any case) registers as Barlow rasterized from the embedded faces: the size-picked UI fonts '
-      'share SemiBold at 95% width, bold text is Bold and the console Medium; each keeps its stock pixel height, an H as '
+      'share SemiBold at 95% width, bold text is Bold, the console Medium and the killcam\'s own font Regular, which '
+      'registers optionally (NULL without the setting, a WWII font or a free slot); each keeps its stock pixel height, an H as '
       'tall as the stock one ending at its baseline, and Barlow\'s widths; the glyph table is the one R_GetCharacterGlyph '
       'searches; atlases are packed without overlap on clear borders with exact mipmaps, one texel per unit per 480 '
       'lines up to 3 and one for the console\'s own font; images are released on shutdown and rebuilt; without $raw, an '
-      f'image, the setting or a free name the stock fonts stay; {cases} font and size cases; {len(mutants)} failing '
-      'regression mutants')
+      f'image, the setting or a free name the stock fonts stay; {cases} font and size cases; '
+      f'{len(mutants) + len(registry_mutants)} failing regression mutants')

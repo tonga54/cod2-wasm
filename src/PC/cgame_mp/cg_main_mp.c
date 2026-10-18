@@ -4,6 +4,7 @@
 #include "headers/PC/cgame_mp/cg_ammocounter.h"
 #include "headers/PC/cgame_mp/cg_minimap.h"
 #include "headers/PC/cgame_mp/cg_scorepopup.h"
+#include "headers/PC/cgame_mp/cg_killcam.h"
 #include "headers/PC/cgame_mp/cg_killfeed.h"
 #include "headers/PC/cgame_mp/cg_scorepanel.h"
 #include "headers/PC/cgame_mp/cg_weaponprompt.h"
@@ -1226,6 +1227,7 @@ void CG_Init(int serverMessageNum, int serverCommandSequence, int clientNum)
     CG_MantlePromptInit();
     CG_GrenadeWarningInit();
     CG_ScoreTableInit();
+    CG_KillcamInit();
     CG_LoadingString("sounds");
     CG_RegisterSounds();
     CG_LoadingString("clients");

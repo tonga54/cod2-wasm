@@ -30,6 +30,8 @@ typedef struct {
     int persId;
     int inUse;
     unsigned long long damagedBy;
+    int damageOrder[POINTS_MAX_CLIENTS];
+    int damageCount;
 } G_PointsClient;
 
 /* Objectives are worth whole kills: a capture three, a return one, a plant
@@ -183,8 +185,35 @@ void G_PointsPlayerDamaged(gentity_t *victim, gentity_t *attacker, int damage)
     attackerNum = attacker->s.number;
     if (victimNum == attackerNum || !G_PointsValidClient(victimNum) || !G_PointsValidClient(attackerNum))
         return;
+    if (!(s_pointsClients[victimNum].damagedBy & (1ull << attackerNum)))
+        s_pointsClients[victimNum].damageOrder[attackerNum] = ++s_pointsClients[victimNum].damageCount;
     if (G_PointsEnemies(attackerNum, victimNum))
         s_pointsClients[victimNum].damagedBy |= 1ull << attackerNum;
+}
+
+/* The victim's killcam lists who hurt them: the killer, then the others in
+ * the order they first hit. */
+static void G_PointsSendAttackers(int victimNum, int attackerNum, unsigned long long damagedBy)
+{
+    const G_PointsClient *slot = &s_pointsClients[victimNum];
+    int order[POINTS_MAX_CLIENTS];
+    char text[512];
+    int count = 0;
+    int length;
+    int i, j;
+
+    for (i = 0; i < level.maxclients && i < POINTS_MAX_CLIENTS; ++i) {
+        if (i == attackerNum || !(damagedBy & (1ull << i)) || !G_PointsConnected(i))
+            continue;
+        for (j = count; j > 0 && slot->damageOrder[order[j - 1]] > slot->damageOrder[i]; --j)
+            order[j] = order[j - 1];
+        order[j] = i;
+        ++count;
+    }
+    length = Com_sprintf(text, sizeof(text), "cod2_attackers %i", attackerNum);
+    for (i = 0; i < count; ++i)
+        length += Com_sprintf(text + length, sizeof(text) - length, " %i", order[i]);
+    G_PointsSend(victimNum, text);
 }
 
 void G_PointsPlayerKilled(gentity_t *victim, gentity_t *attacker, int meansOfDeath, int hitLoc)
@@ -204,6 +233,8 @@ void G_PointsPlayerKilled(gentity_t *victim, gentity_t *attacker, int meansOfDea
     if (!attacker || !attacker->client)
         return;
     attackerNum = attacker->s.number;
+    if (attackerNum != victimNum && G_PointsValidClient(attackerNum))
+        G_PointsSendAttackers(victimNum, attackerNum, damagedBy);
     if (attackerNum == victimNum || !G_PointsValidClient(attackerNum) || !G_PointsEnemies(attackerNum, victimNum))
         return;
     ++s_pointsClients[attackerNum].kills;

@@ -70,6 +70,9 @@ static float CG_BreathPromptAlpha(const playerState_t *ps)
 {
     const WeaponDef *weapDef;
 
+    /* A replay shows the killer's aim, not the viewer's. */
+    if (cg->inKillCam)
+        return 0.0f;
     if (!cg_drawBreathHint->current.enabled || cg->renderingThirdPerson || ps->pm_type > 1 || ps->stats[0] <= 0 ||
         (ps->eFlags & 0x300) || (ps->pm_flags & BREATH_PROMPT_HOLDING) || ps->fWeaponPosFrac != 1.0f ||
         (int)(player_breath_hold_time->current.value * 1000.0f) <= 0)

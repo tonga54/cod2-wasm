@@ -114,7 +114,7 @@ typedef struct Font_s *FontHandle;
 typedef struct { struct { int enabled; float value; } current; } dvar_t;
 typedef struct { int overlayReticle, weapClass; } WeaponDef;
 typedef struct { int pm_type, pm_flags, eFlags, stats[1], weapon, holdBreathTimer; float fWeaponPosFrac; } playerState_t;
-static struct { int renderingThirdPerson; playerState_t predictedPlayerState; } cgState;
+static struct { int renderingThirdPerson, inKillCam; playerState_t predictedPlayerState; } cgState;
 static struct { struct { MaterialHandle whiteMaterial; } media; } cgsState = { { "white" } };
 #define cg (&cgState)
 #define cgs (&cgsState)
@@ -270,8 +270,9 @@ int main(void) {
     assert(drawCount == 0);
     cases += 4;
 
-    /* Where no hold can start, nothing is drawn and no key is looked up. */
-    for (int gate = 0; gate < 17; gate++) {
+    /* Where no hold can start, or over a replay of the killer's aim, nothing
+     * is drawn and no key is looked up. */
+    for (int gate = 0; gate < 18; gate++) {
         aimed();
         playerState_t *ps = &cgState.predictedPlayerState;
         switch (gate) {
@@ -292,6 +293,7 @@ int main(void) {
         case 14: ps->weapon = 3; break;
         case 15: fontReady = 0; break;
         case 16: ps->pm_flags = 0x4000 | 0x8000; break;
+        case 17: cgState.inKillCam = 1; break;
         }
         draw();
         assert(drawCount == 0 && configs == 0 && lookups == 0);
@@ -372,6 +374,7 @@ mutants = [
     [('        if (!GetKeyBindings(s_breathPromptCommands[i], bindings))\n            continue;\n',
       '        GetKeyBindings(s_breathPromptCommands[i], bindings);\n')],
     [('    Controls_GetConfig();\n', '')],
+    [('    if (cg->inKillCam)\n        return 0.0f;\n', '')],
     [('    if (!cg_drawBreathHint->current.enabled || cg->renderingThirdPerson ||', '    if (cg->renderingThirdPerson ||')],
     [('cg->renderingThirdPerson || ps->pm_type > 1 ||', 'ps->pm_type > 1 ||')],
     [('ps->pm_type > 1 ||', 'ps->pm_type > 5 ||')],
@@ -422,5 +425,5 @@ with tempfile.TemporaryDirectory(prefix='cod2-breath-prompt-') as directory:
 print('PASS: fully aimed down a scope that can hold the breath, the WWII prompt shows the key of +holdbreath, else of '
       '+sprint (Shift, which holds the breath), else of the stock hint\'s commands, one key in capitals on a cream '
       'keycap that grows to the left, then "Hold Breath" where the capture puts its label, in the labels\' lettering; '
-      f'it dims while the breath recovers and is gone while it is held; {cases} cases; '
+      f'it dims while the breath recovers and is gone while it is held or a killcam replays; {cases} cases; '
       f'{len(variants) - 1} failing regression mutants')

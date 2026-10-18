@@ -101,8 +101,18 @@ char *va(const char *fmt, ...) {
 static char sent[512][1400];
 static int sentTo[512];
 static int sentCount;
+/* The killcam's attacker lists are kept apart: the last one and how many. */
+static char list[256];
+static int listTo, lists;
 void SV_GameSendServerCommand(int clientNum, int type, const char *text) {
-    assert(type == SV_CMD_RELIABLE && sentCount < 512);
+    assert(type == SV_CMD_RELIABLE);
+    if (!strncmp(text, "cod2_attackers ", 15)) {
+        listTo = clientNum;
+        snprintf(list, sizeof(list), "%s", text + 15);
+        ++lists;
+        return;
+    }
+    assert(sentCount < 512);
     sentTo[sentCount] = clientNum;
     snprintf(sent[sentCount++], sizeof(sent[0]), "%s", text);
 }
@@ -349,6 +359,46 @@ int main(void) {
     for (int i = 0; i < listed; ++i)
         assert(atoi(tokens[4 + 5 * listed + i]) == G_PointsKills(atoi(tokens[4 + 5 * i])));
     sentCount = sentIndex = 0;
+
+    /* Every death by another player tells the victim who hurt them: the
+     * killer, then the other enemies by their first hit this life, connected
+     * ones only; a teammate's kill too, a death by the world or by their own
+     * hand not. */
+    const int sides[] = { TEAM_AXIS, TEAM_ALLIES, TEAM_ALLIES, TEAM_ALLIES, TEAM_AXIS, TEAM_ALLIES };
+    setup("tdm", sides, 6);
+    lists = 0;
+    kill(0, 1, RIFLE, TORSO);
+    assert(lists == 1 && listTo == 0 && !strcmp(list, "1"));
+    damage(0, 3, 10);
+    damage(0, 1, 10);
+    damage(0, 5, 10);
+    damage(0, 3, 10);
+    damage(0, 4, 10);
+    damage(0, 2, 10);
+    kill(0, 1, RIFLE, TORSO);
+    assert(lists == 2 && listTo == 0 && !strcmp(list, "1 3 5 2"));
+    damage(0, 2, 10);
+    damage(0, 5, 10);
+    damage(0, 3, 10);
+    clients[5].sess.connected = CON_DISCONNECTED;
+    kill(0, 1, RIFLE, HEAD);
+    assert(lists == 3 && !strcmp(list, "1 2 3"));
+    clients[5].sess.connected = CON_CONNECTED;
+    damage(0, 3, 10);
+    kill(0, 4, RIFLE, TORSO);
+    assert(lists == 4 && listTo == 0 && !strcmp(list, "4 3"));
+    damage(0, 1, 10);
+    kill(0, -1, 11, 0);
+    kill(0, 0, RIFLE, TORSO);
+    assert(lists == 4);
+    damage(0, 5, 10);
+    G_PointsClientSpawn(0);
+    damage(0, 2, 0);
+    kill(3, 2, RIFLE, TORSO);
+    assert(lists == 5 && listTo == 3 && !strcmp(list, "2"));
+    kill(0, 1, RIFLE, TORSO);
+    assert(lists == 6 && listTo == 0 && !strcmp(list, "1"));
+    sentCount = sentIndex = 0;
     return 0;
 }
 '''
@@ -406,6 +456,18 @@ module_mutants = [
      '        s_pointsClients[i].points = 0;\n    }'),
     ('        slot->kills = 0;\n', ''),
     ('return s_pointsClients[clientNum].kills;', 'return s_pointsClients[clientNum].points;'),
+    ('slot->damageOrder[order[j - 1]] > slot->damageOrder[i]', 'slot->damageOrder[order[j - 1]] < slot->damageOrder[i]'),
+    ('    if (!(s_pointsClients[victimNum].damagedBy & (1ull << attackerNum)))\n        s_pointsClients[victimNum].damageOrder',
+     '    s_pointsClients[victimNum].damageOrder'),
+    ('if (i == attackerNum || !(damagedBy & (1ull << i)) || !G_PointsConnected(i))',
+     'if (!(damagedBy & (1ull << i)) || !G_PointsConnected(i))'),
+    ('if (i == attackerNum || !(damagedBy & (1ull << i)) || !G_PointsConnected(i))',
+     'if (i == attackerNum || !(damagedBy & (1ull << i)))'),
+    ('    if (attackerNum != victimNum && G_PointsValidClient(attackerNum))\n        G_PointsSendAttackers',
+     '    if (G_PointsValidClient(attackerNum))\n        G_PointsSendAttackers'),
+    ('    if (attackerNum != victimNum && G_PointsValidClient(attackerNum))\n        G_PointsSendAttackers',
+     '    if (attackerNum != victimNum && G_PointsValidClient(attackerNum) && G_PointsEnemies(attackerNum, victimNum))\n'
+     '        G_PointsSendAttackers'),
 ]
 scoreboard_mutants = [
     ('order[i] = lvl->sortedClients[i];\n    G_PointsSortClients(order, numSorted);', 'order[i] = lvl->sortedClients[i];'),
@@ -430,4 +492,5 @@ with tempfile.TemporaryDirectory(prefix='cod2-points-') as directory:
 print('PASS: kills earn 100, assisted kills 75, headshots 150 and assists 25 in team modes; DM has no assists and shares '
       'retail scores; CTF captures/returns and SD plants/defuses score; points survive only SD rounds; the scoreboard '
       f'sends points ranked players first, then their kills of enemies (kept with the points), and fits a full '
-      f'server in one reliable command; {len(hooks) + 1} hooks wired; {len(variants) - 1} failing regression mutants')
+      f'server in one reliable command; a victim learns their killer and the other enemies that hurt them, by first '
+      f'hit; {len(hooks) + 1} hooks wired; {len(variants) - 1} failing regression mutants')

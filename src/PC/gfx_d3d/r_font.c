@@ -112,6 +112,25 @@ FontHandle R_RegisterFont(const char *fontName, int imageTrack)
     return font;
 }
 
+FontHandle R_RegisterWwiiFont(const char *fontName)
+{
+    int fontIndex;
+    FontHandle font;
+
+    for (fontIndex = 0; fontIndex < registeredFontCount; fontIndex++) {
+        if (I_stricmp(fontName, *(const char **)registeredFont[fontIndex]) == 0)
+            return registeredFont[fontIndex];
+    }
+    if (registeredFontCount > 15)
+        return 0;
+    font = R_LoadWwiiFont(fontName);
+    if (!font)
+        return 0;
+    registeredFont[registeredFontCount] = font;
+    registeredFontCount++;
+    return font;
+}
+
 int R_DuplicateFont(FontHandle fontCopy, const char *name)
 {
     int fontIndex;

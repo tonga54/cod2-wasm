@@ -117,7 +117,7 @@ static float CG_HeadshotIconSample(int texel, int sample, int size, int texels)
     return ((float)texel + ((float)sample + 0.5f) / HEADSHOT_ICON_SAMPLES - 0.5f * (float)size) / (float)texels;
 }
 
-static void CG_HeadshotIconRaster(byte *bgra, int size, int texels)
+void CG_HeadshotIconRaster(byte *bgra, int size, int texels)
 {
     int x, y, sx, sy;
 

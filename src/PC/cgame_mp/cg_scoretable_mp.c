@@ -435,7 +435,7 @@ void CG_ScoreTablePrepare(void)
  * come from the fonts: the name font's em is its pixel height, Barlow's
  * capitals 0.7 of it on the pen, and the WWII fonts keep the stock fonts'
  * metrics, told apart by pixel height. */
-static void CG_ScoreTableFontMetrics(FontHandle font, float *cap, float *baseline)
+void CG_ScoreTableFontMetrics(FontHandle font, float *cap, float *baseline)
 {
     const Glyph *glyph;
     int i;
@@ -457,7 +457,7 @@ static void CG_ScoreTableFontMetrics(FontHandle font, float *cap, float *baselin
 }
 
 /* Scale for a font whose capitals stand cap units tall. */
-static float CG_ScoreTableCapScale(FontHandle font, float cap)
+float CG_ScoreTableCapScale(FontHandle font, float cap)
 {
     float units;
     float baseline;
@@ -477,7 +477,7 @@ static FontHandle CG_ScoreTableRowFont(float cap, float *scale)
 }
 
 /* The advances' sum, without the UI's rounding down to a whole unit. */
-static float CG_ScoreTableTextWidth(const char *text, int maxChars, FontHandle font, float scale)
+float CG_ScoreTableTextWidth(const char *text, int maxChars, FontHandle font, float scale)
 {
     return (float)CL_TextWidth(text, maxChars, font) * CL_NormalizedTextScale(font, scale);
 }
@@ -496,7 +496,7 @@ static void CG_ScoreTableDrawText(const char *text, int maxChars, FontHandle fon
 }
 
 /* How many letters of text fit in room; color codes do not count. */
-static int CG_ScoreTableFit(const char *text, FontHandle font, float scale, float room)
+int CG_ScoreTableFit(const char *text, FontHandle font, float scale, float room)
 {
     int count = 0;
     const char *c;

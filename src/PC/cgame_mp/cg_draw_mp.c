@@ -9,6 +9,7 @@
 #include "headers/PC/cgame_mp/cg_grenadewarning.h"
 #include "headers/PC/cgame_mp/cg_minimap.h"
 #include "headers/PC/cgame_mp/cg_scorepopup.h"
+#include "headers/PC/cgame_mp/cg_killcam.h"
 #include "headers/PC/cgame_mp/cg_killfeed.h"
 #include "headers/PC/cgame_mp/cg_scorepanel.h"
 #include "headers/PC/cgame_mp/cg_scoretable.h"
@@ -1864,6 +1865,7 @@ unsigned int CG_Draw2D(void)
     qboolean drawHudElems;
     qboolean drewScoreboard;
     int hudCovered;
+    int killcam;
     float debugY = 0.0f;
     int pm_type;
     byte *cls = (byte *)imp_cls;
@@ -1931,9 +1933,12 @@ unsigned int CG_Draw2D(void)
     }
 
     pm_type = cg->nextSnap->ps.pm_type;
+    /* Over a replay the WWII killcam keeps the killer's crosshair, names and
+     * script elements and stands in for the rest of the HUD. */
+    killcam = drawHudElems && CG_KillcamActive();
     /* The compass menu, and with it the minimap, is painted for players, not
      * for free spectators or at intermission. */
-    CG_MinimapSetHudVisible(drawHudMenus && pm_type != 4 && pm_type != 5);
+    CG_MinimapSetHudVisible(drawHudMenus && pm_type != 4 && pm_type != 5 && !killcam);
     if (pm_type == 5) {
         CL_CloseAllMenus();
         if (!cg->showScores) {
@@ -1982,6 +1987,8 @@ unsigned int CG_Draw2D(void)
         CG_CheckTimedMenus();
         if (drawHudElems)
             CG_Draw2dHudElems(0);
+        if (killcam)
+            drawHudMenus = 0;
         if (drawHudMenus)
             Menu_PaintAll((void *)imp_cgDC);
         if (!hudCovered)
@@ -1992,6 +1999,8 @@ unsigned int CG_Draw2D(void)
             CG_DrawAmmoCounter();
             CG_DrawScorePopup();
         }
+        if (killcam)
+            CG_DrawKillcam();
     }
 
     drewScoreboard = CG_DrawScoreboard();

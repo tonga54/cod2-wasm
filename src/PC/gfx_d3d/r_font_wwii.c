@@ -47,7 +47,8 @@ extern void RB_UnbindImage(const GfxImage *image);
 enum {
     R_WWII_MEDIUM,
     R_WWII_SEMIBOLD,
-    R_WWII_BOLD
+    R_WWII_BOLD,
+    R_WWII_REGULAR
 };
 
 typedef struct {
@@ -68,7 +69,9 @@ typedef struct {
 
 /* The UI picks small, normal, big or extra big by the text's height on the
  * screen, so they share the captures' SemiBold, at their width: 95% of
- * Barlow's. Bold text is the scoreboard title's Bold. */
+ * Barlow's. Bold text is the scoreboard title's Bold. The killcam's numbers
+ * and prompt are Regular, a font no stock one stands for, in the extra big
+ * font's units. */
 static const R_WwiiFontProfile s_wwiiFontProfiles[] = {
     { "smallFont", R_WWII_SEMIBOLD, 12, 7.0f, 2, 0.95f, 0 },
     { "normalFont", R_WWII_SEMIBOLD, 16, 11.0f, 2, 0.95f, 0 },
@@ -79,9 +82,11 @@ static const R_WwiiFontProfile s_wwiiFontProfiles[] = {
     { "smallDevFont", R_WWII_SEMIBOLD, 16, 9.17f, 2, 0.95f, 0 },
     { "bigDevFont", R_WWII_SEMIBOLD, 24, 13.12f, 3, 0.95f, 0 },
     { "qerFont", R_WWII_SEMIBOLD, 12, 7.0f, 3, 0.95f, 0 },
+    { "regularFont", R_WWII_REGULAR, 32, 21.0f, 5, 1.0f, 0 },
 };
 
-static const unsigned char *const s_wwiiFontData[] = { r_wwiiFontMedium, r_wwiiFontSemiBold, r_wwiiFontBold };
+static const unsigned char *const s_wwiiFontData[] = { r_wwiiFontMedium, r_wwiiFontSemiBold, r_wwiiFontBold,
+                                                       r_wwiiFontRegular };
 
 /* Windows-1252 from 0x80; 0 where it defines no letter. */
 static const unsigned short s_wwiiFontWindows1252[32] = {

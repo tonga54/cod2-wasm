@@ -14,5 +14,12 @@ void CG_ScoreTableSetKills(int clientNum, int kills);
 /* Builds the team emblems for the current screen size; cheap once built. */
 void CG_ScoreTablePrepare(void);
 void CG_DrawScoreTable(float fade);
+/* Its lettering, which the killcam shares: where a font's capitals stand, the
+ * scale that makes them cap units tall, a text's width in units and how many
+ * of its letters fit in room. */
+void CG_ScoreTableFontMetrics(FontHandle font, float *cap, float *baseline);
+float CG_ScoreTableCapScale(FontHandle font, float cap);
+float CG_ScoreTableTextWidth(const char *text, int maxChars, FontHandle font, float scale);
+int CG_ScoreTableFit(const char *text, FontHandle font, float scale, float room);
 
 #endif
