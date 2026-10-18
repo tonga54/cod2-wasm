@@ -157,13 +157,14 @@ public manifest hashes rather than the archives.
 An optional `hitmarker.wav` beside the original IWDs replaces the sound of
 `MP_hit_alert`, which the original scripts play to the attacker for each hit.
 Like the IWDs it belongs to the owner and is never committed. The generator
-stores it unchanged as `sound/browser/hitmarker.wav` in
-`cod2_browser_audio.iwd` and moves the alias to
-`soundaliases/browser_hitmarker.csv`. The new row keeps the original volume,
-pitch, `auto2d` channel and `all_mp` load spec, but drops the original 35 ms
-start delay. `check-private-assets.py` verifies the alias and the packaged
-bytes against the owner file. Without the file the archive keeps the original
-sound.
+stores it as `sound/browser/hitmarker.wav` in `cod2_browser_audio.iwd`: a
+stereo file unchanged, a mono one as stereo with both channels the same,
+because the engine plays a mono 2D sound at half level on each side. It moves
+the alias to `soundaliases/browser_hitmarker.csv`. The new row keeps the
+original volume, pitch, `auto2d` channel and `all_mp` load spec, but drops the
+original 35 ms start delay. `check-private-assets.py` verifies the alias, and
+that the packaged bytes are what the generator makes of the owner file.
+Without the file the archive keeps the original sound.
 
 The file must be a 16-bit PCM WAV, mono or stereo, 11025–48000 Hz, at most
 two seconds long, reaching a tenth of its peak within 50 ms; the generator

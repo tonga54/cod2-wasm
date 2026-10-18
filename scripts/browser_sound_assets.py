@@ -19,11 +19,13 @@ def alias_table(text):
     return [value.lower().strip() for value in rows[0]], rows[1:]
 
 
-def check_hit_sound(data):
-    """Return the owner's hit sound if the engine loads it as it is and it starts at once.
+def package_hit_sound(data):
+    """The owner's hit sound as the archive holds it, if the engine loads it and it starts at once.
 
     Loaded aliases must be PCM WAV. The sound must reach a tenth of its peak
-    within 50 ms, to land with the hit marker, and last at most 2 s."""
+    within 50 ms, to land with the hit marker, and last at most 2 s. The engine
+    plays a mono 2D sound at half level on each side and a stereo one at full
+    level, so a mono sound is stored as stereo, both channels the same."""
     def invalid(reason):
         return ValueError(f'{HIT_SOUND_OWNER_FILE}: {reason}')
 
@@ -57,7 +59,14 @@ def check_hit_sound(data):
     onset = next(index for index, value in enumerate(values) if abs(value) * 10 >= peak) // channels
     if onset * 20 > rate:
         raise invalid(f'starts with {onset * 1000 // rate} ms of silence; trim it so the hit is heard at once')
-    return data
+    if channels == 2:
+        return data
+    stereo = bytearray(2 * len(samples))
+    for byte in (0, 1):
+        stereo[byte::4] = stereo[byte + 2::4] = samples[byte::2]
+    fmt = struct.pack('<HHIIHH', 1, 2, rate, 4 * rate, 4, 16)
+    body = b'WAVE' + b'fmt ' + struct.pack('<I', len(fmt)) + fmt + b'data' + struct.pack('<I', len(stereo)) + stereo
+    return b'RIFF' + struct.pack('<I', len(body)) + body
 
 
 def hit_sound_row(header, fields):
@@ -76,7 +85,7 @@ def verify_hit_sound(entries, original_rows, owner):
     if owner is None:
         assert table is None and sound is None, 'Hit sound packaged without the owner file'
         return
-    assert sound == check_hit_sound(owner), 'Packaged hit sound differs from the owner file'
+    assert sound == package_hit_sound(owner), 'Packaged hit sound differs from the owner file'
     assert table is not None, 'Missing the hit sound alias'
     header, rows = alias_table(table.decode('utf-8'))
     assert len(rows) == 1 and any(header == original_header and rows[0] == hit_sound_row(original_header, fields)
@@ -157,7 +166,7 @@ def collect_sound_assets(root, asset_index, originals, renderer, maps, hit_sound
         writer.writerow(header)
         writer.writerow(hit_sound_row(header, fields))
         files[HIT_SOUND_TABLE] = output.getvalue().encode('utf-8')
-        files['sound/' + HIT_SOUND_FILE] = check_hit_sound(hit_sound)
+        files['sound/' + HIT_SOUND_FILE] = package_hit_sound(hit_sound)
         print(f'Hit confirmation: the owner\'s {HIT_SOUND_OWNER_FILE} replaces MP_hit_alert')
     for name, (header, rows) in tables.items():
         if rows:

@@ -57,17 +57,27 @@ def click(lead_ms=0, attack_ms=1, rate=44100, channels=1, length_ms=80):
     return [value for value in samples for _ in range(channels)]
 
 
+def sound(samples, rate=44100, channels=1, extra=b''):
+    return wav(samples, rate, channels, extra=extra), rate, channels, samples
+
+
+def packaged(data, rate, channels, samples):
+    """What the archive holds: a stereo sound as it is, a mono one with both channels the same."""
+    return data if channels == 2 else wav([value for value in samples for _ in (0, 1)], rate, 2)
+
+
 STOCK_WAV = wav([0, 9000, -9000, 4000] * 300)
 TAIL_WAV = wav([0, 100, -100] * 50)
 FIRE_WAV = wav([0, 12000, -12000] * 400)
-OWNER = wav(click())
+OWNER_SOUND = sound(click())
+OWNER, PACKAGED_OWNER = OWNER_SOUND[0], packaged(*OWNER_SOUND)
 
 accepted = {
-    'mono 44.1 kHz': (OWNER, 44100, 1),
-    'stereo 48 kHz, 40 ms of silence': (wav(click(40, rate=48000, channels=2), 48000, 2), 48000, 2),
-    'a tenth of the peak at once, the peak after 60 ms': (wav(click(0, 60)), 44100, 1),
-    'mono 11025 Hz with a padded LIST chunk': (
-        wav(click(rate=11025), 11025, extra=b'LIST' + struct.pack('<I', 3) + b'abc\0'), 11025, 1),
+    'mono 44.1 kHz': OWNER_SOUND,
+    'stereo 48 kHz, 40 ms of silence': sound(click(40, rate=48000, channels=2), 48000, 2),
+    'a tenth of the peak at once, the peak after 60 ms': sound(click(0, 60)),
+    'mono 11025 Hz with a padded LIST chunk': sound(click(rate=11025), 11025,
+                                                    extra=b'LIST' + struct.pack('<I', 3) + b'abc\0'),
 }
 rejected = {
     'empty': b'',
@@ -134,10 +144,11 @@ def check(m, archive_path):
 
 
 def checks(m, archive_path):
-    for name, (data, _, _) in accepted.items():
-        assert m.check_hit_sound(data) is data, name
+    for name, accepted_sound in accepted.items():
+        result = m.package_hit_sound(accepted_sound[0])
+        assert result == packaged(*accepted_sound) and (result is accepted_sound[0]) == (accepted_sound[2] == 2), name
     for name, data in rejected.items():
-        raises(ValueError, lambda: m.check_hit_sound(data))
+        raises(ValueError, lambda: m.package_hit_sound(data))
 
     original = zipfile.ZipFile(archive_path)
     try:
@@ -160,7 +171,7 @@ def checks(m, archive_path):
 
         # With it, the same alias plays it, loaded, at once and alone.
         owned = m.collect_sound_assets(root, index, originals, renderer, maps, OWNER)
-        assert owned['sound/' + m.HIT_SOUND_FILE] == OWNER
+        assert owned['sound/' + m.HIT_SOUND_FILE] == PACKAGED_OWNER
         _, rows = m.alias_table(owned['soundaliases/test_mp.csv'].decode())
         assert rows == [FIRE_ROW]
         table_header, rows = m.alias_table(owned[m.HIT_SOUND_TABLE].decode())
@@ -186,9 +197,11 @@ def checks(m, archive_path):
         kept['soundaliases/test_mp.csv'] = stock['soundaliases/test_mp.csv']
         swapped = dict(owned)
         swapped['sound/' + m.HIT_SOUND_FILE] = wav(click(attack_ms=2))
+        unpackaged = dict(owned)
+        unpackaged['sound/' + m.HIT_SOUND_FILE] = OWNER
         missing = {name: data for name, data in owned.items() if name != m.HIT_SOUND_TABLE}
         for package, owner in ((delayed, OWNER), (doubled, OWNER), (kept, OWNER), (swapped, OWNER),
-                               (missing, OWNER), (stock, OWNER), (owned, None)):
+                               (unpackaged, OWNER), (missing, OWNER), (stock, OWNER), (owned, None)):
             raises(AssertionError, lambda: m.verify_hit_sound(package, hit_rows, owner))
         raises(ValueError, lambda: m.verify_hit_sound(owned, hit_rows, rejected['60 ms of silence']))
 
@@ -216,11 +229,14 @@ with tempfile.TemporaryDirectory(prefix='cod2-hit-sound-') as directory:
     (folder / 'test.c').write_text(harness)
     subprocess.run(['cc', '-O1', '-g', '-fsanitize=address,undefined', str(folder / 'test.c'),
                     '-o', str(folder / 'test')], check=True)
+    # The owner's files and the archive's copies of them.
     arguments = [str(folder / 'test')]
-    for number, (data, rate, channels) in enumerate(accepted.values()):
-        path = folder / f'{number}.wav'
-        path.write_bytes(data)
-        arguments += [str(path), str(rate), str(channels), str((len(data) - data.index(b'data') - 8) // (2 * channels))]
+    for number, accepted_sound in enumerate(accepted.values()):
+        data, rate, channels, samples = accepted_sound
+        for suffix, content, count in (('owner', data, channels), ('packaged', packaged(*accepted_sound), 2)):
+            path = folder / f'{number}-{suffix}.wav'
+            path.write_bytes(content)
+            arguments += [str(path), str(rate), str(count), str(len(samples) // channels)]
     subprocess.run(arguments, check=True)
 
     mutants = [
@@ -233,7 +249,11 @@ with tempfile.TemporaryDirectory(prefix='cod2-hit-sound-') as directory:
          "                replaced.append((tables[table][0], fields))\n"),
         ("if hit_sound is not None and alias == HIT_SOUND_ALIAS:", "if hit_sound is not None:"),
         ("        if not replaced:\n", "        if False:\n"),
-        ("files['sound/' + HIT_SOUND_FILE] = check_hit_sound(hit_sound)", "files[HIT_SOUND_FILE] = check_hit_sound(hit_sound)"),
+        ("files['sound/' + HIT_SOUND_FILE] = package_hit_sound(hit_sound)", "files[HIT_SOUND_FILE] = package_hit_sound(hit_sound)"),
+        ("files['sound/' + HIT_SOUND_FILE] = package_hit_sound(hit_sound)", "files['sound/' + HIT_SOUND_FILE] = hit_sound"),
+        ("    if channels == 2:\n        return data\n", "    if channels:\n        return data\n"),
+        ("stereo[byte::4] = stereo[byte + 2::4] = samples[byte::2]", "stereo[byte::4] = samples[byte::2]"),
+        ("struct.pack('<HHIIHH', 1, 2, rate, 4 * rate, 4, 16)", "struct.pack('<HHIIHH', 1, 2, rate, 2 * rate, 4, 16)"),
         ("    if onset * 20 > rate:", "    if onset * 2 > rate:"),
         ("abs(value) * 10 >= peak", "abs(value) >= peak"),
         ("tag != 1 or bits != 16 or ", "tag != 1 or "),
@@ -241,7 +261,8 @@ with tempfile.TemporaryDirectory(prefix='cod2-hit-sound-') as directory:
         ("if len(samples) // align > 2 * rate:", "if len(samples) // align > 20 * rate:"),
         ("        if size > len(data) - start:\n            raise invalid('truncated chunk')\n", ""),
         ("assert table is None and sound is None", "assert True"),
-        ("assert sound == check_hit_sound(owner)", "assert sound is not None"),
+        ("assert sound == package_hit_sound(owner)", "assert sound is not None"),
+        ("assert sound == package_hit_sound(owner)", "assert sound == owner"),
         ("dict(zip(other_header, row)).get('name', '').lower() != HIT_SOUND_ALIAS", "row is not None"),
     ]
     for old, new in mutants:
@@ -253,6 +274,7 @@ with tempfile.TemporaryDirectory(prefix='cod2-hit-sound-') as directory:
         raise AssertionError('mutant survived: ' + new)
 
 print(f'PASS: without the owner file the retail MP_hit_alert stays; with it the alias plays only the owner\'s '
-      f'loaded sound at once, the rest of the archive unchanged; {len(accepted)} accepted and {len(rejected)} rejected '
-      f'WAVs, the accepted ones read alike by the engine parser under ASan/UBSan; the checker rejects 8 altered '
-      f'packages; all {len(mutants)} mutants fail')
+      f'loaded sound at once, a mono one as stereo with both channels the same, the rest of the archive unchanged; '
+      f'{len(accepted)} accepted and {len(rejected)} rejected WAVs, the accepted ones and their packaged copies read '
+      f'alike by the engine parser under ASan/UBSan; the checker rejects 9 altered packages; all {len(mutants)} '
+      f'mutants fail')
