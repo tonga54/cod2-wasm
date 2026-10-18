@@ -61,7 +61,8 @@ private IWDs and credentials never enter GitHub Actions or releases.
 
 `scripts/update-pi.py` checks every five minutes through a user systemd timer.
 It requires a clean `main` checkout, a fast-forward source update, and the
-owner's original IWDs in `~/cod2-original/main` (private, outside Git). It
+owner's original IWDs, and the optional [hit sound](#owner-hit-sound), in
+`~/cod2-original/main` (private, outside Git). It
 validates package checksums, ARM64 image identities and the clean source/build
 revision, regenerates private assets in staging, and checks their exact public
 manifest hashes. A separate Docker project then exercises three maps, two bots
@@ -116,6 +117,8 @@ Two statuses keep the Pi on its installed build until someone acts:
   commit the manifest. On October 16, 2026 the Pi rejected `428bcbc` and
   `fd9057b` this way: its renderer archive was 848 bytes larger than the
   published one, and the build machine produced the same archive once rerun.
+  A missing or different [owner hit sound](#owner-hit-sound) causes the same
+  status, because the published audio archive includes the build machine's.
 - `At least 1.5 GiB free space is needed for a staged update`: every run
   downloads only `manifest.json` and waits. Check `df -h /` and
   `docker system df`. Build cache from manual Pi builds can be removed with
@@ -148,6 +151,26 @@ A person setting up another host must supply their original CoD2 IWD files in
 `data/main/`. These files are not supplied by a Git clone, public image or Release.
 Original assets remain private, read-only mounts; the repository contains their
 public manifest hashes rather than the archives.
+
+### Owner hit sound
+
+An optional `hitmarker.wav` beside the original IWDs replaces the sound of
+`MP_hit_alert`, which the original scripts play to the attacker for each hit.
+Like the IWDs it belongs to the owner and is never committed. The generator
+stores it unchanged as `sound/browser/hitmarker.wav` in
+`cod2_browser_audio.iwd` and moves the alias to
+`soundaliases/browser_hitmarker.csv`. The new row keeps the original volume,
+pitch, `auto2d` channel and `all_mp` load spec, but drops the original 35 ms
+start delay. `check-private-assets.py` verifies the alias and the packaged
+bytes against the owner file. Without the file the archive keeps the original
+sound.
+
+The file must be a 16-bit PCM WAV, mono or stereo, 11025–48000 Hz, at most
+two seconds long, reaching a tenth of its peak within 50 ms; the generator
+rejects anything else. Every host that prepares the published build needs a
+byte-identical copy: `data/main/hitmarker.wav` on the build machine and
+`~/cod2-original/main/hitmarker.wav` on the Pi. Changing the file changes the
+asset version, so each browser downloads the archives again once.
 
 ## Version checks
 

@@ -43,6 +43,7 @@ python3 "${repo_root}/scripts/test-sprint.py"
 python3 "${repo_root}/scripts/test-spectator-sprint.py"
 python3 "${repo_root}/scripts/test-hip-crosshair.py"
 python3 "${repo_root}/scripts/test-hit-marker.py"
+python3 "${repo_root}/scripts/test-hit-sound-assets.py"
 python3 "${repo_root}/scripts/test-minimap.py"
 python3 "${repo_root}/scripts/test-minimap-renderer.py"
 python3 "${repo_root}/scripts/test-objective-visibility.py"
@@ -188,7 +189,7 @@ for (const file of files) {
 assert.equal(JSON.parse(fs.readFileSync(path.join(site, 'wasm-game-framework.json'))).version, '0.9.2');
 assert.ok(!fs.readdirSync(site).some(name => /\.(iwd|data|html)$/i.test(name)));
 NODE
-tracked_assets="$(git -C "${repo_root}" ls-files '*.iwd' '*.wasm' '*.data')"
+tracked_assets="$(git -C "${repo_root}" ls-files '*.iwd' '*.wasm' '*.data' '*.wav' '*.mp3')"
 if [[ -n "${tracked_assets}" ]]; then
   printf '%s\n' "${tracked_assets}"
   echo 'Private assets or generated binaries are tracked' >&2

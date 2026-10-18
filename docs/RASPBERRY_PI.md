@@ -121,7 +121,8 @@ git clone https://github.com/tonga54/cod2-wasm.git
 cd cod2-wasm
 git clone https://github.com/theodorecharles/wasm-game-framework.git ../wasm-game-framework
 
-# Put your original CoD2 1.3 English IWD files in data/main/ first.
+# Put your original CoD2 1.3 English IWD files in data/main/ first, and the
+# optional hitmarker.wav (docs/UPDATES.md#owner-hit-sound) beside them.
 python3 scripts/prepare-browser-bootstrap.py
 python3 scripts/check-private-assets.py
 

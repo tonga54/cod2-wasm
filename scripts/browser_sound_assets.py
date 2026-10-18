@@ -2,9 +2,94 @@
 import csv
 import io
 import re
+import struct
+
+# The owner may keep a hit confirmation sound of their own beside the original
+# IWDs, never in Git. It replaces the sound of the scripts' MP_hit_alert.
+HIT_SOUND_OWNER_FILE = 'hitmarker.wav'
+HIT_SOUND_ALIAS = 'mp_hit_alert'
+HIT_SOUND_FILE = 'browser/hitmarker.wav'
+HIT_SOUND_TABLE = 'soundaliases/browser_hitmarker.csv'
 
 
-def collect_sound_assets(root, asset_index, originals, renderer, maps):
+def alias_table(text):
+    """The lowercased header and the alias rows of a sound alias CSV."""
+    rows = [row for row in csv.reader(io.StringIO(text))
+            if row and row[0].strip() and not row[0].lstrip().startswith('#')]
+    return [value.lower().strip() for value in rows[0]], rows[1:]
+
+
+def check_hit_sound(data):
+    """Return the owner's hit sound if the engine loads it as it is and it starts at once.
+
+    Loaded aliases must be PCM WAV. The sound must reach a tenth of its peak
+    within 50 ms, to land with the hit marker, and last at most 2 s."""
+    def invalid(reason):
+        return ValueError(f'{HIT_SOUND_OWNER_FILE}: {reason}')
+
+    if len(data) < 12 or data[:4] != b'RIFF' or data[8:12] != b'WAVE':
+        raise invalid('not a WAV file')
+    position, fmt, samples = 12, None, None
+    while position + 8 <= len(data):
+        chunk = data[position:position + 4]
+        size = struct.unpack_from('<I', data, position + 4)[0]
+        start = position + 8
+        if size > len(data) - start:
+            raise invalid('truncated chunk')
+        if chunk == b'fmt ' and size >= 16:
+            fmt = struct.unpack_from('<HHIIHH', data, start)
+        elif chunk == b'data':
+            samples = data[start:start + size]
+        position = start + size + (size & 1)
+    if fmt is None or samples is None:
+        raise invalid('missing format or sample data')
+    tag, channels, rate, _, align, bits = fmt
+    if tag != 1 or bits != 16 or channels not in (1, 2) or not 11025 <= rate <= 48000 or align != 2 * channels:
+        raise invalid('use 16-bit PCM, mono or stereo, at 11025 to 48000 Hz')
+    if not samples or len(samples) % align:
+        raise invalid('empty or partial sample data')
+    if len(samples) // align > 2 * rate:
+        raise invalid('longer than 2 s')
+    values = struct.unpack(f'<{len(samples) // 2}h', samples)
+    peak = max(abs(value) for value in values)
+    if not peak:
+        raise invalid('silent')
+    onset = next(index for index, value in enumerate(values) if abs(value) * 10 >= peak) // channels
+    if onset * 20 > rate:
+        raise invalid(f'starts with {onset * 1000 // rate} ms of silence; trim it so the hit is heard at once')
+    return data
+
+
+def hit_sound_row(header, fields):
+    """An original MP_hit_alert row playing the owner's sound, without its delay."""
+    values = dict(fields, file=HIT_SOUND_FILE, startdelay='', secondaryaliasname='')
+    return [values.get(name, '') for name in header]
+
+
+def verify_hit_sound(entries, original_rows, owner):
+    """Check that a package plays the owner's sound, and only it, for MP_hit_alert.
+
+    original_rows holds (header, fields) for every original MP_hit_alert row;
+    owner is the owner's file content, or None without one."""
+    table = entries.get(HIT_SOUND_TABLE)
+    sound = entries.get('sound/' + HIT_SOUND_FILE)
+    if owner is None:
+        assert table is None and sound is None, 'Hit sound packaged without the owner file'
+        return
+    assert sound == check_hit_sound(owner), 'Packaged hit sound differs from the owner file'
+    assert table is not None, 'Missing the hit sound alias'
+    header, rows = alias_table(table.decode('utf-8'))
+    assert len(rows) == 1 and any(header == original_header and rows[0] == hit_sound_row(original_header, fields)
+                                  for original_header, fields in original_rows), \
+        'The hit sound alias differs from the original MP_hit_alert'
+    for name, data in entries.items():
+        if name.startswith('soundaliases/') and name.endswith('.csv') and name != HIT_SOUND_TABLE:
+            other_header, other_rows = alias_table(data.decode('utf-8'))
+            assert all(dict(zip(other_header, row)).get('name', '').lower() != HIT_SOUND_ALIAS
+                       for row in other_rows), 'Original MP_hit_alert kept beside the hit sound: ' + name
+
+
+def collect_sound_assets(root, asset_index, originals, renderer, maps, hit_sound=None):
     def read(name):
         path, original_name = asset_index[name]
         return originals[path].read(original_name)
@@ -13,11 +98,9 @@ def collect_sound_assets(root, asset_index, originals, renderer, maps):
     for name in sorted(asset_index):
         if not name.startswith('soundaliases/') or not name.endswith('.csv'):
             continue
-        rows = [row for row in csv.reader(io.StringIO(read(name).decode('utf-8-sig', 'replace')))
-                if row and row[0].strip() and not row[0].lstrip().startswith('#')]
-        header = [value.lower().strip() for value in rows[0]]
+        header, rows = alias_table(read(name).decode('utf-8-sig', 'replace'))
         tables[name] = (header, [])
-        for row in rows[1:]:
+        for row in rows:
             fields = dict(zip(header, row))
             alias = fields.get('name', '').lower()
             if alias:
@@ -39,7 +122,7 @@ def collect_sound_assets(root, asset_index, originals, renderer, maps):
     # Dynamic quick-message names are assembled by faction at runtime.
     references.update(alias for alias in aliases if alias.startswith(('uk_mp_', 'us_mp_', 'ge_mp_')))
     pending = sorted(references & aliases.keys())
-    chosen, files, missing = set(), {}, set()
+    chosen, files, missing, replaced = set(), {}, set(), []
     while pending:
         alias = pending.pop()
         if alias in chosen:
@@ -50,6 +133,9 @@ def collect_sound_assets(root, asset_index, originals, renderer, maps):
             if spec and not spec[0].startswith('!') and not set(spec) & {'all_mp', 'menu', *maps}:
                 continue
             if '!all_mp' in spec or all('!' + mapname in spec for mapname in maps):
+                continue
+            if hit_sound is not None and alias == HIT_SOUND_ALIAS:
+                replaced.append((tables[table][0], fields))
                 continue
             sound = 'sound/' + fields.get('file', '').replace('\\', '/').lower()
             if sound not in asset_index:
@@ -62,6 +148,17 @@ def collect_sound_assets(root, asset_index, originals, renderer, maps):
                 pending.append(secondary)
     if missing:
         raise ValueError('Missing original sound dependencies: ' + ', '.join(sorted(missing)))
+    if hit_sound is not None:
+        if not replaced:
+            raise ValueError('No original MP_hit_alert alias for the owner hit sound to replace')
+        header, fields = replaced[0]
+        output = io.StringIO(newline='')
+        writer = csv.writer(output, lineterminator='\r\n')
+        writer.writerow(header)
+        writer.writerow(hit_sound_row(header, fields))
+        files[HIT_SOUND_TABLE] = output.getvalue().encode('utf-8')
+        files['sound/' + HIT_SOUND_FILE] = check_hit_sound(hit_sound)
+        print(f'Hit confirmation: the owner\'s {HIT_SOUND_OWNER_FILE} replaces MP_hit_alert')
     for name, (header, rows) in tables.items():
         if rows:
             output = io.StringIO(newline='')

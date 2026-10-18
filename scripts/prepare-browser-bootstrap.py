@@ -7,7 +7,7 @@ import json
 import re
 import struct
 import zipfile
-from browser_sound_assets import collect_sound_assets
+from browser_sound_assets import HIT_SOUND_OWNER_FILE, collect_sound_assets
 from browser_bot_menu import apply_bot_menu
 from browser_settings_menu import apply_settings_menu
 from browser_objective_assets import objective_asset_roots
@@ -314,7 +314,10 @@ try:
             pending.extend(candidate for candidate in candidates
                            if candidate in asset_index and candidate not in renderer)
     archives["cod2_browser_renderer.iwd"] = renderer
-    archives["cod2_browser_audio.iwd"] = collect_sound_assets(root, asset_index, originals, renderer, maps)
+    hit_sound = root / "data/main" / HIT_SOUND_OWNER_FILE
+    archives["cod2_browser_audio.iwd"] = collect_sound_assets(
+        root, asset_index, originals, renderer, maps,
+        hit_sound.read_bytes() if hit_sound.is_file() else None)
     for mapname, longname in maps.items():
         archives["cod2_browser_bootstrap.iwd"][f"mp/{mapname[3:]}.arena"] = (
             f'{{ map "{mapname}" longname "{longname}" gametype "{" ".join(gametypes)}" }}\n'.encode()
