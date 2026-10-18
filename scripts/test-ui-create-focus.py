@@ -113,6 +113,8 @@ static void UI_DrawText(const char *s,int max,FontHandle f,float x,float y,int h
  strcpy(paintedText,s);paintedMax=max;paintedCursor=-1;}
 static void UI_DrawTextWithCursor(const char *s,int max,FontHandle f,float x,float y,int ha,int va,float scale,const float *c,int style,int cursor,int ch){
  UI_DrawText(s,max,f,x,y,ha,va,scale,c,style);assert(ch=='_'||ch=='|');paintedCursor=cursor;}
+/* The WWII main menu switched off. */
+static int UI_WWIIMenu_CoversScreen(const menuDef_t *m){(void)m;return 0;}
 qboolean Item_ListBox_HandleKey(displayContextDef_t *,itemDef_t *,int,qboolean,qboolean);
 void Menu_HandleKey(displayContextDef_t *,menuDef_t *,int,qboolean);
 void Menus_HandleOOBClick(displayContextDef_t *,menuDef_t *,int,qboolean);

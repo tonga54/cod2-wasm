@@ -2,6 +2,7 @@
 #include "imports.h"
 #include "bytematch.h"
 #include "cod2_feature_config.h"
+#include "headers/PC/ui_mp/ui_wwii_menu.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -1241,6 +1242,7 @@ void UI_Init(void)
     Dvar_RegisterBool_mac("g_allowvote", 1, 0x1001);
     Dvar_RegisterBool_mac("cg_brass", 1, 0x1001);
     Dvar_RegisterBool_mac("cg_marks", 1, 0x1001);
+    UI_WWIIMenu_RegisterDvars();
 
     Dvar_RegisterString_mac("server1", "", 0x1001);
     Dvar_RegisterString_mac("server2", "", 0x1001);
@@ -3299,10 +3301,11 @@ after_browser:
         return;
 #endif
 
-    UI_DrawHandlePic((float)(uiInfo->uiDC.cursorx - 16),
-                     (float)(uiInfo->uiDC.cursory - 16),
-                     32.0f, 32.0f, 4, 4, 0,
-                     sharedUiInfo.assets.cursor);
+    if (!UI_WWIIMenu_DrawCursor(uiInfo->uiDC.cursorx, uiInfo->uiDC.cursory))
+        UI_DrawHandlePic((float)(uiInfo->uiDC.cursorx - 16),
+                         (float)(uiInfo->uiDC.cursory - 16),
+                         32.0f, 32.0f, 4, 4, 0,
+                         sharedUiInfo.assets.cursor);
 }
 
 void UI_RunMenuScript(const char **args)
@@ -4979,6 +4982,7 @@ void UI_Init(void)
     Dvar_RegisterBool_mac("g_allowvote", 1, 0x1001);
     Dvar_RegisterBool_mac("cg_brass", 1, 0x1001);
     Dvar_RegisterBool_mac("cg_marks", 1, 0x1001);
+    UI_WWIIMenu_RegisterDvars();
 
     Dvar_RegisterString_mac("server1", "", 0x1001);
     Dvar_RegisterString_mac("server2", "", 0x1001);

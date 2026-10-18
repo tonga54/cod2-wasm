@@ -76,6 +76,8 @@ static void Menu_HandleKey(displayContextDef_t *dc,menuDef_t *menu,int key,qbool
     assert(Item_ListBox_HandleKey(dc,menu->items[0],key,down,0));
 }
 static void CIN_StopCinematic(int handle) {(void)handle;++stops;}
+/* The WWII main menu switched off. */
+static int UI_WWIIMenu_CoversScreen(const menuDef_t *menu) {(void)menu;return 0;}
 '''
 code += list_key + '\n' + pause + '\n' + click + r'''
 int main(void) {

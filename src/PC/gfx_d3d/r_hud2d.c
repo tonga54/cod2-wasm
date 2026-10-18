@@ -1,6 +1,7 @@
 #include "common_types.h"
 #include "imports.h"
 #include "headers/PC/gfx_d3d/r_hud2d.h"
+#include <stdlib.h>
 #include <string.h>
 
 extern r_global_permanent_t rgp;
@@ -16,9 +17,11 @@ extern int Com_sprintf(char *dest, int size, const char *fmt, ...);
 /* Linear filtering, no mipmaps, clamped in U and V (see RB_SetSampler). */
 #define HUD_IMAGE_SAMPLER_STATE 0x32
 #define IWI_VERSION 5
+#define IWI_FORMAT_DXT1 0x0b
 #define IWI_FORMAT_DXT3 0x0c
 #define IWI_FORMAT_DXT5 0x0d
 #define DXT_BLOCK_BYTES 16
+#define DXT1_BLOCK_BYTES 8
 /* Fainter texels do not count as part of a silhouette's shape. */
 #define HUD_SILHOUETTE_ALPHA_MIN 16
 /* The darkest parts of an emblem keep this much of their alpha, so the whole
@@ -37,6 +40,10 @@ static const char *const s_hudImageNames[R_HUD_IMAGE_COUNT] = {
     "*hud_team_emblems",
     "*hud_killcam",
     "*hud_endgame",
+    "*menu_backdrop",
+    "*menu_shade",
+    "*menu_pill",
+    "*menu_cursor",
 };
 
 static GfxImage s_hudImages[R_HUD_IMAGE_COUNT];
@@ -58,6 +65,7 @@ typedef struct HudSilhouette {
 
 static HudSilhouette s_silhouettes[R_HUD_SILHOUETTE_COUNT];
 static int s_silhouetteCount;
+static int s_hudImageGeneration;
 static byte s_silhouettePixels[R_HUD_SILHOUETTE_MAX_SIZE * R_HUD_SILHOUETTE_MAX_SIZE * 4];
 
 static void R_ReleaseImage(GfxImage *image)
@@ -146,27 +154,41 @@ static void R_DecodeBlockAlpha(const byte *block, int format, byte *alpha)
         alpha[i] = palette[(bits >> (3 * i)) & 7];
 }
 
-/* Rec. 709 luma of each texel of a DXT3 or DXT5 color block, which always
- * holds four colors. */
-static void R_DecodeBlockLuma(const byte *block, byte *luma)
+/* Rec. 709 luma of each texel of a color block. A DXT1 block whose first
+ * color is not above its second holds three colors and black; a DXT3 or DXT5
+ * block always holds four. */
+static void R_DecodeColorLuma(const byte *color, int dxt1, byte *luma)
 {
     int palette[4];
+    int endpoints[2];
     unsigned int bits;
     int i;
 
     for (i = 0; i < 2; i++) {
-        int color = block[8 + 2 * i] | (block[9 + 2 * i] << 8);
-        int r = ((color >> 11) & 31) * 255 / 31;
-        int g = ((color >> 5) & 63) * 255 / 63;
-        int b = (color & 31) * 255 / 31;
+        int r, g, b;
+
+        endpoints[i] = color[2 * i] | (color[2 * i + 1] << 8);
+        r = ((endpoints[i] >> 11) & 31) * 255 / 31;
+        g = ((endpoints[i] >> 5) & 63) * 255 / 63;
+        b = (endpoints[i] & 31) * 255 / 31;
         palette[i] = (r * 54 + g * 183 + b * 19) >> 8;
     }
-    palette[2] = (2 * palette[0] + palette[1]) / 3;
-    palette[3] = (palette[0] + 2 * palette[1]) / 3;
-    bits = (unsigned int)block[12] | ((unsigned int)block[13] << 8) | ((unsigned int)block[14] << 16) |
-           ((unsigned int)block[15] << 24);
+    if (!dxt1 || endpoints[0] > endpoints[1]) {
+        palette[2] = (2 * palette[0] + palette[1]) / 3;
+        palette[3] = (palette[0] + 2 * palette[1]) / 3;
+    } else {
+        palette[2] = (palette[0] + palette[1]) / 2;
+        palette[3] = 0;
+    }
+    bits = (unsigned int)color[4] | ((unsigned int)color[5] << 8) | ((unsigned int)color[6] << 16) |
+           ((unsigned int)color[7] << 24);
     for (i = 0; i < 16; i++)
         luma[i] = (byte)palette[(bits >> (2 * i)) & 3];
+}
+
+static void R_DecodeBlockLuma(const byte *block, byte *luma)
+{
+    R_DecodeColorLuma(block + 8, 0, luma);
 }
 
 /* luminance scales each texel's alpha by its brightness, from
@@ -225,6 +247,104 @@ static int R_DecodeIcon(const byte *file, int fileLen, byte *bgra, int maxSize, 
 int R_DecodeIconAlpha(const byte *file, int fileLen, byte *bgra, int maxSize, int *width, int *height)
 {
     return R_DecodeIcon(file, fileLen, bgra, maxSize, width, height, 0);
+}
+
+/* The bytes of a DXT1, DXT3 or DXT5 block, or 0 for another format. */
+static int R_GrayBlockBytes(int format)
+{
+    if (format == IWI_FORMAT_DXT1)
+        return DXT1_BLOCK_BYTES;
+    if (format == IWI_FORMAT_DXT3 || format == IWI_FORMAT_DXT5)
+        return DXT_BLOCK_BYTES;
+    return 0;
+}
+
+int R_GetGrayImageSize(const byte *file, int fileLen, int *width, int *height)
+{
+    const GfxImageFileHeader *header = (const GfxImageFileHeader *)file;
+    int blockBytes, w, h;
+
+    if (!file || fileLen < (int)sizeof(*header) || memcmp(header->tag, "IWi", 3))
+        return 0;
+    if (header->version != IWI_VERSION)
+        return 0;
+    blockBytes = R_GrayBlockBytes(header->format);
+    w = header->dimensions[0];
+    h = header->dimensions[1];
+    if (!blockBytes || w < 1 || h < 1 || w > R_HUD_GRAY_MAX_SIZE || h > R_HUD_GRAY_MAX_SIZE)
+        return 0;
+    /* Mips are stored smallest first, so the top mip ends the file. */
+    if (fileLen - (int)sizeof(*header) < ((w + 3) / 4) * ((h + 3) / 4) * blockBytes)
+        return 0;
+    *width = w;
+    *height = h;
+    return 1;
+}
+
+int R_DecodeGrayImage(const byte *file, int fileLen, byte *bgra, const byte *tone)
+{
+    const GfxImageFileHeader *header = (const GfxImageFileHeader *)file;
+    const byte *block;
+    int w, h, blockBytes, blocksW, blocksH, bx, by, i;
+
+    if (!tone || !R_GetGrayImageSize(file, fileLen, &w, &h))
+        return 0;
+    blockBytes = R_GrayBlockBytes(header->format);
+    blocksW = (w + 3) / 4;
+    blocksH = (h + 3) / 4;
+    block = file + fileLen - blocksW * blocksH * blockBytes;
+
+    for (by = 0; by < blocksH; by++) {
+        for (bx = 0; bx < blocksW; bx++, block += blockBytes) {
+            byte luma[16];
+
+            R_DecodeColorLuma(blockBytes == DXT1_BLOCK_BYTES ? block : block + 8, blockBytes == DXT1_BLOCK_BYTES,
+                              luma);
+            for (i = 0; i < 16; i++) {
+                int x = bx * 4 + (i & 3);
+                int y = by * 4 + (i >> 2);
+
+                if (x < w && y < h) {
+                    byte *texel = bgra + (y * w + x) * 4;
+
+                    texel[0] = texel[1] = texel[2] = tone[luma[i]];
+                    texel[3] = 255;
+                }
+            }
+        }
+    }
+    return 1;
+}
+
+MaterialHandle R_CreateHudGrayMaterial(int slot, MaterialHandle source, const byte *tone, float *aspect)
+{
+    const Material *material = (const Material *)source;
+    const GfxImage *image;
+    MaterialHandle gray = NULL;
+    char path[96];
+    void *file;
+    byte *bgra;
+    int fileLen, width, height;
+
+    *aspect = 0.0f;
+    if (!material || material == rgp.defaultMaterial || material->textureCount < 1 || !material->textures)
+        return NULL;
+    image = material->textures[0].u.image;
+    if (!image || !image->name || Com_sprintf(path, sizeof(path), "images/%s.iwi", image->name) < 0)
+        return NULL;
+    fileLen = FS_ReadFile(path, &file);
+    if (fileLen < 0)
+        return NULL;
+    if (R_GetGrayImageSize((const byte *)file, fileLen, &width, &height)) {
+        bgra = (byte *)malloc((size_t)width * height * 4);
+        if (bgra && R_DecodeGrayImage((const byte *)file, fileLen, bgra, tone))
+            gray = R_CreateHudImageMaterial(slot, bgra, width, height);
+        free(bgra);
+    }
+    FS_FreeFile(file);
+    if (gray)
+        *aspect = (float)width / (float)height;
+    return gray;
 }
 
 /* Trims the transparent margin but one texel and packs the remaining rows at
@@ -350,6 +470,12 @@ void R_ShutdownHudImages(void)
         R_ReleaseImage(&s_silhouettes[slot].image);
     memset(s_silhouettes, 0, sizeof(s_silhouettes));
     s_silhouetteCount = 0;
+    s_hudImageGeneration++;
+}
+
+int R_GetHudImageGeneration(void)
+{
+    return s_hudImageGeneration;
 }
 
 int R_GetWorldDrawBounds(vec_t *mins, vec_t *maxs)

@@ -25,7 +25,11 @@ typedef struct HudVertex2D {
 #define R_HUD_IMAGE_TEAM_EMBLEMS 8
 #define R_HUD_IMAGE_KILLCAM 9
 #define R_HUD_IMAGE_ENDGAME 10
-#define R_HUD_IMAGE_COUNT 11
+#define R_HUD_IMAGE_MENU_BACKDROP 11
+#define R_HUD_IMAGE_MENU_SHADE 12
+#define R_HUD_IMAGE_MENU_PILL 13
+#define R_HUD_IMAGE_MENU_CURSOR 14
+#define R_HUD_IMAGE_COUNT 15
 
 /* Icons whose white silhouette or emblem has been built; each is read once. */
 #define R_HUD_SILHOUETTE_COUNT 64
@@ -45,7 +49,22 @@ MaterialHandle R_GetHudSilhouetteMaterial(MaterialHandle icon, float *aspect);
 MaterialHandle R_GetHudEmblemMaterial(MaterialHandle icon);
 /* The top mip of a DXT3 or DXT5 IWi file as white BGRA texels with its alpha. */
 int R_DecodeIconAlpha(const byte *file, int fileLen, byte *bgra, int maxSize, int *width, int *height);
+/* Images a gray copy is built from: DXT1, DXT3 or DXT5 IWis of at most this
+ * many texels a side. */
+#define R_HUD_GRAY_MAX_SIZE 2048
+/* The top mip of a DXT1, DXT3 or DXT5 IWi file as opaque gray BGRA texels:
+ * tone maps each texel's Rec. 709 luma to its gray. bgra holds width * height
+ * texels, read from the file's header by R_GetGrayImageSize. */
+int R_GetGrayImageSize(const byte *file, int fileLen, int *width, int *height);
+int R_DecodeGrayImage(const byte *file, int fileLen, byte *bgra, const byte *tone);
+/* An opaque gray copy of a 2D material's image through tone, built into slot.
+ * aspect gets its width over its height. Returns NULL, with aspect 0, when the
+ * image is not one R_DecodeGrayImage reads. */
+MaterialHandle R_CreateHudGrayMaterial(int slot, MaterialHandle source, const byte *tone, float *aspect);
 void R_ShutdownHudImages(void);
+/* Changes whenever R_ShutdownHudImages releases the images and the fonts
+ * shut down with them, so materials and fonts kept from before are gone. */
+int R_GetHudImageGeneration(void);
 /* Bounds of the loaded world's drawn surfaces, without the sky. */
 int R_GetWorldDrawBounds(vec_t *mins, vec_t *maxs);
 

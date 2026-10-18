@@ -1,6 +1,7 @@
 #include "common_types.h"
 #include "imports.h"
 #include "bytematch.h"
+#include "headers/PC/ui_mp/ui_wwii_menu.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -926,6 +927,7 @@ void UI_AddMenuList(displayContextDef_t *dc, MenuList *menuList)
 #ifdef __EMSCRIPTEN__
         UI_ConfigureBrowserMenu(menuList->menus[i]);
 #endif
+        UI_WWIIMenu_AddMenu(dc, menuList->menus[i]);
         if (dc->menuCount > 0x7f)
             Com_Error(1, "UI_AddMenu: Maximum number of menus %d exceeded.", 0x80);
         dc->Menus[dc->menuCount] = menuList->menus[i];
@@ -2054,6 +2056,7 @@ void Window_Paint(displayContextDef_t *dc, float (*w_param)[4][32], float fadeAm
 
 void Menu_Setup(displayContextDef_t *dc)
 {
+    UI_WWIIMenu_Reset(dc);
     dc->menuCount = 0;
     dc->openMenuCount = 0;
     Item_SetupKeywordHash();
@@ -2436,12 +2439,12 @@ static itemDef_t *Menu_MoveCursor(displayContextDef_t *dc, menuDef_t *menu, int 
     int cursor = oldCursor;
     int visited;
     if (count <= 0) return NULL;
-    if (cursor < 0 || cursor >= count) cursor = direction > 0 ? -1 : 0;
+    if (cursor < 0 || cursor >= count) cursor = direction > 0 ? -1 : count;
     for (visited = 0; visited < count; ++visited) {
         itemDef_t *item;
         rectDef_t rect;
         float x, y, scaleX = 1.0f, scaleY = 1.0f;
-        cursor = (cursor + direction + count) % count;
+        cursor = UI_WWIIMenu_NextItem(menu, cursor, direction);
         item = menu->items[cursor];
         if (!item) continue;
         rect = item->window.rect[0];
@@ -2655,6 +2658,9 @@ void Item_Text_Paint(displayContextDef_t *dc, itemDef_t *item)
                            item->dvar ? item->dvar : "");
         return;
     }
+
+    if (UI_WWIIMenu_PaintText(dc, item, textPtr))
+        return;
 
     Item_TextColor(dc, item, (vec4_t *)color);
     Item_SetTextExtents(item, &width, &height, textPtr);
@@ -4877,7 +4883,7 @@ void Menu_HandleKey(displayContextDef_t *dc, menuDef_t *menu, int key, qboolean 
             CalcScreenX(&cx, 4);
             CalcScreenY(&cy, 4);
             CalcScreenPlacement(&rx, &ry, &rw, &rh, (((rectDef_t*)(m))->horzAlign), (((rectDef_t*)(m))->vertAlign));
-            int inside = (cx >= rx && cx <= rx + rw && cy >= ry && cy <= ry + rh);
+            int inside = (cx >= rx && cx <= rx + rw && cy >= ry && cy <= ry + rh) || UI_WWIIMenu_CoversScreen(menu);
             if (!inside) {
 
                 if (!inHandleKey && key >= 0xc8 && key <= 0xca) {
@@ -5254,6 +5260,9 @@ void Item_Paint(displayContextDef_t *dc, itemDef_t *item)
         ((itemDef_t *)it)->window.background = CL_RegisterMaterialNoMip(dvarStr, 3);
     }
 
+    if (UI_WWIIMenu_PaintItem(dc, item))
+        return;
+
     Window_Paint(dc, (void *)item,
                  (((menuDef_t*)(parent))->fadeAmount), (((menuDef_t*)(parent))->fadeInAmount),
                  (((menuDef_t*)(parent))->fadeClamp), (float)(((menuDef_t*)(parent))->fadeCycle));
@@ -5490,6 +5499,7 @@ paint_content:
             Item_Paint(dc, item);
         }
     }
+    UI_WWIIMenu_PaintMenu(dc, menu);
 
     if (debugMode) {
         float color[4] = { 1.0f, 1.0f, 0.0f, 1.0f };
@@ -5504,6 +5514,7 @@ void Menu_PaintAll(displayContextDef_t *dc)
     int i, j;
 
     (((displayContextDef_s*)(d))->blurRadiusOut) = 0.0f;
+    UI_WWIIMenu_Update(dc);
 
     if (captureFunc)
         captureFunc(dc, captureData);
@@ -5592,7 +5603,8 @@ void Menus_HandleOOBClick(displayContextDef_t *dc, menuDef_t *menu, int key, qbo
         CalcScreenX(&testX, 4);
         CalcScreenY(&testY, 4);
         CalcScreenPlacement(&rx, &ry, &rw, &rh, (((rectDef_t*)(openMenu))->horzAlign), (((rectDef_t*)(openMenu))->vertAlign));
-        if (testX < rx || testX > rx + rw || testY < ry || testY > ry + rh)
+        if ((testX < rx || testX > rx + rw || testY < ry || testY > ry + rh) &&
+            !UI_WWIIMenu_CoversScreen((menuDef_t *)openMenu))
             continue;
 
         int itemCount = (((menuDef_t*)(openMenu))->itemCount);
