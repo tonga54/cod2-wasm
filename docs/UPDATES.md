@@ -65,7 +65,8 @@ private IWDs and credentials never enter GitHub Actions or releases.
 
 `scripts/update-pi.py` checks every five minutes through a user systemd timer.
 It requires a clean `main` checkout, a fast-forward source update, and the
-owner's original IWDs, and the optional [hit sound](#owner-hit-sound), in
+owner's original IWDs, and the optional [hit sound](#owner-hit-sound),
+[menu music](#owner-menu-music) and [sound pack](#owner-sound-pack), in
 `~/cod2-original/main` (private, outside Git). It
 validates package checksums, ARM64 image identities and the clean source/build
 revision, regenerates private assets in staging, and checks their exact public
@@ -121,9 +122,10 @@ Two statuses keep the Pi on its installed build until someone acts:
   commit the manifest. On October 16, 2026 the Pi rejected `428bcbc` and
   `fd9057b` this way: its renderer archive was 848 bytes larger than the
   published one, and the build machine produced the same archive once rerun.
-  A missing or different [owner hit sound](#owner-hit-sound) or
-  [menu music](#owner-menu-music) causes the same status, because the
-  published audio archive includes the build machine's.
+  A missing or different [owner hit sound](#owner-hit-sound),
+  [menu music](#owner-menu-music) or [sound pack](#owner-sound-pack) causes
+  the same status, because the published audio archive includes the build
+  machine's.
 - `At least 1.5 GiB free space is needed for a staged update`: every run
   downloads only `manifest.json` and waits. Check `df -h /` and
   `docker system df`. Build cache from manual Pi builds can be removed with
@@ -145,7 +147,8 @@ Prepare the owner's files on the build machine:
 python3 scripts/prepare-browser-bootstrap.py
 ```
 
-The current Toujane/Carentan/Dawnville subset is approximately **307 MB**. Each browser
+The current Toujane/Carentan/Dawnville subset is approximately **324 MB** with
+the owner's [sound pack](#owner-sound-pack) (313 MB without it). Each browser
 downloads it from the host over HTTP/HTTPS and stores it in IndexedDB. The
 manifest verifies archive sizes and SHA-256 hashes; a new asset version
 invalidates the old cache. Storage belongs to each browser and origin, so
@@ -197,6 +200,47 @@ The file must be MPEG audio layer III throughout, as the engine reads its
 frames before the browser decodes it, and last 1 to 240 seconds. The browser
 decodes a stream whole, 384 KB a second at 48 kHz in stereo, while the menu
 is open. Native builds play no streams, so they have no menu music either way.
+
+### Owner sound pack
+
+An optional `owner_sounds/` folder beside the original IWDs replaces the
+sounds of any original aliases it lists. Like the hit sound and the music it
+belongs to the owner: the WAVs, and the list of which original alias each one
+replaces, are never committed, and every host that prepares the published build
+needs a byte-identical copy (`data/main/owner_sounds/` and
+`~/cod2-original/main/owner_sounds/`). Changing a file or the list changes the
+asset version.
+
+The folder holds 16-bit PCM WAVs, mono or stereo, 11025–48000 Hz and at most
+20 seconds long, in lower-case subfolders, and `aliases.csv`: an `alias` and a
+`file` column, then any other alias column, such as `pitch_min` or `vol_max`,
+with an empty cell keeping the original value. Volumes stay within the alias
+format's 0–1; the engine clamps a volume to 1 again after its volume mod group.
+
+For each listed alias the generator drops its original rows and writes one row
+per listed file to `soundaliases/browser_owner.csv`, taking the alias's own rows
+in turn for every column the list does not set: channel, distances, falloff,
+start delay, secondary alias and load spec. Several rows of an alias are
+numbered 1, 2, 3 in `sequence`, because the engine drops rows of an alias that
+share a sequence number; it then picks among them at random without repeating
+the last. The files go to `sound/browser/owner/` in `cod2_browser_audio.iwd`,
+each once, and original files that only the replaced rows played are left out.
+The generator refuses an alias the three maps never play, a column the alias
+table lacks, a missing or malformed file, and an alias the hit sound or menu
+music already replaces. `check-private-assets.py` verifies the rows and that
+the packaged files are the owner's bytes. Without the folder the archive keeps
+the original sounds.
+
+On October 18, 2026 the owner's pack of 213 files replaced 215 aliases: first-
+and third-person fire, reloads and bolt cycles of every weapon, the mounted
+MG42 and .30 cal loops and cooldowns, grenade pins, throws, bounces and
+explosions, smoke, melee, weapon handling, mines and the radio and flak
+explosions. The audio archive grew from 46.1 to 57.0 MB, and the hunk in use
+after joining by 13.2 MB on Toujane and Carentan: on Carentan, the largest map,
+to 97.8 MB of the 134.2 MB (128 MiB) hunk. In 60-second TDM rounds with ten bots
+on both maps the console reported no sound alias or load errors, 39 and 30 of
+the owner's files played, and the fire aliases heard alternated between their
+variants.
 
 ## Version checks
 

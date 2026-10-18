@@ -18,6 +18,14 @@ MENU_MUSIC_FILE = 'browser/menumusic.mp3'
 MENU_MUSIC_TABLE = 'soundaliases/browser_menumusic.csv'
 # The browser decodes a stream whole, 384 KB a second at 48 kHz in stereo.
 MENU_MUSIC_MAX_SECONDS = 240
+# A sound pack of the owner's may sit there too, likewise never in Git: a
+# folder of 16-bit PCM WAVs and a list of the original aliases whose rows they
+# replace, a row a file, with values for any other alias column.
+OWNER_SOUNDS_DIR = 'owner_sounds'
+OWNER_SOUNDS_LIST = 'aliases.csv'
+OWNER_SOUNDS_FOLDER = 'browser/owner/'
+OWNER_SOUNDS_TABLE = 'soundaliases/browser_owner.csv'
+OWNER_SOUNDS_MAX_SECONDS = 20
 
 
 def alias_table(text):
@@ -128,6 +136,72 @@ def check_menu_music(data):
     return data
 
 
+def check_owner_sound(data, name):
+    """Return a file of the owner's sound pack if the engine loads it: a 16-bit PCM WAV, mono or stereo, at 11025
+    to 48000 Hz, at most OWNER_SOUNDS_MAX_SECONDS long."""
+    def invalid(reason):
+        return ValueError(f'{OWNER_SOUNDS_DIR}/{name}: {reason}')
+
+    if data[:4] != b'RIFF' or data[8:12] != b'WAVE':
+        raise invalid('not a WAV file')
+    position, fmt, frames = 12, None, None
+    while position + 8 <= len(data):
+        kind, size = data[position:position + 4], struct.unpack_from('<I', data, position + 4)[0]
+        if position + 8 + size > len(data):
+            raise invalid('a chunk runs past the end of the file')
+        if kind == b'fmt ' and size >= 16:
+            fmt = struct.unpack_from('<HHIIHH', data, position + 8)
+        elif kind == b'data':
+            frames = size
+        position += 8 + size + (size & 1)
+    if fmt is None or frames is None:
+        raise invalid('missing format or sample data')
+    tag, channels, rate, _, align, bits = fmt
+    if (tag, bits) != (1, 16) or channels not in (1, 2) or rate < 11025 or rate > 48000 or align != 2 * channels:
+        raise invalid('use 16-bit PCM, mono or stereo, at 11025 to 48000 Hz')
+    if not frames or frames % align:
+        raise invalid('empty or partial sample data')
+    if frames > OWNER_SOUNDS_MAX_SECONDS * rate * align:
+        raise invalid(f'longer than {OWNER_SOUNDS_MAX_SECONDS} s')
+    return data
+
+
+def load_owner_sounds(folder):
+    """The owner's sound pack in folder, or None without its list: for each alias, its files in order with the
+    alias columns they set, and each file's content."""
+    listing = folder / OWNER_SOUNDS_LIST
+    if not listing.is_file():
+        return None
+    rows = [row for row in csv.reader(io.StringIO(listing.read_text('utf-8-sig')))
+            if row and row[0].strip() and not row[0].lstrip().startswith('#')]
+    header = [value.lower().strip() for value in rows[0]]
+    if header[:2] != ['alias', 'file'] or len(set(header)) != len(header) or 'name' in header:
+        raise ValueError(f'{OWNER_SOUNDS_DIR}/{OWNER_SOUNDS_LIST}: start with alias,file columns, named once each')
+    aliases, files = {}, {}
+    for row in rows[1:]:
+        fields = dict(zip(header, (value.strip() for value in row)))
+        alias, name = fields.pop('alias').lower(), fields.pop('file').replace('\\', '/').lower()
+        if not alias or not re.fullmatch(r'[a-z0-9_]+(/[a-z0-9_]+)*\.wav', name):
+            raise ValueError(f'{OWNER_SOUNDS_DIR}/{OWNER_SOUNDS_LIST}: bad row {row}')
+        if name not in files:
+            path = folder / name
+            if not path.is_file():
+                raise ValueError(f'{OWNER_SOUNDS_DIR}/{name}: missing')
+            files[name] = check_owner_sound(path.read_bytes(), name)
+        aliases.setdefault(alias, []).append((name, {key: value for key, value in fields.items() if value}))
+    return {'aliases': aliases, 'files': files}
+
+
+def owner_sound_row(header, fields, name, values, sequence=None):
+    """An original row of an alias playing a file of the owner's pack, with the columns the pack sets. The engine
+    drops rows of an alias that share a sequence number, so an alias of several rows numbers them unless the pack
+    does."""
+    columns = dict(fields, **values, file=OWNER_SOUNDS_FOLDER + name)
+    if sequence is not None and 'sequence' not in values:
+        columns['sequence'] = str(sequence)
+    return [columns.get(column, '') for column in header]
+
+
 def menu_music_row(header, fields):
     """An original menu music row streaming the owner's music."""
     values = dict(fields, file=MENU_MUSIC_FILE)
@@ -188,7 +262,43 @@ def verify_menu_music(entries, original_rows, owner):
                        for row in other_rows), 'Original menu music kept beside the owner\'s: ' + name
 
 
-def collect_sound_assets(root, asset_index, originals, renderer, maps, hit_sound=None, menu_music=None):
+def verify_owner_sounds(entries, original_rows, owner):
+    """Check that a package plays the owner's pack, and only it, for the aliases the pack lists.
+
+    original_rows maps each alias to (header, fields) for its original rows; owner is the loaded pack, or None
+    without one."""
+    tables = {name: data for name, data in entries.items()
+              if name.startswith(OWNER_SOUNDS_TABLE[:-4]) and name.endswith('.csv')}
+    sounds = {name: data for name, data in entries.items() if name.startswith('sound/' + OWNER_SOUNDS_FOLDER)}
+    if owner is None:
+        assert not tables and not sounds, 'Owner sounds packaged without the owner pack'
+        return
+    used = {name for entries_of_alias in owner['aliases'].values() for name, _ in entries_of_alias}
+    assert sounds == {'sound/' + OWNER_SOUNDS_FOLDER + name: owner['files'][name] for name in used}, \
+        'Packaged owner sounds differ from the owner pack'
+    played = {}
+    for data in tables.values():
+        header, rows = alias_table(data.decode('utf-8'))
+        for row in rows:
+            played.setdefault(dict(zip(header, row)).get('name', '').lower(), []).append((header, row))
+    assert sorted(played) == sorted(owner['aliases']), 'Owner sound aliases differ from the owner pack'
+    for alias, wanted in owner['aliases'].items():
+        rows = played[alias]
+        assert len(rows) == len(wanted) and all(
+            any(original_header == header and
+                row == owner_sound_row(header, fields, name, values, number + 1 if len(wanted) > 1 else None)
+                for original_header, fields in original_rows.get(alias, []))
+            for number, ((header, row), (name, values)) in enumerate(zip(rows, wanted))), \
+            'Owner sound rows differ for ' + alias
+    for name, data in entries.items():
+        if name.startswith('soundaliases/') and name.endswith('.csv') and name not in tables:
+            other_header, other_rows = alias_table(data.decode('utf-8'))
+            assert all(dict(zip(other_header, row)).get('name', '').lower() not in owner['aliases']
+                       for row in other_rows), 'Original rows kept beside the owner pack: ' + name
+
+
+def collect_sound_assets(root, asset_index, originals, renderer, maps, hit_sound=None, menu_music=None,
+                         owner_sounds=None):
     def read(name):
         path, original_name = asset_index[name]
         return originals[path].read(original_name)
@@ -221,7 +331,11 @@ def collect_sound_assets(root, asset_index, originals, renderer, maps, hit_sound
     # Dynamic quick-message names are assembled by faction at runtime.
     references.update(alias for alias in aliases if alias.startswith(('uk_mp_', 'us_mp_', 'ge_mp_')))
     pending = sorted(references & aliases.keys())
-    chosen, files, missing, replaced, music = set(), {}, set(), [], {}
+    chosen, files, missing, replaced, music, owned = set(), {}, set(), [], {}, {}
+    pack = owner_sounds['aliases'] if owner_sounds is not None else {}
+    if (hit_sound is not None and HIT_SOUND_ALIAS in pack or
+            menu_music is not None and set(MENU_MUSIC_ALIASES) & set(pack)):
+        raise ValueError('The owner sound pack lists an alias the owner hit sound or menu music replaces')
     while pending:
         alias = pending.pop()
         if alias in chosen:
@@ -239,13 +353,18 @@ def collect_sound_assets(root, asset_index, originals, renderer, maps, hit_sound
             if menu_music is not None and alias in MENU_MUSIC_ALIASES:
                 music.setdefault(alias, (tables[table][0], fields))
                 continue
+            secondary = fields.get('secondaryaliasname', '').lower()
+            if alias in pack:
+                owned.setdefault(alias, []).append((table, fields))
+                if secondary in aliases:
+                    pending.append(secondary)
+                continue
             sound = 'sound/' + fields.get('file', '').replace('\\', '/').lower()
             if sound not in asset_index:
                 missing.add(sound)
                 continue
             tables[table][1].append(row)
             files[sound] = read(sound)
-            secondary = fields.get('secondaryaliasname', '').lower()
             if secondary in aliases:
                 pending.append(secondary)
     if missing:
@@ -275,6 +394,31 @@ def collect_sound_assets(root, asset_index, originals, renderer, maps, hit_sound
         files[MENU_MUSIC_TABLE] = output.getvalue().encode('utf-8')
         files['sound/' + MENU_MUSIC_FILE] = check_menu_music(menu_music)
         print(f'Menu music: the owner\'s {MENU_MUSIC_OWNER_FILE} replaces {" and ".join(MENU_MUSIC_ALIASES)}')
+    if owner_sounds is not None:
+        unused = sorted(set(pack) - set(owned))
+        if unused:
+            raise ValueError('The owner sound pack lists aliases the supported maps do not play: ' + ', '.join(unused))
+        by_table = {}
+        for alias, wanted in pack.items():
+            for number, (name, values) in enumerate(wanted):
+                table, fields = owned[alias][number % len(owned[alias])]
+                header = tables[table][0]
+                unknown = sorted(set(values) - set(header))
+                if unknown:
+                    raise ValueError(f'The owner sound pack sets {", ".join(unknown)}, not a column of {table}')
+                by_table.setdefault(table, (header, []))[1].append(
+                    owner_sound_row(header, fields, name, values, number + 1 if len(wanted) > 1 else None))
+                files['sound/' + OWNER_SOUNDS_FOLDER + name] = owner_sounds['files'][name]
+        for number, table in enumerate(sorted(by_table)):
+            header, rows = by_table[table]
+            output = io.StringIO(newline='')
+            writer = csv.writer(output, lineterminator='\r\n')
+            writer.writerow(header)
+            writer.writerows(rows)
+            name = OWNER_SOUNDS_TABLE if not number else OWNER_SOUNDS_TABLE[:-4] + f'_{number + 1}.csv'
+            files[name] = output.getvalue().encode('utf-8')
+        print(f'Owner sound pack: {len({name for wanted in pack.values() for name, _ in wanted})} files replace '
+              f'{len(pack)} aliases')
     for name, (header, rows) in tables.items():
         if rows:
             output = io.StringIO(newline='')

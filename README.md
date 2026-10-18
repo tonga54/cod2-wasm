@@ -209,6 +209,10 @@ retail CoD2:
   Prone movement crawls at 15% of standing speed with the original forward
   and backward crawling animations. Mantling requires a fresh press, checks its
   path for obstacles, and stops safely if that path becomes blocked.
+- **Owner sound pack:** an optional folder of the host owner's WAVs beside the
+  original IWDs replaces the sounds of the original aliases it lists, keeping
+  each alias's channel, distances and timing; see
+  [docs/UPDATES.md](docs/UPDATES.md#owner-sound-pack).
 - **Fall damage and blood feedback:** falls above 256 game units progressively
   deal damage, reaching a lethal fall at 480 units. The thresholds are controlled
   by `bg_fallDamageMinHeight` and `bg_fallDamageMaxHeight`. Damage scales from
