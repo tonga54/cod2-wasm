@@ -4,6 +4,9 @@
 #include "headers/PC/cgame_mp/cg_minimap.h"
 #include "headers/PC/cgame_mp/cg_killcam.h"
 #include "headers/PC/cgame_mp/cg_scorepanel.h"
+#include "headers/PC/cgame_mp/cg_hitmarker.h"
+#include "headers/PC/gfx_d3d/r_hud2d.h"
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -654,18 +657,138 @@ static void CG_GetHudElemInfo(const hudelem_t *elem, cg_hudelem_t *cghe, char *h
     CG_GetHudElemColor(elem, cghe->color);
 }
 
-/* The gametype scripts confirm each hit by showing the white damage_feedback X
- * and fading it out over a second. Like CoD WWII, draw it larger and red, and
- * only briefly. */
+#define CG_HUD_LINES_MAX 4
+
+void CG_DrawHudLines(const float lines[][4], int count, float width, float feather, const vec_t *color)
+{
+    HudVertex2D verts[CG_HUD_LINES_MAX * 16];
+    unsigned short indices[CG_HUD_LINES_MAX * 54];
+    float alpha = color[3];
+    float across[4];
+    int vertexCount = 0;
+    int indexCount = 0;
+    int line;
+
+    /* Thinner than a pixel, a line is a pixel wide and fainter. */
+    if (width < 1.0f) {
+        alpha *= width;
+        width = 1.0f;
+    }
+    if (alpha <= 0.0f || count > CG_HUD_LINES_MAX || !(feather > 0.0f && feather <= 1.0f))
+        return;
+    across[0] = (width + feather) * -0.5f;
+    across[1] = (width - feather) * -0.5f;
+    across[2] = (width - feather) * 0.5f;
+    across[3] = (width + feather) * 0.5f;
+    for (line = 0; line < count; ++line) {
+        float dx = lines[line][2] - lines[line][0];
+        float dy = lines[line][3] - lines[line][1];
+        float length = sqrtf(dx * dx + dy * dy);
+        float along[4];
+        int i;
+        int j;
+
+        if (length < 1.0f)
+            continue;
+        dx /= length;
+        dy /= length;
+        along[0] = -0.5f;
+        along[1] = 0.5f;
+        along[2] = length - 0.5f;
+        along[3] = length + 0.5f;
+        /* A grid four vertices across and four along, opaque inside. */
+        for (j = 0; j < 4; ++j) {
+            for (i = 0; i < 4; ++i) {
+                HudVertex2D *vertex = &verts[vertexCount + j * 4 + i];
+
+                memset(vertex, 0, sizeof(*vertex));
+                vertex->xy[0] = lines[line][0] + dx * along[j] - dy * across[i];
+                vertex->xy[1] = lines[line][1] + dy * along[j] + dx * across[i];
+                vertex->rgba[0] = color[0];
+                vertex->rgba[1] = color[1];
+                vertex->rgba[2] = color[2];
+                vertex->rgba[3] = (i == 0 || i == 3 || j == 0 || j == 3) ? 0.0f : alpha;
+            }
+        }
+        for (j = 0; j < 3; ++j) {
+            for (i = 0; i < 3; ++i) {
+                unsigned short corner = (unsigned short)(vertexCount + j * 4 + i);
+
+                indices[indexCount++] = corner;
+                indices[indexCount++] = (unsigned short)(corner + 1);
+                indices[indexCount++] = (unsigned short)(corner + 5);
+                indices[indexCount++] = corner;
+                indices[indexCount++] = (unsigned short)(corner + 5);
+                indices[indexCount++] = (unsigned short)(corner + 4);
+            }
+        }
+        vertexCount += 16;
+    }
+    if (indexCount)
+        R_AddCmdDrawTriangles2D(verts, vertexCount, indices, indexCount, cgs->media.whiteMaterial);
+}
+
+/* The gametype scripts confirm each hit by showing the damage_feedback X in a
+ * 24-unit box at screen center and fading it out over a second. Draw CoD
+ * WWII's instead, measured on its captures in units of that box: four thin
+ * lines on the diagonals, white for a hit and longer and red for the hit that
+ * kills, shown only briefly. */
 #define CG_HIT_MARKER_MATERIAL "damage_feedback"
-#define CG_HIT_MARKER_SCALE 1.8f
+#define CG_HIT_MARKER_BOX 24.0f
+#define CG_HIT_MARKER_INNER 5.8f
+#define CG_HIT_MARKER_OUTER 13.0f
+#define CG_HIT_MARKER_KILL_OUTER 14.6f
+#define CG_HIT_MARKER_WIDTH 0.85f
 #define CG_HIT_MARKER_HOLD_MS 80
 #define CG_HIT_MARKER_FADE_MS 220
+/* The scripts show the marker in the server frame of the obituary, but a
+ * snapshot that is late may bring the obituary after it. */
+#define CG_HIT_MARKER_KILL_WINDOW_MS 250
 
-static void CG_DrawHitMarker(const hudelem_t *elem, float x, float y, float width, float height, float alpha, void *material)
+static const float s_hitMarkerKillColor[3] = {0.86f, 0.16f, 0.13f};
+/* The server time of the snapshot that brought each player's latest kill. */
+static int s_hitMarkerKillTime[64];
+static int s_hitMarkerKilled[64];
+
+void CG_HitMarkerInit(void)
 {
-    vec4_t color = {1.0f, 0.2f, 0.15f, alpha};
+    memset(s_hitMarkerKillTime, 0, sizeof(s_hitMarkerKillTime));
+    memset(s_hitMarkerKilled, 0, sizeof(s_hitMarkerKilled));
+}
+
+void CG_HitMarkerObituary(int attacker, int target)
+{
+    if (attacker < 0 || attacker >= 64 || attacker == target || !cg->nextSnap)
+        return;
+    s_hitMarkerKillTime[attacker] = cg->nextSnap->serverTime;
+    s_hitMarkerKilled[attacker] = 1;
+}
+
+/* Whether the viewed player's marker shows their latest kill, once the
+ * snapshot that brought it is the one drawn. */
+static int CG_HitMarkerShowsKill(const hudelem_t *elem)
+{
+    int viewer = cg->snap->ps.clientNum;
+    int killTime;
+
+    if (viewer < 0 || viewer >= 64 || !s_hitMarkerKilled[viewer])
+        return 0;
+    killTime = s_hitMarkerKillTime[viewer];
+    return cg->snap->serverTime - killTime >= 0 && killTime - elem->fadeStartTime >= 0 &&
+           killTime - elem->fadeStartTime <= CG_HIT_MARKER_KILL_WINDOW_MS;
+}
+
+static void CG_DrawHitMarker(const hudelem_t *elem, float x, float y, float width, float height, float alpha)
+{
+    static const float diagonals[4][2] = {{-1.0f, -1.0f}, {1.0f, -1.0f}, {1.0f, 1.0f}, {-1.0f, 1.0f}};
+    vec4_t color = {1.0f, 1.0f, 1.0f, alpha};
+    float lines[4][4];
+    float unit = height / CG_HIT_MARKER_BOX * 0.70710678f;
+    float outer = CG_HIT_MARKER_OUTER;
+    float centerX;
+    float centerY;
     int fadeElapsed = cg_time() - elem->fadeStartTime;
+    int i;
 
     /* While the script's fade runs the hit is fresh: hold, then fade out early. */
     if (fadeElapsed < elem->fadeTime) {
@@ -674,12 +797,23 @@ static void CG_DrawHitMarker(const hudelem_t *elem, float x, float y, float widt
             return;
         color[3] = fadeElapsed > 0 ? 1.0f - (float)fadeElapsed / (float)CG_HIT_MARKER_FADE_MS : 1.0f;
     }
+    if (CG_HitMarkerShowsKill(elem)) {
+        color[0] = s_hitMarkerKillColor[0];
+        color[1] = s_hitMarkerKillColor[1];
+        color[2] = s_hitMarkerKillColor[2];
+        outer = CG_HIT_MARKER_KILL_OUTER;
+    }
 
-    float markerWidth = width * CG_HIT_MARKER_SCALE;
-    float markerHeight = height * CG_HIT_MARKER_SCALE;
-    x = floorf(x - (markerWidth - width) * 0.5f + 0.5f);
-    y = floorf(y - (markerHeight - height) * 0.5f + 0.5f);
-    CL_DrawStretchPicPhysical(x, y, markerWidth, markerHeight, 0.0f, 0.0f, 1.0f, 1.0f, &color, material);
+    /* Centered on the box's middle pixel, where the crosshair's lines meet. */
+    centerX = floorf(x + width * 0.5f) + 0.5f;
+    centerY = floorf(y + height * 0.5f) + 0.5f;
+    for (i = 0; i < 4; ++i) {
+        lines[i][0] = centerX + diagonals[i][0] * unit * CG_HIT_MARKER_INNER;
+        lines[i][1] = centerY + diagonals[i][1] * unit * CG_HIT_MARKER_INNER;
+        lines[i][2] = centerX + diagonals[i][0] * unit * outer;
+        lines[i][3] = centerY + diagonals[i][1] * unit * outer;
+    }
+    CG_DrawHudLines(lines, 4, height / CG_HIT_MARKER_BOX * CG_HIT_MARKER_WIDTH, 1.0f, color);
 }
 
 void CG_Draw2dHudElems(qboolean foreground)
@@ -788,7 +922,7 @@ void CG_Draw2dHudElems(qboolean foreground)
                 CalcScreenPlacement(&dummyX, &dummyY, &width, &height, (alignScreen >> 3) & 7, alignScreen & 7);
 
                 if (!I_stricmp(materialName, CG_HIT_MARKER_MATERIAL))
-                    CG_DrawHitMarker(elem, cghe.x, yPos, width, height, cghe.color[3], material);
+                    CG_DrawHitMarker(elem, cghe.x, yPos, width, height, cghe.color[3]);
                 else
                     CL_DrawStretchPicPhysical(cghe.x, yPos, width, height, 0.0f, 0.0f, 1.0f, 1.0f, &cghe.color, material);
             } else if (typeMask & 0x1800) {

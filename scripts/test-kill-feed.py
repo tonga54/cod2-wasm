@@ -42,6 +42,8 @@ static int CG_KillFeedEnabled(void){return feedEnabled;}
 static void CG_KillFeedAdd(int a,int v,const char *i,int wide,int flip,int headshot){fed++;fedAttacker=a;fedVictim=v;snprintf(fedIcon,sizeof(fedIcon),"%s",i);fedWide=wide;fedFlip=flip;fedHeadshot=headshot;}
 static int killcamCalls,killcamAttacker,killcamTarget,killcamParm;
 static void CG_KillcamObituary(int a,int t,int ep){killcamCalls++;killcamAttacker=a;killcamTarget=t;killcamParm=ep;}
+static int hitMarkerCalls,hitMarkerAttacker,hitMarkerTarget;
+static void CG_HitMarkerObituary(int a,int t){hitMarkerCalls++;hitMarkerAttacker=a;hitMarkerTarget=t;}
 static int deliveringObituary;
 static void obituary(entityState_t *es) {
  float attackerColor[4],victimColor[4],iconColor[4],iconWidth;
@@ -50,7 +52,7 @@ static void obituary(entityState_t *es) {
 '''
 checks=r'''
 }
-static void reset(void){teamCount=printed=fed=killcamCalls=0;center[0]=0;}
+static void reset(void){teamCount=printed=fed=killcamCalls=hitMarkerCalls=0;center[0]=0;}
 int main(void){
 #ifdef __EMSCRIPTEN__
  deliveringObituary=1;
@@ -104,6 +106,14 @@ int main(void){
  reset();es=(entityState_t){5,1022,0x80|8};obituary(&es);assert(killcamCalls==1 && killcamAttacker==-1 && killcamTarget==5);
  reset();es=(entityState_t){5,5,0x80|12};obituary(&es);assert(killcamCalls==1 && killcamAttacker==-1);
  reset();es=(entityState_t){5,6,1};cg->inKillCam=1;obituary(&es);assert(killcamCalls==deliveringObituary);cg->inKillCam=0;
+ /* So does the hit marker, with the same killer, to show the kill. */
+ feedEnabled=0;
+ reset();es=(entityState_t){5,6,1};obituary(&es);assert(hitMarkerCalls==1 && hitMarkerAttacker==6 && hitMarkerTarget==5);
+ feedEnabled=1;
+ reset();es=(entityState_t){5,6,0x80|8};obituary(&es);assert(hitMarkerCalls==1 && hitMarkerAttacker==6 && hitMarkerTarget==5);
+ reset();es=(entityState_t){5,1022,0x80|8};obituary(&es);assert(hitMarkerCalls==1 && hitMarkerAttacker==-1 && hitMarkerTarget==5);
+ reset();es=(entityState_t){5,5,0x80|12};obituary(&es);assert(hitMarkerCalls==1 && hitMarkerAttacker==-1);
+ reset();es=(entityState_t){5,6,1};cg->inKillCam=1;obituary(&es);assert(hitMarkerCalls==deliveringObituary);cg->inKillCam=0;
  return 0;
 }
 '''
@@ -124,7 +134,9 @@ with tempfile.TemporaryDirectory(prefix='cod2-obituary-') as directory:
           ('iconWidth > 2.0f, iconHorzFlip,','iconWidth > 2.0f, 0,'),
           ('            CG_KillcamObituary(attackerName[0] ? attacker : -1, target, ep);\n',''),
           ('CG_KillcamObituary(attackerName[0] ? attacker : -1,','CG_KillcamObituary(attacker,'),
-          ('target, ep);','target, ep & 0x7f);')]
+          ('target, ep);','target, ep & 0x7f);'),
+          ('            CG_HitMarkerObituary(attackerName[0] ? attacker : -1, target);\n',''),
+          ('CG_HitMarkerObituary(attackerName[0] ? attacker : -1,','CG_HitMarkerObituary(attacker,')]
  for old,new in mutants:
   assert body.count(old)>=1,old
  for index,variant in enumerate([body]+[body.replace(old,new) for old,new in mutants]):
@@ -134,5 +146,5 @@ with tempfile.TemporaryDirectory(prefix='cod2-obituary-') as directory:
 print('PASS: native and reliable browser feed; 4096 killer/victim combinations, correct names and teams, retail icons for '
       'melee, headshot, crush, falling and suicide deaths, world deaths and no replay duplicate; with cg_hudKillFeed the '
       'obituary goes to the WWII feed with the weapon icon, its width and mirroring, every headshot is marked as one '
-      'with the stock headshot icon in both builds, and world deaths and suicides have no attacker; the killcam hears '
-      'of each obituary once, feed or not; all %d mutants fail' % len(mutants))
+      'with the stock headshot icon in both builds, and world deaths and suicides have no attacker; the killcam and '
+      'the hit marker hear of each obituary once, feed or not; all %d mutants fail' % len(mutants))

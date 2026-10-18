@@ -8,6 +8,7 @@
 #include "headers/PC/cgame_mp/cg_breathprompt.h"
 #include "headers/PC/cgame_mp/cg_endgame.h"
 #include "headers/PC/cgame_mp/cg_grenadewarning.h"
+#include "headers/PC/cgame_mp/cg_hitmarker.h"
 #include "headers/PC/cgame_mp/cg_minimap.h"
 #include "headers/PC/cgame_mp/cg_scorepopup.h"
 #include "headers/PC/cgame_mp/cg_killcam.h"
@@ -1643,8 +1644,106 @@ float CG_DrawWeapReticle(void)
  * them only down to this fraction of the crosshair alpha. */
 #define CG_CROSSHAIR_SPRINT_SPREAD 1.4f
 #define CG_CROSSHAIR_SPREAD_ALPHA_MIN 0.6f
+/* The side marks as CoD WWII draws them, measured on its captures in virtual
+ * units: thin lines without an outline from the spread outwards, fainter than
+ * the crosshair alpha. A line is whole pixels wide, its opacity making up the
+ * difference. */
+#define CG_CROSSHAIR_LINE_LENGTH 4.7f
+#define CG_CROSSHAIR_LINE_WIDTH 0.75f
+#define CG_CROSSHAIR_LINE_ALPHA 0.8f
 
 extern float CG_SprintCarryBlend(const playerState_t *ps);
+extern int I_strnicmp(const char *s0, const char *s1, size_t n);
+
+/* Every stock gun marks its spread with the skinny side bar, which the lines
+ * replace. Other marks, such as the launchers' arcs, keep their image. */
+static int CG_CrosshairSideIsBar(const char *name)
+{
+    const char *file = name;
+
+    for (; *name; ++name) {
+        if (*name == '/' || *name == '\\')
+            file = name + 1;
+    }
+    return !I_strnicmp(file, "side_skinny", 11);
+}
+
+static void CG_DrawCrosshairSidePics(float centerX, float centerY, float minOfs, float sideSizeF,
+                                     const vec_t *reticleColor, MaterialHandle material)
+{
+    float sideSize = CL_IsRenderingSplitScreen() ? sideSizeF + sideSizeF : sideSizeF;
+    float realW = GetRealWidthFromVirtualWidth(sideSize);
+    float realH = GetRealHeightFromVirtualHeight(sideSize);
+    float divW = (float)cgs->viewWidth;
+    float divH = (float)cgs->viewHeight;
+    float vw = GetVirtualWidthFromRealWidth(divW * (realW / divW * 0.125f));
+    float vh = GetVirtualHeightFromRealHeight(divH * (realH / divH * 0.125f));
+    float ax;
+    float ay;
+
+    ax = CG_AlignHudElemX(4, centerX, sideSize);
+    ay = CG_AlignHudElemY(2, centerY, sideSize);
+    CG_DrawRotatedPic(ax, ay - minOfs - vh, sideSize, sideSize, 2, 2, 0.0f, reticleColor, material);
+
+    ax = CG_AlignHudElemX(0, centerX, sideSize);
+    ay = CG_AlignHudElemY(1, centerY, sideSize);
+    CG_DrawRotatedPic(minOfs + ax, ay, sideSize, sideSize, 2, 2, 90.0f, reticleColor, material);
+
+    ax = CG_AlignHudElemX(4, centerX, sideSize);
+    ay = CG_AlignHudElemY(0, centerY, sideSize);
+    CG_DrawRotatedPic(ax - vw, ay + minOfs, sideSize, sideSize, 2, 2, 180.0f, reticleColor, material);
+
+    ax = CG_AlignHudElemX(8, centerX, sideSize);
+    ay = CG_AlignHudElemY(1, centerY, sideSize);
+    CG_DrawRotatedPic(ax - minOfs - vw, ay - vh, sideSize, sideSize, 2, 2, 270.0f, reticleColor, material);
+}
+
+static void CG_DrawCrosshairLines(float centerX, float centerY, float minOfs, float transScale, vec_t *reticleColor)
+{
+    float length = CG_CROSSHAIR_LINE_LENGTH * transScale;
+    float x = centerX;
+    float y = centerY;
+    float scaleX = 1.0f;
+    float scale = 1.0f;
+    float exact;
+    float pixels;
+    float lines[4][4];
+
+    if (CL_IsRenderingSplitScreen())
+        length += length;
+
+    /* Odd widths center on the crosshair's pixel, even ones between two. */
+    CalcScreenPlacement(&x, &y, &scaleX, &scale, 2, 2);
+    exact = CG_CROSSHAIR_LINE_WIDTH * scale;
+    pixels = fmaxf(1.0f, floorf(exact + 0.5f));
+    reticleColor[3] = fminf(1.0f, reticleColor[3] * CG_CROSSHAIR_LINE_ALPHA * exact / pixels);
+    if ((int)pixels & 1) {
+        x = floorf(x) + 0.5f;
+        y = floorf(y) + 0.5f;
+    } else {
+        x = floorf(x + 0.5f);
+        y = floorf(y + 0.5f);
+    }
+    minOfs *= scale;
+    length *= scale;
+    lines[0][0] = x;
+    lines[0][1] = y - minOfs;
+    lines[0][2] = x;
+    lines[0][3] = y - minOfs - length;
+    lines[1][0] = x + minOfs;
+    lines[1][1] = y;
+    lines[1][2] = x + minOfs + length;
+    lines[1][3] = y;
+    lines[2][0] = x;
+    lines[2][1] = y + minOfs;
+    lines[2][2] = x;
+    lines[2][3] = y + minOfs + length;
+    lines[3][0] = x - minOfs;
+    lines[3][1] = y;
+    lines[3][2] = x - minOfs - length;
+    lines[3][3] = y;
+    CG_DrawHudLines(lines, 4, pixels, 0.5f, reticleColor);
+}
 
 unsigned int CG_DrawCrosshair(void)
 {
@@ -1795,19 +1894,9 @@ unsigned int CG_DrawCrosshair(void)
 
     {
         float sideSizeF = (float)weapDef->iReticleSideSize * transScale;
-        float sideSize;
-        float realW, realH;
         float spreadMin, spreadMax, spread;
         double spreadTan, fovTan;
         float minOfs;
-        float divW, divH;
-        float vw, vh;
-        float ax, ay;
-
-        if (CL_IsRenderingSplitScreen())
-            sideSize = sideSizeF + sideSizeF;
-        else
-            sideSize = sideSizeF;
 
         BG_GetSpreadForWeapon(ps, weapIndex, &spreadMin, &spreadMax);
         spread = ((spreadMax - spreadMin) * (ps->aimSpreadScale / 255.0f) + spreadMin) * transScale;
@@ -1817,28 +1906,10 @@ unsigned int CG_DrawCrosshair(void)
         minOfs = fmaxf((float)weapDef->iReticleMinOfs, (float)(spreadTan * 240.0 / fovTan));
         minOfs -= sideSizeF * weapDef->fHipReticleSidePos;
 
-        realW = GetRealWidthFromVirtualWidth(sideSize);
-        realH = GetRealHeightFromVirtualHeight(sideSize);
-        divW = (float)cgs->viewWidth;
-        divH = (float)cgs->viewHeight;
-        vw = GetVirtualWidthFromRealWidth(divW * (realW / divW * 0.125f));
-        vh = GetVirtualHeightFromRealHeight(divH * (realH / divH * 0.125f));
-
-        ax = CG_AlignHudElemX(4, centerX, sideSize);
-        ay = CG_AlignHudElemY(2, centerY, sideSize);
-        CG_DrawRotatedPic(ax, ay - minOfs - vh, sideSize, sideSize, 2, 2, 0.0f, reticleColor, material);
-
-        ax = CG_AlignHudElemX(0, centerX, sideSize);
-        ay = CG_AlignHudElemY(1, centerY, sideSize);
-        CG_DrawRotatedPic(minOfs + ax, ay, sideSize, sideSize, 2, 2, 90.0f, reticleColor, material);
-
-        ax = CG_AlignHudElemX(4, centerX, sideSize);
-        ay = CG_AlignHudElemY(0, centerY, sideSize);
-        CG_DrawRotatedPic(ax - vw, ay + minOfs, sideSize, sideSize, 2, 2, 180.0f, reticleColor, material);
-
-        ax = CG_AlignHudElemX(8, centerX, sideSize);
-        ay = CG_AlignHudElemY(1, centerY, sideSize);
-        CG_DrawRotatedPic(ax - minOfs - vw, ay - vh, sideSize, sideSize, 2, 2, 270.0f, reticleColor, material);
+        if (CG_CrosshairSideIsBar(weapDef->szReticleSide))
+            CG_DrawCrosshairLines(centerX, centerY, minOfs, transScale, reticleColor);
+        else
+            CG_DrawCrosshairSidePics(centerX, centerY, minOfs, sideSizeF, reticleColor, material);
     }
 
     return 0;
