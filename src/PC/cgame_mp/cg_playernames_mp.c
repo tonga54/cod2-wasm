@@ -3,6 +3,7 @@
 #include "headers/PC/cgame_mp/cg_playernames.h"
 #include "headers/PC/cgame_mp/cg_namefont_data.h"
 #include "headers/PC/gfx_d3d/r_hud2d.h"
+#include "headers/PC/gfx_d3d/r_font_wwii.h"
 #include <stdlib.h>
 
 extern const dvar_t *Dvar_RegisterBool_mac(const char *name, int value, int flags);
@@ -88,6 +89,7 @@ static int CG_NameFontReady(void)
     s_nameFont.material = material;
     s_nameFont.glyphs = s_nameGlyphs;
     s_nameFontState = NAME_FONT_READY;
+    R_AddWwiiLettering(&s_nameFont);
     return 1;
 }
 

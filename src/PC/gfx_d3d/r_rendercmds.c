@@ -1,6 +1,7 @@
 #include "common_types.h"
 #include "imports.h"
 #include "headers/PC/gfx_d3d/r_hud2d.h"
+#include "headers/PC/gfx_d3d/r_font_wwii.h"
 
 extern char *getenv(const char *name);
 
@@ -709,7 +710,11 @@ void R_AddCmdDrawTextWithCursor(const char *text, int maxChars, FontHandle font,
     cmd->font = font;
     cmd->xScale = xScale;
     cmd->yScale = yScale;
-    R_ConvertColorToBytes(color, cmd->color.array);
+    {
+        vec4_t toned;
+
+        R_ConvertColorToBytes(R_ToneWwiiText(font, color, toned) ? toned : color, cmd->color.array);
+    }
     cmd->style = style;
     cmd->cursorPos = cursorPos;
     cmd->cursor = (char)cursor;

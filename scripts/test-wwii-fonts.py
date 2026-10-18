@@ -12,6 +12,8 @@ root = Path(__file__).resolve().parent.parent
 source = (root / 'src/PC/gfx_d3d/r_font_wwii.c').read_text()
 header = (root / 'src/headers/PC/gfx_d3d/r_font_wwii.h').read_text()
 fonts = (root / 'src/PC/gfx_d3d/r_font.c').read_text()
+rendercmds = (root / 'src/PC/gfx_d3d/r_rendercmds.c').read_text()
+backend_source = (root / 'src/PC/gfx_d3d/rb_backend.c').read_text()
 data = (root / 'src/headers/PC/gfx_d3d/r_font_wwii_data.h').read_text()
 static_tests = (root / 'scripts/test-static.sh').read_text()
 
@@ -41,13 +43,23 @@ assert fonts.count('    font = R_LoadWwiiFont(fontName);\n    if (!font)\n      
 assert fonts.count('    registeredFontCount = 0;\n    R_ShutdownWwiiFonts();\n') == 1
 assert 'FontHandle R_LoadWwiiFont(const char *fontName);' in header and 'void R_ShutdownWwiiFonts(void);' in header
 assert 'FontHandle R_RegisterWwiiFont(const char *fontName);' in header
+assert 'void R_AddWwiiLettering(FontHandle font);' in header and 'int R_IsWwiiFont(FontHandle font);' in header
+assert 'int R_ToneWwiiText(FontHandle font, const vec_t *color, vec_t *toned);' in header
+# Text in a WWII font takes their tone as it is queued, and the backend draws it.
+assert rendercmds.count('#include "headers/PC/gfx_d3d/r_font_wwii.h"\n') == 1
+assert function(rendercmds, 'R_AddCmdDrawTextWithCursor').count(
+    '        R_ConvertColorToBytes(R_ToneWwiiText(font, color, toned) ? toned : color, cmd->color.array);\n') == 1
+assert 'R_ConvertColorToBytes(color, cmd->color.array);\n    cmd->style' not in rendercmds
+assert backend_source.count('#include "headers/PC/gfx_d3d/r_font_wwii.h"\n') == 1
+assert function(backend_source, 'RB_DrawTextCmd').count('RB_DrawTextWithCursor_impl(') == 1
 assert static_tests.count('python3 "${repo_root}/scripts/test-wwii-fonts.py"') == 1
 
 # The embedded faces are the committed fonts, under their license.
-for weight in ('Medium', 'SemiBold', 'Bold', 'Regular'):
+for weight in ('Medium', 'Bold', 'Regular'):
     ttf = root / f'third_party/barlow/Barlow-{weight}.ttf'
     assert f' *   Barlow-{weight}.ttf, SHA-256 {hashlib.sha256(ttf.read_bytes()).hexdigest()}.' in data, weight
     assert re.search(r'static const unsigned char r_wwiiFont' + weight + r'\[\d+\] = \{', data), weight
+assert 'SemiBold' not in data
 assert 'SIL OPEN FONT LICENSE Version 1.1' in (root / 'third_party/barlow/OFL.txt').read_text()
 stb = (root / 'third_party/stb/stb_truetype.h').read_text()
 assert stb.startswith('// stb_truetype.h - v1.26 - public domain') and 'ALTERNATIVE A - MIT License' in stb
@@ -72,6 +84,7 @@ support = r'''
 #include <string.h>
 #include <strings.h>
 typedef unsigned char byte;
+typedef float vec_t;
 typedef unsigned int DWORD;
 typedef int D3DFORMAT;
 typedef int D3DCUBEMAP_FACES;
@@ -87,7 +100,7 @@ typedef struct Font_s { const char *name; int pixelHeight; int glyphCount; Mater
 typedef Font *FontHandle;
 typedef struct { const Material *rawMaterial, *defaultMaterial; } r_global_permanent_t;
 typedef struct { const dvar_t *(*Dvar_RegisterBool)(const char *name, int value, int flags);
-                 unsigned int (*SEH_ReadCharFromString)(const char **text, int *punctuation); } refimport_t;
+                 int (*SEH_ReadCharFromString)(const char **text, int punctuation); int (*Milliseconds)(void); } refimport_t;
 typedef struct { int width, height; } vidConfig_t;
 #define __attribute_regparm__(n)
 
@@ -101,8 +114,9 @@ static const dvar_t *RegisterBool(const char *name, int value, int flags) {
     dvarRegistrations++;
     return &fontsDvar;
 }
-static unsigned int ReadChar(const char **text, int *punctuation) { (void)punctuation; return (unsigned char)*(*text)++; }
-refimport_t ri = { RegisterBool, ReadChar };
+static int ReadChar(const char **text, int punctuation) { (void)punctuation; return (unsigned char)*(*text)++; }
+static int Milliseconds(void) { return 0; }
+refimport_t ri = { RegisterBool, ReadChar, Milliseconds };
 vidConfig_t vidConfig = { 1280, 720 };
 int I_stricmp(const char *a, const char *b) { return strcasecmp(a, b); }
 
@@ -205,16 +219,16 @@ typedef struct { const char *name; int pixelHeight; double cap; int baseline; do
 /* The stock fonts' units: their pixel heights, the coverage height of their
  * "H" and where it ends above the pen. The width is "The quick brown fox
  * jumps over the lazy dog" in advances over the cap height, and the stem an
- * "I"'s over its height: Barlow SemiBold at 95% 26.33 and 0.157, Bold 28.05
- * and 0.201, Medium 27.45 and 0.137, Regular 27.09 and 0.101 (Pillow,
- * Barlow's own metrics). Regular has no stock font: the killcam's. */
+ * "I"'s over its height: Barlow Medium at 95% 26.07 and 0.130, at its own
+ * width 27.45 and 0.137, Bold 28.05 and 0.201, Regular 27.09 and 0.101
+ * (Barlow's own metrics). Regular has no stock font: the killcam's. */
 #define FONT_CASES 10
 static const Expect expect[FONT_CASES] = {
-    { "fonts/smallFont", 12, 7.0, 2, 26.33, 0.157 }, { "fonts/normalFont", 16, 11.0, 2, 26.33, 0.157 },
-    { "fonts/bigFont", 24, 13.12, 5, 26.33, 0.157 }, { "fonts/extraBigFont", 32, 21.0, 5, 26.33, 0.157 },
+    { "fonts/smallFont", 12, 7.0, 2, 26.07, 0.130 }, { "fonts/normalFont", 16, 11.0, 2, 26.07, 0.130 },
+    { "fonts/bigFont", 24, 13.12, 5, 26.07, 0.130 }, { "fonts/extraBigFont", 32, 21.0, 5, 26.07, 0.130 },
     { "fonts/boldFont", 30, 17.1, 6, 28.05, 0.201 }, { "fonts/consoleFont", 16, 9.0, 3, 27.45, 0.137 },
-    { "fonts/smallDevFont", 16, 9.17, 2, 26.33, 0.157 }, { "fonts/bigDevFont", 24, 13.12, 3, 26.33, 0.157 },
-    { "fonts/qerFont", 12, 7.0, 3, 26.33, 0.157 }, { "$regularfont", 32, 21.0, 5, 27.09, 0.101 },
+    { "fonts/smallDevFont", 16, 9.17, 2, 26.07, 0.130 }, { "fonts/bigDevFont", 24, 13.12, 3, 26.07, 0.130 },
+    { "fonts/qerFont", 12, 7.0, 3, 26.07, 0.130 }, { "$regularfont", 32, 21.0, 5, 27.09, 0.101 },
 };
 static const char *sample = "The quick brown fox jumps over the lazy dog";
 
@@ -478,20 +492,147 @@ int main(void) {
     reset(720);
     for (int i = 0; i < 16; i++) R_RegisterFont("fonts/objectiveFont", 0);
     assert(stockLoads == 16 && R_RegisterWwiiFont("$regularfont") == NULL);
+
+    /* Fonts lettered in Barlow elsewhere count as WWII fonts until the fonts
+     * shut down: up to four, each once. So do copies of either, such as the
+     * UI's R_DuplicateFont makes, which share their atlas. */
+    reset(720);
+    font = R_RegisterFont("$font", 0);
+    {
+        static Material letters[6];
+        static Font other[6], copy, letteredCopy;
+        for (int i = 0; i < 6; i++) other[i].material = &letters[i];
+        assert(R_IsWwiiFont(font) && !R_IsWwiiFont(&stockFont) && !R_IsWwiiFont(NULL) && !R_IsWwiiFont(&other[0]));
+        memcpy(&copy, font, sizeof(copy));
+        copy.name = "$copy";
+        assert(R_IsWwiiFont(&copy) && R_IsWwiiFont(R_RegisterFont("fonts/consoleFont", 0)));
+        R_AddWwiiLettering(&other[0]); R_AddWwiiLettering(&other[0]); R_AddWwiiLettering(NULL);
+        for (int i = 1; i < 6; i++) R_AddWwiiLettering(&other[i]);
+        assert(R_IsWwiiFont(&other[0]) && R_IsWwiiFont(&other[3]) && !R_IsWwiiFont(&other[4]) && !R_IsWwiiFont(&other[5]));
+        memcpy(&letteredCopy, &other[2], sizeof(letteredCopy));
+        assert(R_IsWwiiFont(&letteredCopy));
+        R_ShutdownFonts();
+        assert(!R_IsWwiiFont(&other[0]) && !R_IsWwiiFont(font) && !R_IsWwiiFont(&copy) && !R_IsWwiiFont(&letteredCopy));
+        cases++;
+    }
+
+    /* Text drawn white in them takes the captures' warm, translucent white,
+     * a NULL color being white; colored text and other fonts' keep theirs. */
+    reset(720);
+    font = R_RegisterFont("$font", 0);
+    {
+        float toned[4] = { -1, -1, -1, -1 };
+        static const float white[4] = { 1, 1, 1, 1 }, faded[4] = { 1, 1, 1, 0.5f }, edge[4] = { 0.9f, 0.9f, 0.9f, 1 };
+        static const float warm[4] = { 0.95f, 0.89f, 0.95f, 1 }, cool[4] = { 0.95f, 0.95f, 0.89f, 1 };
+        static const float gray[4] = { 0.89f, 0.95f, 0.95f, 1 }, gold[4] = { 1, 0.85f, 0.4f, 1 };
+        assert(R_ToneWwiiText(font, white, toned) && near(toned[0], 0.96, 1e-6) && near(toned[1], 0.94, 1e-6) &&
+               near(toned[2], 0.88, 1e-6) && near(toned[3], 0.82, 1e-6));
+        memset(toned, 0, sizeof(toned));
+        assert(R_ToneWwiiText(font, NULL, toned) && near(toned[0], 0.96, 1e-6) && near(toned[3], 0.82, 1e-6));
+        assert(R_ToneWwiiText(font, faded, toned) && near(toned[3], 0.41, 1e-6));
+        assert(R_ToneWwiiText(font, edge, toned) && near(toned[0], 0.864, 1e-6) && near(toned[2], 0.792, 1e-6));
+        toned[0] = -1;
+        assert(!R_ToneWwiiText(font, gray, toned) && !R_ToneWwiiText(font, warm, toned) &&
+               !R_ToneWwiiText(font, cool, toned) && !R_ToneWwiiText(font, gold, toned) && toned[0] == -1);
+        assert(!R_ToneWwiiText(&stockFont, white, toned) && !R_ToneWwiiText(NULL, white, toned) && toned[0] == -1);
+        cases++;
+    }
+
+    /* The backend draws a WWII font's letters once, each over one shadow a
+     * pixel (two for style 6) down and right at half the text's alpha; the
+     * stock fonts' twice, a quarter pixel apart, over two shadows. */
+    reset(720);
+    font = R_RegisterFont("$font", 0);
+    {
+        GfxColor color;
+        color.array[0] = 200; color.array[1] = 240; color.array[2] = 230; color.array[3] = 220;
+        quadCount = 0;
+        RB_DrawTextWithCursor_impl("Hi", 2, font, 100.0f, 50.0f, 1.0f, 1.0f, color, 0, -1, 0);
+        assert(quadCount == 2 && quads[0].color == color.packed && quads[1].color == color.packed);
+        assert(quads[0].material == font->material && quads[1].x > quads[0].x);
+        quadCount = 0;
+        RB_DrawTextWithCursor_impl("Hi", 2, font, 100.0f, 50.0f, 1.0f, 1.0f, color, 3, -1, 0);
+        assert(quadCount == 4 && quads[0].color == 100 && quads[1].color == color.packed && quads[2].color == 100);
+        assert(near(quads[0].x - quads[1].x, 1.0, 1e-6) && near(quads[0].y - quads[1].y, 1.0, 1e-6));
+        quadCount = 0;
+        RB_DrawTextWithCursor_impl("Hi", 2, font, 100.0f, 50.0f, 1.0f, 1.0f, color, 6, -1, 0);
+        assert(quadCount == 4 && near(quads[0].x - quads[1].x, 2.0, 1e-6) && near(quads[0].y - quads[1].y, 2.0, 1e-6));
+        /* A text field's cursor, inside and after the text, is drawn once. */
+        quadCount = 0;
+        RB_DrawTextWithCursor_impl("Hi", 2, font, 100.0f, 50.0f, 1.0f, 1.0f, color, 0, 0, '|');
+        assert(quadCount == 3);
+        quadCount = 0;
+        RB_DrawTextWithCursor_impl("Hi", 2, font, 100.0f, 50.0f, 1.0f, 1.0f, color, 0, 2, '|');
+        assert(quadCount == 3);
+        quadCount = 0;
+        RB_DrawTextWithCursor_impl("Hi", 2, &stockText, 100.0f, 50.0f, 1.0f, 1.0f, color, 3, -1, 0);
+        assert(quadCount == 8 && quads[0].color == 200 && quads[1].color == 200 && quads[2].color == color.packed &&
+               quads[3].color == color.packed);
+        assert(near(quads[1].x - quads[0].x, 0.25, 1e-6) && near(quads[3].x - quads[2].x, 0.25, 1e-6));
+        quadCount = 0;
+        RB_DrawTextWithCursor_impl("Hi", 2, &stockText, 100.0f, 50.0f, 1.0f, 1.0f, color, 0, 2, '|');
+        assert(quadCount == 6);
+        cases++;
+    }
     printf("%d\n", cases);
     return 0;
 }
 '''
 
+# The backend's text drawing, into a list of quads.
+backend_support = r'''
+typedef union { unsigned int packed; byte array[4]; } GfxColor;
+typedef unsigned int D3DCOLOR;
+typedef int GfxPrimStatsTarget;
+#define RB_BACKEND_REGPARM3_SSE_ABI
+typedef struct { const Material *material; float x, y, w, h; D3DCOLOR color; } Quad;
+static Quad quads[64];
+static int quadCount;
+static Glyph stockGlyphs[96];
+static Font stockText = { "stockText", 16, 96, &rawMaterial, stockGlyphs };
+static int RB_ShouldTraceTextCmd(const char *text) { (void)text; return 0; }
+static int ColorIndex(int c) { return (c - '0') & 7; }
+static void RB_LookupColor(int c, byte *color) { color[0] = (byte)c; color[1] = 1; color[2] = 2; color[3] = 3; }
+static void RB_DrawStretchPic(const Material *material, float x, float y, float w, float h, float s0, float t0, float s1,
+                              float t1, D3DCOLOR color, GfxPrimStatsTarget statsTarget) {
+    (void)s0; (void)t0; (void)s1; (void)t1;
+    assert(quadCount < 64 && statsTarget == 8);
+    quads[quadCount++] = (Quad){ material, x, y, w, h, color };
+}
+'''
+backend = function(backend_source, 'RB_DrawTextWithCursor_impl')
+
 mutants = [
-    ('    { "normalFont", R_WWII_SEMIBOLD, 16, 11.0f, 2, 0.95f, 0 },', '    { "normalFont", R_WWII_SEMIBOLD, 16, 10.0f, 2, 0.95f, 0 },'),
-    ('    { "smallFont", R_WWII_SEMIBOLD, 12, 7.0f, 2, 0.95f, 0 },', '    { "smallFont", R_WWII_SEMIBOLD, 12, 7.0f, 3, 0.95f, 0 },'),
-    ('    { "bigFont", R_WWII_SEMIBOLD, 24, 13.12f, 5, 0.95f, 0 },', '    { "bigFont", R_WWII_SEMIBOLD, 24, 13.12f, 5, 1.0f, 0 },'),
-    ('    { "extraBigFont", R_WWII_SEMIBOLD, 32, 21.0f, 5, 0.95f, 0 },', '    { "extraBigFont", R_WWII_SEMIBOLD, 30, 21.0f, 5, 0.95f, 0 },'),
-    ('    { "boldFont", R_WWII_BOLD, 30, 17.1f, 6, 1.0f, 0 },', '    { "boldFont", R_WWII_SEMIBOLD, 30, 17.1f, 6, 1.0f, 0 },'),
+    ('    { "normalFont", R_WWII_MEDIUM, 16, 11.0f, 2, 0.95f, 0 },', '    { "normalFont", R_WWII_MEDIUM, 16, 10.0f, 2, 0.95f, 0 },'),
+    ('    { "normalFont", R_WWII_MEDIUM, 16, 11.0f, 2, 0.95f, 0 },', '    { "normalFont", R_WWII_BOLD, 16, 11.0f, 2, 0.95f, 0 },'),
+    ('    { "smallFont", R_WWII_MEDIUM, 12, 7.0f, 2, 0.95f, 0 },', '    { "smallFont", R_WWII_MEDIUM, 12, 7.0f, 3, 0.95f, 0 },'),
+    ('    { "smallFont", R_WWII_MEDIUM, 12, 7.0f, 2, 0.95f, 0 },', '    { "smallFont", R_WWII_REGULAR, 12, 7.0f, 2, 0.95f, 0 },'),
+    ('    { "bigFont", R_WWII_MEDIUM, 24, 13.12f, 5, 0.95f, 0 },', '    { "bigFont", R_WWII_MEDIUM, 24, 13.12f, 5, 1.0f, 0 },'),
+    ('    { "extraBigFont", R_WWII_MEDIUM, 32, 21.0f, 5, 0.95f, 0 },', '    { "extraBigFont", R_WWII_MEDIUM, 30, 21.0f, 5, 0.95f, 0 },'),
+    ('    { "boldFont", R_WWII_BOLD, 30, 17.1f, 6, 1.0f, 0 },', '    { "boldFont", R_WWII_MEDIUM, 30, 17.1f, 6, 1.0f, 0 },'),
     ('    { "consoleFont", R_WWII_MEDIUM, 16, 9.0f, 3, 1.0f, 1 },', '    { "consoleFont", R_WWII_MEDIUM, 16, 9.0f, 3, 1.0f, 0 },'),
-    ('    { "smallDevFont", R_WWII_SEMIBOLD, 16, 9.17f, 2, 0.95f, 0 },', '    { "smallDevFont", R_WWII_SEMIBOLD, 16, 9.17f, 3, 0.95f, 0 },'),
-    ('    { "bigDevFont", R_WWII_SEMIBOLD, 24, 13.12f, 3, 0.95f, 0 },', ''),
+    ('    { "smallDevFont", R_WWII_MEDIUM, 16, 9.17f, 2, 0.95f, 0 },', '    { "smallDevFont", R_WWII_MEDIUM, 16, 9.17f, 3, 0.95f, 0 },'),
+    ('    { "bigDevFont", R_WWII_MEDIUM, 24, 13.12f, 3, 0.95f, 0 },', ''),
+    ('static const float s_wwiiTextTone[4] = { 0.96f, 0.94f, 0.88f, 0.82f };',
+     'static const float s_wwiiTextTone[4] = { 1.0f, 1.0f, 1.0f, 0.82f };'),
+    ('static const float s_wwiiTextTone[4] = { 0.96f, 0.94f, 0.88f, 0.82f };',
+     'static const float s_wwiiTextTone[4] = { 0.96f, 0.94f, 0.88f, 1.0f };'),
+    ('#define R_WWII_TEXT_WHITE 0.9f', '#define R_WWII_TEXT_WHITE 0.85f'),
+    ('    if (color[0] < R_WWII_TEXT_WHITE || color[1] < R_WWII_TEXT_WHITE || color[2] < R_WWII_TEXT_WHITE)',
+     '    if (color[1] < R_WWII_TEXT_WHITE || color[2] < R_WWII_TEXT_WHITE)'),
+    ('    if (color[0] < R_WWII_TEXT_WHITE || color[1] < R_WWII_TEXT_WHITE || color[2] < R_WWII_TEXT_WHITE)',
+     '    if (color[0] < R_WWII_TEXT_WHITE || color[2] < R_WWII_TEXT_WHITE)'),
+    ('    if (color[0] < R_WWII_TEXT_WHITE || color[1] < R_WWII_TEXT_WHITE || color[2] < R_WWII_TEXT_WHITE)',
+     '    if (color[0] < R_WWII_TEXT_WHITE || color[1] < R_WWII_TEXT_WHITE)'),
+    ('    if (!color)\n        color = white;\n', ''),
+    ('    if (!R_IsWwiiFont(font))\n        return 0;\n    if (!color)', '    if (!color)'),
+    ('    s_wwiiLetteringCount = 0;\n', ''),
+    ('        if (s_wwiiLettering[i] == font)\n            return;\n', ''),
+    ('    if (font && s_wwiiLetteringCount < R_WWII_FONT_LETTERING)', '    if (s_wwiiLetteringCount < R_WWII_FONT_LETTERING)'),
+    ('#define R_WWII_FONT_LETTERING 4', '#define R_WWII_FONT_LETTERING 5'),
+    ('    for (i = 0; font && i < s_wwiiLetteringCount; i++) {\n        if (font == s_wwiiLettering[i] || font->material == s_wwiiLettering[i]->material)\n            return 1;\n    }\n', ''),
+    ('        if (font == s_wwiiLettering[i] || font->material == s_wwiiLettering[i]->material)', '        if (font == s_wwiiLettering[i])'),
+    ('        if (font->material == &s_wwiiFontAtlases[i].material)', '        if (font == &s_wwiiFontNames[i].font)'),
     ('#define R_WWII_FONT_TEXELS_MAX 3', '#define R_WWII_FONT_TEXELS_MAX 4'),
     ('#define R_WWII_FONT_MARGIN 1', '#define R_WWII_FONT_MARGIN 0'),
     ('#define R_WWII_FONT_GAP 2', '#define R_WWII_FONT_GAP 1'),
@@ -514,7 +655,7 @@ mutants = [
     ('        if (atlas->face == profile->face && atlas->capHeight == profile->capHeight &&',
      '        if (atlas->face == profile->face &&'),
     ('        int y0 = face->glyphs[i].y0 - profile->baseline;', '        int y0 = face->glyphs[i].y0;'),
-    ('    s_wwiiFontNameCount = 0;\n    r_wwiiFonts = NULL;', '    r_wwiiFonts = NULL;'),
+    ('    s_wwiiFontNameCount = 0;\n    s_wwiiLetteringCount = 0;', '    s_wwiiLetteringCount = 0;'),
     ('    for (i = 0; i < s_wwiiFontAtlasCount; i++)\n        R_WwiiFontReleaseAtlas(&s_wwiiFontAtlases[i]);\n', ''),
     ('    if (!raw || raw == rgp.defaultMaterial || raw->textureCount != 1 || !raw->textures)\n        return NULL;\n    return raw;',
      '    if (!raw)\n        return NULL;\n    return raw;'),
@@ -534,20 +675,39 @@ registry_mutants = [
     ('    if (!font)\n        return 0;\n', '    if (!font)\n        font = R_LoadFont(fontName, 0);\n'),
 ]
 
-variants = [(module, registry)]
+backend_mutants = [
+    ('    int wwii = R_IsWwiiFont(font);', '    int wwii = 0;'),
+    ('        newBlack.array[0] = (byte)(newBlack.array[0] / 2);', '        newBlack.array[0] = newBlack.array[0];'),
+    ('                    if (!wwii)\n                        RB_DrawStretchPic(material, shadowX + 0.25f',
+     '                    if (1)\n                        RB_DrawStretchPic(material, shadowX + 0.25f'),
+    ('            if (!wwii)\n                RB_DrawStretchPic(material, savedGlyphX2, glyphY + 0.25f',
+     '            if (1)\n                RB_DrawStretchPic(material, savedGlyphX2, glyphY + 0.25f'),
+    ('                if (!wwii)\n                    RB_DrawStretchPic(material, savedGlyphX2, cy + 0.25f',
+     '                if (1)\n                    RB_DrawStretchPic(material, savedGlyphX2, cy + 0.25f'),
+    ('            if (!wwii)\n                RB_DrawStretchPic(material, cursorX + 0.25f',
+     '            if (1)\n                RB_DrawStretchPic(material, cursorX + 0.25f'),
+]
+
+variants = [(module, registry, backend)]
 for old, new in mutants:
     assert module.count(old) == 1, old
-    variants.append((module.replace(old, new), registry))
+    variants.append((module.replace(old, new), registry, backend))
 for old, new in registry_mutants:
     assert registry.count(old) == 1, old
-    variants.append((module, registry.replace(old, new)))
+    variants.append((module, registry.replace(old, new), backend))
+for old, new in backend_mutants:
+    assert backend.count(old) == 1, old
+    variants.append((module, registry, backend.replace(old, new)))
 
 with tempfile.TemporaryDirectory(prefix='cod2-wwii-fonts-') as directory:
     path = Path(directory) / 'fonts.c'
     binary = Path(directory) / 'fonts'
-    for index, (variant, fonts_registry) in enumerate(variants):
-        path.write_text(support + variant + fonts_registry + checks)
-        flags = ['-Wall', '-Werror', '-Wno-unused-function', '-Wno-unused-but-set-variable', '-Wno-misleading-indentation'] if index == 0 else ['-w']
+    for index, (variant, fonts_registry, text_backend) in enumerate(variants):
+        path.write_text(support + variant + fonts_registry + backend_support + text_backend + checks)
+        # The backend declares R_GetCharacterGlyph's result without const.
+        flags = ['-Wall', '-Werror', '-Wno-unused-function', '-Wno-unused-but-set-variable', '-Wno-misleading-indentation',
+                 '-Wno-unknown-warning-option', '-Wno-incompatible-pointer-types-discards-qualifiers',
+                 '-Wno-discarded-qualifiers'] if index == 0 else ['-w']
         subprocess.run(['cc', '-std=gnu99', '-O1', '-g', '-fsanitize=address,undefined', '-fno-sanitize-recover=all']
                        + flags + [str(path), '-lm', '-o', str(binary)], check=True)
         result = subprocess.run([str(binary)], capture_output=True, text=True)
@@ -556,10 +716,12 @@ with tempfile.TemporaryDirectory(prefix='cod2-wwii-fonts-') as directory:
             cases = int(result.stdout)
 print('PASS: every stock font (normal, small, big, extra big, bold, console, both dev fonts and qer, by their UI aliases '
       'or their files in any case) registers as Barlow rasterized from the embedded faces: the size-picked UI fonts '
-      'share SemiBold at 95% width, bold text is Bold, the console Medium and the killcam\'s own font Regular, which '
+      'share Medium at 95% width, bold text is Bold, the console Medium and the killcam\'s own font Regular, which '
       'registers optionally (NULL without the setting, a WWII font or a free slot); each keeps its stock pixel height, an H as '
       'tall as the stock one ending at its baseline, and Barlow\'s widths; the glyph table is the one R_GetCharacterGlyph '
       'searches; atlases are packed without overlap on clear borders with exact mipmaps, one texel per unit per 480 '
       'lines up to 3 and one for the console\'s own font; images are released on shutdown and rebuilt; without $raw, an '
-      f'image, the setting or a free name the stock fonts stay; {cases} font and size cases; '
-      f'{len(mutants) + len(registry_mutants)} failing regression mutants')
+      f'image, the setting or a free name the stock fonts stay; fonts lettered in Barlow elsewhere count as WWII fonts; '
+      f'text drawn white in them takes the captures\' warm 82% white, and the backend draws them once over a shadow '
+      f'at half alpha while the stock fonts keep their double draw; {cases} font and size cases; '
+      f'{len(mutants) + len(registry_mutants) + len(backend_mutants)} failing regression mutants')

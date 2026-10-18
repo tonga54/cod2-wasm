@@ -70,7 +70,7 @@ names = re.findall(r'"([^"]+)"', names)
 assert slot < count and len(names) == count and names[slot] == '*hud_name_font'
 
 # The data was baked from the committed font, whose license travels with it.
-font_file = root / 'third_party/barlow/Barlow-SemiBold.ttf'
+font_file = root / 'third_party/barlow/Barlow-Medium.ttf'
 assert hashlib.sha256(font_file.read_bytes()).hexdigest() in data.split('\n', 2)[1]
 license_text = (root / 'third_party/barlow/OFL.txt').read_text()
 assert license_text.startswith('Copyright 2017 The Barlow Project Authors (https://github.com/jpt/barlow)\n')
@@ -218,6 +218,10 @@ static MaterialHandle R_CreateHudImageMaterial(int slot, const byte *bgra, int w
     memcpy(createdPixels, bgra, (size_t)width * height * 4);
     return createFails ? NULL : fakeMaterial;
 }
+/* The renderer draws the fonts it is told are Barlow like its WWII fonts. */
+static FontHandle lettered;
+static int letterings;
+static void R_AddWwiiLettering(FontHandle font) { lettered = font; letterings++; }
 typedef struct { char text[64]; int maxChars; FontHandle font; float x, y; int horzAlign, vertAlign; float scale;
                  vec4_t color; int style; } Draw;
 static Draw drawn[16];
@@ -324,7 +328,7 @@ int main(void) {
     assert(draws == 1);
     font = drawn[0].font;
     assert(font != &stockFont && font->material == fakeMaterial && font->name && font->name[0]);
-    assert(CG_GetPlayerNameFont() == font && creates == 1);
+    assert(CG_GetPlayerNameFont() == font && creates == 1 && lettered == font && letterings == 1);
     assert(font->pixelHeight == CG_NAME_FONT_PIXEL_HEIGHT && font->glyphCount == CG_NAME_FONT_GLYPH_COUNT);
     for (i = 0; i < CG_NAME_FONT_GLYPH_COUNT; i++) {
         const CG_NameFontGlyph *src = &cg_nameFontGlyphs[i];
@@ -388,12 +392,12 @@ int main(void) {
     createFails = 1;
     assert(!CG_DrawTeammateName("Friend", 0.0f, 0.0f) && !CG_DrawTeammateName("Friend", 0.0f, 0.0f));
     assert(!CG_GetTeammateNameColor(rgb) && rgb[0] == -1.0f && rgb[1] == -1.0f && rgb[2] == -1.0f);
-    assert(!CG_GetPlayerNameFont() && creates == 2 && draws == 4);
+    assert(!CG_GetPlayerNameFont() && creates == 2 && draws == 4 && letterings == 1);
     CG_PlayerNamesInit();
     createFails = 0;
     /* Other WWII text can build the font first, with the labels off. */
     teamNames.current.enabled = 0;
-    assert(CG_GetPlayerNameFont() == font && creates == 3);
+    assert(CG_GetPlayerNameFont() == font && creates == 3 && lettered == font && letterings == 2);
     teamNames.current.enabled = 1;
     assert(CG_DrawTeammateName("Friend", 0.0f, 0.0f) && creates == 3 && draws == 5);
 
@@ -581,6 +585,7 @@ mutants = [
     ('glyph->dx = src->dx;', 'glyph->dx = src->width;'),
     ('    if (!material)\n        return 0;\n', ''),
     ('    return CG_NameFontReady() ? &s_nameFont : NULL;\n', '    return &s_nameFont;\n'),
+    ('    R_AddWwiiLettering(&s_nameFont);\n', ''),
     ('    return CG_NameFontReady() ? &s_nameFont : NULL;\n', '    return CG_TeammateNamesDrawn() ? &s_nameFont : NULL;\n'),
 ]
 position_mutants = [
@@ -642,7 +647,7 @@ with tempfile.TemporaryDirectory(prefix='cod2-player-names-') as directory:
                         '-Wno-unused-function', str(path), '-lm', '-o', str(binary)], check=True)
         result = subprocess.run([str(binary)], capture_output=True, text=True)
         assert (result.returncode == 0) == (index == 0), (index, result.stderr[-2000:])
-print(f'PASS: the name font holds {len(glyph_rows)} Windows-1252 glyphs of the committed Barlow SemiBold in the order '
+print(f'PASS: the name font holds {len(glyph_rows)} Windows-1252 glyphs of the committed Barlow Medium in the order '
       'R_GetCharacterGlyph searches, padded and apart in its atlas, with capitals 0.7 em tall and the WWII capture\'s '
       'width for their height; while cg_hudTeammateNames is on, the friendly name loop draws each teammate\'s name '
       'without color codes, centred where the stock label was, in the capture\'s teal with capitals 7 units tall and '

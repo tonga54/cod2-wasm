@@ -99,6 +99,9 @@ assert abs(key_caps - 5.0) < 0.05
 assert abs(define('KEY_BASELINE') - 0.5 * key_caps - 0.5 * define('KEY_HEIGHT')) < 0.05
 
 advances = ', '.join(str(glyphs[c][2] if c in glyphs else 0) for c in range(128))
+# "SHIFT" at the key's scale, 0.15, and 3 units each side: its keycap.
+shift_keycap = sum(glyphs[ord(c)][2] for c in 'SHIFT') * 48 * 0.15 / 52 + 6
+assert 24 < shift_keycap < 26, shift_keycap
 prompt = source[source.index('/* Virtual units from the screen'):]
 
 support = r'''
@@ -120,7 +123,7 @@ static struct { struct { MaterialHandle whiteMaterial; } media; } cgsState = { {
 #define cgs (&cgsState)
 static dvar_t drawBreathHint, holdTime;
 static const dvar_t *cg_drawBreathHint = &drawBreathHint, *player_breath_hold_time = &holdTime;
-/* The labels' Barlow SemiBold: its advances, 52 font units to the em. */
+/* The labels' Barlow Medium: its advances, 52 font units to the em. */
 static const int advance[128] = { ''' + advances + r''' };
 static struct Font_s nameFont = { 52 };
 static int fontReady;
@@ -249,8 +252,8 @@ int main(void) {
     aimed();
     draw();
     assert(prompt("SHIFT", 1) && configs == 1);
-    /* "SHIFT" in capitals 5 units tall needs a keycap 25.1 units wide. */
-    assert(fabsf(drawn[1].w - 25.11f) < 0.01f);
+    /* "SHIFT" in capitals 5 units tall needs a keycap ''' + f'{shift_keycap:.2f}' + r''' units wide. */
+    assert(fabsf(drawn[1].w - ''' + f'{shift_keycap:.4f}' + r'''f) < 0.01f);
     cases++;
 
     /* While the breath recovers the key cannot start a hold, so the prompt

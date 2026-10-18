@@ -95,7 +95,7 @@ def font_table(text, name):
 stock_fonts = font_table(scoretable, 's_tableFonts')
 assert len(stock_fonts) == 5 and font_table(source, 's_wwiiMenuFonts') == stock_fonts
 
-Regular, Bold, SemiBold = Font('Regular'), Font('Bold'), Font('SemiBold')
+Regular, Bold, UiFont = Font('Regular'), Font('Bold'), Font('Medium')
 UNIT = 2.25  # px a unit on the 1728 x 1080 capture
 SEMI = 0.95
 
@@ -142,17 +142,17 @@ def evidence(text):
     # The focus slides over 7 frames of the 30 fps capture and grows in 3.
     check(define('MENU_SLIDE_MS') == round(7 / 30 * 1000) and define('MENU_GROW_MS') == round(3 / 30 * 1000), 'timing')
     # CALL OF DUTY is inked from 106 to 472 px; MULTIPLAYER from 150 to 429 px,
-    # 17 to 19 px tall on a baseline at 338 px. The WWII SemiBold is drawn at
+    # 17 to 19 px tall on a baseline at 338 px. The UI font, Medium, is drawn at
     # 95% of Barlow's width.
     check(abs(define('LOGO_INK_LEFT') - 106 / UNIT) < 0.1, 'logo left')
     check(abs(define('LOGO_INK_WIDTH') - 367 / UNIT) < 0.3, 'logo width')
     title_cap, title_tracking = define('TITLE_CAP'), define('TITLE_TRACKING')
-    check(abs(SemiBold.ink_width('MULTIPLAYER', title_tracking, SEMI) * title_cap - 280 / UNIT) < 0.2, 'title width')
+    check(abs(UiFont.ink_width('MULTIPLAYER', title_tracking, SEMI) * title_cap - 280 / UNIT) < 0.2, 'title width')
     check(abs(define('TITLE_BASELINE') - 338 / UNIT) < 0.2 and abs(title_cap - 8.0) < 1e-6, 'title baseline')
-    pen = define('LOGO_INK_LEFT') + 0.5 * (define('LOGO_INK_WIDTH') - advances(SemiBold, 'MULTIPLAYER', title_cap,
+    pen = define('LOGO_INK_LEFT') + 0.5 * (define('LOGO_INK_WIDTH') - advances(UiFont, 'MULTIPLAYER', title_cap,
                                                                                 title_tracking, SEMI))
-    ink = pen + bearing(SemiBold, 'M', title_cap) * SEMI
-    check(abs(ink + 0.5 * SemiBold.ink_width('MULTIPLAYER', title_tracking, SEMI) * title_cap - 290 / UNIT) < 0.4,
+    ink = pen + bearing(UiFont, 'M', title_cap) * SEMI
+    check(abs(ink + 0.5 * UiFont.ink_width('MULTIPLAYER', title_tracking, SEMI) * title_cap - 290 / UNIT) < 0.4,
           'centred')
     # The version, 1.0.2082721.106.1-15, is inked to 88 px left of the right
     # edge, its digits down to row 122.
@@ -196,7 +196,7 @@ caps = {int(height): float(cap) for height, cap, _ in stock_fonts}
 fonts = (f'static const short regularAdvance[256] = {advance_table(Regular, caps[32])};\n'
          f'static const short boldAdvance[256] = {advance_table(Bold, caps[30])};\n'
          f'static const short oddAdvance[256] = {advance_table(Regular, 25)};\n' +
-         ''.join(f'static const short semiAdvance{h}[256] = {advance_table(SemiBold, caps[h], SEMI)};\n'
+         ''.join(f'static const short uiAdvance{h}[256] = {advance_table(UiFont, caps[h], SEMI)};\n'
                  for h in (12, 16, 24, 32)))
 
 support = r'''
@@ -235,11 +235,11 @@ typedef struct sharedUiInfo_t { struct { FontHandle bigFont, smallFont, consoleF
  * stock font has, whose "H" is its capitals. */
 static Font_s regularFont = { "regular", 32, regularAdvance, { 'H', 0, -27, 0, 0, 0 } };
 static Font_s boldFont = { "bold", 30, boldAdvance, { 'H', 0, -24, 0, 0, 0 } };
-static Font_s smallFont = { "small", 12, semiAdvance12, { 'H', 0, -10, 0, 0, 0 } };
-static Font_s textFont = { "text", 16, semiAdvance16, { 'H', 0, -14, 0, 0, 0 } };
-static Font_s bigFont = { "big", 24, semiAdvance24, { 'H', 0, -19, 0, 0, 0 } };
-static Font_s extraBigFont = { "extraBig", 32, semiAdvance32, { 'H', 0, -27, 0, 0, 0 } };
-static Font_s markFont = { "mark", 12, semiAdvance12, { 'H', 0, -10, 0, 0, 0 } };
+static Font_s smallFont = { "small", 12, uiAdvance12, { 'H', 0, -10, 0, 0, 0 } };
+static Font_s textFont = { "text", 16, uiAdvance16, { 'H', 0, -14, 0, 0, 0 } };
+static Font_s bigFont = { "big", 24, uiAdvance24, { 'H', 0, -19, 0, 0, 0 } };
+static Font_s extraBigFont = { "extraBig", 32, uiAdvance32, { 'H', 0, -27, 0, 0, 0 } };
+static Font_s markFont = { "mark", 12, uiAdvance12, { 'H', 0, -10, 0, 0, 0 } };
 static Font_s oddFont = { "odd", 40, oddAdvance, { 'H', 0, -25, 0, 0, 0 } };
 static sharedUiInfo_t sharedUiInfo = { { &bigFont, &smallFont, NULL, &boldFont, &textFont, &extraBigFont } };
 
@@ -642,7 +642,7 @@ int main(void) {
     wwiiDvar.current.enabled = 1;
     UI_WWIIMenu_Update(&uiDc);
     cases++;
-    /* Without the WWII fonts the UI's SemiBold stands in. */
+    /* Without the WWII fonts the UI's font stands in. */
     wwiiFontsOff = 1;
     generation++;
     UI_WWIIMenu_Update(&uiDc);
@@ -744,7 +744,7 @@ int main(void) {
 
     /* Over bg with main_text open: logo_cod2 as wide as the capture's
      * lettering and ending where its lockup ends, the retail registered mark
-     * beside it, MULTIPLAYER centred under it in the UI's SemiBold, the
+     * beside it, MULTIPLAYER centred under it in the UI's UiFont, the
      * version from bg's own item, and Enter's prompt; Escape's only in a
      * match. */
     start();
@@ -759,7 +759,7 @@ int main(void) {
                near(drawn[1].x, x + 222.0f / 288 * w) && near(drawn[1].y, y + 56.0f / 72 * h) &&
                near(drawn[1].scale, 0.17f / 72 * h) && near(markScale, 0.17f / 72 * h) &&
                nearColor(drawn[1].color, markColor) && drawn[1].style == 3 && drawn[1].horz == 1 && drawn[1].vert == 1);
-        /* At 720 lines capitals 8 tall are 12 px: the 24 px SemiBold's 13.12. */
+        /* At 720 lines capitals 8 tall are 12 px: the 24 px font's 13.12. */
         float title = advance(&bigFont, "MULTIPLAYER", WWII_TITLE_CAP, WWII_TITLE_TRACKING);
         int d = word(2, "MULTIPLAYER", &bigFont, WWII_LOGO_INK_LEFT + 0.5f * (WWII_LOGO_INK_WIDTH - title),
                      WWII_TITLE_BASELINE, WWII_TITLE_CAP, WWII_TITLE_TRACKING, titleColor, 1, 1);
@@ -1025,12 +1025,12 @@ mutants = [
     [('#define WWII_MENU_TOP 185.95f', '#define WWII_MENU_TOP 187.0f')],
     [('#define WWII_MENU_SPACING 27.1f', '#define WWII_MENU_SPACING 28.0f')],
     [('#define WWII_MENU_FOCUS_INDENT 8.0f', '#define WWII_MENU_FOCUS_INDENT 6.0f')],
-    [('#define WWII_TITLE_TRACKING 0.705f', '#define WWII_TITLE_TRACKING 0.66f')],
+    [('#define WWII_TITLE_TRACKING 0.711f', '#define WWII_TITLE_TRACKING 0.66f')],
     [('#define WWII_TITLE_BASELINE 150.2f', '#define WWII_TITLE_BASELINE 152.0f')],
     [('#define WWII_VERSION_RIGHT 38.5f', '#define WWII_VERSION_RIGHT 39.1f')],
     [('#define WWII_PROMPT_PAD 3.45f', '#define WWII_PROMPT_PAD 3.3f')],
     [('#define WWII_PROMPT_KEY_CAP 5.65f', '#define WWII_PROMPT_KEY_CAP 5.5f')],
-    [('    FontHandle keyFont = UI_WWIIMenu_Regular(WWII_PROMPT_KEY_CAP);', '    FontHandle keyFont = UI_WWIIMenu_SemiBold(WWII_PROMPT_KEY_CAP);')],
+    [('    FontHandle keyFont = UI_WWIIMenu_Regular(WWII_PROMPT_KEY_CAP);', '    FontHandle keyFont = UI_WWIIMenu_UiFont(WWII_PROMPT_KEY_CAP);')],
     [('#define WWII_PROMPT_BOTTOM 48.0f', '#define WWII_PROMPT_BOTTOM 46.0f')],
     [('#define WWII_PROMPT_RIGHT 48.4f', '#define WWII_PROMPT_RIGHT 49.1f')],
     [('#define WWII_PROMPT_GAP 3.1f', '#define WWII_PROMPT_GAP 3.4f')],

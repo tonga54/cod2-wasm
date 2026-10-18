@@ -3,6 +3,7 @@
 extern int alwaysfails;
 #include "bytematch.h"
 #include "headers/PC/gfx_d3d/r_hud2d.h"
+#include "headers/PC/gfx_d3d/r_font_wwii.h"
 
 extern char *getenv(const char *name);
 
@@ -3482,10 +3483,16 @@ static void RB_BACKEND_REGPARM3_SSE_ABI RB_DrawTextWithCursor_impl(const char *t
     int (*Sys_Milliseconds)(void) = (int (*)(void))ri.Milliseconds;
     const Material *material = (const Material *)font->material;
     int traceText = RB_ShouldTraceTextCmd(text);
+    /* The stock fonts are drawn twice a quarter pixel apart, over two
+     * shadows, to thicken them; the WWII lettering once, as rasterized, over
+     * one shadow at half its alpha. */
+    int wwii = R_IsWwiiFont(font);
     GfxColor newColor = color;
     GfxColor newBlack;
     byte savedAlpha;
     newBlack.packed = color.packed & 0xFF;
+    if (wwii)
+        newBlack.array[0] = (byte)(newBlack.array[0] / 2);
     savedAlpha = color.array[0];
     float xOrig, yPos, xPos, xAdj, glyphX, glyphY, savedGlyphX2;
     int count, ch;
@@ -3571,8 +3578,9 @@ static void RB_BACKEND_REGPARM3_SSE_ABI RB_DrawTextWithCursor_impl(const char *t
                     float shadowX = glyphX + shadowOffset;
                     RB_DrawStretchPic(material, shadowX, shadowY, w, h,
                                       glyph->s0, glyph->t0, glyph->s1, glyph->t1, newBlack.packed, 8);
-                    RB_DrawStretchPic(material, shadowX + 0.25f, shadowY + 0.25f, w, h,
-                                      glyph->s0, glyph->t0, glyph->s1, glyph->t1, newBlack.packed, 8);
+                    if (!wwii)
+                        RB_DrawStretchPic(material, shadowX + 0.25f, shadowY + 0.25f, w, h,
+                                          glyph->s0, glyph->t0, glyph->s1, glyph->t1, newBlack.packed, 8);
                 }
 
             } else {
@@ -3597,8 +3605,9 @@ static void RB_BACKEND_REGPARM3_SSE_ABI RB_DrawTextWithCursor_impl(const char *t
             RB_DrawStretchPic(material, glyphX, glyphY, w, h,
                               glyph->s0, glyph->t0, glyph->s1, glyph->t1, newColor.packed, 8);
             savedGlyphX2 = glyphX + 0.25f;
-            RB_DrawStretchPic(material, savedGlyphX2, glyphY + 0.25f, w, h,
-                              glyph->s0, glyph->t0, glyph->s1, glyph->t1, newColor.packed, 8);
+            if (!wwii)
+                RB_DrawStretchPic(material, savedGlyphX2, glyphY + 0.25f, w, h,
+                                  glyph->s0, glyph->t0, glyph->s1, glyph->t1, newColor.packed, 8);
         }
 
         if (count == cursorPos) {
@@ -3613,8 +3622,9 @@ static void RB_BACKEND_REGPARM3_SSE_ABI RB_DrawTextWithCursor_impl(const char *t
                 float cy = yPos + (float)(signed char)cg->y0 * yScale;
                 RB_DrawStretchPic(material, glyphX, cy, cw, ch_,
                                   cg->s0, cg->t0, cg->s1, cg->t1, newColor.packed, 8);
-                RB_DrawStretchPic(material, savedGlyphX2, cy + 0.25f, cw, ch_,
-                                  cg->s0, cg->t0, cg->s1, cg->t1, newColor.packed, 8);
+                if (!wwii)
+                    RB_DrawStretchPic(material, savedGlyphX2, cy + 0.25f, cw, ch_,
+                                      cg->s0, cg->t0, cg->s1, cg->t1, newColor.packed, 8);
             }
         }
 
@@ -3635,8 +3645,9 @@ static void RB_BACKEND_REGPARM3_SSE_ABI RB_DrawTextWithCursor_impl(const char *t
             float cy = yPos + (float)(signed char)cg->y0 * yScale;
             RB_DrawStretchPic(material, cursorX, cy, cw, ch_,
                               cg->s0, cg->t0, cg->s1, cg->t1, newColor.packed, 8);
-            RB_DrawStretchPic(material, cursorX + 0.25f, cy + 0.25f, cw, ch_,
-                              cg->s0, cg->t0, cg->s1, cg->t1, newColor.packed, 8);
+            if (!wwii)
+                RB_DrawStretchPic(material, cursorX + 0.25f, cy + 0.25f, cw, ch_,
+                                  cg->s0, cg->t0, cg->s1, cg->t1, newColor.packed, 8);
         }
     }
 }

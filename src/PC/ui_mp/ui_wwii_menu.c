@@ -83,14 +83,14 @@ extern void CalcScreenY(float *y, int vertAlign);
 /* The capture's CALL OF DUTY lettering is inked from 47.1 to 210.0, and its
  * lockup ends 136.7 down; logo_cod2 is drawn as wide as that lettering and
  * ends there. The subtitle's capitals are 8.0 tall on a baseline 150.2 down,
- * centred under the lettering, 0.705 capitals apart in the UI's SemiBold,
+ * centred under the lettering, 0.711 capitals apart in the UI's Medium,
  * which the WWII fonts draw at 95% of Barlow's width. */
 #define WWII_LOGO_INK_LEFT 47.1f
 #define WWII_LOGO_INK_WIDTH 162.9f
 #define WWII_LOGO_INK_BOTTOM 136.7f
 #define WWII_TITLE_CAP 8.0f
 #define WWII_TITLE_BASELINE 150.2f
-#define WWII_TITLE_TRACKING 0.705f
+#define WWII_TITLE_TRACKING 0.711f
 #define WWII_TITLE "MULTIPLAYER"
 /* Where logo_cod2's lettering lies in the retail 288 by 72 rectangle, as
  * fractions, measured where it is drawn at 720 lines, and the retail
@@ -453,9 +453,9 @@ static float UI_WWIIMenu_Scale(FontHandle font, float cap)
     return cap * (float)font->pixelHeight / (48.0f * UI_WWIIMenu_CapUnits(font));
 }
 
-/* The smallest of the UI's SemiBold sizes whose capitals are as tall on the
+/* The smallest of the UI's sizes whose capitals are as tall on the
  * screen as the text's, or the largest. */
-static FontHandle UI_WWIIMenu_SemiBold(float cap)
+static FontHandle UI_WWIIMenu_UiFont(float cap)
 {
     FontHandle fonts[4];
     float pixels = GetRealHeightFromVirtualHeight(cap);
@@ -478,12 +478,12 @@ static FontHandle UI_WWIIMenu_Regular(float cap)
         s_wwiiMenu.fontsRegistered = 1;
         s_wwiiMenu.regular = R_RegisterWwiiFont("$regularfont");
     }
-    return s_wwiiMenu.regular ? s_wwiiMenu.regular : UI_WWIIMenu_SemiBold(cap);
+    return s_wwiiMenu.regular ? s_wwiiMenu.regular : UI_WWIIMenu_UiFont(cap);
 }
 
 static FontHandle UI_WWIIMenu_Bold(float cap)
 {
-    return sharedUiInfo.assets.boldFont ? sharedUiInfo.assets.boldFont : UI_WWIIMenu_SemiBold(cap);
+    return sharedUiInfo.assets.boldFont ? sharedUiInfo.assets.boldFont : UI_WWIIMenu_UiFont(cap);
 }
 
 /* From the first letter's pen to the last one's advance, with tracking
@@ -837,7 +837,7 @@ static void UI_WWIIMenu_PaintLogo(void)
                     y + WWII_LOGO_MARK_Y * height, WWII_ALIGN_LEFT, WWII_ALIGN_TOP, scale, s_wwiiMark,
                     WWII_TEXT_SHADOWED);
     }
-    font = UI_WWIIMenu_SemiBold(WWII_TITLE_CAP);
+    font = UI_WWIIMenu_UiFont(WWII_TITLE_CAP);
     width = UI_WWIIMenu_TextWidth(WWII_TITLE, font, WWII_TITLE_CAP, WWII_TITLE_TRACKING);
     UI_WWIIMenu_DrawText(WWII_TITLE, font, WWII_LOGO_INK_LEFT + 0.5f * (WWII_LOGO_INK_WIDTH - width),
                          WWII_TITLE_BASELINE, WWII_ALIGN_LEFT, WWII_ALIGN_TOP, WWII_TITLE_CAP, WWII_TITLE_TRACKING,

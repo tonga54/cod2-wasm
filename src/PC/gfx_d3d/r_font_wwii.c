@@ -46,7 +46,6 @@ extern void RB_UnbindImage(const GfxImage *image);
 
 enum {
     R_WWII_MEDIUM,
-    R_WWII_SEMIBOLD,
     R_WWII_BOLD,
     R_WWII_REGULAR
 };
@@ -68,25 +67,32 @@ typedef struct {
 } R_WwiiFontProfile;
 
 /* The UI picks small, normal, big or extra big by the text's height on the
- * screen, so they share the captures' SemiBold, at their width: 95% of
+ * screen, so they share the HUD capture's Medium, at their width: 95% of
  * Barlow's. Bold text is the scoreboard title's Bold. The killcam's numbers
  * and prompt are Regular, a font no stock one stands for, in the extra big
  * font's units. */
 static const R_WwiiFontProfile s_wwiiFontProfiles[] = {
-    { "smallFont", R_WWII_SEMIBOLD, 12, 7.0f, 2, 0.95f, 0 },
-    { "normalFont", R_WWII_SEMIBOLD, 16, 11.0f, 2, 0.95f, 0 },
-    { "bigFont", R_WWII_SEMIBOLD, 24, 13.12f, 5, 0.95f, 0 },
-    { "extraBigFont", R_WWII_SEMIBOLD, 32, 21.0f, 5, 0.95f, 0 },
+    { "smallFont", R_WWII_MEDIUM, 12, 7.0f, 2, 0.95f, 0 },
+    { "normalFont", R_WWII_MEDIUM, 16, 11.0f, 2, 0.95f, 0 },
+    { "bigFont", R_WWII_MEDIUM, 24, 13.12f, 5, 0.95f, 0 },
+    { "extraBigFont", R_WWII_MEDIUM, 32, 21.0f, 5, 0.95f, 0 },
     { "boldFont", R_WWII_BOLD, 30, 17.1f, 6, 1.0f, 0 },
     { "consoleFont", R_WWII_MEDIUM, 16, 9.0f, 3, 1.0f, 1 },
-    { "smallDevFont", R_WWII_SEMIBOLD, 16, 9.17f, 2, 0.95f, 0 },
-    { "bigDevFont", R_WWII_SEMIBOLD, 24, 13.12f, 3, 0.95f, 0 },
-    { "qerFont", R_WWII_SEMIBOLD, 12, 7.0f, 3, 0.95f, 0 },
+    { "smallDevFont", R_WWII_MEDIUM, 16, 9.17f, 2, 0.95f, 0 },
+    { "bigDevFont", R_WWII_MEDIUM, 24, 13.12f, 3, 0.95f, 0 },
+    { "qerFont", R_WWII_MEDIUM, 12, 7.0f, 3, 0.95f, 0 },
     { "regularFont", R_WWII_REGULAR, 32, 21.0f, 5, 1.0f, 0 },
 };
 
-static const unsigned char *const s_wwiiFontData[] = { r_wwiiFontMedium, r_wwiiFontSemiBold, r_wwiiFontBold,
-                                                       r_wwiiFontRegular };
+static const unsigned char *const s_wwiiFontData[] = { r_wwiiFontMedium, r_wwiiFontBold, r_wwiiFontRegular };
+
+/* Fonts lettered in Barlow outside this module: the cgame's name font. */
+#define R_WWII_FONT_LETTERING 4
+/* The captures letter in a warm white the scene shows through, about 82%
+ * opaque over the HUD's frame; the menus' is dimmer still. Text the game
+ * draws white takes it; colored text keeps its color. */
+#define R_WWII_TEXT_WHITE 0.9f
+static const float s_wwiiTextTone[4] = { 0.96f, 0.94f, 0.88f, 0.82f };
 
 /* Windows-1252 from 0x80; 0 where it defines no letter. */
 static const unsigned short s_wwiiFontWindows1252[32] = {
@@ -138,6 +144,8 @@ static int s_wwiiFontAtlasCount;
 static R_WwiiFontFace s_wwiiFontFaces[R_WWII_FONT_FACES];
 static int s_wwiiFontFaceCount;
 static R_WwiiFontName s_wwiiFontNames[R_WWII_FONT_NAMES];
+static FontHandle s_wwiiLettering[R_WWII_FONT_LETTERING];
+static int s_wwiiLetteringCount;
 static int s_wwiiFontNameCount;
 static R_WwiiFontLayout s_wwiiFontLayout[R_WWII_FONT_GLYPHS];
 
@@ -542,5 +550,51 @@ void R_ShutdownWwiiFonts(void)
     s_wwiiFontAtlasCount = 0;
     s_wwiiFontFaceCount = 0;
     s_wwiiFontNameCount = 0;
+    s_wwiiLetteringCount = 0;
     r_wwiiFonts = NULL;
+}
+
+void R_AddWwiiLettering(FontHandle font)
+{
+    int i;
+
+    for (i = 0; i < s_wwiiLetteringCount; i++) {
+        if (s_wwiiLettering[i] == font)
+            return;
+    }
+    if (font && s_wwiiLetteringCount < R_WWII_FONT_LETTERING)
+        s_wwiiLettering[s_wwiiLetteringCount++] = font;
+}
+
+/* By their atlases, which the copies R_DuplicateFont makes under the UI's
+ * aliases share. */
+int R_IsWwiiFont(FontHandle font)
+{
+    int i;
+
+    for (i = 0; font && i < s_wwiiFontAtlasCount; i++) {
+        if (font->material == &s_wwiiFontAtlases[i].material)
+            return 1;
+    }
+    for (i = 0; font && i < s_wwiiLetteringCount; i++) {
+        if (font == s_wwiiLettering[i] || font->material == s_wwiiLettering[i]->material)
+            return 1;
+    }
+    return 0;
+}
+
+int R_ToneWwiiText(FontHandle font, const vec_t *color, vec_t *toned)
+{
+    static const float white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    int i;
+
+    if (!R_IsWwiiFont(font))
+        return 0;
+    if (!color)
+        color = white;
+    if (color[0] < R_WWII_TEXT_WHITE || color[1] < R_WWII_TEXT_WHITE || color[2] < R_WWII_TEXT_WHITE)
+        return 0;
+    for (i = 0; i < 4; i++)
+        toned[i] = color[i] * s_wwiiTextTone[i];
+    return 1;
 }

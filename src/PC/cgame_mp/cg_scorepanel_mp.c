@@ -2,6 +2,7 @@
 #include "imports.h"
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_scorepanel.h"
+#include "headers/PC/cgame_mp/cg_scoretable.h"
 #include "headers/PC/gfx_d3d/r_hud2d.h"
 
 #include <stdlib.h>
@@ -9,7 +10,7 @@
 
 extern const dvar_t *Dvar_RegisterBool_mac(const char *name, int value, int flags);
 extern FontHandle UI_GetFontHandle(int fontEnum, float scale);
-extern int UI_TextWidth(const char *text, int maxChars, FontHandle font, float scale);
+extern float CL_NormalizedTextScale(FontHandle font, float scale);
 extern void UI_DrawText(const char *text, int maxChars, FontHandle font, float x, float y, int horzAlign, int vertAlign, float scale, const vec_t *color, int style);
 extern void CL_DrawStretchPic(float x, float y, float w, float h, int horzAlign, int vertAlign, float s1, float t1, float s2, float t2, const vec_t *color, MaterialHandle material);
 extern MaterialHandle CL_RegisterMaterial(const char *name, int imageTrack);
@@ -30,18 +31,22 @@ extern const char *va(const char *format, ...);
 #define SCORE_PANEL_BAR_WIDTH 125.0f
 #define SCORE_PANEL_TOP_Y -52.0f
 #define SCORE_PANEL_TOP_HEIGHT 18.0f
-#define SCORE_PANEL_TOP_SCALE 0.38f
 #define SCORE_PANEL_BOTTOM_Y -33.0f
 #define SCORE_PANEL_BOTTOM_HEIGHT 9.0f
-#define SCORE_PANEL_BOTTOM_SCALE 0.24f
 #define SCORE_PANEL_NUMBER_PAD 4.0f
-#define SCORE_PANEL_TEXT_BASELINE -56.0f
 #define SCORE_PANEL_LABEL_X 42.0f
-#define SCORE_PANEL_LABEL_SCALE 0.26f
 #define SCORE_PANEL_LABEL_GAP 6.0f
 #define SCORE_PANEL_FONT 0
 #define SCORE_PANEL_CLOCK_RIGHT 172.0f
-#define SCORE_PANEL_CLOCK_SCALE 0.44f
+/* The capitals' and digits' heights, and the line the label and the clock
+ * stand on: on the capture "Winning" is 9 px tall, the clock's digits 12.7,
+ * the scores' 12.5 and 8.6, at 1.2 px a unit, on baselines 57.9 and 58.6
+ * units up. */
+#define SCORE_PANEL_LABEL_CAP 7.5f
+#define SCORE_PANEL_CLOCK_CAP 10.6f
+#define SCORE_PANEL_TOP_CAP 10.4f
+#define SCORE_PANEL_BOTTOM_CAP 7.2f
+#define SCORE_PANEL_TEXT_BASELINE -58.2f
 #define SCORE_PANEL_EMBLEM_X 8.0f
 #define SCORE_PANEL_EMBLEM_Y -55.0f
 #define SCORE_PANEL_EMBLEM_SIZE 34.0f
@@ -49,8 +54,6 @@ extern const char *va(const char *format, ...);
 #define SCORE_PANEL_ARROW_X 34.5f
 #define SCORE_PANEL_ARROW_WIDTH 4.5f
 #define SCORE_PANEL_ARROW_HEIGHT 7.0f
-/* Height of the default font's digits per unit of text scale. */
-#define SCORE_PANEL_DIGIT_HEIGHT 26.0f
 #define SCORE_PANEL_STANDING_MSEC 5000
 #define SCORE_PANEL_LABEL_FADE_MSEC 250
 #define SCORE_PANEL_ALIGN_LEFT 1
@@ -317,12 +320,36 @@ static float CG_ScorePanelFill(int score, int limit, float minWidth)
     return width < minWidth ? minWidth : width;
 }
 
-static void CG_ScorePanelDrawBar(float y, float height, float scale, int score, int limit, const vec_t *fillColor)
+/* A font whose capitals are cap units tall at scale. */
+static FontHandle CG_ScorePanelFont(float cap, float *scale)
 {
-    FontHandle font = UI_GetFontHandle(SCORE_PANEL_FONT, scale);
+    FontHandle font = UI_GetFontHandle(SCORE_PANEL_FONT, cap / 30.0f);
+
+    *scale = CG_ScoreTableCapScale(font, cap);
+    return font;
+}
+
+/* Text from x on its baseline: the renderer draws half a unit up and left of
+ * its pen, and the pen stands under the baseline. */
+static void CG_ScorePanelDrawText(const char *text, FontHandle font, float x, float baseline, float scale,
+                                  const vec_t *color)
+{
+    float unit = CL_NormalizedTextScale(font, scale);
+    float cap;
+    float rise;
+
+    CG_ScoreTableFontMetrics(font, &cap, &rise);
+    UI_DrawText(text, 0x7fffffff, font, x + 0.5f * unit, baseline + (rise + 0.5f) * unit, SCORE_PANEL_ALIGN_LEFT,
+                SCORE_PANEL_ALIGN_BOTTOM, scale, color, 3);
+}
+
+static void CG_ScorePanelDrawBar(float y, float height, float cap, int score, int limit, const vec_t *fillColor)
+{
+    float scale;
+    FontHandle font = CG_ScorePanelFont(cap, &scale);
     const char *number = va("%i", score);
     float fill = CG_ScorePanelFill(score, limit,
-                                   (float)UI_TextWidth(number, 0, font, scale) + 2.0f * SCORE_PANEL_NUMBER_PAD);
+                                   CG_ScoreTableTextWidth(number, 0, font, scale) + 2.0f * SCORE_PANEL_NUMBER_PAD);
 
     CL_DrawStretchPic(SCORE_PANEL_BAR_X, y, fill, height, SCORE_PANEL_ALIGN_LEFT, SCORE_PANEL_ALIGN_BOTTOM, 0.0f,
                       0.0f, 1.0f, 1.0f, fillColor, cgs->media.whiteMaterial);
@@ -330,9 +357,8 @@ static void CG_ScorePanelDrawBar(float y, float height, float scale, int score, 
         CL_DrawStretchPic(SCORE_PANEL_BAR_X + fill, y, SCORE_PANEL_BAR_WIDTH - fill, height, SCORE_PANEL_ALIGN_LEFT,
                           SCORE_PANEL_ALIGN_BOTTOM, 0.0f, 0.0f, 1.0f, 1.0f, s_scorePanelTrack,
                           cgs->media.whiteMaterial);
-    UI_DrawText(number, 0x7fffffff, font, SCORE_PANEL_BAR_X + SCORE_PANEL_NUMBER_PAD,
-                y + 0.5f * (height + SCORE_PANEL_DIGIT_HEIGHT * scale), SCORE_PANEL_ALIGN_LEFT,
-                SCORE_PANEL_ALIGN_BOTTOM, scale, s_scorePanelText, 3);
+    CG_ScorePanelDrawText(number, font, SCORE_PANEL_BAR_X + SCORE_PANEL_NUMBER_PAD, y + 0.5f * (height + cap), scale,
+                          s_scorePanelText);
 }
 
 /* Points at the viewer's own bar. */
@@ -364,9 +390,10 @@ static void CG_ScorePanelDraw(const CG_ScorePanelState *state, const CG_ScorePan
 {
     MaterialHandle emblem = CG_ScorePanelEmblem(retail, view->team);
     float clockLeft = SCORE_PANEL_CLOCK_RIGHT;
-    float labelScale = SCORE_PANEL_LABEL_SCALE;
+    float labelCap = SCORE_PANEL_LABEL_CAP;
     float labelWidth;
     float room;
+    float scale;
     FontHandle font;
     const char *label;
     vec4_t color;
@@ -383,10 +410,9 @@ static void CG_ScorePanelDraw(const CG_ScorePanelState *state, const CG_ScorePan
     if (retail->clock) {
         const char *clock = CG_GetHudElemTimer(retail->clock, color);
         if (clock && color[3] > 0.0f) {
-            font = UI_GetFontHandle(SCORE_PANEL_FONT, SCORE_PANEL_CLOCK_SCALE);
-            clockLeft -= (float)UI_TextWidth(clock, 0, font, SCORE_PANEL_CLOCK_SCALE);
-            UI_DrawText(clock, 0x7fffffff, font, clockLeft, SCORE_PANEL_TEXT_BASELINE, SCORE_PANEL_ALIGN_LEFT,
-                        SCORE_PANEL_ALIGN_BOTTOM, SCORE_PANEL_CLOCK_SCALE, color, 3);
+            font = CG_ScorePanelFont(SCORE_PANEL_CLOCK_CAP, &scale);
+            clockLeft -= CG_ScoreTableTextWidth(clock, 0, font, scale);
+            CG_ScorePanelDrawText(clock, font, clockLeft, SCORE_PANEL_TEXT_BASELINE, scale, color);
         }
     }
 
@@ -395,18 +421,20 @@ static void CG_ScorePanelDraw(const CG_ScorePanelState *state, const CG_ScorePan
                                SEH_LocalizeTextMessage(UI_GetGameTypeDisplayName(cgs->gametype),
                                                        "score panel gametype", 0),
                                &alpha);
-    labelWidth = (float)UI_TextWidth(label, 0, UI_GetFontHandle(SCORE_PANEL_FONT, labelScale), labelScale);
+    font = CG_ScorePanelFont(labelCap, &scale);
+    labelWidth = CG_ScoreTableTextWidth(label, 0, font, scale);
     room = clockLeft - SCORE_PANEL_LABEL_GAP - SCORE_PANEL_LABEL_X;
-    if (labelWidth > room && room > 0.0f)
-        labelScale *= room / labelWidth;
+    if (labelWidth > room && room > 0.0f) {
+        labelCap *= room / labelWidth;
+        font = CG_ScorePanelFont(labelCap, &scale);
+    }
     memcpy(color, s_scorePanelText, sizeof(color));
     color[3] = alpha;
-    UI_DrawText(label, 0x7fffffff, UI_GetFontHandle(SCORE_PANEL_FONT, labelScale), SCORE_PANEL_LABEL_X,
-                SCORE_PANEL_TEXT_BASELINE, SCORE_PANEL_ALIGN_LEFT, SCORE_PANEL_ALIGN_BOTTOM, labelScale, color, 3);
+    CG_ScorePanelDrawText(label, font, SCORE_PANEL_LABEL_X, SCORE_PANEL_TEXT_BASELINE, scale, color);
 
-    CG_ScorePanelDrawBar(SCORE_PANEL_TOP_Y, SCORE_PANEL_TOP_HEIGHT, SCORE_PANEL_TOP_SCALE, view->topScore,
+    CG_ScorePanelDrawBar(SCORE_PANEL_TOP_Y, SCORE_PANEL_TOP_HEIGHT, SCORE_PANEL_TOP_CAP, view->topScore,
                          view->limit, s_scorePanelTopFill);
-    CG_ScorePanelDrawBar(SCORE_PANEL_BOTTOM_Y, SCORE_PANEL_BOTTOM_HEIGHT, SCORE_PANEL_BOTTOM_SCALE,
+    CG_ScorePanelDrawBar(SCORE_PANEL_BOTTOM_Y, SCORE_PANEL_BOTTOM_HEIGHT, SCORE_PANEL_BOTTOM_CAP,
                          view->bottomScore, view->limit, s_scorePanelBottomFill);
     if (view->standing != SCORE_PANEL_NEUTRAL)
         CG_ScorePanelDrawArrow();

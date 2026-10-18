@@ -51,7 +51,7 @@ typedef unsigned char byte;
 typedef int qboolean;
 typedef float vec_t;
 typedef vec_t vec4_t[4];
-typedef const float *FontHandle;
+typedef const struct FakeFont { const char *name; float perScale, rise; int pixelHeight; } *FontHandle;
 typedef const char *MaterialHandle;
 ''' + definition(vector, 'enum he_type_t {') + r'''
 typedef enum he_type_t he_type_t;
@@ -87,32 +87,35 @@ static const dvar_t *Dvar_RegisterBool_mac(const char *name, int value, int flag
     assert(!strcmp(name, "cg_hudScorePanel") && value == 1 && flags == 0x1001);
     return &panelDvar;
 }
-/* One font per scale, so a width is always measured with the drawn font. */
-static float fonts[16];
-static int fontCount;
+/* Two fonts the UI picks by scale, as it does normalFont and extraBigFont:
+ * capitals 33 and 31.5 units tall a unit of scale, baselines 2 and 5 font
+ * units over the pen, 16 and 32 pixels high. */
+static const struct FakeFont smallFake = { "small", 33.0f, 2.0f, 16 }, largeFake = { "large", 31.5f, 5.0f, 32 };
 static FontHandle UI_GetFontHandle(int fontEnum, float scale) {
     assert(fontEnum == 0);
-    for (int i = 0; i < fontCount; i++)
-        if (fonts[i] == scale) return &fonts[i];
-    assert(fontCount < 16);
-    fonts[fontCount] = scale;
-    return &fonts[fontCount++];
+    return scale < 0.3f ? &smallFake : &largeFake;
 }
-static int UI_TextWidth(const char *text, int maxChars, FontHandle font, float scale) {
-    assert(maxChars == 0 && *font == scale);
-    return (int)(strlen(text) * 20.0f * scale);
+static float CG_ScoreTableCapScale(FontHandle font, float cap) { return cap / font->perScale; }
+static void CG_ScoreTableFontMetrics(FontHandle font, float *cap, float *baseline) {
+    *cap = font->perScale * font->pixelHeight / 48.0f;
+    *baseline = font->rise;
 }
-typedef struct { int pic; char text[32]; MaterialHandle material; float x, y, w, h, s0, t0, s1, t1, scale;
+static float CG_ScoreTableTextWidth(const char *text, int maxChars, FontHandle font, float scale) {
+    assert(maxChars == 0 && font);
+    return strlen(text) * 20.0f * scale;
+}
+static float CL_NormalizedTextScale(FontHandle font, float scale) { return 48.0f * scale / font->pixelHeight; }
+typedef struct { int pic; char text[32]; MaterialHandle material; FontHandle font; float x, y, w, h, s0, t0, s1, t1, scale;
                  vec4_t color; int horz, vert, style; } Drawn;
 static Drawn drawn[16];
 static int drawCount;
 static void UI_DrawText(const char *text, int maxChars, FontHandle font, float x, float y, int horzAlign,
                         int vertAlign, float scale, const vec_t *color, int style) {
-    assert(drawCount < 16 && maxChars == 0x7fffffff && *font == scale);
+    assert(drawCount < 16 && maxChars == 0x7fffffff && font);
     Drawn *d = &drawn[drawCount++];
     memset(d, 0, sizeof(*d));
     snprintf(d->text, sizeof(d->text), "%s", text);
-    d->x = x; d->y = y; d->scale = scale; memcpy(d->color, color, sizeof(d->color));
+    d->font = font; d->x = x; d->y = y; d->scale = scale; memcpy(d->color, color, sizeof(d->color));
     d->horz = horzAlign; d->vert = vertAlign; d->style = style;
 }
 static void CL_DrawStretchPic(float x, float y, float w, float h, int horzAlign, int vertAlign, float s1, float t1,
@@ -187,7 +190,7 @@ static const char *Info_ValueForKey(const char *s, const char *key) {
 }
 static const char *const modes[][3] = {
     { "dm", "MPUI_DEATHMATCH", "Deathmatch" }, { "tdm", "MPUI_TEAM_DEATHMATCH", "Team Deathmatch" },
-    { "sd", "MPUI_SEARCH_AND_DESTROY", "Search and Destroy" }, { "ctf", "MPUI_CAPTURE_THE_FLAG", "Capture the Flag" },
+    { "sd", "MPUI_SEARCH_AND_DESTROY", "Search and Destroy Classic" }, { "ctf", "MPUI_CAPTURE_THE_FLAG", "Capture the Flag" },
     { "hq", "MPUI_HEADQUARTERS", "Headquarters" } };
 static const char *UI_GetGameTypeDisplayName(const char *gameType) {
     for (int i = 0; i < 5; i++)
@@ -216,12 +219,19 @@ static int pic(int i, MaterialHandle material, float x, float y, float w, float 
            near(d->w, w) && near(d->h, h) && d->s0 == 0 && d->t0 == 0 && d->s1 == 1 && d->t1 == 1 &&
            d->horz == 1 && d->vert == 3 && colored(d->color, rgb, alpha);
 }
-static int text(int i, const char *value, float x, float y, float scale, const float *rgb, float alpha) {
+/* The font for capitals cap tall, its scale, and the text drawn with its pen
+ * at x on baseline, half a unit up and left, the pen under the baseline. */
+static FontHandle fontFor(float cap) { return cap / 30.0f < 0.3f ? &smallFake : &largeFake; }
+static float capScale(float cap) { return cap / fontFor(cap)->perScale; }
+static float capWidth(const char *value, float cap) { return strlen(value) * 20.0f * capScale(cap); }
+static int text(int i, const char *value, float x, float baseline, float cap, const float *rgb, float alpha) {
     const Drawn *d = &drawn[i];
-    return i < drawCount && !d->pic && !strcmp(d->text, value) && near(d->x, x) && near(d->y, y) &&
-           near(d->scale, scale) && d->horz == 1 && d->vert == 3 && d->style == 3 && colored(d->color, rgb, alpha);
+    FontHandle font = fontFor(cap);
+    float scale = capScale(cap), unit = 48.0f * scale / font->pixelHeight;
+    return i < drawCount && !d->pic && !strcmp(d->text, value) && d->font == font && near(d->x, x + 0.5f * unit) &&
+           near(d->y, baseline + (font->rise + 0.5f) * unit) && near(d->scale, scale) && d->horz == 1 &&
+           d->vert == 3 && d->style == 3 && colored(d->color, rgb, alpha);
 }
-static float width(const char *value, float scale) { return (float)(int)(strlen(value) * 20.0f * scale); }
 static hudelem_t make(he_type_t type, float x, float y) {
     hudelem_t e;
     memset(&e, 0, sizeof(e));
@@ -456,17 +466,17 @@ int main(void) {
     stockHud();
     snapState.ps.clientNum = 3;
     render(10000);
-    float clockX = 172 - width("8:03", 0.44f);
+    float clockX = 172 - capWidth("8:03", 10.6f);
     assert(drawCount == 9);
     assert(pic(0, "emblem:hudicon_british", 8, -55, 34, 34, white, 0.35f));
-    assert(text(1, "8:03", clockX, -56, 0.44f, goldRgb, 1));
-    assert(text(2, "Winning", 42, -56, 0.26f, cream, 1));
+    assert(text(1, "8:03", clockX, -58.2f, 10.6f, goldRgb, 1));
+    assert(text(2, "Winning", 42, -58.2f, 7.5f, cream, 1));
     assert(pic(3, "white", 40, -52, 35, 18, teal, 0.9f) && pic(4, "white", 75, -52, 90, 18, black, 0.4f));
-    assert(text(5, "21", 44, -52 + 0.5f * (18 + 26 * 0.38f), 0.38f, cream, 1));
+    assert(text(5, "21", 44, -52 + 0.5f * (18 + 10.4f), 10.4f, cream, 1));
     float fill = 125 * 11 / 75.0f;
-    assert(fill > width("11", 0.24f) + 8);
+    assert(fill > capWidth("11", 7.2f) + 8);
     assert(pic(6, "white", 40, -33, fill, 9, orange, 0.9f) && pic(7, "white", 40 + fill, -33, 125 - fill, 9, black, 0.4f));
-    assert(text(8, "11", 44, -33 + 0.5f * (9 + 26 * 0.24f), 0.24f, cream, 1));
+    assert(text(8, "11", 44, -33 + 0.5f * (9 + 7.2f), 7.2f, cream, 1));
     /* The arrow left of the viewer's bar, in physical pixels. */
     assert(triCount == 1 && !strcmp(triMaterial, "white"));
     assert(triIndices[0] == 0 && triIndices[1] == 1 && triIndices[2] == 2);
@@ -476,25 +486,25 @@ int main(void) {
     for (int i = 0; i < 3; i++) assert(colored(triVerts[i].rgba, cream, 1));
     /* Then the mode name. */
     render(16000);
-    assert(text(2, "Team Deathmatch", 42, -56, 0.26f, cream, 1) && text(1, "7:57", clockX, -56, 0.44f, goldRgb, 1));
+    assert(text(2, "Team Deathmatch", 42, -58.2f, 7.5f, cream, 1) && text(1, "7:57", clockX, -58.2f, 10.6f, goldRgb, 1));
     /* The Allies overtaken: Losing. */
     cgs->teamScores[0] = 22;
     render(17000);
-    assert(text(2, "Losing", 42, -56, 0.26f, cream, 1) && text(5, "21", 44, -52 + 0.5f * (18 + 26 * 0.38f), 0.38f, cream, 1));
-    assert(text(8, "22", 44, -33 + 0.5f * (9 + 26 * 0.24f), 0.24f, cream, 1));
+    assert(text(2, "Losing", 42, -58.2f, 7.5f, cream, 1) && text(5, "21", 44, -52 + 0.5f * (18 + 10.4f), 10.4f, cream, 1));
+    assert(text(8, "22", 44, -33 + 0.5f * (9 + 7.2f), 7.2f, cream, 1));
     /* A long mode name shrinks to stay clear of the clock. */
     snprintf(cgs->gametype, sizeof(cgs->gametype), "sd");
     serverinfo = "\\ui_sd_scorelimit\\10";
     render(30000);
-    float room = 172 - width("7:43", 0.44f) - 6 - 42, sdScale = 0.26f * room / width("Search and Destroy", 0.26f);
-    assert(room < width("Search and Destroy", 0.26f));
-    assert(text(1, "7:43", 172 - width("7:43", 0.44f), -56, 0.44f, goldRgb, 1));
-    assert(text(2, "Search and Destroy", 42, -56, sdScale, cream, 1));
+    float room = 172 - capWidth("7:43", 10.6f) - 6 - 42, sdCap = 7.5f * room / capWidth("Search and Destroy Classic", 7.5f);
+    assert(room < capWidth("Search and Destroy Classic", 7.5f));
+    assert(text(1, "7:43", 172 - capWidth("7:43", 10.6f), -58.2f, 10.6f, goldRgb, 1));
+    assert(text(2, "Search and Destroy Classic", 42, -58.2f, sdCap, cream, 1));
     /* A full bar has no track left; without a clock nothing shrinks. */
-    assert(pic(3, "white", 40, -52, 125, 18, teal, 0.9f) && text(4, "21", 44, -52 + 0.5f * (18 + 26 * 0.38f), 0.38f, cream, 1));
+    assert(pic(3, "white", 40, -52, 125, 18, teal, 0.9f) && text(4, "21", 44, -52 + 0.5f * (18 + 10.4f), 10.4f, cream, 1));
     memset(&snapState.ps.hud.archival[0].color, 0, 4);
     render(40000);
-    assert(text(1, "Search and Destroy", 42, -56, 0.26f, cream, 1) && drawCount == 6);
+    assert(text(1, "Search and Destroy Classic", 42, -58.2f, 7.5f, cream, 1) && drawCount == 6);
 
     /* A spectator: no emblem, no arrow, the mode name and the Allies on top. */
     stockHud();
@@ -503,8 +513,8 @@ int main(void) {
     player(3, TEAM_SPECTATOR);
     render(41000);
     assert(drawCount == 8 && triCount == 0 && !drawn[0].pic);
-    assert(text(1, "Team Deathmatch", 42, -56, 0.26f, cream, 1) && text(4, "21", 44, -52 + 0.5f * (18 + 26 * 0.38f), 0.38f, cream, 1));
-    assert(text(7, "22", 44, -33 + 0.5f * (9 + 26 * 0.24f), 0.24f, cream, 1));
+    assert(text(1, "Team Deathmatch", 42, -58.2f, 7.5f, cream, 1) && text(4, "21", 44, -52 + 0.5f * (18 + 10.4f), 10.4f, cream, 1));
+    assert(text(7, "22", 44, -33 + 0.5f * (9 + 7.2f), 7.2f, cream, 1));
 
     /* Deathmatch, first seen: the player's own icon and Tied at zero. */
     CG_ScorePanelInit();
@@ -515,12 +525,12 @@ int main(void) {
     snapState.ps.hud.current[1].materialIndex = 2;
     snapState.ps.hud.current[2].type = HE_TYPE_FREE;
     render(50000);
-    assert(pic(0, "emblem:hudicon_german", 8, -55, 34, 34, white, 0.35f) && text(2, "Tied", 42, -56, 0.26f, cream, 1));
+    assert(pic(0, "emblem:hudicon_german", 8, -55, 34, 34, white, 0.35f) && text(2, "Tied", 42, -58.2f, 7.5f, cream, 1));
     assert(triCount == 1);
     CG_ScorePanelSetDmScore(1, 20); CG_ScorePanelSetDmScore(3, 12);
     render(51000);
-    assert(text(2, "Losing", 42, -56, 0.26f, cream, 1) && text(5, "12", 44, -52 + 0.5f * (18 + 26 * 0.38f), 0.38f, cream, 1));
-    assert(pic(3, "white", 40, -52, 50, 18, teal, 0.9f) && text(8, "20", 44, -33 + 0.5f * (9 + 26 * 0.24f), 0.24f, cream, 1));
+    assert(text(2, "Losing", 42, -58.2f, 7.5f, cream, 1) && text(5, "12", 44, -52 + 0.5f * (18 + 10.4f), 10.4f, cream, 1));
+    assert(pic(3, "white", 40, -52, 50, 18, teal, 0.9f) && text(8, "20", 44, -33 + 0.5f * (9 + 7.2f), 7.2f, cream, 1));
 
     /* Nothing without the dvar, outside the stock gametypes, without a
      * snapshot or for an impossible client. */
@@ -558,14 +568,23 @@ mutants = [
     ('    if (width > SCORE_PANEL_BAR_WIDTH)\n        width = SCORE_PANEL_BAR_WIDTH;\n', ''),
     ('if (limit > 0 && score > 0)', 'if (score > 0)'),
     ('    if (view->standing != SCORE_PANEL_NEUTRAL)\n        CG_ScorePanelDrawArrow();', '    CG_ScorePanelDrawArrow();'),
-    ('        labelScale *= room / labelWidth;\n', ''),
+    ('        labelCap *= room / labelWidth;\n', ''),
+    ('        font = CG_ScorePanelFont(labelCap, &scale);\n    }', '    }'),
     ('if (clock && color[3] > 0.0f) {', 'if (clock) {'),
-    ('y + 0.5f * (height + SCORE_PANEL_DIGIT_HEIGHT * scale)', 'y + 0.5f * height'),
+    ('y + 0.5f * (height + cap)', 'y + 0.5f * height'),
     ('return CG_ScorePanelActiveGametype() >= 0 && CG_ScorePanelRetailElem(elem)', 'return CG_ScorePanelRetailElem(elem)'),
     ('if (!cg_hudScorePanel || !cg_hudScorePanel->current.enabled)', 'if (!cg_hudScorePanel)'),
     ('    s_scorePanel.standing = SCORE_PANEL_UNSEEN;\n', ''),
     ('    if ((unsigned)viewClient >= SCORE_PANEL_MAX_CLIENTS)\n        return;\n', ''),
-    ('clockLeft -= (float)UI_TextWidth(', 'clockLeft = SCORE_PANEL_CLOCK_RIGHT + 0.0f * (float)UI_TextWidth('),
+    ('clockLeft -= CG_ScoreTableTextWidth(', 'clockLeft -= 0.0f * CG_ScoreTableTextWidth('),
+    ('#define SCORE_PANEL_LABEL_CAP 7.5f', '#define SCORE_PANEL_LABEL_CAP 8.6f'),
+    ('#define SCORE_PANEL_CLOCK_CAP 10.6f', '#define SCORE_PANEL_CLOCK_CAP 13.9f'),
+    ('#define SCORE_PANEL_TOP_CAP 10.4f', '#define SCORE_PANEL_TOP_CAP 12.0f'),
+    ('#define SCORE_PANEL_BOTTOM_CAP 7.2f', '#define SCORE_PANEL_BOTTOM_CAP 7.9f'),
+    ('#define SCORE_PANEL_TEXT_BASELINE -58.2f', '#define SCORE_PANEL_TEXT_BASELINE -56.0f'),
+    ('UI_GetFontHandle(SCORE_PANEL_FONT, cap / 30.0f)', 'UI_GetFontHandle(SCORE_PANEL_FONT, 0.4f)'),
+    ('x + 0.5f * unit, baseline + (rise + 0.5f) * unit', 'x, baseline + (rise + 0.5f) * unit'),
+    ('x + 0.5f * unit, baseline + (rise + 0.5f) * unit', 'x + 0.5f * unit, baseline + 0.5f * unit'),
     ('    if (fill < SCORE_PANEL_BAR_WIDTH)\n', ''),
 ]
 timer_mutants = [
@@ -595,5 +614,7 @@ print('PASS: the panel hides only the stock clock, icons, scores and limits, in 
       'cg_hudScorePanel is on; it puts the viewer\'s team or a deathmatch player on top against the other team or '
       'the best other player (spectators see the Allies or the two leaders), shows a new standing for five seconds '
       'before fading into the mode name, fills bars toward the serverinfo score limit, keeps the stock clock text '
-      'and color, shrinks long mode names clear of it, and draws a faint emblem and an arrow only for a side; '
+      'and color, shrinks long mode names clear of it, letters everything by the capture\'s capital heights (7.5, '
+      '10.6, 10.4 and 7.2 units) in the font the UI picks for them, and draws a faint emblem and an arrow only for '
+      'a side; '
       f'{len(variants) - 1} failing regression mutants')
