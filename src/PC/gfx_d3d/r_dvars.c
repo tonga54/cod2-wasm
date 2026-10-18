@@ -30,6 +30,7 @@ extern const dvar_t *r_lodBias;
 const dvar_t *r_lodDistanceScale;
 const dvar_t *r_dof_enable;
 const dvar_t *r_filmTweakEnable;
+const dvar_t *r_motionBlur;
 #endif
 extern const dvar_t *r_znear;
 extern const dvar_t *r_znear_depthhack;
@@ -501,11 +502,14 @@ void R_RegisterDvars(void)
 
     r_glowBloomDesaturation = ri.Dvar_RegisterFloat("r_glowBloomDesaturation", 0.75f, 0.0f, 1.0f, 0x2000);
 #ifdef __EMSCRIPTEN__
-    /* The browser composes r_glow, aim depth of field and the film grade in
-     * one pass after the 3D scene (downstream/wasm/web_scene_fx.c). */
+    /* The browser composes r_glow, camera motion blur, aim depth of field and
+     * the film grade in one pass after the 3D scene
+     * (downstream/wasm/web_scene_fx.c). */
     r_dof_enable = ri.Dvar_RegisterBool("r_dof_enable", 1, 0x2001);
 
     r_filmTweakEnable = ri.Dvar_RegisterBool("r_filmTweakEnable", 1, 0x2001);
+
+    r_motionBlur = ri.Dvar_RegisterBool("r_motionBlur", 1, 0x2001);
 #endif
 
     r_outdoorAwayBias = ri.Dvar_RegisterFloat("r_outdoorAwayBias", 32.0f, -3.4028235e+38f, 3.4028235e+38f, 0x2000);

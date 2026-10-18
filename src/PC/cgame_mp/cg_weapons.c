@@ -1353,6 +1353,8 @@ extern void CG_TraceCapsule(trace_t *result, const vec_t *start, const vec_t *mi
 extern void BG_GetSpreadForWeapon(const playerState_t *ps, int weaponIndex, float *minSpread, float *maxSpread);
 extern float randomf(void);
 float g_webAdsDofFrac = 0.0f;
+/* How far the sights are raised, scopes included. */
+float g_webAimFrac = 0.0f;
 float g_webAdsViewmodelStart = 6.0f;
 float g_webAdsViewmodelEnd = 15.0f;
 float g_webAdsNearEnd = 512.0f;
@@ -1607,6 +1609,9 @@ void CG_AddViewWeapon(playerState_t *ps)
     float sprintCycle;
 
     playerState = ps;
+#ifdef __EMSCRIPTEN__
+    g_webAimFrac = playerState->fWeaponPosFrac;
+#endif
 
     if (playerState->pm_type == 4 || playerState->pm_type == 5) {
 #ifdef __EMSCRIPTEN__

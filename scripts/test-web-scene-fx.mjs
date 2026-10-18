@@ -69,12 +69,22 @@ try {
     const c = 0.9995002746582031, near = 0.1, worldNear = c * 4;
     const vmDepth = z => 2 * (0.2 * (c - near / z)) - 1;
     const worldDepth = z => 2 * (c - worldNear / z) - 1;
-    function drawScene() {
+    function drawScene(layout = fixture) {
       gl.useProgram(scene); gl.bindVertexArray(sceneVao);
       gl.viewport(0, 0, W, H);
       gl.disable(gl.BLEND); gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LESS); gl.depthMask(true); gl.colorMask(true, true, true, true);
       gl.clearColor(0, 0, 0, 1); gl.clearDepth(1); gl.clearStencil(0);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+      layout();
+    }
+    // Black distant world, a white world square at the centre and a white
+    // viewmodel strip on the right.
+    function squares() {
+      rect(-1, -1, 1, 1, worldDepth(2000), [0, 0, 0], 0);
+      rect(-0.1, -0.1, 0.1, 0.1, worldDepth(1999), [1, 1, 1], 0);
+      rect(0.5, -1, 1, 1, vmDepth(5), [1, 1, 1], 0);
+    }
+    function fixture() {
       rect(-1, -1, 1, 1, worldDepth(2000), [0.55, 0.5, 0.42], 1);                // distant world texture detail
       rect(0.55, 0.55, 0.75, 0.8, worldDepth(1800), [1, 1, 1], 0);              // sky highlight
       rect(-1, -1, -0.3, -0.3, worldDepth(1500), [0.08, 0.08, 0.08], 0);        // dark wall
@@ -85,10 +95,17 @@ try {
       rect(0.4, -0.15, 0.95, 0.15, vmDepth(9.6), [0.62, 0.5, 0.42], 1, 0, 6);   // trigger hand ahead of it
       rect(-0.012, -0.25, 0.012, -0.02, vmDepth(20), [0.6, 0.6, 0.6], 1);       // front sight post
     }
+    // Camera motion since the last frame, as WebSceneFx_TrackCamera hands it
+    // over: a column-major rotation and an offset from this view's space into
+    // the last one's, for a 90-degree 16:9 projection.
+    const turn = (angle, scale = 1) => ({scale, move: [0, 0, 0],
+      rotation: [Math.cos(angle), 0, -Math.sin(angle), 0, 1, 0, Math.sin(angle), 0, Math.cos(angle)]});
+    const strafe = (units, scale = 1) => ({scale, move: [units, 0, 0], rotation: [1, 0, 0, 0, 1, 0, 0, 0, 1]});
     // The production viewmodel range for a muzzle 28 units out (a Thompson).
-    function params(ads, {glow = 1, film = 1, nearEnd = 512} = {}) {
+    function params(ads, {glow = 1, film = 1, nearEnd = 512, motion = null} = {}) {
       HEAPF32.set([0.42 * glow, 0.30 * glow, 0.9, 0.75, 5, 12, ads, 4.55, 17.5, near, 3,
-        film ? 0.147 : 0, 0.96, film ? 0.35 : 0, film, worldNear, nearEnd, 1], 16);
+        film ? 0.147 : 0, 0.96, film ? 0.35 : 0, film, worldNear, nearEnd, 1,
+        ...(motion ? [motion.scale, ...motion.rotation, ...motion.move] : Array(13).fill(0)), 1, 16 / 9], 16);
       return 64;
     }
     function read() {
@@ -98,7 +115,7 @@ try {
     }
     function render(samples, ads, options) {
       check(bind(gl, Module, HEAPF32, W, H, samples) === 1, `offscreen scene bound with ${samples} sample(s)`);
-      drawScene();
+      drawScene(options?.layout);
       compose(gl, Module, HEAPF32, params(ads, options));
       return read();
     }
@@ -146,6 +163,31 @@ try {
     const wall = [-0.98, -0.95, -0.32, -0.32], partial = px => region(px, ...wall).values.filter(v => v > 40 && v < 200).length;
     check(partial(render(4, 0, {glow: 0, film: 0})) > partial(plain) + 100, 'r_aaSamples multisamples the offscreen scene');
 
+    // Camera motion blur. A turn of 0.03 rad moves the centre 19.2 pixels.
+    check(same(render(4, 0, {motion: turn(0.03, 0)}), graded, [-1, -1, 1, 1]), 'without camera motion nothing smears');
+    const turning = render(4, 0, {motion: turn(0.03)}); snapshot('turn');
+    check(kept(turning, feet) < 0.5 && kept(turning, ground) < 0.5, 'turning smears the world near and far');
+    check(same(turning, graded, receiver) && same(turning, graded, hand), 'turning leaves the viewmodel sharp');
+    // Strafing 2 units moves the ground at 120 units 10.7 pixels, at 380 units
+    // 3.4, and the world at 1,400 units and beyond under one.
+    const strafing = render(4, 0, {motion: strafe(2)}); snapshot('strafe');
+    check(kept(strafing, feet) < 0.6 && kept(strafing, ground) > 1.3 * kept(strafing, feet),
+      'strafing smears near surfaces more than farther ones');
+    check(same(strafing, graded, [-0.95, 0.2, -0.6, 0.9]) && same(strafing, graded, centreWorld),
+      'strafing leaves the distant world sharp');
+    check(same(strafing, graded, receiver), 'strafing leaves the viewmodel sharp');
+    const pixel = (px, x, y) => px[(y * W + x) * 4 + 1];
+    // The square covers pixels 576-703 by 324-395 and the strip starts at 960.
+    const smeared = render(4, 0, {glow: 0, film: 0, layout: squares, motion: turn(0.03)}); snapshot('turn-squares');
+    check(pixel(smeared, 708, 360) > 20 && pixel(smeared, 571, 360) > 20, 'a turn smears the square sideways');
+    check(pixel(smeared, 718, 360) === 0 && pixel(smeared, 561, 360) === 0, 'the smear spans the turn and no more');
+    check(pixel(smeared, 640, 400) === 0 && pixel(smeared, 640, 319) === 0, 'a turn does not smear vertically');
+    check(pixel(smeared, 955, 360) === 0 && pixel(smeared, 950, 200) === 0, 'the viewmodel stays out of the world smear');
+    check(pixel(smeared, 960, 360) === 255 && pixel(smeared, 962, 100) === 255, 'the viewmodel edge stays sharp');
+    const flick = render(4, 0, {glow: 0, film: 0, layout: squares, motion: turn(0.03, 20)});
+    check(pixel(flick, 716, 360) > 0 && pixel(flick, 728, 360) === 0 && pixel(flick, 551, 360) === 0,
+      'a flick smears 6% of the screen height at most');
+
     // Each pass has a fixed GPU cost, so the pass count is part of the frame budget.
     const passes = (ads, options) => {
       bind(gl, Module, HEAPF32, W, H, 4); drawScene();
@@ -160,6 +202,7 @@ try {
     check(passes(0, {glow: 0}) === '1+1', 'grade and sharpening alone: one resolve and one full-screen pass');
     check(passes(0) === '3+1', 'glow adds two 1/8-resolution passes');
     check(passes(1) === '5+1', 'aiming adds two 1/4-resolution passes');
+    check(passes(0, {glow: 0, motion: turn(0.03)}) === '1+1', 'motion blur adds no pass');
 
     // Production state is restored exactly, including the cached WebGL entry points.
     check(bind(gl, Module, HEAPF32, W, H, 4) === 1, 'rebind without reallocating');

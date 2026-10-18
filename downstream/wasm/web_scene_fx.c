@@ -1,13 +1,14 @@
 #include "common_types.h"
 #include <emscripten.h>
 #include <math.h>
+#include <string.h>
 
 /* The first full-screen 3D view of a frame renders into an offscreen target
  * (multisampled when r_aaSamples > 1). Before the first 2D draw it is composed
- * into the canvas: CoD2's DX9 glow (r_glow*), a CoD4-style depth of field on
- * the viewmodel and the near world while aiming, contrast adaptive sharpening
- * and a light film grade. The HUD and any later view draw straight into the
- * canvas. */
+ * into the canvas: CoD2's DX9 glow (r_glow*), WWII-style camera motion blur
+ * (r_motionBlur), a CoD4-style depth of field on the viewmodel and the near
+ * world while aiming, contrast adaptive sharpening and a light film grade.
+ * The HUD and any later view draw straight into the canvas. */
 
 extern const dvar_t *r_glow;
 extern const dvar_t *r_glowRadius[2];
@@ -18,6 +19,7 @@ extern const dvar_t *r_fullbright;
 extern const dvar_t *r_aaSamples;
 extern const dvar_t *r_dof_enable;
 extern const dvar_t *r_filmTweakEnable;
+extern const dvar_t *r_motionBlur;
 
 enum {
     SCENE_FX_GLOW0,
@@ -38,11 +40,31 @@ enum {
     SCENE_FX_WORLD_NEAR_CLIP,
     SCENE_FX_NEAR_END,
     SCENE_FX_WORLD_BLUR,
-    SCENE_FX_PARAM_COUNT
+    /* The camera's motion over the exposure as a multiple of its motion since
+     * the last frame; 0 draws no motion blur. */
+    SCENE_FX_MOTION,
+    /* Column-major rotation, then offset, taking a point from this view's
+     * space into the last frame's. */
+    SCENE_FX_MOTION_ROTATION,
+    SCENE_FX_MOTION_MOVE = SCENE_FX_MOTION_ROTATION + 9,
+    /* The projection's x and y scales. */
+    SCENE_FX_MOTION_PROJECTION = SCENE_FX_MOTION_MOVE + 3,
+    SCENE_FX_PARAM_COUNT = SCENE_FX_MOTION_PROJECTION + 2
 };
 
 /* InfinitePerspectiveMatrix's depth scale times the default r_znear of 4. */
 #define SCENE_FX_DEFAULT_WORLD_NEAR_CLIP (0.9995002746582031f * 4.0f)
+
+/* Milliseconds of camera motion the blur spans, at any frame rate. */
+#define SCENE_FX_MOTION_EXPOSURE 10.0
+/* Two views further apart in time or space than these are a cut: a spawn,
+ * a teleport or a new killcam, not motion. */
+#define SCENE_FX_MOTION_MAX_GAP 100.0
+#define SCENE_FX_MOTION_MAX_TURN 0.35f
+#define SCENE_FX_MOTION_MAX_MOVE 48.0f
+/* Below these, a turn in radians or a move in units, the camera stands still. */
+#define SCENE_FX_MOTION_MIN_TURN 0.0002f
+#define SCENE_FX_MOTION_MIN_MOVE 0.05f
 
 static float s_adsFrac;
 static float s_vmStart = 6.0f;
@@ -52,6 +74,17 @@ static float s_nearClip = 0.1f;
 static float s_worldNearClip = SCENE_FX_DEFAULT_WORLD_NEAR_CLIP;
 static int s_active;
 static int s_frameUsed;
+static float s_aimFrac;
+static float s_cameraView[16];
+static float s_cameraProjection[2];
+static int s_cameraPending;
+static float s_lastView[16];
+static double s_lastViewTime;
+static int s_lastViewValid;
+static float s_motionScale;
+static float s_motionRotation[9];
+static float s_motionMove[3];
+static float s_motionProjection[2];
 
 EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples), {
     if (typeof GLctx === "undefined" || !GLctx || !GLctx.blitFramebuffer) return 0;
@@ -168,11 +201,46 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples), {
                 "uniform highp sampler2D u_depth;\nuniform sampler2D u_dofMed;\nuniform sampler2D u_dofLarge;\n" +
                 "uniform highp vec4 u_px;\nuniform vec4 u_glow;\nuniform highp vec4 u_dof;\nuniform vec4 u_dof2;\nuniform vec4 u_film;\n" +
                 "uniform highp vec4 u_near;\nuniform vec2 u_tier;\n" +
+                "uniform highp vec4 u_motion;\nuniform highp mat3 u_motionRotation;\nuniform highp vec3 u_motionMove;\n" +
                 coc + nearWorld +
                 "void main() {\n" +
                 "  vec3 c = texture(u_scene, v_uv).rgb;\n" +
                 "  vec3 col = c;\n" +
-                "  if (u_film.x > 0.0) {\n" +
+                "  bool smeared = false;\n" +
+                /* Each world pixel goes back to where the last frame's camera saw
+                 * it, and the scene is averaged along that path. The viewmodel
+                 * moves with the camera: it stays sharp and stays out of the
+                 * world's average. */
+                "  if (u_motion.x > 0.0) {\n" +
+                "    highp float depth = texelFetch(u_depth, ivec2(gl_FragCoord.xy), 0).r;\n" +
+                "    highp vec2 ndc = v_uv * 2.0 - 1.0;\n" +
+                "    highp float z = min(u_near.x / max(u_dof.x - depth, 0.000001), 1000000.0);\n" +
+                "    highp vec3 p = u_motionRotation * vec3(ndc * z / u_motion.yz, z) + u_motionMove;\n" +
+                "    highp vec2 v = (ndc - p.xy * u_motion.yz / max(p.z, 0.001)) * (0.5 * u_motion.x);\n" +
+                "    float len = length(v / u_px.xy);\n" +
+                "    if (depth >= 0.2 && p.z > 1.0 && len > 1.0) {\n" +
+                "      float n = min(len, u_motion.w);\n" +
+                "      highp vec2 path = v / u_px.xy * (n / len);\n" +
+                "      int taps = int(clamp(ceil(n * 0.25), 3.0, 12.0));\n" +
+                "      float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));\n" +
+                "      ivec2 last = textureSize(u_scene, 0) - 1;\n" +
+                "      vec3 sum = c;\n" +
+                "      float weight = 1.0;\n" +
+                /* Color and depth come from the same texel, so no filtered tap
+                 * blends the viewmodel into the world. */
+                "      for (int i = 0; i < 12; ++i) {\n" +
+                "        if (i >= taps) break;\n" +
+                "        ivec2 q = clamp(ivec2(gl_FragCoord.xy + path * ((float(i) + jitter) / float(taps) - 0.5)),\n" +
+                "          ivec2(0), last);\n" +
+                "        float w = step(0.2, texelFetch(u_depth, q, 0).r);\n" +
+                "        sum += texelFetch(u_scene, q, 0).rgb * w;\n" +
+                "        weight += w;\n" +
+                "      }\n" +
+                "      col = sum / weight;\n" +
+                "      smeared = true;\n" +
+                "    }\n" +
+                "  }\n" +
+                "  if (u_film.x > 0.0 && !smeared) {\n" +
                 "    vec3 n = texture(u_scene, v_uv + vec2(0.0, u_px.y)).rgb;\n" +
                 "    vec3 s = texture(u_scene, v_uv - vec2(0.0, u_px.y)).rgb;\n" +
                 "    vec3 e = texture(u_scene, v_uv + vec2(u_px.x, 0.0)).rgb;\n" +
@@ -215,7 +283,8 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples), {
                 "  }\n" +
                 "  o = vec4(col, 1.0);\n}\n",
                 ["u_scene", "u_bloom", "u_depth", "u_dofMed", "u_dofLarge"],
-                ["u_px", "u_glow", "u_dof", "u_dof2", "u_film", "u_near", "u_tier"]);
+                ["u_px", "u_glow", "u_dof", "u_dof2", "u_film", "u_near", "u_tier",
+                 "u_motion", "u_motionRotation", "u_motionMove"]);
             gl.useProgram(previous);
             if (!ok) return false;
             fx.programs = programs;
@@ -329,7 +398,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples), {
             var t = fx.t, P = fx.programs, H = HEAPF32;
             if (!t || !P) return;
             var w = fx.width, h = fx.height, qw = t.qw, qh = t.qh, ew = t.ew, eh = t.eh;
-            var glow0 = H[o], glow1 = H[o + 1], ads = H[o + 6];
+            var glow0 = H[o], glow1 = H[o + 1], ads = H[o + 6], motion = H[o + 18];
             var glow = glow0 > 0 || glow1 > 0, dof = ads > 0.004;
             var lines = h / 480;
             var program = gl.getParameter(gl.CURRENT_PROGRAM);
@@ -346,7 +415,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples), {
                 gl.bindFramebuffer(gl.READ_FRAMEBUFFER, t.ms);
                 gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, t.scene);
                 gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h,
-                    dof ? (gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT) : gl.COLOR_BUFFER_BIT, gl.NEAREST);
+                    dof || motion > 0 ? (gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT) : gl.COLOR_BUFFER_BIT, gl.NEAREST);
                 gl.invalidateFramebuffer(gl.READ_FRAMEBUFFER, fx.discard);
             }
             /* Reading the write masks back would stall on the GPU process. Every
@@ -406,6 +475,12 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples), {
             /* CoD4 blurs the near world from one unit up to nearEnd. */
             gl.uniform4f(C.u_near, H[o + 15], nearEnd, 1 / Math.max(nearEnd - 1, 1), H[o + 17]);
             gl.uniform2f(C.u_tier, smallTier, medTier);
+            /* The longest smear is 6% of the screen's height. */
+            gl.uniform4f(C.u_motion, motion > 0 ? motion : 0, H[o + 31], H[o + 32], 0.06 * h);
+            if (motion > 0) {
+                gl.uniformMatrix3fv(C.u_motionRotation, false, H, o + 19, 9);
+                gl.uniform3f(C.u_motionMove, H[o + 28], H[o + 29], H[o + 30]);
+            }
             var sources = [t.color, t.e[1], t.depth, t.q[0], t.q[1]];
             for (var s = 0; s < sources.length; ++s) fx.texture(s, sources[s]);
             fx.pass(C, null, w, h);
@@ -468,6 +543,88 @@ void WebSceneFx_SetAds(float adsFrac, float viewmodelStart, float viewmodelEnd, 
     s_nearEnd = WebSceneFx_Clamp(nearEnd, 1.0f, 1024.0f);
 }
 
+/* Aiming down the sights fades the motion blur out. */
+void WebSceneFx_SetAim(float aimFrac)
+{
+    s_aimFrac = WebSceneFx_Clamp(aimFrac, 0.0f, 1.0f);
+}
+
+/* The D3D view and projection matrices of the view about to begin. */
+void WebSceneFx_SetCamera(const float *viewMatrix, const float *projectionMatrix)
+{
+    if (!viewMatrix || !projectionMatrix)
+        return;
+    memcpy(s_cameraView, viewMatrix, sizeof(s_cameraView));
+    s_cameraProjection[0] = projectionMatrix[0];
+    s_cameraProjection[1] = projectionMatrix[5];
+    s_cameraPending = 1;
+}
+
+static int WebSceneFx_CameraValid(void)
+{
+    int i;
+
+    for (i = 0; i < 16; ++i)
+        if (!isfinite(s_cameraView[i]))
+            return 0;
+    return isfinite(s_cameraProjection[0]) && isfinite(s_cameraProjection[1]) &&
+           s_cameraProjection[0] > 0.0f && s_cameraProjection[1] > 0.0f;
+}
+
+/* A view takes a world point p to R p + t, with R[j][i] = view[i * 4 + j] and
+ * t[j] = view[12 + j]. From this view's space into the last one's, a point
+ * turns by R_last R^T and then moves by t_last - R_last R^T t. */
+static void WebSceneFx_TrackCamera(void)
+{
+    const float *view = s_cameraView, *last = s_lastView;
+    float rotation[9], move[3];
+    float turn, moved, trace;
+    double now, gap;
+    int valid, i, j, k;
+
+    s_motionScale = 0.0f;
+    if (!s_cameraPending) {
+        s_lastViewValid = 0;
+        return;
+    }
+    s_cameraPending = 0;
+    valid = WebSceneFx_CameraValid();
+    now = emscripten_get_now();
+    gap = now - s_lastViewTime;
+    if (valid && s_lastViewValid && gap >= 1.0 && gap <= SCENE_FX_MOTION_MAX_GAP &&
+        WebSceneFx_Enabled(r_motionBlur) && s_aimFrac < 1.0f) {
+        for (j = 0; j < 3; ++j)
+            for (k = 0; k < 3; ++k) {
+                float sum = 0.0f;
+                for (i = 0; i < 3; ++i)
+                    sum += last[i * 4 + j] * view[i * 4 + k];
+                rotation[k * 3 + j] = sum;
+            }
+        for (j = 0; j < 3; ++j) {
+            float sum = last[12 + j];
+            for (k = 0; k < 3; ++k)
+                sum -= rotation[k * 3 + j] * view[12 + k];
+            move[j] = sum;
+        }
+        trace = rotation[0] + rotation[4] + rotation[8];
+        turn = 0.5f * sqrtf((rotation[5] - rotation[7]) * (rotation[5] - rotation[7]) +
+                            (rotation[6] - rotation[2]) * (rotation[6] - rotation[2]) +
+                            (rotation[1] - rotation[3]) * (rotation[1] - rotation[3]));
+        moved = sqrtf(move[0] * move[0] + move[1] * move[1] + move[2] * move[2]);
+        if (trace > 1.0f + 2.0f * cosf(SCENE_FX_MOTION_MAX_TURN) && moved < SCENE_FX_MOTION_MAX_MOVE &&
+            (turn > SCENE_FX_MOTION_MIN_TURN || moved > SCENE_FX_MOTION_MIN_MOVE)) {
+            s_motionScale = (float)(SCENE_FX_MOTION_EXPOSURE / gap) * (1.0f - s_aimFrac);
+            memcpy(s_motionRotation, rotation, sizeof(s_motionRotation));
+            memcpy(s_motionMove, move, sizeof(s_motionMove));
+            s_motionProjection[0] = s_cameraProjection[0];
+            s_motionProjection[1] = s_cameraProjection[1];
+        }
+    }
+    memcpy(s_lastView, view, sizeof(s_lastView));
+    s_lastViewTime = now;
+    s_lastViewValid = valid;
+}
+
 static void WebSceneFx_FillParams(float *params)
 {
     int glow = WebSceneFx_GlowEnabled();
@@ -498,6 +655,11 @@ static void WebSceneFx_FillParams(float *params)
     params[SCENE_FX_WORLD_NEAR_CLIP] = s_worldNearClip;
     params[SCENE_FX_NEAR_END] = s_nearEnd;
     params[SCENE_FX_WORLD_BLUR] = 1.0f;
+    params[SCENE_FX_MOTION] = s_motionScale;
+    memcpy(params + SCENE_FX_MOTION_ROTATION, s_motionRotation, sizeof(s_motionRotation));
+    memcpy(params + SCENE_FX_MOTION_MOVE, s_motionMove, sizeof(s_motionMove));
+    params[SCENE_FX_MOTION_PROJECTION] = s_motionProjection[0];
+    params[SCENE_FX_MOTION_PROJECTION + 1] = s_motionProjection[1];
 }
 
 void WebSceneFx_EndView(void)
@@ -520,12 +682,13 @@ void WebSceneFx_BeginView(int x, int y, int width, int height, int screenWidth, 
     if (s_frameUsed || x || y || width != screenWidth || height != screenHeight || width <= 0 || height <= 0)
         return;
     s_frameUsed = 1;
+    WebSceneFx_TrackCamera();
     /* r_fullbright clears the frame buffer before it begins the view. */
     if (WebSceneFx_Enabled(r_fullbright))
         return;
     samples = WebSceneFx_Samples();
     if (!WebSceneFx_GlowEnabled() && !WebSceneFx_Enabled(r_filmTweakEnable) && samples <= 1 &&
-        !(WebSceneFx_Enabled(r_dof_enable) && s_adsFrac > 0.0f))
+        !(WebSceneFx_Enabled(r_dof_enable) && s_adsFrac > 0.0f) && s_motionScale <= 0.0f)
         return;
     s_nearClip = isfinite(depthHackNearClip) && depthHackNearClip > 0.0f ? depthHackNearClip : 0.1f;
     s_worldNearClip = isfinite(worldNearClip) && worldNearClip > 0.0f ? worldNearClip : SCENE_FX_DEFAULT_WORLD_NEAR_CLIP;
