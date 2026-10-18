@@ -145,8 +145,9 @@ extern void CalcScreenY(float *y, int vertAlign);
 #define WWII_SHADE_ALPHA 0.5f
 #define WWII_SHADE_FALLOFF 1.6f
 
-/* The capture's gold arrow is 14.7 units tall, its tip at the cursor. */
-#define WWII_CURSOR_SIZE 16.0f
+/* The capture's gold arrow is 14.7 units tall, 0.84 of its image, its tip at
+ * the cursor. */
+#define WWII_CURSOR_SIZE 17.5f
 
 /* Runtime images: the wash's ramp, a keycap whose ends are half circles, and
  * the arrow, in texels. */
@@ -159,7 +160,16 @@ extern void CalcScreenY(float *y, int vertAlign);
 #define WWII_PILL_FILL_ALPHA 0.88f
 #define WWII_PILL_EDGE 0.79f
 #define WWII_CURSOR_IMAGE 64
-#define WWII_CURSOR_OUTLINE 2.5f
+/* The dark rims under the arrow's wing and foot, the dark line along its
+ * left edge, and its soft shadow down and to the right, in texels. */
+#define WWII_CURSOR_WING_RIM 3.5f
+#define WWII_CURSOR_FOOT_RIM 2.5f
+#define WWII_CURSOR_LINE 2.6f
+#define WWII_CURSOR_LINE_OUT 1.0f
+#define WWII_CURSOR_SHADOW_X 2.0f
+#define WWII_CURSOR_SHADOW_Y 3.0f
+#define WWII_CURSOR_SHADOW_SOFT 3.0f
+#define WWII_CURSOR_SHADOW_ALPHA 0.35f
 #define WWII_CURSOR_SAMPLES 4
 #define WWII_IMAGE_TEXELS (WWII_CURSOR_IMAGE * WWII_CURSOR_IMAGE)
 
@@ -177,14 +187,26 @@ static const vec4_t s_wwiiVersion = { 0.78f, 0.78f, 0.78f, 0.85f };
 static const vec4_t s_wwiiMark = { 1.0f, 1.0f, 1.0f, 0.6f };
 static const vec4_t s_wwiiWhite = { 1.0f, 1.0f, 1.0f, 1.0f };
 static const vec4_t s_wwiiShade = { 1.0f, 1.0f, 1.0f, WWII_SHADE_ALPHA };
-/* The arrow's light top and darker bottom, and its outline. */
-static const float s_wwiiCursorTop[3] = { 1.0f, 0.92f, 0.66f };
-static const float s_wwiiCursorBottom[3] = { 0.78f, 0.63f, 0.32f };
-static const float s_wwiiCursorEdge[3] = { 0.16f, 0.12f, 0.05f };
-/* The arrow's tip, outer wing, notch and lower wing, as fractions of its
- * image. */
+/* The arrow's faces as the pointer capture lights them: the upper one cream,
+ * lighter toward the tip, the left one gold, the two under the crease in
+ * shadow; the left edge's line, darker down to the foot; and the rims under
+ * the wing and the foot. */
+static const float s_wwiiCursorTip[3] = { 0.94f, 0.90f, 0.74f };
+static const float s_wwiiCursorUpper[3] = { 0.87f, 0.81f, 0.60f };
+static const float s_wwiiCursorSide[3] = { 0.72f, 0.65f, 0.45f };
+static const float s_wwiiCursorUnder[3] = { 0.42f, 0.34f, 0.18f };
+static const float s_wwiiCursorFoot[3] = { 0.47f, 0.42f, 0.35f };
+static const float s_wwiiCursorLineTop[3] = { 0.50f, 0.46f, 0.29f };
+static const float s_wwiiCursorLineFoot[3] = { 0.31f, 0.27f, 0.15f };
+static const float s_wwiiCursorWingRim[3] = { 0.17f, 0.12f, 0.05f };
+static const float s_wwiiCursorFootRim[3] = { 0.30f, 0.26f, 0.21f };
+/* The arrow's tip, wing, notch and foot, its left edge upright; the ridge
+ * its four faces meet at, and where the left face's band widens toward it;
+ * as fractions of its image. */
 static const float s_wwiiCursorShape[4][2] = {
-    { 0.06f, 0.04f }, { 0.94f, 0.60f }, { 0.52f, 0.58f }, { 0.40f, 0.96f } };
+    { 0.12f, 0.03f }, { 0.691f, 0.467f }, { 0.397f, 0.593f }, { 0.12f, 0.87f } };
+static const float s_wwiiCursorRidge[2] = { 0.338f, 0.425f };
+static const float s_wwiiCursorBand[2] = { 0.187f, 0.299f };
 
 typedef struct {
     itemDef_t *item;
@@ -334,6 +356,15 @@ static int UI_WWIIMenu_InCursor(float x, float y)
     return inside;
 }
 
+static float UI_WWIIMenu_SegmentDistance(const float *a, const float *b, float x, float y)
+{
+    float dx = b[0] - a[0], dy = b[1] - a[1];
+    float t = UI_WWIIMenu_Clamp01(((x - a[0]) * dx + (y - a[1]) * dy) / (dx * dx + dy * dy));
+    float ex = a[0] + t * dx - x, ey = a[1] + t * dy - y;
+
+    return sqrtf(ex * ex + ey * ey);
+}
+
 /* Distance from the arrow's nearest edge, in fractions of its image. */
 static float UI_WWIIMenu_CursorEdge(float x, float y)
 {
@@ -341,11 +372,7 @@ static float UI_WWIIMenu_CursorEdge(float x, float y)
     int i;
 
     for (i = 0; i < 4; i++) {
-        const float *a = s_wwiiCursorShape[i], *b = s_wwiiCursorShape[(i + 1) & 3];
-        float dx = b[0] - a[0], dy = b[1] - a[1];
-        float t = UI_WWIIMenu_Clamp01(((x - a[0]) * dx + (y - a[1]) * dy) / (dx * dx + dy * dy));
-        float ex = a[0] + t * dx - x, ey = a[1] + t * dy - y;
-        float dist = sqrtf(ex * ex + ey * ey);
+        float dist = UI_WWIIMenu_SegmentDistance(s_wwiiCursorShape[i], s_wwiiCursorShape[(i + 1) & 3], x, y);
 
         if (dist < best)
             best = dist;
@@ -353,41 +380,130 @@ static float UI_WWIIMenu_CursorEdge(float x, float y)
     return best;
 }
 
-/* The gold arrow, light at its top and darker at its bottom, inside a dark
- * edge, its coverage sampled WWII_CURSOR_SAMPLES times a side. */
+/* Distance from a's and b's line, in rims, where a point faces the segment
+ * between them short of its last 15%, else no nearer than a rim. */
+static float UI_WWIIMenu_RimDistance(const float *a, const float *b, float x, float y, float rim)
+{
+    float dx = b[0] - a[0], dy = b[1] - a[1];
+    float t = ((x - a[0]) * dx + (y - a[1]) * dy) / (dx * dx + dy * dy);
+
+    if (t < 0.0f || t > 0.85f)
+        return 1.0f;
+    return fabsf(dx * (y - a[1]) - dy * (x - a[0])) / sqrtf(dx * dx + dy * dy) / rim;
+}
+
+/* The left edge's line, darker down to the foot. */
+static void UI_WWIIMenu_CursorLine(float y, float *rgb)
+{
+    const float *tip = s_wwiiCursorShape[0], *foot = s_wwiiCursorShape[3];
+    float down = UI_WWIIMenu_Clamp01((y - tip[1]) / (foot[1] - tip[1]));
+    int c;
+
+    for (c = 0; c < 3; c++)
+        rgb[c] = UI_WWIIMenu_Lerp(s_wwiiCursorLineTop[c], s_wwiiCursorLineFoot[c], down);
+}
+
+/* The color of the rim a point outside the arrow lies on: under the wing,
+ * under the foot round its point, or the left edge's line just outside it.
+ * Whether it lies on one. */
+static int UI_WWIIMenu_CursorRim(float x, float y, float *rgb)
+{
+    const float *tip = s_wwiiCursorShape[0], *wing = s_wwiiCursorShape[1], *notch = s_wwiiCursorShape[2];
+    const float *foot = s_wwiiCursorShape[3];
+
+    if (UI_WWIIMenu_RimDistance(wing, notch, x, y, WWII_CURSOR_WING_RIM / (float)WWII_CURSOR_IMAGE) < 1.0f)
+        memcpy(rgb, s_wwiiCursorWingRim, sizeof(s_wwiiCursorWingRim));
+    else if (UI_WWIIMenu_SegmentDistance(notch, foot, x, y) < WWII_CURSOR_FOOT_RIM / (float)WWII_CURSOR_IMAGE)
+        memcpy(rgb, s_wwiiCursorFootRim, sizeof(s_wwiiCursorFootRim));
+    else if (x < tip[0] && tip[0] - x < WWII_CURSOR_LINE_OUT / (float)WWII_CURSOR_IMAGE && y > tip[1] && y < foot[1])
+        UI_WWIIMenu_CursorLine(y, rgb);
+    else
+        return 0;
+    return 1;
+}
+
+static float UI_WWIIMenu_Side(const float *a, const float *b, float x, float y)
+{
+    return (b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0]);
+}
+
+/* The face of the arrow a point inside it lies on: 0 the upper face, from the
+ * tip to the wing, the ridge and the band's corner; 1 the wing's lower face
+ * and 2 the foot's, each from its edge to the ridge; else 3, the left face. */
+static int UI_WWIIMenu_CursorFace(float x, float y)
+{
+    const float *tip = s_wwiiCursorShape[0], *wing = s_wwiiCursorShape[1], *notch = s_wwiiCursorShape[2];
+    const float *foot = s_wwiiCursorShape[3], *ridge = s_wwiiCursorRidge, *band = s_wwiiCursorBand;
+
+    if (UI_WWIIMenu_Side(tip, wing, x, y) >= 0.0f && UI_WWIIMenu_Side(wing, ridge, x, y) >= 0.0f &&
+        UI_WWIIMenu_Side(ridge, band, x, y) >= 0.0f && UI_WWIIMenu_Side(band, tip, x, y) >= 0.0f)
+        return 0;
+    if (UI_WWIIMenu_Side(wing, notch, x, y) >= 0.0f && UI_WWIIMenu_Side(notch, ridge, x, y) >= 0.0f &&
+        UI_WWIIMenu_Side(ridge, wing, x, y) >= 0.0f)
+        return 1;
+    if (UI_WWIIMenu_Side(notch, foot, x, y) >= 0.0f && UI_WWIIMenu_Side(foot, ridge, x, y) >= 0.0f &&
+        UI_WWIIMenu_Side(ridge, notch, x, y) >= 0.0f)
+        return 2;
+    return 3;
+}
+
+/* The arrow's color at a point inside it: the left edge's line, or its face's
+ * tone. */
+static void UI_WWIIMenu_CursorTone(float x, float y, float *rgb)
+{
+    const float *tip = s_wwiiCursorShape[0], *wing = s_wwiiCursorShape[1];
+    const float *tone[4] = { NULL, s_wwiiCursorUnder, s_wwiiCursorFoot, s_wwiiCursorSide };
+    float t = UI_WWIIMenu_Clamp01((y - tip[1]) / (wing[1] - tip[1]));
+    int face = UI_WWIIMenu_CursorFace(x, y), c;
+
+    if (x - tip[0] < WWII_CURSOR_LINE / (float)WWII_CURSOR_IMAGE) {
+        UI_WWIIMenu_CursorLine(y, rgb);
+        return;
+    }
+    for (c = 0; c < 3; c++)
+        rgb[c] = face ? tone[face][c] : UI_WWIIMenu_Lerp(s_wwiiCursorTip[c], s_wwiiCursorUpper[c], t);
+}
+
+/* The gold arrow and its rims, their coverage and colors sampled
+ * WWII_CURSOR_SAMPLES times a side, over their black shadow, in straight
+ * alpha. */
 static void UI_WWIIMenu_CursorImage(byte *bgra)
 {
-    const float edge = WWII_CURSOR_OUTLINE / (float)WWII_CURSOR_IMAGE;
+    const float soft = WWII_CURSOR_SHADOW_SOFT / (float)WWII_CURSOR_IMAGE;
     const int samples = WWII_CURSOR_SAMPLES * WWII_CURSOR_SAMPLES;
     int x, y, sx, sy, c;
 
     for (y = 0; y < WWII_CURSOR_IMAGE; y++) {
         for (x = 0; x < WWII_CURSOR_IMAGE; x++) {
             byte *texel = bgra + (y * WWII_CURSOR_IMAGE + x) * 4;
-            int covered = 0, outline = 0;
-            float rgb[3];
+            float u = ((float)x + 0.5f - WWII_CURSOR_SHADOW_X) / WWII_CURSOR_IMAGE;
+            float v = ((float)y + 0.5f - WWII_CURSOR_SHADOW_Y) / WWII_CURSOR_IMAGE;
+            float depth = UI_WWIIMenu_InCursor(u, v) ? UI_WWIIMenu_CursorEdge(u, v) : -UI_WWIIMenu_CursorEdge(u, v);
+            float shadow = WWII_CURSOR_SHADOW_ALPHA * UI_WWIIMenu_Clamp01(0.5f + depth / soft);
+            float sum[3] = { 0.0f, 0.0f, 0.0f }, rgb[3], alpha, total;
+            int covered = 0;
 
             for (sy = 0; sy < WWII_CURSOR_SAMPLES; sy++) {
                 for (sx = 0; sx < WWII_CURSOR_SAMPLES; sx++) {
-                    float u = ((float)x + ((float)sx + 0.5f) / WWII_CURSOR_SAMPLES) / WWII_CURSOR_IMAGE;
-                    float v = ((float)y + ((float)sy + 0.5f) / WWII_CURSOR_SAMPLES) / WWII_CURSOR_IMAGE;
-
-                    if (!UI_WWIIMenu_InCursor(u, v))
+                    u = ((float)x + ((float)sx + 0.5f) / WWII_CURSOR_SAMPLES) / WWII_CURSOR_IMAGE;
+                    v = ((float)y + ((float)sy + 0.5f) / WWII_CURSOR_SAMPLES) / WWII_CURSOR_IMAGE;
+                    if (UI_WWIIMenu_InCursor(u, v))
+                        UI_WWIIMenu_CursorTone(u, v, rgb);
+                    else if (!UI_WWIIMenu_CursorRim(u, v, rgb))
                         continue;
                     covered++;
-                    outline += UI_WWIIMenu_CursorEdge(u, v) < edge;
+                    for (c = 0; c < 3; c++)
+                        sum[c] += rgb[c];
                 }
             }
-            for (c = 0; c < 3; c++) {
-                float fill = UI_WWIIMenu_Lerp(s_wwiiCursorTop[c], s_wwiiCursorBottom[c],
-                                              ((float)y + 0.5f) / WWII_CURSOR_IMAGE);
-
-                rgb[c] = covered ? UI_WWIIMenu_Lerp(fill, s_wwiiCursorEdge[c], (float)outline / covered) : 0.0f;
-            }
+            alpha = (float)covered / samples;
+            total = alpha + shadow * (1.0f - alpha);
+            for (c = 0; c < 3; c++)
+                rgb[c] = covered ? sum[c] / covered * alpha / total : 0.0f;
             texel[0] = UI_WWIIMenu_Byte(rgb[2]);
             texel[1] = UI_WWIIMenu_Byte(rgb[1]);
             texel[2] = UI_WWIIMenu_Byte(rgb[0]);
-            texel[3] = UI_WWIIMenu_Byte((float)covered / samples);
+            texel[3] = UI_WWIIMenu_Byte(total);
         }
     }
 }

@@ -815,11 +815,11 @@ int main(void) {
     UI_WWIIMenu_Update(&uiDc);
     cases++;
 
-    /* The gold arrow, 16 units square in the screen's pixels, its tip on the
+    /* The gold arrow, 17.5 units square in the screen's pixels, its tip on the
      * cursor; switched off, the retail cursor. */
     drawCount = 0;
     assert(UI_WWIIMenu_DrawCursor(320, 240) == 1);
-    assert(drawCount == 1 && pic(0, 640 - 0.06f * 24, 360 - 0.04f * 24, 24, 24, 5, 5, 0, 0, 1, 1, white,
+    assert(drawCount == 1 && pic(0, 640 - 0.12f * 26.25f, 360 - 0.03f * 26.25f, 26.25f, 26.25f, 5, 5, 0, 0, 1, 1, white,
                                  &hudMaterials[R_HUD_IMAGE_MENU_CURSOR]));
     wwiiDvar.current.enabled = 0;
     UI_WWIIMenu_Update(&uiDc);
@@ -904,13 +904,23 @@ int main(void) {
                        !memcmp(pill + (y * 64 + x) * 4, pill + ((31 - y) * 64 + x) * 4, 4));
         const byte *cursor = slotTexels[R_HUD_IMAGE_MENU_CURSOR];
         assert(slotWidth[R_HUD_IMAGE_MENU_CURSOR] == 64 && slotHeight[R_HUD_IMAGE_MENU_CURSOR] == 64);
-        const byte *upper = cursor + (16 * 64 + 16) * 4, *lower = cursor + (44 * 64 + 23) * 4;
-        assert(upper[3] == 255 && lower[3] == 255 && upper[2] > upper[1] && upper[1] > upper[0] && upper[2] > lower[2] &&
-               upper[1] > lower[1]);
-        assert(!cursor[(5 * 64 + 60) * 4 + 3] && !cursor[(60 * 64 + 5) * 4 + 3]);
-        /* Its edge is dark. */
-        const byte *rim = cursor + (4 * 64 + 4) * 4;
-        assert(rim[3] > 0 && rim[2] < upper[2] / 2);
+        /* The arrow as the pointer capture lights it: its upper face cream,
+         * reaching the band's corner, the left face gold, the wing's lower
+         * face darker than the foot's, the left edge's line darker than the
+         * left face and darker down, a near-black rim under the wing and a
+         * soft black shadow past the foot. */
+#define TEXEL(x, y) (cursor + ((y) * 64 + (x)) * 4)
+        const byte *upper = TEXEL(21, 15), *left = TEXEL(14, 24), *wing = TEXEL(31, 31), *foot = TEXEL(17, 40);
+        const byte *line = TEXEL(8, 30), *rim = TEXEL(37, 35), *shadow = TEXEL(9, 58);
+        assert(upper[3] == 255 && left[3] == 255 && wing[3] == 255 && foot[3] == 255 && line[3] == 255 && rim[3] == 255);
+        assert(upper[2] > 220 && upper[2] > upper[1] && upper[1] > upper[0] && upper[0] > 150 && TEXEL(14, 18)[2] > 210);
+        assert(left[2] < upper[2] - 30 && left[2] > left[1] && left[1] > left[0]);
+        assert(wing[2] < foot[2] && foot[2] < left[2] && wing[2] > wing[1] && wing[1] > wing[0]);
+        assert(line[2] < left[2] - 50 && TEXEL(8, 45)[2] < line[2]);
+        assert(rim[2] < 60 && rim[2] > rim[0]);
+        assert(shadow[3] > 0 && shadow[3] < 100 && !shadow[0] && !shadow[1] && !shadow[2]);
+        assert(!TEXEL(60, 5)[3] && !TEXEL(5, 60)[3] && !TEXEL(46, 29)[3]);
+#undef TEXEL
         cases += 3;
     }
 
@@ -1005,10 +1015,15 @@ mutants = [
     [('s_wwiiVersion = { 0.78f, 0.78f, 0.78f, 0.85f }', 's_wwiiVersion = { 0.25f, 0.25f, 0.25f, 1.0f }')],
     [('#define WWII_PILL_OUTLINE 2.0f', '#define WWII_PILL_OUTLINE 0.0f')],
     [('#define WWII_PILL_FILL_ALPHA 0.88f', '#define WWII_PILL_FILL_ALPHA 1.0f')],
-    [('static const float s_wwiiCursorTop[3] = { 1.0f, 0.92f, 0.66f };',
-      'static const float s_wwiiCursorTop[3] = { 0.78f, 0.63f, 0.32f };')],
-    [('#define WWII_CURSOR_OUTLINE 2.5f', '#define WWII_CURSOR_OUTLINE 0.0f')],
-    [('#define WWII_CURSOR_SIZE 16.0f', '#define WWII_CURSOR_SIZE 32.0f')],
+    [('static const float s_wwiiCursorTip[3] = { 0.94f, 0.90f, 0.74f };',
+      'static const float s_wwiiCursorTip[3] = { 0.72f, 0.65f, 0.45f };')],
+    [('#define WWII_CURSOR_WING_RIM 3.5f', '#define WWII_CURSOR_WING_RIM 0.0f')],
+    [('#define WWII_CURSOR_SHADOW_ALPHA 0.35f', '#define WWII_CURSOR_SHADOW_ALPHA 0.0f')],
+    [('        return 1;\n    if (UI_WWIIMenu_Side(notch, foot, x, y)', '        return 2;\n    if (UI_WWIIMenu_Side(notch, foot, x, y)')],
+    [('UI_WWIIMenu_Side(ridge, band, x, y) >= 0.0f && UI_WWIIMenu_Side(band, tip, x, y) >= 0.0f',
+      'UI_WWIIMenu_Side(ridge, tip, x, y) >= 0.0f')],
+    [('    if (x - tip[0] < WWII_CURSOR_LINE / (float)WWII_CURSOR_IMAGE) {', '    if (0) {')],
+    [('#define WWII_CURSOR_SIZE 17.5f', '#define WWII_CURSOR_SIZE 32.0f')],
     [('            else if (item->dvar)\n                s_wwiiMenu.bgVersion = item;\n', '')],
     [('    return s_wwiiMenu.applied && menu && menu == s_wwiiMenu.mainText;', '    return menu && menu == s_wwiiMenu.mainText;')],
     [('    return s_wwiiMenu.applied && menu && menu == s_wwiiMenu.mainText;', '    return s_wwiiMenu.applied && menu != NULL;')],
@@ -1281,6 +1296,6 @@ print('PASS: with ui_wwiiMainMenu on, main_text\'s buttons take the WWII capture
       'with the capture\'s tracking and gray, the focused one sliding 8 units right over 233 ms and growing into gold '
       'Bold within 100 ms; over bg the retail background turns gray and drifts under a black wash, its other items give '
       'way to logo_cod2 sized to the capture\'s lettering, the registered mark, MULTIPLAYER, the version and the Enter '
-      'and (in a match) Escape keycaps; the gold arrow replaces the cursor; cgame\'s menus and renderer restarts leave '
+      'and (in a match) Escape keycaps; the pointer capture\'s faceted gold arrow, with its rims and shadow, replaces the cursor; cgame\'s menus and renderer restarts leave '
       f'it consistent; {menu_cases} cases; gray copies of DXT1, DXT3 and DXT5 images, {gray_cases} cases; the layout\'s '
       f'numbers within the capture\'s measurements; {len(mutants) + len(gray_mutants)} failing regression mutants')
