@@ -102,10 +102,10 @@ try {
       rotation: [Math.cos(angle), 0, -Math.sin(angle), 0, 1, 0, Math.sin(angle), 0, Math.cos(angle)]});
     const strafe = (units, scale = 1) => ({scale, move: [units, 0, 0], rotation: [1, 0, 0, 0, 1, 0, 0, 0, 1]});
     // The production viewmodel range for a muzzle 28 units out (a Thompson).
-    function params(ads, {glow = 1, film = 1, nearEnd = 512, motion = null} = {}) {
+    function params(ads, {glow = 1, film = 1, nearEnd = 512, motion = null, backdrop = 0} = {}) {
       HEAPF32.set([0.42 * glow, 0.30 * glow, 0.9, 0.75, 5, 12, ads, 4.55, 17.5, near, 3,
         film ? 0.147 : 0, 0.96, film ? 0.35 : 0, film, worldNear, nearEnd, 1,
-        ...(motion ? [motion.scale, ...motion.rotation, ...motion.move] : Array(13).fill(0)), 1, 16 / 9], 16);
+        ...(motion ? [motion.scale, ...motion.rotation, ...motion.move] : Array(13).fill(0)), 1, 16 / 9, backdrop], 16);
       return 64;
     }
     function read() {
@@ -188,6 +188,21 @@ try {
     check(pixel(flick, 716, 360) > 0 && pixel(flick, 728, 360) === 0 && pixel(flick, 551, 360) === 0,
       'a flick smears 6% of the screen height at most');
 
+    // Behind the end of a match's scoreboard the whole view, the viewmodel
+    // too, blurs by about 20 pixels at 720 lines. Across the square's right
+    // edge the light falls from 84% to 16% over two deviations.
+    const backdrop = render(4, 0, {glow: 0, film: 0, layout: squares, backdrop: 1}); snapshot('backdrop');
+    const peak = pixel(backdrop, 640, 360);
+    let x84 = 640, x16 = 640;
+    while (x84 < W - 1 && pixel(backdrop, x84, 360) > 0.84 * peak) ++x84;
+    while (x16 < W - 1 && pixel(backdrop, x16, 360) > 0.16 * peak) ++x16;
+    const deviation = (x16 - x84) / 2;
+    check(deviation > 14 && deviation < 28, `the backdrop blurs with a ${deviation}-pixel deviation`);
+    check(pixel(backdrop, 958, 360) > 0 && pixel(backdrop, 962, 360) < 255, 'the backdrop blurs the viewmodel too');
+    const halfway = render(4, 0, {glow: 0, film: 0, layout: squares, backdrop: 0.5});
+    check(pixel(halfway, 720, 360) > 0 && pixel(halfway, 720, 360) < pixel(backdrop, 720, 360),
+      'half the backdrop blurs less');
+
     // Each pass has a fixed GPU cost, so the pass count is part of the frame budget.
     const passes = (ads, options) => {
       bind(gl, Module, HEAPF32, W, H, 4); drawScene();
@@ -203,6 +218,7 @@ try {
     check(passes(0) === '3+1', 'glow adds two 1/8-resolution passes');
     check(passes(1) === '5+1', 'aiming adds two 1/4-resolution passes');
     check(passes(0, {glow: 0, motion: turn(0.03)}) === '1+1', 'motion blur adds no pass');
+    check(passes(0, {glow: 0, backdrop: 1}) === '5+1', 'the backdrop adds four 1/4-resolution passes');
 
     // Production state is restored exactly, including the cached WebGL entry points.
     check(bind(gl, Module, HEAPF32, W, H, 4) === 1, 'rebind without reallocating');

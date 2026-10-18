@@ -14,6 +14,20 @@ void CG_ScoreTableSetKills(int clientNum, int kills);
 /* Builds the team emblems for the current screen size; cheap once built. */
 void CG_ScoreTablePrepare(void);
 void CG_DrawScoreTable(float fade);
+/* At the end of a match: the result over the title and the reason it ended
+ * under it, in place of the clock. */
+void CG_DrawScoreTableResult(float fade, const char *result, const char *reason);
+/* Deathmatch, or a mod's mode where everyone plays for himself. */
+int CG_ScoreTableFreeForAll(void);
+/* The map's display name without its country, "Toujane". */
+void CG_ScoreTableMapName(char *buf, int size);
+/* The kind of emblem a team has, -1 for none: the Allies' follows their
+ * nation, the Axis have the iron cross. */
+int CG_ScoreTableEmblemKind(int team);
+/* The emblem of kind as a lit medal: size BGRA texels a side, a texel of
+ * margin round it, rows stride bytes apart from bgra. Only rows firstRow to
+ * firstRow + rows are written, so the work can be spread over frames. */
+void CG_ScoreTableRasterizeMedal(int kind, byte *bgra, int stride, int size, int firstRow, int rows);
 /* Its lettering, which the killcam shares: where a font's capitals stand, the
  * scale that makes them cap units tall, a text's width in units and how many
  * of its letters fit in room. */

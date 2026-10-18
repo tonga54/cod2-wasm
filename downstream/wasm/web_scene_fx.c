@@ -49,7 +49,9 @@ enum {
     SCENE_FX_MOTION_MOVE = SCENE_FX_MOTION_ROTATION + 9,
     /* The projection's x and y scales. */
     SCENE_FX_MOTION_PROJECTION = SCENE_FX_MOTION_MOVE + 3,
-    SCENE_FX_PARAM_COUNT = SCENE_FX_MOTION_PROJECTION + 2
+    /* How much of the whole view blurs behind a screen-filling menu. */
+    SCENE_FX_BACKDROP = SCENE_FX_MOTION_PROJECTION + 2,
+    SCENE_FX_PARAM_COUNT
 };
 
 /* InfinitePerspectiveMatrix's depth scale times the default r_znear of 4. */
@@ -85,6 +87,7 @@ static float s_motionScale;
 static float s_motionRotation[9];
 static float s_motionMove[3];
 static float s_motionProjection[2];
+static float s_backdropFrac;
 
 EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples), {
     if (typeof GLctx === "undefined" || !GLctx || !GLctx.blitFramebuffer) return 0;
@@ -250,7 +253,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples), {
                 "    vec3 wt = -u_film.x * sqrt(clamp(min(lo, 1.0 - hi) / max(hi, vec3(0.0001)), 0.0, 1.0));\n" +
                 "    col = clamp((c + (n + s + e + w) * wt) / (1.0 + 4.0 * wt), 0.0, 1.0);\n" +
                 "  }\n" +
-                "  if (u_dof2.x > 0.0) {\n" +
+                "  if (u_dof2.x > 0.0 || u_dof2.w > 0.0) {\n" +
                 "    highp float depth = texelFetch(u_depth, ivec2(gl_FragCoord.xy), 0).r;\n" +
                 "    vec4 large = texture(u_dofLarge, v_uv);\n" +
                 "    float k;\n" +
@@ -261,7 +264,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples), {
                 "      k = max(worldBlur(depth),\n" +
                 "        clamp(2.0 * large.a, 0.0, 1.0) * smoothstep(u_dof2.y, u_dof2.z, length(centered)));\n" +
                 "    }\n" +
-                "    k *= u_dof2.x;\n" +
+                "    k = max(k * u_dof2.x, u_dof2.w);\n" +
                 "    if (k > 0.003) {\n" +
                 "      vec3 small = 0.25 * (texture(u_scene, v_uv + u_px.xy * vec2(0.5, 1.5)).rgb +\n" +
                 "        texture(u_scene, v_uv + u_px.xy * vec2(-1.5, 0.5)).rgb +\n" +
@@ -398,8 +401,8 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples), {
             var t = fx.t, P = fx.programs, H = HEAPF32;
             if (!t || !P) return;
             var w = fx.width, h = fx.height, qw = t.qw, qh = t.qh, ew = t.ew, eh = t.eh;
-            var glow0 = H[o], glow1 = H[o + 1], ads = H[o + 6], motion = H[o + 18];
-            var glow = glow0 > 0 || glow1 > 0, dof = ads > 0.004;
+            var glow0 = H[o], glow1 = H[o + 1], ads = H[o + 6], motion = H[o + 18], backdrop = H[o + 33];
+            var glow = glow0 > 0 || glow1 > 0, blurBehind = backdrop > 0.004, dof = ads > 0.004 || blurBehind;
             var lines = h / 480;
             var program = gl.getParameter(gl.CURRENT_PROGRAM);
             var vao = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
@@ -460,17 +463,24 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples), {
                 fx.texture(0, t.color);
                 fx.texture(1, t.depth);
                 fx.pass(P.dof, t.qFbo[0], qw, qh);
+                /* Behind a menu, two wider passes take the quarter image back
+                 * and forth to a deviation of 13 pixels at 480 lines; each
+                 * pass's nearer taps stay within twice the blur already there. */
+                var b = lines / 1.5;
+                var steps = blurBehind ? [Math.max(near, 0.8 * b), 1.6 * b, 3.2 * b] : [near];
                 gl.useProgram(P.dofBlur.program);
-                gl.uniform2f(P.dofBlur.u_step, near / qw, near / qh);
-                fx.texture(0, t.q[0]);
-                fx.pass(P.dofBlur, t.qFbo[1], qw, qh);
+                for (var p = 0; p < steps.length; ++p) {
+                    gl.uniform2f(P.dofBlur.u_step, steps[p] / qw, steps[p] / qh);
+                    fx.texture(0, t.q[p & 1]);
+                    fx.pass(P.dofBlur, t.qFbo[1 - (p & 1)], qw, qh);
+                }
             }
             var C = P.compose;
             gl.useProgram(C.program);
             gl.uniform4f(C.u_px, 1 / w, 1 / h, w / h, 0);
             gl.uniform4f(C.u_glow, glow ? 1 : 0, 0, 0, 0);
             gl.uniform4f(C.u_dof, 0.9995002746582031, H[o + 9], vmEnd, invRange);
-            gl.uniform4f(C.u_dof2, dof ? ads : 0, 0.07, 0.17, 0);
+            gl.uniform4f(C.u_dof2, ads > 0.004 ? ads : 0, 0.07, 0.17, blurBehind ? backdrop : 0);
             gl.uniform4f(C.u_film, H[o + 11], H[o + 12], H[o + 13], H[o + 14]);
             /* CoD4 blurs the near world from one unit up to nearEnd. */
             gl.uniform4f(C.u_near, H[o + 15], nearEnd, 1 / Math.max(nearEnd - 1, 1), H[o + 17]);
@@ -547,6 +557,11 @@ void WebSceneFx_SetAds(float adsFrac, float viewmodelStart, float viewmodelEnd, 
 void WebSceneFx_SetAim(float aimFrac)
 {
     s_aimFrac = WebSceneFx_Clamp(aimFrac, 0.0f, 1.0f);
+}
+
+void WebSceneFx_SetBackdrop(float backdropFrac)
+{
+    s_backdropFrac = WebSceneFx_Clamp(backdropFrac, 0.0f, 1.0f);
 }
 
 /* The D3D view and projection matrices of the view about to begin. */
@@ -660,6 +675,7 @@ static void WebSceneFx_FillParams(float *params)
     memcpy(params + SCENE_FX_MOTION_MOVE, s_motionMove, sizeof(s_motionMove));
     params[SCENE_FX_MOTION_PROJECTION] = s_motionProjection[0];
     params[SCENE_FX_MOTION_PROJECTION + 1] = s_motionProjection[1];
+    params[SCENE_FX_BACKDROP] = s_backdropFrac;
 }
 
 void WebSceneFx_EndView(void)
@@ -688,7 +704,7 @@ void WebSceneFx_BeginView(int x, int y, int width, int height, int screenWidth, 
         return;
     samples = WebSceneFx_Samples();
     if (!WebSceneFx_GlowEnabled() && !WebSceneFx_Enabled(r_filmTweakEnable) && samples <= 1 &&
-        !(WebSceneFx_Enabled(r_dof_enable) && s_adsFrac > 0.0f) && s_motionScale <= 0.0f)
+        !(WebSceneFx_Enabled(r_dof_enable) && s_adsFrac > 0.0f) && s_motionScale <= 0.0f && s_backdropFrac <= 0.0f)
         return;
     s_nearClip = isfinite(depthHackNearClip) && depthHackNearClip > 0.0f ? depthHackNearClip : 0.1f;
     s_worldNearClip = isfinite(worldNearClip) && worldNearClip > 0.0f ? worldNearClip : SCENE_FX_DEFAULT_WORLD_NEAR_CLIP;

@@ -44,7 +44,8 @@ assert main.count('#include "headers/PC/cgame_mp/cg_scoretable.h"\n') == 1
 ordered(function(scoreboard, 'qboolean CG_DrawScoreboard(void)\n{'),
         '    CG_ScoreTablePrepare();\n    if (cg_paused->current.integer != 0 &&',
         'CL_AddReliableCommand((const char *)"score");',
-        '    if (CG_ScoreTableEnabled()) {\n        CG_DrawScoreTable(fade);\n        return 1;\n    }\n',
+        '    if (CG_ScoreTableEnabled()) {\n        if (!CG_DrawEndgame(fade))\n            CG_DrawScoreTable(fade);\n'
+        '        return 1;\n    }\n',
         'imp_colorBlack')
 draw2d = function(draw, 'unsigned int CG_Draw2D(void)\n{')
 ordered(draw2d,
@@ -68,6 +69,9 @@ profiles = {name: (int(pixels), float(cap), int(base)) for name, pixels, cap, ba
             re.findall(r'\{ "(\w+)", R_WWII_\w+, (\d+), ([\d.]+)f, (\d+), [\d.]+f, [01] \}', wwii_fonts)}
 ui_fonts = ('smallFont', 'normalFont', 'bigFont', 'extraBigFont')
 assert set(ui_fonts + ('boldFont',)) <= set(profiles)
+# Regular, under the result, keeps the extra big font's metrics, so the table
+# tells it by its pixel height.
+assert profiles['regularFont'] == profiles['extraBigFont']
 
 
 def cap_height(path):
@@ -99,7 +103,7 @@ font_metrics = ''.join(f'    {{ {profiles[name][0]}, {profiles[name][1]!r}f, {pr
 body = module
 for include in ('#include "common_types.h"\n', '#include "imports.h"\n', '#include "headers/PC/cgame_mp/cg_local.h"\n',
                 '#include "headers/PC/cgame_mp/cg_scorepanel.h"\n', '#include "headers/PC/cgame_mp/cg_playernames.h"\n',
-                '#include "headers/PC/gfx_d3d/r_hud2d.h"\n'):
+                '#include "headers/PC/gfx_d3d/r_font_wwii.h"\n', '#include "headers/PC/gfx_d3d/r_hud2d.h"\n'):
     assert body.count(include) == 1, include
     body = body.replace(include, '')
 assert body.count('#include "headers/PC/cgame_mp/cg_scoretable.h"\n') == 1
@@ -163,6 +167,7 @@ static const Metrics stockFonts[] = {
 static Font nameFont = { "playernames", ''' + str(name_pixels) + r''', -40 };
 static Font boldFont = { "$boldfont", ''' + str(profiles['boldFont'][0]) + r''', -24 };
 static Font uiFont = { "fonts/normalFont", ''' + str(profiles['normalFont'][0]) + r''', -14 };
+static Font regularFont = { "$regularfont", ''' + str(profiles['regularFont'][0]) + r''', -21 };
 static int nameFontReady = 1;
 static Material white = { "white" }, emblemMaterial = { "*hud_team_emblems" }, voiceOn = { "voice_on" };
 static Material voiceOff = { "voice_off" }, statusIcon = { "status" };
@@ -182,6 +187,7 @@ FontHandle CL_RegisterFont(const char *name, int imageTrack) {
     assert(!strcmp(name, "$boldfont") && imageTrack == 0);
     return &boldFont;
 }
+FontHandle R_RegisterWwiiFont(const char *name) { assert(!strcmp(name, "$regularfont")); return &regularFont; }
 struct Font_s *CG_GetPlayerNameFont(void) { return nameFontReady ? &nameFont : NULL; }
 const Glyph *R_GetCharacterGlyph(FontHandle font, unsigned int letter) {
     static Glyph glyph;
@@ -206,7 +212,7 @@ static int visible(const char *text, int maxChars) {
 /* Every letter advances three quarters of the font's pixel height. */
 static int advanceOf(FontHandle font) { return font->pixelHeight * 3 / 4; }
 int CL_TextWidth(const char *text, int maxChars, FontHandle font) {
-    assert(font == &nameFont || font == &boldFont || font == &uiFont);
+    assert(font == &nameFont || font == &boldFont || font == &uiFont || font == &regularFont);
     return visible(text, maxChars) * advanceOf(font);
 }
 float CL_NormalizedTextScale(FontHandle font, float scale) { return 48.0f * scale / (float)font->pixelHeight; }
@@ -673,6 +679,32 @@ int main(void) {
     assert(!text("3:40") && text("Team Deathmatch | Toujane"));
     clockText = "3:40";
 
+    /* At the end of a match the result stands over the title in bold and why
+     * the match ended under it in Regular, where the clock was. */
+    drawCount = 0;
+    CG_DrawScoreTableResult(1.0f, "ALLIES VICTORY", "Time limit reached");
+    assert(textAt(text("ALLIES VICTORY"), 9.5f, 37.1f, 11.25f, &boldFont, 3, 1));
+    assert(textAt(text("Time limit reached"), 9.5f, 79.7f, 8.0f, &regularFont, 0, 1));
+    assert(!text("3:40") && textAt(text("Team Deathmatch | Toujane"), 9.5f, 59.7f, 15.05f, &boldFont, 3, 1));
+    assert(colored(draws[0].color, black, 0.5f) && textAt(text("Chapu54"), 159.5f, base, 7.3f, &nameFont, 0, 1));
+    assert(textIndex("ALLIES VICTORY") > textIndex("Team Deathmatch | Toujane") &&
+           textIndex("Time limit reached") < textIndex("Score"));
+    /* Without a reason the result stands alone, and it fades with the rest. */
+    drawCount = 0;
+    CG_DrawScoreTableResult(0.5f, "DRAW", "");
+    assert(textAt(text("DRAW"), 9.5f, 37.1f, 11.25f, &boldFont, 3, 0.5f) && !text("") && !text("3:40"));
+    drawCount = 0;
+    CG_DrawScoreTableResult(1.0f, NULL, NULL);
+    assert(!text("3:40") && text("Team Deathmatch | Toujane"));
+    /* Without Regular the reason takes the UI font. */
+    s_table.regularFont = NULL;
+    drawCount = 0;
+    CG_DrawScoreTableResult(1.0f, "AXIS DEFEAT", "Score limit reached");
+    assert(textAt(text("Score limit reached"), 9.5f, 79.7f, 8.0f, &uiFont, 0, 1));
+    s_table.regularFont = &regularFont;
+    render(1.0f);
+    assert(text("3:40") && !text("ALLIES VICTORY"));
+
     /* A map without a display name keeps its file name; a long title shrinks. */
     mapDisplayName = "";
     render(1.0f);
@@ -859,6 +891,100 @@ int main(void) {
     assert(emblemBuilds == 9 && count(PHYS, &emblemMaterial) == 2);
     unitScale = 1.2f;
 
+    /* The end of a match shows them as lit medals: clear a texel round the
+     * outline and opaque inside it, each part in its enamel or metal, and each
+     * face brighter where it leans toward the light at the top left than
+     * where it leans away. Parts are told by their own outlines, a texel clear
+     * of each. */
+    static byte medal[96 * 96 * 4];
+    for (int kind = TABLE_EMBLEM_NONE; kind <= GERMAN; ++kind) {
+        const float units = 47.0f, edge = 1.0f / 47.0f;
+        float lit = 0.0f, shaded = 0.0f;
+        int litCount = 0, shadedCount = 0;
+        memset(medal, 0xab, sizeof(medal));
+        CG_ScoreTableRasterizeMedal(kind, medal, 96 * 4, 96, 0, 96);
+        /* Built in bands, it writes only each band's rows, the same texels. */
+        static byte banded[96 * 96 * 4];
+        memset(banded, 0xcd, sizeof(banded));
+        CG_ScoreTableRasterizeMedal(kind, banded, 96 * 4, 96, 40, 7);
+        for (int i = 0; i < 96 * 96 * 4; ++i)
+            assert(i / (96 * 4) >= 40 && i / (96 * 4) < 47 ? banded[i] == medal[i] : banded[i] == 0xcd);
+        for (int first = -5; first < 96; first += 13)
+            CG_ScoreTableRasterizeMedal(kind, banded, 96 * 4, 96, first, 13);
+        CG_ScoreTableRasterizeMedal(kind, banded, 96 * 4, 96, 96, 40);
+        assert(!memcmp(banded, medal, sizeof(medal)));
+        for (int y = 0; y < 96; ++y) {
+            for (int x = 0; x < 96; ++x) {
+                const byte *t = &medal[(y * 96 + x) * 4];
+                float u = ((float)x + 0.5f - 48.0f) / units, v = ((float)y + 0.5f - 48.0f) / units;
+                float outline = CG_ScoreTableMedalOutline(&s_table, kind, u, v);
+                float r = sqrtf(u * u + v * v);
+                int points = kind == RUSSIAN ? TABLE_STAR_POINTS : TABLE_CROSS_POINTS;
+                float band = CG_ScoreTablePolygonDistance(kind == RUSSIAN ? s_table.redStar[1] : s_table.cross[1],
+                                                          points, u, v);
+                float core = CG_ScoreTablePolygonDistance(kind == RUSSIAN ? s_table.redStar[2] : s_table.cross[2],
+                                                          points, u, v);
+                if (outline > edge) {
+                    assert(!t[0] && !t[1] && !t[2] && !t[3]);
+                    continue;
+                }
+                if (!x || !y || x == 95 || y == 95) {
+                    assert(!t[3]);
+                    continue;
+                }
+                if (outline >= -edge)
+                    continue;
+                assert(t[3] == 255);
+                CG_ScoreTableField lean = { 0.0f, 0.0f, 0.0f };
+                if (kind == AMERICAN)
+                    CG_ScoreTablePolygonField(s_table.star, TABLE_STAR_POINTS, u, v, &lean);
+                else if (kind == BRITISH && r > 0.1f && r < 0.5f - edge)
+                    lean.gx = u / r, lean.gy = v / r;
+                else if ((kind == RUSSIAN || kind == GERMAN) && core < -edge)
+                    CG_ScoreTablePolygonField(kind == RUSSIAN ? s_table.redStar[2] : s_table.cross[2], points, u, v,
+                                              &lean);
+                if (-(lean.gx + lean.gy) > 0.7f) {
+                    lit += t[0] + t[1] + t[2];
+                    ++litCount;
+                } else if (lean.gx + lean.gy > 0.7f) {
+                    shaded += t[0] + t[1] + t[2];
+                    ++shadedCount;
+                }
+                switch (kind) {
+                case AMERICAN:
+                    assert(t[2] > t[1] && t[1] > t[0]);
+                    break;
+                case BRITISH:
+                    if (r < 0.5f - edge)
+                        assert(t[2] > 2 * t[1] && t[2] > 2 * t[0]);
+                    else if (r > 0.5f + edge && r < 0.78f - edge)
+                        assert(t[0] > 150 && t[1] > 150 && t[2] > 150);
+                    else if (r > 0.78f + edge)
+                        assert(t[0] > 2 * t[2]);
+                    break;
+                case RUSSIAN:
+                    if (band > edge)
+                        assert(t[2] >= t[1] && t[1] > t[0] && t[2] > t[0] + 20);
+                    else if (band < -edge && core > edge)
+                        assert(t[2] < 90 && t[2] > 2 * t[1]);
+                    else if (core < -edge)
+                        assert(t[2] > 2 * t[1] && t[2] > 2 * t[0]);
+                    break;
+                case GERMAN:
+                    if (band > edge)
+                        assert(t[2] > 50 && abs(t[2] - t[1]) < 8 && abs(t[2] - t[0]) < 20);
+                    else if (band < -edge && core > edge)
+                        assert(t[0] < 30 && t[1] < 30 && t[2] < 30);
+                    else if (core < -edge)
+                        assert(t[2] > 15 && t[2] < 130 && abs(t[2] - t[0]) < 15);
+                    break;
+                }
+            }
+        }
+        if (kind != TABLE_EMBLEM_NONE)
+            assert(litCount > 50 && shadedCount > 50 && lit / litCount > 1.1f * shaded / shadedCount);
+    }
+
     /* Off, it builds nothing and leaves the HUD alone; shown only while held. */
     displayed = 0;
     assert(!CG_ScoreTableHidesHud());
@@ -944,6 +1070,29 @@ module_mutants = [
     ('        nameRight = TABLE_TAG_RIGHT - width - TABLE_NAME_GAP;\n', ''),
     ('    CG_ScoreTableDrawTriangle((const float (*)[2])marker, color);\n', ''),
     ('    if ((unsigned)localClient >= TABLE_MAX_CLIENTS)\n        return;\n', '    if (localClient > TABLE_MAX_CLIENTS)\n        return;\n'),
+    ('#define TABLE_RESULT_BASELINE 37.1f', '#define TABLE_RESULT_BASELINE 38.0f'),
+    ('#define TABLE_REASON_BASELINE 79.7f', '#define TABLE_REASON_BASELINE 78.0f'),
+    ('#define TABLE_REASON_CAP 8.0f', '#define TABLE_REASON_CAP 8.85f'),
+    ('    if (result)\n        CG_ScoreTableDrawResult(result, reason, fade);\n    else\n        CG_ScoreTableDrawClock(fade);\n',
+     '    if (result)\n        CG_ScoreTableDrawResult(result, reason, fade);\n    CG_ScoreTableDrawClock(fade);\n'),
+    ('                          CG_ScoreTableCapScale(font, TABLE_REASON_CAP), color, TABLE_TEXT_STYLE);',
+     '                          CG_ScoreTableCapScale(font, TABLE_REASON_CAP), color, TABLE_TITLE_STYLE);'),
+    ('    s_table.regularFont = R_RegisterWwiiFont("$regularfont");\n', ''),
+    ('    CG_ScoreTableDraw(fade, result ? result : "", reason);', '    CG_ScoreTableDraw(fade, result, reason);'),
+    ('texel[2 - i] = ', 'texel[i] = '),
+    ('static const vec3_t s_medalLight = { -0.5f, -0.6f, 0.62f };',
+     'static const vec3_t s_medalLight = { 0.5f, 0.6f, 0.62f };'),
+    ('CG_ScoreTableMedalFace(s_medalRed, gx, gy, TABLE_MEDAL_DOME_SLOPE * radius, coverage[2], ink);',
+     'CG_ScoreTableMedalFace(s_medalBlue, gx, gy, TABLE_MEDAL_DOME_SLOPE * radius, coverage[2], ink);'),
+    ('s_medalGold, s_medalDarkRed, s_medalRed,', 's_medalRed, s_medalDarkRed, s_medalGold,'),
+    ('s_medalSilver, s_medalGroove, s_medalIron,', 's_medalIron, s_medalGroove, s_medalSilver,'),
+    ('texel[3] = (byte)(ink[3] / (float)(TABLE_MEDAL_SAMPLES * TABLE_MEDAL_SAMPLES) * 255.0f + 0.5f);',
+     'texel[3] = (byte)(ink[3] / 4.5f * 255.0f + 0.5f);'),
+    ('            texel[0] = texel[1] = texel[2] = texel[3] = 0;\n            if (CG_ScoreTableMedalOutline',
+     '            if (CG_ScoreTableMedalOutline'),
+    ('y = firstRow < 0 ? 0 : firstRow; y < firstRow + rows && y < size;', 'y = 0; y < size;'),
+    ('y < firstRow + rows && y < size;', 'y < firstRow + rows;'),
+    ('y = firstRow < 0 ? 0 : firstRow;', 'y = firstRow;'),
 ]
 parse_mutants = [
     ('if (Cmd_Argc() >= 4 + scoreCount * 6) {', 'if (1) {'),
@@ -969,4 +1118,6 @@ print('PASS: the WWII scoreboard dims the screen and draws the title, clock and 
       'score and emblem, rows in server order with clan tags, cut names, voice and status icons, kills only from our '
       'server, ping bars and the viewer\'s outlined row kept in a crowded team; deathmatch gets one block of eighteen; '
       'the star, roundel, red star and iron cross are built once per size and nation; the HUD hides under it; '
+      'at the end of a match the result and its reason take the clock\'s place, and the emblems become lit medals '
+      'in their enamels and metals; '
       f'{len(variants) - 1} failing regression mutants')

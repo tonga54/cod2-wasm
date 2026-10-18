@@ -2,6 +2,7 @@
 #include "imports.h"
 #include "bytematch.h"
 #include "headers/PC/cgame_mp/cg_local.h"
+#include "headers/PC/cgame_mp/cg_endgame.h"
 #include "headers/PC/cgame_mp/cg_scoretable.h"
 
 extern const dvar_t *cg_scoreboardBannerHeight;
@@ -741,7 +742,8 @@ qboolean CG_DrawScoreboard(void)
     }
 
     if (CG_ScoreTableEnabled()) {
-        CG_DrawScoreTable(fade);
+        if (!CG_DrawEndgame(fade))
+            CG_DrawScoreTable(fade);
         return 1;
     }
 

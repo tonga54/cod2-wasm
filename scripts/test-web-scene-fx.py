@@ -20,7 +20,10 @@ camera = backend.index('WebSceneFx_SetCamera((const float *)&vp->viewMatrix, (co
 assert backend.rindex('#ifdef __EMSCRIPTEN__', 0, begin) < camera < begin
 scene = (root / 'src/PC/gfx_d3d/r_scene.c').read_text()
 assert 'WebSceneFx_SetAds(g_webAdsDofFrac, g_webAdsViewmodelStart, g_webAdsViewmodelEnd, g_webAdsNearEnd);' in scene
-assert scene.index('WebSceneFx_SetAds(g_webAdsDofFrac') < scene.index('WebSceneFx_SetAim(g_webAimFrac);')
+assert scene.index('WebSceneFx_SetAds(g_webAdsDofFrac') < scene.index('WebSceneFx_SetAim(g_webAimFrac);') < \
+    scene.index('WebSceneFx_SetBackdrop(g_webBackdropFrac);') < scene.index('#endif', scene.index('WebSceneFx_SetAim('))
+# The end of a match blurs the view behind its scoreboard.
+assert 'float g_webBackdropFrac = 0.0f;' in (root / 'src/PC/cgame_mp/cg_endgame_mp.c').read_text()
 # The aim fraction is read before any early return, so scopes, which hide the
 # gun, still fade the blur out.
 weapons = (root / 'src/PC/cgame_mp/cg_weapons.c').read_text()
@@ -48,6 +51,8 @@ assert 'glDepthMask(dev->zWriteEnable ? 1 : 0);' in draw and 'glDepthMask(0);' i
 assert draw.index('glColorMask(\n            (dev->colorWriteEnable & 1) != 0') < draw.index('glColorMask(1, 1, 1, 1);')
 compositor = source.read_text()
 assert 'COLOR_WRITEMASK' not in compositor and 'DEPTH_WRITEMASK' not in compositor
+# The compositor reads the backdrop where the C side writes it.
+assert 'backdrop = H[o + 33];' in compositor
 
 emscripten = '#define EM_JS(ret, name, params, ...) ret name params;\ndouble emscripten_get_now(void);\n'
 common_types = r'''
@@ -349,8 +354,31 @@ int main(void)
     frame(8, 1264, 0.1f);
     assert(binds == 2);
     assert(moved(10, 1.56f, 0.07f, 193.52f, 198.8f, 60.5f) == 0.5f && binds == 3);
+
+    /* A menu's blurred backdrop composes on its own, whatever the other
+     * effects, and stays between none and all of it. */
+    assert(SCENE_FX_BACKDROP == 33 && SCENE_FX_PARAM_COUNT == 34);
     defaults();
-    puts("PASS: 600 composed frames, single compose per frame before Present, partial/fullbright/disabled views drawn directly, bounded glow, viewmodel and near world focus parameters, camera motion reprojected over a 10 ms exposure with aim fade, cuts and still cameras");
+    glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
+    motion.current.enabled = 0;
+    binds = composes = 0;
+    frame(0, 1280, 0.1f);
+    assert(!binds && !composes);
+    WebSceneFx_SetBackdrop(0.6f);
+    frame(0, 1280, 0.1f);
+    assert(binds == 1 && composes == 1 && composed[SCENE_FX_BACKDROP] == 0.6f && composed[SCENE_FX_ADS] == 0);
+    WebSceneFx_SetBackdrop(4);
+    frame(0, 1280, 0.1f);
+    assert(composes == 2 && composed[SCENE_FX_BACKDROP] == 1);
+    WebSceneFx_SetBackdrop(NAN);
+    frame(0, 1280, 0.1f);
+    WebSceneFx_SetBackdrop(-1);
+    frame(0, 1280, 0.1f);
+    assert(composes == 2);
+    defaults();
+    frame(0, 1280, 0.1f);
+    assert(composes == 3 && composed[SCENE_FX_BACKDROP] == 0);
+    puts("PASS: 600 composed frames, single compose per frame before Present, partial/fullbright/disabled views drawn directly, bounded glow, viewmodel and near world focus parameters, camera motion reprojected over a 10 ms exposure with aim fade, cuts and still cameras, a bounded menu backdrop");
     return 0;
 }
 '''
@@ -369,7 +397,10 @@ mutants = [
     ('(float)(SCENE_FX_MOTION_EXPOSURE / gap)', '(float)(SCENE_FX_MOTION_EXPOSURE / 10.0)'),
     ('s_lastViewValid = valid;', 's_lastViewValid = 1;'),
     ('WebSceneFx_Enabled(r_motionBlur) && ', ''),
-    (' && s_motionScale <= 0.0f)', ')'),
+    (' && s_motionScale <= 0.0f && ', ' && '),
+    (' && s_backdropFrac <= 0.0f)', ')'),
+    ('params[SCENE_FX_BACKDROP] = s_backdropFrac;', 'params[SCENE_FX_BACKDROP] = 0.0f;'),
+    ('s_backdropFrac = WebSceneFx_Clamp(backdropFrac, 0.0f, 1.0f);', 's_backdropFrac = backdropFrac;'),
     ('params[SCENE_FX_MOTION_PROJECTION + 1] = s_motionProjection[1];',
      'params[SCENE_FX_MOTION_PROJECTION + 1] = s_motionProjection[0];'),
     ('    WebSceneFx_TrackCamera();\n    /* r_fullbright clears the frame buffer before it begins the view. */\n'
@@ -397,4 +428,4 @@ with tempfile.TemporaryDirectory(prefix='cod2-scene-fx-') as tmp:
                         '-lm', '-o', str(path / f'mutant{index}')], check=True)
         result = subprocess.run([str(path / f'mutant{index}')], capture_output=True)
         assert result.returncode != 0, f'mutant survived: {after!r}'
-    print(f'PASS: {len(mutants)} motion blur mutants fail')
+    print(f'PASS: {len(mutants)} motion blur and backdrop mutants fail')

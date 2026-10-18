@@ -36,6 +36,7 @@ static const char *const s_hudImageNames[R_HUD_IMAGE_COUNT] = {
     "*hud_headshot",
     "*hud_team_emblems",
     "*hud_killcam",
+    "*hud_endgame",
 };
 
 static GfxImage s_hudImages[R_HUD_IMAGE_COUNT];

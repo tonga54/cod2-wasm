@@ -6,6 +6,7 @@
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_ammocounter.h"
 #include "headers/PC/cgame_mp/cg_breathprompt.h"
+#include "headers/PC/cgame_mp/cg_endgame.h"
 #include "headers/PC/cgame_mp/cg_grenadewarning.h"
 #include "headers/PC/cgame_mp/cg_minimap.h"
 #include "headers/PC/cgame_mp/cg_scorepopup.h"
@@ -1872,6 +1873,7 @@ unsigned int CG_Draw2D(void)
     float screenWidth = (float)((clientStatic_t *)cls)->vidConfig.width;
     float screenHeight = (float)((clientStatic_t *)cls)->vidConfig.height;
 
+    CG_EndgameFrame(cg->nextSnap && cg->nextSnap->ps.pm_type == 5);
     if (cg->cubemapShot)
         return 0;
 

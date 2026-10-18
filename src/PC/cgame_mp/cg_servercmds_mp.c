@@ -3,6 +3,7 @@
 #include "bytematch.h"
 #include "headers/cod2_chat.h"
 #include "headers/PC/cgame_mp/cg_local.h"
+#include "headers/PC/cgame_mp/cg_endgame.h"
 #include "headers/PC/cgame_mp/cg_killcam.h"
 #include "headers/PC/cgame_mp/cg_scorepopup.h"
 #include "headers/PC/cgame_mp/cg_scorepanel.h"
@@ -1089,6 +1090,7 @@ void CG_ServerCommand(void)
         return;
     case 'e':
     case 'f':
+        CG_EndgameMessage(CG_Argv(1));
         CG_ServerCommandMessage("game message", 0);
         return;
     case 'g':

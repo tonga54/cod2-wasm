@@ -4,6 +4,7 @@
 #include "headers/PC/cgame_mp/cg_scoretable.h"
 #include "headers/PC/cgame_mp/cg_scorepanel.h"
 #include "headers/PC/cgame_mp/cg_playernames.h"
+#include "headers/PC/gfx_d3d/r_font_wwii.h"
 #include "headers/PC/gfx_d3d/r_hud2d.h"
 
 #include <math.h>
@@ -47,6 +48,12 @@ extern const char *va(const char *format, ...);
 #define TABLE_CLOCK_RIGHT 621.0f
 #define TABLE_CLOCK_BASELINE 69.3f
 #define TABLE_CLOCK_CAP 13.65f
+/* At the end of a match the result stands over the title and why the match
+ * ended under it, in place of the clock. */
+#define TABLE_RESULT_BASELINE 37.1f
+#define TABLE_RESULT_CAP 11.25f
+#define TABLE_REASON_BASELINE 79.7f
+#define TABLE_REASON_CAP 8.0f
 #define TABLE_HEADER_BASELINE 86.7f
 #define TABLE_HEADER_CAP 8.85f
 #define TABLE_LEFT 108.0f
@@ -101,6 +108,19 @@ extern const char *va(const char *format, ...);
 #define TABLE_CROSS_POINTS 12
 #define TABLE_STAR_POINTS 10
 #define TABLE_NAME_FONT_CAP 0.7f
+/* The medals, in units of half their size: samples a texel a side, how far a
+ * rim's bevels reach in from its edges, and how far each face leans. */
+#define TABLE_MEDAL_SAMPLES 2
+#define TABLE_MEDAL_BEVEL 0.035f
+#define TABLE_MEDAL_RIM_SLOPE 1.1f
+#define TABLE_MEDAL_STAR_SLOPE 0.55f
+#define TABLE_MEDAL_CORE_SLOPE 0.45f
+#define TABLE_MEDAL_IRON_SLOPE 0.3f
+#define TABLE_MEDAL_DOME_SLOPE 1.8f
+#define TABLE_MEDAL_AMBIENT 0.3f
+#define TABLE_MEDAL_DIFFUSE 0.95f
+#define TABLE_MEDAL_SHINE 0.3f
+#define TABLE_MEDAL_GRAIN 0.06f
 
 enum {
     TABLE_EMBLEM_NONE = -1,
@@ -153,8 +173,16 @@ typedef struct {
     int emblemAllies;
     MaterialHandle emblems;
     FontHandle boldFont;
+    FontHandle regularFont;
     int kills[TABLE_MAX_CLIENTS];
 } CG_ScoreTableState;
+
+/* A signed distance, negative inside, and its gradient, which points out. */
+typedef struct {
+    float distance;
+    float gx;
+    float gy;
+} CG_ScoreTableField;
 
 /* The four fonts the UI picks by size, then the bold font. */
 static const CG_ScoreTableFont s_tableFonts[] = {
@@ -173,6 +201,19 @@ static const vec3_t s_tableFriendly = { 0.145f, 0.42f, 0.38f };
 static const vec3_t s_tableEnemy = { 0.67f, 0.185f, 0.16f };
 static const vec4_t s_tableAccent = { 0.22f, 0.48f, 0.2f, 1.0f };
 static const vec3_t s_tableBlack = { 0.0f, 0.0f, 0.0f };
+static const vec3_t s_medalBronze = { 0.72f, 0.52f, 0.32f };
+static const vec3_t s_medalSilver = { 0.8f, 0.8f, 0.78f };
+static const vec3_t s_medalIron = { 0.2f, 0.2f, 0.21f };
+static const vec3_t s_medalGroove = { 0.05f, 0.05f, 0.05f };
+static const vec3_t s_medalGold = { 0.85f, 0.66f, 0.3f };
+static const vec3_t s_medalRed = { 0.74f, 0.13f, 0.1f };
+static const vec3_t s_medalDarkRed = { 0.22f, 0.03f, 0.02f };
+static const vec3_t s_medalBlue = { 0.17f, 0.25f, 0.5f };
+static const vec3_t s_medalWhite = { 0.86f, 0.85f, 0.8f };
+/* Toward the light, up and to the left, and halfway between it and the
+ * viewer. */
+static const vec3_t s_medalLight = { -0.5f, -0.6f, 0.62f };
+static const vec3_t s_medalHalfway = { -0.278f, -0.334f, 0.901f };
 /* An iron cross pattee: arm ends half the width wide, arms meeting at 0.35. */
 static const CG_ScoreTablePoint s_tableCross[TABLE_CROSS_POINTS] = {
     { -0.5f, -1.0f }, { 0.5f, -1.0f }, { 0.35f, -0.35f }, { 1.0f, -0.5f }, { 1.0f, 0.5f }, { 0.35f, 0.35f },
@@ -191,10 +232,14 @@ static void CG_ScoreTableColor(vec4_t out, const vec_t *rgb, float alpha)
     out[3] = alpha;
 }
 
-/* Signed distance to a closed polygon, negative inside. */
-static float CG_ScoreTablePolygonDistance(const CG_ScoreTablePoint *v, int count, float x, float y)
+/* Signed distance to a closed polygon, its gradient pointing away from the
+ * outline's nearest point. */
+static void CG_ScoreTablePolygonField(const CG_ScoreTablePoint *v, int count, float x, float y,
+                                      CG_ScoreTableField *field)
 {
-    float best = (x - v[0][0]) * (x - v[0][0]) + (y - v[0][1]) * (y - v[0][1]);
+    float best = -1.0f;
+    float nearX = 0.0f;
+    float nearY = 0.0f;
     float sign = 1.0f;
     int i;
     int j;
@@ -217,15 +262,30 @@ static float CG_ScoreTablePolygonDistance(const CG_ScoreTablePoint *v, int count
             t = 1.0f;
         bx = wx - ex * t;
         by = wy - ey * t;
-        if (bx * bx + by * by < best)
+        if (best < 0.0f || bx * bx + by * by < best) {
             best = bx * bx + by * by;
+            nearX = bx;
+            nearY = by;
+        }
         above = y >= v[i][1];
         below = y < v[j][1];
         left = ex * wy > ey * wx;
         if ((above && below && left) || (!above && !below && !left))
             sign = -sign;
     }
-    return sign * sqrtf(best);
+    best = sqrtf(best);
+    field->distance = sign * best;
+    field->gx = best > 0.0f ? sign * nearX / best : 0.0f;
+    field->gy = best > 0.0f ? sign * nearY / best : 0.0f;
+}
+
+/* Signed distance to a closed polygon, negative inside. */
+static float CG_ScoreTablePolygonDistance(const CG_ScoreTablePoint *v, int count, float x, float y)
+{
+    CG_ScoreTableField field;
+
+    CG_ScoreTablePolygonField(v, count, x, y, &field);
+    return field.distance;
 }
 
 /* Moves every edge inward by depth; the corners stay sharp. */
@@ -369,6 +429,197 @@ static void CG_ScoreTableRasterize(const CG_ScoreTableState *state, int kind, by
     }
 }
 
+/* How much of a sample a shape covers, its edge spread over a sample. */
+static float CG_ScoreTableCover(float distance, float sample)
+{
+    float coverage = 0.5f - distance / sample;
+
+    return coverage < 0.0f ? 0.0f : coverage > 1.0f ? 1.0f : coverage;
+}
+
+/* A face of base's color leaning out along (gx, gy) by slope, lit like worn
+ * metal from the top left; ink gets it premultiplied by its coverage. */
+static void CG_ScoreTableMedalFace(const vec_t *base, float gx, float gy, float slope, float coverage, float *ink)
+{
+    float nx = gx * slope;
+    float ny = gy * slope;
+    float n = 1.0f / sqrtf(nx * nx + ny * ny + 1.0f);
+    float diffuse = (nx * s_medalLight[0] + ny * s_medalLight[1] + s_medalLight[2]) * n;
+    float specular = (nx * s_medalHalfway[0] + ny * s_medalHalfway[1] + s_medalHalfway[2]) * n;
+    float shine;
+    int i;
+
+    if (coverage <= 0.0f)
+        return;
+    diffuse = diffuse > 0.0f ? diffuse : 0.0f;
+    specular = specular > 0.0f ? specular * specular : 0.0f;
+    specular *= specular;
+    shine = specular * specular;
+    shine *= shine * specular * specular;
+    for (i = 0; i < 3; ++i) {
+        float c = base[i] * (TABLE_MEDAL_AMBIENT + TABLE_MEDAL_DIFFUSE * diffuse) + TABLE_MEDAL_SHINE * shine;
+        ink[i] += (c < 1.0f ? c : 1.0f) * coverage;
+    }
+}
+
+/* A rim between an outline and its inset, bevelled toward both edges. */
+static void CG_ScoreTableMedalRim(const vec_t *base, const CG_ScoreTableField *outer, const CG_ScoreTableField *inner,
+                                  float coverage, float *ink)
+{
+    float out = -outer->distance;
+    float in = inner->distance;
+
+    if (out < in)
+        CG_ScoreTableMedalFace(base, outer->gx, outer->gy, out < TABLE_MEDAL_BEVEL ? TABLE_MEDAL_RIM_SLOPE : 0.0f,
+                               coverage, ink);
+    else
+        CG_ScoreTableMedalFace(base, -inner->gx, -inner->gy, in < TABLE_MEDAL_BEVEL ? TABLE_MEDAL_RIM_SLOPE : 0.0f,
+                               coverage, ink);
+}
+
+/* A shape with a border: the rim, the groove inside it, then the inset
+ * face, which folds along its ridges. */
+static void CG_ScoreTableMedalBordered(const CG_ScoreTablePoint *outline, const CG_ScoreTablePoint *band,
+                                       const CG_ScoreTablePoint *core, int count, const vec_t *rim,
+                                       const vec_t *groove, const vec_t *face, float slope, float x, float y,
+                                       float sample, float *ink)
+{
+    CG_ScoreTableField fields[3];
+    float coverage[3];
+    int i;
+
+    CG_ScoreTablePolygonField(outline, count, x, y, &fields[0]);
+    CG_ScoreTablePolygonField(band, count, x, y, &fields[1]);
+    CG_ScoreTablePolygonField(core, count, x, y, &fields[2]);
+    for (i = 0; i < 3; ++i) {
+        coverage[i] = CG_ScoreTableCover(fields[i].distance, sample);
+        if (i && coverage[i] > coverage[i - 1])
+            coverage[i] = coverage[i - 1];
+    }
+    CG_ScoreTableMedalRim(rim, &fields[0], &fields[1], coverage[0] - coverage[1], ink);
+    CG_ScoreTableMedalFace(groove, 0.0f, 0.0f, 0.0f, coverage[1] - coverage[2], ink);
+    CG_ScoreTableMedalFace(face, fields[2].gx, fields[2].gy, slope, coverage[2], ink);
+    ink[3] += coverage[0];
+}
+
+/* Where a medal's outline is, to leave the texels outside it clear. */
+static float CG_ScoreTableMedalOutline(const CG_ScoreTableState *state, int kind, float x, float y)
+{
+    switch (kind) {
+    case TABLE_EMBLEM_AMERICAN:
+        return CG_ScoreTablePolygonDistance(state->star, TABLE_STAR_POINTS, x, y);
+    case TABLE_EMBLEM_BRITISH:
+        return sqrtf(x * x + y * y) - 1.0f;
+    case TABLE_EMBLEM_RUSSIAN:
+        return CG_ScoreTablePolygonDistance(state->redStar[0], TABLE_STAR_POINTS, x, y);
+    case TABLE_EMBLEM_GERMAN:
+        return CG_ScoreTablePolygonDistance(state->cross[0], TABLE_CROSS_POINTS, x, y);
+    default:
+        return 1.0f;
+    }
+}
+
+/* One sample of a medal, in units of half its size: the American star
+ * alone, as the end of a match shows it, the RAF roundel in its enamels, the
+ * Soviet star in a gold rim and the iron cross in a silver one. ink gets its
+ * color premultiplied by its coverage, the coverage in ink[3]. */
+static void CG_ScoreTableMedalSample(const CG_ScoreTableState *state, int kind, float x, float y, float sample,
+                                     float *ink)
+{
+    CG_ScoreTableField field;
+    float coverage[3];
+    float radius;
+    float gx;
+    float gy;
+
+    switch (kind) {
+    case TABLE_EMBLEM_AMERICAN:
+        CG_ScoreTablePolygonField(state->star, TABLE_STAR_POINTS, x, y, &field);
+        coverage[0] = CG_ScoreTableCover(field.distance, sample);
+        CG_ScoreTableMedalFace(s_medalBronze, field.gx, field.gy, TABLE_MEDAL_STAR_SLOPE, coverage[0], ink);
+        ink[3] += coverage[0];
+        return;
+    case TABLE_EMBLEM_BRITISH:
+        radius = sqrtf(x * x + y * y);
+        gx = radius > 0.0f ? x / radius : 0.0f;
+        gy = radius > 0.0f ? y / radius : 0.0f;
+        coverage[0] = CG_ScoreTableCover(radius - 1.0f, sample);
+        coverage[1] = CG_ScoreTableCover(radius - 0.78f, sample);
+        coverage[2] = CG_ScoreTableCover(radius - 0.5f, sample);
+        field.distance = radius - 1.0f;
+        field.gx = gx;
+        field.gy = gy;
+        {
+            CG_ScoreTableField inner = { radius - 0.78f, gx, gy };
+            CG_ScoreTableMedalRim(s_medalBlue, &field, &inner, coverage[0] - coverage[1], ink);
+        }
+        CG_ScoreTableMedalFace(s_medalWhite, 0.0f, 0.0f, 0.0f, coverage[1] - coverage[2], ink);
+        CG_ScoreTableMedalFace(s_medalRed, gx, gy, TABLE_MEDAL_DOME_SLOPE * radius, coverage[2], ink);
+        ink[3] += coverage[0];
+        return;
+    case TABLE_EMBLEM_RUSSIAN:
+        CG_ScoreTableMedalBordered(state->redStar[0], state->redStar[1], state->redStar[2], TABLE_STAR_POINTS,
+                                   s_medalGold, s_medalDarkRed, s_medalRed, TABLE_MEDAL_CORE_SLOPE, x, y, sample, ink);
+        return;
+    case TABLE_EMBLEM_GERMAN:
+        CG_ScoreTableMedalBordered(state->cross[0], state->cross[1], state->cross[2], TABLE_CROSS_POINTS,
+                                   s_medalSilver, s_medalGroove, s_medalIron, TABLE_MEDAL_IRON_SLOPE, x, y, sample,
+                                   ink);
+        return;
+    default:
+        return;
+    }
+}
+
+/* A fine grain in [-1, 1] that wears the metal, the same for every build. */
+static float CG_ScoreTableGrain(int x, int y)
+{
+    unsigned int h = (unsigned int)x * 374761393u + (unsigned int)y * 668265263u;
+
+    h = (h ^ (h >> 13)) * 1274126177u;
+    return (float)((h ^ (h >> 16)) & 1023u) / 511.5f - 1.0f;
+}
+
+void CG_ScoreTableRasterizeMedal(int kind, byte *bgra, int stride, int size, int firstRow, int rows)
+{
+    float half = 0.5f * (float)size;
+    float units = half - 1.0f;
+    float sample = 1.0f / (units * (float)TABLE_MEDAL_SAMPLES);
+    int x;
+    int y;
+
+    CG_ScoreTableBuildShapes(&s_table);
+    for (y = firstRow < 0 ? 0 : firstRow; y < firstRow + rows && y < size; ++y) {
+        byte *texel = bgra + y * stride;
+        for (x = 0; x < size; ++x, texel += 4) {
+            float u = ((float)x + 0.5f - half) / units;
+            float v = ((float)y + 0.5f - half) / units;
+            float ink[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+            float wear;
+            int sx;
+            int sy;
+            int i;
+
+            texel[0] = texel[1] = texel[2] = texel[3] = 0;
+            if (CG_ScoreTableMedalOutline(&s_table, kind, u, v) * units > 1.5f)
+                continue;
+            for (sy = 0; sy < TABLE_MEDAL_SAMPLES; ++sy) {
+                for (sx = 0; sx < TABLE_MEDAL_SAMPLES; ++sx)
+                    CG_ScoreTableMedalSample(&s_table, kind, u + ((float)sx + 0.5f) * sample - 0.5f / units,
+                                             v + ((float)sy + 0.5f) * sample - 0.5f / units, sample, ink);
+            }
+            if (ink[3] <= 0.0f)
+                continue;
+            wear = 1.0f + TABLE_MEDAL_GRAIN * CG_ScoreTableGrain(x, y);
+            for (i = 0; i < 3; ++i) {
+                float c = ink[i] / ink[3] * wear;
+                texel[2 - i] = (byte)((c < 1.0f ? c : 1.0f) * 255.0f + 0.5f);
+            }
+            texel[3] = (byte)(ink[3] / (float)(TABLE_MEDAL_SAMPLES * TABLE_MEDAL_SAMPLES) * 255.0f + 0.5f);
+        }
+    }
+}
+
 /* The Allies' nation from the stock scoreboard banner, "mpflag_british". */
 static int CG_ScoreTableAlliesEmblem(void)
 {
@@ -381,6 +632,15 @@ static int CG_ScoreTableAlliesEmblem(void)
         if (!I_stricmp(banner + 7, s_tableNations[kind]))
             return kind;
     }
+    return TABLE_EMBLEM_NONE;
+}
+
+int CG_ScoreTableEmblemKind(int team)
+{
+    if (team == TEAM_AXIS)
+        return TABLE_EMBLEM_GERMAN;
+    if (team == TEAM_ALLIES)
+        return CG_ScoreTableAlliesEmblem();
     return TABLE_EMBLEM_NONE;
 }
 
@@ -561,7 +821,7 @@ static int CG_ScoreTableRowLayout(int players, int slots, float *rowHeight)
     return rows;
 }
 
-static int CG_ScoreTableFreeForAll(void)
+int CG_ScoreTableFreeForAll(void)
 {
     if (!I_stricmp(cgs->gametype, "dm"))
         return 1;
@@ -848,7 +1108,7 @@ static void CG_ScoreTableDrawBlock(const CG_ScoreTableBlock *block, int freeForA
     }
 }
 
-static void CG_ScoreTableMapName(char *buf, int size)
+void CG_ScoreTableMapName(char *buf, int size)
 {
     const char *base = FS_GetMapBaseName(cgs->mapname);
     const char *name = UI_GetMapDisplayName(base);
@@ -908,6 +1168,25 @@ static void CG_ScoreTableDrawClock(float fade)
                           TABLE_CLOCK_BASELINE, scale, color, TABLE_TITLE_STYLE);
 }
 
+/* The result in bold over the title and the reason, in Regular, under it. */
+static void CG_ScoreTableDrawResult(const char *result, const char *reason, float fade)
+{
+    FontHandle font = s_table.boldFont;
+    vec4_t color;
+
+    CG_ScoreTableColor(color, s_tableText, fade);
+    if (font && result && result[0])
+        CG_ScoreTableDrawText(result, 0x7fffffff, font, TABLE_TITLE_X, TABLE_RESULT_BASELINE,
+                              CG_ScoreTableCapScale(font, TABLE_RESULT_CAP), color, TABLE_TITLE_STYLE);
+    if (!reason || !reason[0])
+        return;
+    font = s_table.regularFont;
+    if (!font)
+        font = UI_GetFontHandle(0, TABLE_REASON_CAP / 30.0f);
+    CG_ScoreTableDrawText(reason, 0x7fffffff, font, TABLE_TITLE_X, TABLE_REASON_BASELINE,
+                          CG_ScoreTableCapScale(font, TABLE_REASON_CAP), color, TABLE_TEXT_STYLE);
+}
+
 static void CG_ScoreTableDrawHeaders(float fade)
 {
     float cap = TABLE_HEADER_CAP;
@@ -952,6 +1231,7 @@ void CG_ScoreTableInit(void)
     s_table.emblemAllies = TABLE_EMBLEM_NONE;
     s_table.emblems = NULL;
     s_table.boldFont = CL_RegisterFont("$boldfont", 0);
+    s_table.regularFont = R_RegisterWwiiFont("$regularfont");
     for (i = 0; i < TABLE_MAX_CLIENTS; ++i)
         s_table.kills[i] = -1;
 }
@@ -980,7 +1260,8 @@ void CG_ScoreTableSetKills(int clientNum, int kills)
         s_table.kills[clientNum] = kills < 0 ? 0 : kills;
 }
 
-void CG_DrawScoreTable(float fade)
+/* result is NULL while the match goes on, and the clock shows. */
+static void CG_ScoreTableDraw(float fade, const char *result, const char *reason)
 {
     CG_ScoreTableView *view = &s_tableView;
     int localClient = cg->clientNum;
@@ -999,7 +1280,10 @@ void CG_DrawScoreTable(float fade)
 
     CG_ScoreTableBuildView(view, localClient);
     CG_ScoreTableDrawTitle(fade);
-    CG_ScoreTableDrawClock(fade);
+    if (result)
+        CG_ScoreTableDrawResult(result, reason, fade);
+    else
+        CG_ScoreTableDrawClock(fade);
     CG_ScoreTableDrawHeaders(fade);
     for (b = 0; b < view->blockCount; ++b) {
         int slots = view->freeForAll ? TABLE_FREE_ROWS : TABLE_TEAM_ROWS;
@@ -1007,4 +1291,14 @@ void CG_DrawScoreTable(float fade)
         CG_ScoreTableDrawBlock(&view->blocks[b], view->freeForAll, top, slots, localClient, fade);
     }
     CG_ScoreTableDrawSpectators(view, fade);
+}
+
+void CG_DrawScoreTable(float fade)
+{
+    CG_ScoreTableDraw(fade, NULL, NULL);
+}
+
+void CG_DrawScoreTableResult(float fade, const char *result, const char *reason)
+{
+    CG_ScoreTableDraw(fade, result ? result : "", reason);
 }

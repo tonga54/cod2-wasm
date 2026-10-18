@@ -2,6 +2,7 @@
 #include "imports.h"
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_ammocounter.h"
+#include "headers/PC/cgame_mp/cg_endgame.h"
 #include "headers/PC/cgame_mp/cg_minimap.h"
 #include "headers/PC/cgame_mp/cg_scorepopup.h"
 #include "headers/PC/cgame_mp/cg_killcam.h"
@@ -1228,6 +1229,7 @@ void CG_Init(int serverMessageNum, int serverCommandSequence, int clientNum)
     CG_GrenadeWarningInit();
     CG_ScoreTableInit();
     CG_KillcamInit();
+    CG_EndgameInit();
     CG_LoadingString("sounds");
     CG_RegisterSounds();
     CG_LoadingString("clients");
