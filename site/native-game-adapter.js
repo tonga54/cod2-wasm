@@ -26,6 +26,8 @@
     return name;
   }
   const profileStorageKey = 'cod2-wasm-profile-v1';
+  // Saved profiles hold the old 1280x720 default; each takes the new one once.
+  const displayStorageKey = 'cod2-wasm-display-v2';
   let browserVersion = 'Browser dev';
   function prepareProfile(context, fs) {
     let saved = '';
@@ -33,10 +35,16 @@
     try {
       saved = localStorage.getItem(profileStorageKey) || '';
       legacyName = localStorage.getItem(gametagStorageKey);
+      if (!localStorage.getItem(displayStorageKey)) {
+        saved = saved.replace(/^seta r_mode "1280x720"\r?$/gm, '');
+        localStorage.setItem(profileStorageKey, saved);
+        localStorage.setItem(displayStorageKey, '1');
+      }
     } catch { /* Storage can be disabled; settings still work for this visit. */ }
     gametag = validGametag(legacyName) || validGametag(context.preferences?.values().playerName) || 'Player';
     const defaults = {
-      name: gametag, r_gpuSync: 'off', com_maxfps: '0', r_mode: '1280x720',
+      // The canvas and HUD at 1080 lines; the 3D view renders at r_sceneHeight.
+      name: gametag, r_gpuSync: 'off', com_maxfps: '0', r_mode: '1920x1080',
       r_textureMode: 'anisotropic', r_anisotropy: '16', r_aaSamples: '4',
       r_picmip_manual: '1', r_picmip: '0', cl_maxpackets: '60', rate: '25000',
       snaps: '30', g_gametype: 'tdm', ui_mapname: 'mp_toujane', ui_netSource: '0',

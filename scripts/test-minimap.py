@@ -22,13 +22,16 @@ def function(name):
 
 
 definitions = source[source.index('#define MINIMAP_TEXTURE_MAX'):source.index('static const dvar_t *cg_minimap;')]
+# The disc is drawn alone, with no shadow band around its rim.
+draw = function('CG_DrawMinimap')
+assert draw.count('R_AddCmdDrawTriangles2D') == 1 and 'CG_MinimapBuildDisc' in draw and 'whiteMaterial' not in draw
 names = (
     'CG_MinimapNextPow2', 'CG_MinimapAreaBounds', 'CG_MinimapComputeLayout', 'CG_MinimapFilterLine',
     'CG_MinimapFilter2D', 'CG_MinimapGroundLevel', 'CG_MinimapClassify', 'CG_MinimapRemoveSpecks',
     'CG_MinimapGroundColor', 'CG_MinimapSlope', 'CG_MinimapClamp', 'CG_MinimapPutTexel', 'CG_MinimapIsBuilding',
-    'CG_MinimapColorize', 'CG_MinimapInsidePolygon', 'CG_MinimapPolygonDistance', 'CG_MinimapRasterIcon',
+    'CG_MinimapTexels', 'CG_MinimapNearOpen', 'CG_MinimapShadow', 'CG_MinimapColorize', 'CG_MinimapInsidePolygon', 'CG_MinimapPolygonDistance', 'CG_MinimapRasterIcon',
     'CG_MinimapWorldToScreen', 'CG_MinimapScreenToTexture', 'CG_MinimapClampToDisc', 'CG_MinimapSetVertex',
-    'CG_MinimapBuildDisc', 'CG_MinimapBuildRing', 'CG_MinimapAddIcon', 'CG_MinimapComputeHudOffset',
+    'CG_MinimapBuildDisc', 'CG_MinimapAddIcon', 'CG_MinimapComputeHudOffset',
     'CG_MinimapReadToken', 'CG_MinimapParseSpawns', 'CG_MinimapHudElemOffset')
 body = definitions + ''.join(function(name) for name in names)
 
@@ -69,18 +72,18 @@ static void layout(void) {
     MinimapLayout l;
     assert(CG_MinimapComputeLayout(mins, maxs, &l));
     near(l.texelSize, MINIMAP_MIN_TEXEL_SIZE, 0);
-    assert(l.usedWidth == 336 && l.usedHeight == 252 && l.width == 512 && l.height == 256);
+    assert(l.usedWidth == 669 && l.usedHeight == 502 && l.width == 1024 && l.height == 512);
     /* The outermost used texels lie outside the area: a void border that
      * clamped sampling repeats past the edge. */
     assert(l.minX + 0.5f * l.texelSize < mins[0] && l.maxY - 0.5f * l.texelSize > maxs[1]);
     assert(l.minX + (l.usedWidth - 0.5f) * l.texelSize > maxs[0]);
     assert(l.maxY - (l.usedHeight - 0.5f) * l.texelSize < mins[1]);
     assert(l.minX + (l.usedWidth - 1.5f) * l.texelSize < maxs[0] + l.texelSize);
-    /* A large level keeps about 400 texels across and fits the texture. */
+    /* A large level keeps about 800 texels across and fits the texture. */
     float bigMins[2] = {-10000, -3000}, bigMaxs[2] = {10000, 3000};
     assert(CG_MinimapComputeLayout(bigMins, bigMaxs, &l));
-    near(l.texelSize, 50, 1e-3f);
-    assert(l.usedWidth == 402 && l.width == 512 && l.usedHeight == 122 && l.height == 128);
+    near(l.texelSize, 25, 1e-3f);
+    assert(l.usedWidth == 802 && l.width == 1024 && l.usedHeight == 242 && l.height == 256);
     float tinyMins[2] = {0, 0}, tinyMaxs[2] = {40, 1000};
     assert(!CG_MinimapComputeLayout(tinyMins, tinyMaxs, &l));
 }
@@ -206,6 +209,21 @@ static void colors(void) {
     assert(bright(23, 15) < bright(5, 30) && bright(23, 15) > bright(22, 14));
     /* Light from the north-west: the hill's north-west face is brighter. */
     assert(bright(69, 39) > bright(5, 30) && bright(81, 51) < bright(5, 30));
+    /* On 12-unit texels the outline is a texel deep, the shadow a texel dark
+     * and two light. */
+    const int deep = bright(22, 14), light = bright(23, 15), plain = bright(5, 30);
+    assert(bright(24, 16) == light && bright(25, 17) == plain && bright(11, 10) == bright(16, 10));
+    /* Roof outlines and shadows keep their world size on finer texels: on
+     * 6-unit ones the outline is three texels deep, the shadow three dark and
+     * two light. */
+    CG_MinimapColorize(heights, flags, classes, LW, LH, 6.0f, pixels);
+    assert(bright(12, 10) == bright(10, 10) && bright(13, 10) == bright(16, 10) && bright(13, 10) != bright(10, 10));
+    assert(bright(22, 14) == deep && bright(23, 15) == deep && bright(24, 16) == deep);
+    assert(bright(25, 17) == light && bright(26, 18) == light && bright(27, 19) == plain);
+    /* Coarser texels keep at least a texel of each. */
+    CG_MinimapColorize(heights, flags, classes, LW, LH, 30.0f, pixels);
+    assert(bright(10, 10) != bright(16, 10) && bright(11, 10) == bright(16, 10));
+    assert(bright(22, 14) == deep && bright(23, 15) == light && bright(24, 16) == plain);
 }
 
 static void icons(void) {
@@ -293,17 +311,9 @@ static void disc(void) {
     }
     for (int i = 0; i < 9 * MINIMAP_SEGMENTS; i += 9) areaSum += 0.5f * cross(&verts[indices[i]], &verts[indices[i + 1]], &verts[indices[i + 2]]);
     near(areaSum, 3.14159265f * 89.5f * 89.5f, 3.14159265f * 89.5f * 89.5f * 0.01f);
-
-    static HudVertex2D ring[2 * MINIMAP_SEGMENTS];
-    const float inner[4] = {0, 0, 0, 0.55f}, outer[4] = {0, 0, 0, 0};
-    vertexCount = CG_MinimapBuildRing(&v, 90, 95.5f, inner, outer, ring, indices, &indexCount);
-    assert(vertexCount == 2 * MINIMAP_SEGMENTS && indexCount == 6 * MINIMAP_SEGMENTS);
-    windsLikeQuads(ring, vertexCount, indices, indexCount);
-    for (int i = 0; i < vertexCount; i++) {
-        float r = hypotf(ring[i].xy[0] - 100, ring[i].xy[1] - 80);
-        near(r, i < MINIMAP_SEGMENTS ? 90 : 95.5f, 1e-3f);
-        near(ring[i].rgba[3], i < MINIMAP_SEGMENTS ? 0.55f : 0, 0);
-    }
+    /* The rim's chords stay within 0.15 pixels of a 200-unit circle on a
+     * 2160-line screen, well inside its one-pixel fringe. */
+    assert(450.0f * (1.0f - cosf(3.14159265f / MINIMAP_SEGMENTS)) < 0.15f);
 }
 
 static void markers(void) {
@@ -384,8 +394,14 @@ mutants = [
     mutate('    while (head < tail) {\n        int current = queue[head++];',
            '    while (0) {\n        int current = queue[head++];'),
     mutate('value = tail < minArea ? MINIMAP_CLASS_GROUND', 'value = 0 ? MINIMAP_CLASS_GROUND'),
-    mutate('CG_MinimapIsBuilding(classes, width, height, x - 1, y - 1)',
-           'CG_MinimapIsBuilding(classes, width, height, x + 1, y + 1)'),
+    mutate('CG_MinimapIsBuilding(classes, width, height, x - k, y - k)',
+           'CG_MinimapIsBuilding(classes, width, height, x + k, y + k)'),
+    mutate('return k <= deep ? 0.6f : 0.78f;', 'return 0.6f;'),
+    mutate('    int length = CG_MinimapTexels(MINIMAP_SHADOW_LENGTH, texelSize, deep + 1);',
+           '    int length = 2;'),
+    mutate('    int edge = CG_MinimapTexels(MINIMAP_ROOF_EDGE, texelSize, 1);', '    int edge = 1;'),
+    mutate('    return texels < least ? least : texels;', '    return texels;'),
+    mutate('#define MINIMAP_SEGMENTS 128', '#define MINIMAP_SEGMENTS 64'),
     mutate('bgra[2 - c]', 'bgra[c]'),
     mutate('case 2: case 5: case 16: case 17: case 22:\n        return s_minimapHard;',
            'case 2: case 5: case 16: case 17: case 22:\n        return s_minimapDirt;'),
@@ -417,7 +433,8 @@ with tempfile.TemporaryDirectory(prefix='cod2-minimap-') as directory:
                         str(path), '-lm', '-o', str(binary)], check=True)
         result = subprocess.run([str(binary)], capture_output=True, text=True)
         assert (result.returncode == 0) == (index == 0), (index, result.stderr[-2000:])
-print('PASS: minimap layout keeps a void border and 400 texels; the opening and walk classify a house, walled '
+print('PASS: minimap layout keeps a void border and 800 texels; the opening and walk classify a house, walled '
       'courtyard, terrace, climbable hill, post, wall and pool; road, lawn, pool, shadow and hillshade colors in BGRA; arrow and dot '
-      'icons; forward-up mapping with an exact texture inverse; antialiased disc, ring and icon quads wind like the '
-      f'engine quads; spawn parsing; top-left HUD shift; {len(mutants)} failing regression mutants')
+      'icons; roof outlines and shadows keep their world size on finer texels; forward-up mapping with an exact texture '
+      'inverse; antialiased disc and icon quads wind like the engine quads, the rim within 0.15 pixels of a '
+      f'circle and no shadow ring around it; spawn parsing; top-left HUD shift; {len(mutants)} failing regression mutants')

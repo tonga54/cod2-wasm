@@ -30,8 +30,9 @@ weapons = (root / 'src/PC/cgame_mp/cg_weapons.c').read_text()
 view_weapon = weapons.index('void CG_AddViewWeapon(playerState_t *ps)\n{')
 assert view_weapon < weapons.index('g_webAimFrac = playerState->fWeaponPosFrac;', view_weapon) < \
     weapons.index('return;', view_weapon)
-assert 'r_motionBlur = ri.Dvar_RegisterBool("r_motionBlur", 1, 0x2001);' in \
-    (root / 'src/PC/gfx_d3d/r_dvars.c').read_text()
+dvars = (root / 'src/PC/gfx_d3d/r_dvars.c').read_text()
+assert 'r_motionBlur = ri.Dvar_RegisterBool("r_motionBlur", 1, 0x2001);' in dvars
+assert 'r_sceneHeight = ri.Dvar_RegisterInt("r_sceneHeight", 720, 0, 2160, 0x2001);' in dvars
 assert 'mtx[2][2] = c;' in (root / 'src/PC/universal/com_math.c').read_text()
 set2d = backend.index('static void RB_Set2D(void)')
 assert set2d < backend.index('WebSceneFx_EndView();', set2d) < backend.index('backEnd.projection2D = 1;', set2d)
@@ -66,7 +67,7 @@ test = r'''
 #include <string.h>
 #include "SOURCE"
 static dvar_t glow, radius0, radius1, intensity0, intensity1, cutoff, desaturation, fullbright, samples, dof, film,
-    motion;
+    motion, scene;
 const dvar_t *r_glow = &glow;
 const dvar_t *r_glowRadius[2] = {&radius0, &radius1};
 const dvar_t *r_glowBloomIntensity[2] = {&intensity0, &intensity1};
@@ -77,16 +78,18 @@ const dvar_t *r_aaSamples = &samples;
 const dvar_t *r_dof_enable = &dof;
 const dvar_t *r_filmTweakEnable = &film;
 const dvar_t *r_motionBlur = &motion;
+const dvar_t *r_sceneHeight = &scene;
 static double clockMs = 1000.0;
 double emscripten_get_now(void)
 {
     return clockMs;
 }
-static int binds, composes, bindResult = 1, boundWidth, boundHeight, boundSamples;
+static int binds, composes, bindResult = 1, boundWidth, boundHeight, boundSamples, boundScreenWidth, boundScreenHeight;
 static float composed[SCENE_FX_PARAM_COUNT];
-int WebSceneFx_Bind(int width, int height, int sampleCount)
+int WebSceneFx_Bind(int width, int height, int sampleCount, int screenWidth, int screenHeight)
 {
     ++binds; boundWidth = width; boundHeight = height; boundSamples = sampleCount;
+    boundScreenWidth = screenWidth; boundScreenHeight = screenHeight;
     return bindResult;
 }
 void WebSceneFx_Compose(const float *params)
@@ -99,7 +102,7 @@ static void defaults(void)
     glow.current.enabled = 1; radius0.current.value = 5; radius1.current.value = 12;
     intensity0.current.value = 1; intensity1.current.value = 1; cutoff.current.value = 0.9f;
     desaturation.current.value = 0.75f; fullbright.current.enabled = 0; samples.current.integer = 4;
-    dof.current.enabled = 1; film.current.enabled = 1; motion.current.enabled = 1;
+    dof.current.enabled = 1; film.current.enabled = 1; motion.current.enabled = 1; scene.current.integer = 720;
 }
 static void frameNear(int x, int width, float nearClip, float worldNearClip)
 {
@@ -164,6 +167,7 @@ int main(void)
         binds = composes = 0;
         WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 7.996f);
         assert(binds == 1 && boundWidth == 1280 && boundHeight == 720 && boundSamples == 4 && !composes);
+        assert(boundScreenWidth == 1280 && boundScreenHeight == 720);
         /* RB_Set2D composes once; later 2D batches and views draw directly. */
         WebSceneFx_EndView(); WebSceneFx_EndView();
         WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 2.0f);
@@ -378,7 +382,45 @@ int main(void)
     defaults();
     frame(0, 1280, 0.1f);
     assert(composes == 3 && composed[SCENE_FX_BACKDROP] == 0);
-    puts("PASS: 600 composed frames, single compose per frame before Present, partial/fullbright/disabled views drawn directly, bounded glow, viewmodel and near world focus parameters, camera motion reprojected over a 10 ms exposure with aim fade, cuts and still cameras, a bounded menu backdrop");
+
+    /* A screen taller than r_sceneHeight renders its scene at that many lines
+     * and the screen's aspect, even with every effect off; a shorter one, or
+     * r_sceneHeight 0, keeps the screen's size. */
+    static const int sizes[][5] = {
+        {1920, 1080, 720, 1280, 720}, {1600, 900, 720, 1280, 720}, {1366, 768, 720, 1281, 720},
+        {2560, 1600, 720, 1152, 720}, {3840, 2160, 1080, 1920, 1080}, {100, 2000, 1, 1, 1},
+        {1920, 1080, 0, 1920, 1080}, {1280, 720, 720, 1280, 720}, {1024, 768, 900, 1024, 768}};
+    for (int effects = 0; effects < 2; ++effects) {
+        for (unsigned k = 0; k < sizeof(sizes) / sizeof(sizes[0]); ++k) {
+            const int *z = sizes[k];
+            int scaled = z[3] != z[0] || z[4] != z[1];
+            defaults();
+            if (!effects) {
+                glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
+                motion.current.enabled = 0;
+            }
+            scene.current.integer = z[2];
+            binds = composes = 0;
+            boundWidth = boundHeight = boundScreenWidth = boundScreenHeight = 0;
+            WebSceneFx_BeginView(0, 0, z[0], z[1], z[0], z[1], 0.1f, 4.0f);
+            WebSceneFx_EndView();
+            WebSceneFx_EndFrame();
+            if (!effects && !scaled) {
+                assert(!binds && !composes);
+                continue;
+            }
+            assert(binds == 1 && composes == 1 && boundWidth == z[3] && boundHeight == z[4]);
+            assert(boundScreenWidth == z[0] && boundScreenHeight == z[1] && boundSamples == (effects ? 4 : 1));
+        }
+    }
+    /* Partial views on a taller screen still draw directly. */
+    defaults();
+    binds = composes = 0;
+    WebSceneFx_BeginView(8, 0, 1904, 1080, 1920, 1080, 0.1f, 4.0f);
+    WebSceneFx_EndView();
+    WebSceneFx_EndFrame();
+    assert(!binds && !composes);
+    puts("PASS: 600 composed frames, single compose per frame before Present, partial/fullbright/disabled views drawn directly, bounded glow, viewmodel and near world focus parameters, camera motion reprojected over a 10 ms exposure with aim fade, cuts and still cameras, a bounded menu backdrop, scenes rendered at r_sceneHeight lines and the screen's aspect on taller screens");
     return 0;
 }
 '''
@@ -407,6 +449,12 @@ mutants = [
      '    if (WebSceneFx_Enabled(r_fullbright))\n        return;\n',
      '    /* r_fullbright clears the frame buffer before it begins the view. */\n'
      '    if (WebSceneFx_Enabled(r_fullbright))\n        return;\n    WebSceneFx_TrackCamera();\n'),
+    ('    if (lines > 0 && lines < height) {', '    if (lines > 0) {'),
+    ('(float)lines / (float)height + 0.5f);', '(float)lines / (float)height);'),
+    ('        if (*sceneWidth < 1)\n            *sceneWidth = 1;\n', ''),
+    ('    scaled = sceneWidth != width || sceneHeight != height;', '    scaled = 0;'),
+    ('WebSceneFx_Bind(sceneWidth, sceneHeight, samples, width, height);',
+     'WebSceneFx_Bind(width, height, samples, width, height);'),
 ]
 
 with tempfile.TemporaryDirectory(prefix='cod2-scene-fx-') as tmp:
@@ -428,4 +476,4 @@ with tempfile.TemporaryDirectory(prefix='cod2-scene-fx-') as tmp:
                         '-lm', '-o', str(path / f'mutant{index}')], check=True)
         result = subprocess.run([str(path / f'mutant{index}')], capture_output=True)
         assert result.returncode != 0, f'mutant survived: {after!r}'
-    print(f'PASS: {len(mutants)} motion blur and backdrop mutants fail')
+    print(f'PASS: {len(mutants)} motion blur, backdrop and scene size mutants fail')

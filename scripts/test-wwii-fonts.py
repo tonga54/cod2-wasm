@@ -309,9 +309,9 @@ int main(void) {
             assert(near(capHeight(f, 'z') / capHeight(f, 'I'), 0.73, 0.03));
             assert(near(inkBottom(f, 'z'), -expect[i].baseline, 0.08));
             assert(near(R_NormalizedTextScale((FontHandle)f, 0.3f), 48.0f * 0.3f / expect[i].pixelHeight, 1e-6));
-            /* Texels to a unit follow the screen's lines over 480, up to 3;
-             * the console's own font stays at one. */
-            int want = i == 5 ? 1 : (int[]){ 1, 2, 2, 3 }[h];
+            /* Texels to a unit follow the screen's lines over 480, rounded
+             * up to 3; the console's own font stays at one. */
+            int want = i == 5 ? 1 : (int[]){ 1, 2, 3, 3 }[h];
             assert(t == want);
             cases++;
         }
@@ -644,7 +644,7 @@ mutants = [
     ('    if (letter == 0x7f || letter == 0xa0)\n        return 0x20;\n', ''),
     ('0x20ac, 0, 0x201a,', '0x20ac, 0x20ac, 0x201a,'),
     ('0x2013, 0x2014,', '0x2014, 0x2013,'),
-    ('    texels = (int)floorf((float)vidConfig.height / 480.0f + 0.5f);', '    texels = (int)floorf((float)vidConfig.height / 480.0f);'),
+    ('    texels = (int)ceilf((float)vidConfig.height / 480.0f);', '    texels = (int)floorf((float)vidConfig.height / 480.0f + 0.5f);'),
     ('    rawPixels = profile->rawPixels && fontName[0] != \'$\';', '    rawPixels = profile->rawPixels;'),
     ('        int y0 = face->glyphs[i].y0 - profile->baseline;', '        int y0 = face->glyphs[i].y0 + profile->baseline;'),
     ('        dx = (int)floorf((float)advance * advanceScale + 0.5f);', '        dx = (int)floorf((float)advance * advanceScale);'),
@@ -719,8 +719,8 @@ print('PASS: every stock font (normal, small, big, extra big, bold, console, bot
       'share Medium at 95% width, bold text is Bold, the console Medium and the killcam\'s own font Regular, which '
       'registers optionally (NULL without the setting, a WWII font or a free slot); each keeps its stock pixel height, an H as '
       'tall as the stock one ending at its baseline, and Barlow\'s widths; the glyph table is the one R_GetCharacterGlyph '
-      'searches; atlases are packed without overlap on clear borders with exact mipmaps, one texel per unit per 480 '
-      'lines up to 3 and one for the console\'s own font; images are released on shutdown and rebuilt; without $raw, an '
+      'searches; atlases are packed without overlap on clear borders with exact mipmaps, a texel per unit per 480 '
+      'lines rounded up to 3 and one for the console\'s own font; images are released on shutdown and rebuilt; without $raw, an '
       f'image, the setting or a free name the stock fonts stay; fonts lettered in Barlow elsewhere count as WWII fonts; '
       f'text drawn white in them takes the captures\' warm 82% white, and the backend draws them once over a shadow '
       f'at half alpha while the stock fonts keep their double draw; {cases} font and size cases; '

@@ -31,6 +31,7 @@ const dvar_t *r_lodDistanceScale;
 const dvar_t *r_dof_enable;
 const dvar_t *r_filmTweakEnable;
 const dvar_t *r_motionBlur;
+const dvar_t *r_sceneHeight;
 #endif
 extern const dvar_t *r_znear;
 extern const dvar_t *r_znear_depthhack;
@@ -510,6 +511,11 @@ void R_RegisterDvars(void)
     r_filmTweakEnable = ri.Dvar_RegisterBool("r_filmTweakEnable", 1, 0x2001);
 
     r_motionBlur = ri.Dvar_RegisterBool("r_motionBlur", 1, 0x2001);
+
+    /* Lines the first full-screen 3D view renders at on a taller canvas,
+     * which then draws the HUD at its own resolution; 0 renders it at the
+     * canvas's. */
+    r_sceneHeight = ri.Dvar_RegisterInt("r_sceneHeight", 720, 0, 2160, 0x2001);
 #endif
 
     r_outdoorAwayBias = ri.Dvar_RegisterFloat("r_outdoorAwayBias", 32.0f, -3.4028235e+38f, 3.4028235e+38f, 0x2000);

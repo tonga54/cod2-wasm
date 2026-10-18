@@ -22,11 +22,12 @@ extern const dvar_t *Dvar_RegisterFloat(const char *name, float value, float min
 extern int CG_CompassUpdateFriendlies(void);
 extern const dvar_t **dvar_compassPingFadeTime;
 
-#define MINIMAP_TEXTURE_MAX 512
-/* About 400 texels across the playable area keeps the load-time traces cheap
- * and still gives more than one texel per screen pixel at the default range. */
-#define MINIMAP_TARGET_TEXELS 400
-#define MINIMAP_MIN_TEXEL_SIZE 12.0f
+#define MINIMAP_TEXTURE_MAX 1024
+/* About 800 texels across the playable area: at the default size and range,
+ * Toujane's, Carentan's and Dawnville's texels are under a pixel of a
+ * 1080-line screen. */
+#define MINIMAP_TARGET_TEXELS 800
+#define MINIMAP_MIN_TEXEL_SIZE 6.0f
 #define MINIMAP_SPAWN_MARGIN 1536.0f
 #define MINIMAP_MAX_SPAWNS 256
 /* Solid, glass and water: what the player sees from above, without player
@@ -41,9 +42,15 @@ extern const dvar_t **dvar_compassPingFadeTime;
 #define MINIMAP_SEED_HEIGHT 16.0f
 #define MINIMAP_LOW_GROUND 24.0f
 #define MINIMAP_MIN_BUILDING_AREA 1024.0f
+/* World units of a roof's outline and of the shadow buildings cast to the
+ * south-east, darker for the first stretch: a texel and two of Toujane's
+ * 15.9-unit texels at 400 across. */
+#define MINIMAP_ROOF_EDGE 16.0f
+#define MINIMAP_SHADOW_DEEP 16.0f
+#define MINIMAP_SHADOW_LENGTH 32.0f
 #define MINIMAP_ICON_SIZE 64
 #define MINIMAP_MARGIN 6.0f
-#define MINIMAP_SEGMENTS 64
+#define MINIMAP_SEGMENTS 128
 #define MINIMAP_TOP_LEFT 9
 #define MINIMAP_ACTOR_TIMEOUT 800
 #define MINIMAP_MAX_ICONS 72
@@ -430,8 +437,44 @@ static int CG_MinimapIsBuilding(const byte *classes, int width, int height, int 
     return x >= 0 && y >= 0 && x < width && y < height && classes[y * width + x] == MINIMAP_CLASS_BUILDING;
 }
 
+/* Texels spanning about this many world units, at least the given count. */
+static int CG_MinimapTexels(float units, float texelSize, int least)
+{
+    int texels = (int)(units / texelSize + 0.5f);
+
+    return texels < least ? least : texels;
+}
+
+/* Whether a building texel has open ground within reach along an axis. */
+static int CG_MinimapNearOpen(const byte *classes, int width, int height, int x, int y, int reach)
+{
+    int k;
+
+    for (k = 1; k <= reach; k++) {
+        if (!CG_MinimapIsBuilding(classes, width, height, x - k, y) || !CG_MinimapIsBuilding(classes, width, height, x + k, y) ||
+            !CG_MinimapIsBuilding(classes, width, height, x, y - k) || !CG_MinimapIsBuilding(classes, width, height, x, y + k))
+            return 1;
+    }
+    return 0;
+}
+
+/* The shade of a building's shadow on ground diagonally south-east of it. */
+static float CG_MinimapShadow(const byte *classes, int width, int height, int x, int y, int deep, int length)
+{
+    int k;
+
+    for (k = 1; k <= length; k++) {
+        if (CG_MinimapIsBuilding(classes, width, height, x - k, y - k))
+            return k <= deep ? 0.6f : 0.78f;
+    }
+    return 1.0f;
+}
+
 static void CG_MinimapColorize(const float *heights, const byte *flags, const byte *classes, int width, int height, float texelSize, byte *bgra)
 {
+    int edge = CG_MinimapTexels(MINIMAP_ROOF_EDGE, texelSize, 1);
+    int deep = CG_MinimapTexels(MINIMAP_SHADOW_DEEP, texelSize, 1);
+    int length = CG_MinimapTexels(MINIMAP_SHADOW_LENGTH, texelSize, deep + 1);
     int x;
     int y;
 
@@ -444,8 +487,7 @@ static void CG_MinimapColorize(const float *heights, const byte *flags, const by
             if (classes[i] == MINIMAP_CLASS_VOID) {
                 CG_MinimapPutTexel(texel, s_minimapVoid, 1.0f);
             } else if (classes[i] == MINIMAP_CLASS_BUILDING) {
-                if (!CG_MinimapIsBuilding(classes, width, height, x - 1, y) || !CG_MinimapIsBuilding(classes, width, height, x + 1, y) ||
-                    !CG_MinimapIsBuilding(classes, width, height, x, y - 1) || !CG_MinimapIsBuilding(classes, width, height, x, y + 1)) {
+                if (CG_MinimapNearOpen(classes, width, height, x, y, edge)) {
                     CG_MinimapPutTexel(texel, s_minimapRoofEdge, 1.0f);
                 } else {
                     slope = CG_MinimapSlope(heights, classes, width, height, x, y, texelSize);
@@ -456,11 +498,7 @@ static void CG_MinimapColorize(const float *heights, const byte *flags, const by
 
                 slope = CG_MinimapSlope(heights, classes, width, height, x, y, texelSize);
                 shade = CG_MinimapClamp(1.0f + 0.3f * slope, 0.7f, 1.3f);
-                /* Buildings cast a short shadow to the south-east. */
-                if (CG_MinimapIsBuilding(classes, width, height, x - 1, y - 1))
-                    shade *= 0.6f;
-                else if (CG_MinimapIsBuilding(classes, width, height, x - 2, y - 2))
-                    shade *= 0.78f;
+                shade *= CG_MinimapShadow(classes, width, height, x, y, deep, length);
                 CG_MinimapPutTexel(texel, CG_MinimapGroundColor(flags[i]), shade);
             }
         }
@@ -642,33 +680,6 @@ static int CG_MinimapBuildDisc(const MinimapView *view, const MinimapLayout *lay
     }
     *indexCount = ic;
     return 1 + 2 * MINIMAP_SEGMENTS;
-}
-
-/* A band between two radii, colored from the inner to the outer edge. */
-static int CG_MinimapBuildRing(const MinimapView *view, float innerRadius, float outerRadius, const float *innerColor,
-                               const float *outerColor, HudVertex2D *verts, unsigned short *indices, int *indexCount)
-{
-    int ic = 0;
-    int i;
-
-    for (i = 0; i < MINIMAP_SEGMENTS; i++) {
-        float angle = (float)i * (6.28318531f / (float)MINIMAP_SEGMENTS);
-        float c = cosf(angle);
-        float sn = sinf(angle);
-        int next = (i + 1) % MINIMAP_SEGMENTS;
-
-        CG_MinimapSetVertex(&verts[i], view->centerX + innerRadius * c, view->centerY + innerRadius * sn, 0.5f, 0.5f, innerColor);
-        CG_MinimapSetVertex(&verts[MINIMAP_SEGMENTS + i], view->centerX + outerRadius * c, view->centerY + outerRadius * sn, 0.5f, 0.5f,
-                            outerColor);
-        indices[ic++] = (unsigned short)i;
-        indices[ic++] = (unsigned short)(MINIMAP_SEGMENTS + i);
-        indices[ic++] = (unsigned short)(MINIMAP_SEGMENTS + next);
-        indices[ic++] = (unsigned short)i;
-        indices[ic++] = (unsigned short)(MINIMAP_SEGMENTS + next);
-        indices[ic++] = (unsigned short)next;
-    }
-    *indexCount = ic;
-    return 2 * MINIMAP_SEGMENTS;
 }
 
 /* An icon turned clockwise by angle degrees, as a quad in the engine's corner
@@ -1115,13 +1126,6 @@ void CG_DrawMinimap(float alpha)
     view.sinYaw = sinf(yaw);
     view.cosYaw = cosf(yaw);
 
-    {
-        const float shadow[4] = {0.0f, 0.0f, 0.0f, 0.55f * alpha};
-        const float clear[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-
-        vertexCount = CG_MinimapBuildRing(&view, view.radius, view.radius * 1.05f + 1.0f, shadow, clear, verts, indices, &indexCount);
-        R_AddCmdDrawTriangles2D(verts, vertexCount, indices, indexCount, cgs->media.whiteMaterial);
-    }
     vertexCount = CG_MinimapBuildDisc(&view, &s_minimap.layout, alpha, verts, indices, &indexCount);
     R_AddCmdDrawTriangles2D(verts, vertexCount, indices, indexCount, s_minimap.mapMaterial);
 

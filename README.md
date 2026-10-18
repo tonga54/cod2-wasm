@@ -393,7 +393,8 @@ the full guide before running these commands on a new installation.
 
 ## Performance and verification
 
-The default client renders at **1280×720**, with full-resolution textures,
+The default client draws at **1920×1080**, its 3D view at 720 lines
+(`r_sceneHeight`), with full-resolution textures,
 anti-aliasing and 4× anisotropic filtering where supported. Rendering follows
 the display cadence, including 120 Hz. Performance changes cache static vertex
 buffers, texture/sampler/render state, shader uniforms and animation work;

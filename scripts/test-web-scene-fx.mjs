@@ -42,7 +42,9 @@ try {
     const Module = {}, HEAPF32 = new Float32Array(64);
     const warnings = [], warn = console.warn;
     console.warn = (...args) => { warnings.push(args.join(' ')); warn(...args); };
-    const bind = Function('GLctx', 'Module', 'HEAPF32', 'width', 'height', 'samples', bindBody);
+    const bindScene = Function('GLctx', 'Module', 'HEAPF32', 'width', 'height', 'samples', 'screenWidth', 'screenHeight', bindBody);
+    const bind = (gl, Module, HEAPF32, width, height, samples, screenWidth = width, screenHeight = height) =>
+      bindScene(gl, Module, HEAPF32, width, height, samples, screenWidth, screenHeight);
     const compose = Function('GLctx', 'Module', 'HEAPF32', 'params', composeBody);
     const W = 1280, H = 720;
 
@@ -203,9 +205,29 @@ try {
     check(pixel(halfway, 720, 360) > 0 && pixel(halfway, 720, 360) < pixel(backdrop, 720, 360),
       'half the backdrop blurs less');
 
+    // A scene of half the canvas's lines renders at its size from the canvas
+    // viewport the engine sets, and is filtered up to the whole canvas with
+    // Catmull-Rom. The square's right edge falls between scene columns 351 and
+    // 352: canvas pixels 703 and 704 read 203 and 52, where bilinear filtering
+    // reads 191 and 64, and the overshoot either side clamps.
+    check(bind(gl, Module, HEAPF32, W / 2, H / 2, 1, W, H) === 1, 'a scene below the canvas binds at its own size');
+    drawScene(squares);
+    check(String(gl.getParameter(gl.VIEWPORT)) === `0,0,${W / 2},${H / 2}`, 'the canvas viewport lands on the scene at its scale');
+    compose(gl, Module, HEAPF32, params(0, {glow: 0, film: 0}));
+    check(String(gl.getParameter(gl.VIEWPORT)) === `0,0,${W},${H}` && !Object.prototype.hasOwnProperty.call(gl, 'viewport'),
+      'composing hands the canvas its own viewport back');
+    const upscaled = read(); snapshot('upscaled');
+    check(pixel(upscaled, 640, 360) === 255 && pixel(upscaled, 640, 300) === 0 && pixel(upscaled, 1100, 100) === 255 &&
+      pixel(upscaled, 100, 100) === 0, 'the upscaled scene fills the canvas');
+    const reads = (x, value) => Math.abs(pixel(upscaled, x, 360) - value) <= 2;
+    check(reads(703, 203) && reads(704, 52) && reads(575, 52) && reads(576, 203), 'Catmull-Rom keeps edges sharper than bilinear');
+    check(pixel(upscaled, 702, 360) === 255 && pixel(upscaled, 705, 360) === 0 && pixel(upscaled, 574, 360) === 0 &&
+      pixel(upscaled, 577, 360) === 255, 'an edge spans two canvas pixels and its overshoot clamps');
+    gl.viewport(0, 0, W, H);
+
     // Each pass has a fixed GPU cost, so the pass count is part of the frame budget.
-    const passes = (ads, options) => {
-      bind(gl, Module, HEAPF32, W, H, 4); drawScene();
+    const passes = (ads, options, divisor = 1) => {
+      bind(gl, Module, HEAPF32, W / divisor, H / divisor, 4, W, H); drawScene();
       const drawArrays = gl.drawArrays, blit = gl.blitFramebuffer;
       let draws = 0, blits = 0;
       gl.drawArrays = function(...args) { ++draws; return drawArrays.apply(this, args); };
@@ -219,6 +241,20 @@ try {
     check(passes(1) === '5+1', 'aiming adds two 1/4-resolution passes');
     check(passes(0, {glow: 0, motion: turn(0.03)}) === '1+1', 'motion blur adds no pass');
     check(passes(0, {glow: 0, backdrop: 1}) === '5+1', 'the backdrop adds four 1/4-resolution passes');
+    check(passes(0, {glow: 0}, 2) === '2+1', 'a scene below the canvas adds one full-canvas pass');
+
+    // A steady scaled frame queries nothing the GPU process has to answer.
+    bind(gl, Module, HEAPF32, W / 2, H / 2, 4, W, H); drawScene(); compose(gl, Module, HEAPF32, params(0));
+    {
+      const queried = [], getParameter = gl.getParameter, checkStatus = gl.checkFramebufferStatus;
+      gl.getParameter = function(pname) { queried.push(pname); return getParameter.call(this, pname); };
+      gl.checkFramebufferStatus = function(target) { queried.push('checkFramebufferStatus'); return checkStatus.call(this, target); };
+      bind(gl, Module, HEAPF32, W / 2, H / 2, 4, W, H); drawScene(); compose(gl, Module, HEAPF32, params(0));
+      gl.getParameter = getParameter; gl.checkFramebufferStatus = checkStatus;
+      const answered = new Set([gl.CURRENT_PROGRAM, gl.VERTEX_ARRAY_BINDING, gl.ACTIVE_TEXTURE, gl.VIEWPORT]);
+      check(queried.length && queried.every(pname => answered.has(pname)), 'a scaled frame makes no synchronous GL queries');
+    }
+    gl.viewport(0, 0, W, H);
 
     // Production state is restored exactly, including the cached WebGL entry points.
     check(bind(gl, Module, HEAPF32, W, H, 4) === 1, 'rebind without reallocating');

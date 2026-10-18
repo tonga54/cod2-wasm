@@ -17,6 +17,10 @@ players see the game startup screen and then its native menu. The native main
 menu's **Fullscreen: Off/On** text toggles the browser display mode. There is no
 floating HTML fullscreen button.
 
+The game draws at 1920 × 1080 by default, its 3D view at 720 lines. On the
+first start after this default arrived, a saved profile still at the old
+1280 × 720 default moves to it, once; a resolution chosen afterwards stays.
+
 In Chrome/Edge, fullscreen entry requests capture of Escape only. A short
 press opens the native menu; holding Escape retains the browser's fullscreen
 exit gesture. F10 also exits. Keyboard capture requires browser permission and

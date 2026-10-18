@@ -246,3 +246,13 @@ const textureVersions=source.match(/        this.textureMatrixVersion = [^;]+;/)
 const freshRenderer={};Function('GLImmediate',textureVersions).call(freshRenderer,{MAX_TEXTURES:13});
 assert.equal(freshRenderer.textureMatrixVersion.length,15);
 assert(freshRenderer.textureMatrixVersion.every(v=>v===-1),'fresh shaders must upload identity texture matrices even at version zero');
+
+// A scene rendered below the canvas's size rescales the viewport by replacing
+// it on the context, so the linked call must look it up each time.
+const boxes = [];
+const boxGL = {viewport: () => assert.fail('stale viewport')};
+const viewportCall = Function('GLctx', `${source.match(/var _glViewport = [^;]+;/)[0]}\nreturn _glViewport;`)(boxGL);
+boxGL.viewport = (...args) => boxes.push(args);
+viewportCall(1, 2, 3, 4);
+assert.deepEqual(boxes, [[1, 2, 3, 4]]);
+console.log('PASS: linked glViewport calls the context\'s current viewport');

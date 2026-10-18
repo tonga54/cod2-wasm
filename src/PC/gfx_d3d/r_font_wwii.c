@@ -25,7 +25,8 @@ extern void RB_UnbindImage(const GfxImage *image);
  * rest of Windows-1252 ascending, which it searches. */
 #define R_WWII_FONT_GLYPHS 219
 /* Texels of the atlas to a font unit: the screen's lines over the 480 that UI
- * text is laid out for. The console draws its own font a unit to a pixel. */
+ * text is laid out for, rounded up. The console draws its own font a unit to
+ * a pixel. */
 #define R_WWII_FONT_TEXELS_MAX 3
 /* Transparent texels inside each glyph's quad, and between glyphs so that
  * filtering and the first mipmaps never reach a neighbour. */
@@ -203,7 +204,9 @@ static int R_WwiiFontTexelsPerUnit(int rawPixels)
 
     if (rawPixels)
         return 1;
-    texels = (int)floorf((float)vidConfig.height / 480.0f + 0.5f);
+    /* The screen's pixels to a unit rounded up, so up to 1440 lines glyphs
+     * shrink to the screen rather than stretch: 2 at 720 lines, 3 at 1080. */
+    texels = (int)ceilf((float)vidConfig.height / 480.0f);
     if (texels < 1)
         return 1;
     return texels > R_WWII_FONT_TEXELS_MAX ? R_WWII_FONT_TEXELS_MAX : texels;

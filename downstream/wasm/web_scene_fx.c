@@ -8,7 +8,10 @@
  * into the canvas: CoD2's DX9 glow (r_glow*), WWII-style camera motion blur
  * (r_motionBlur), a CoD4-style depth of field on the viewmodel and the near
  * world while aiming, contrast adaptive sharpening and a light film grade.
- * The HUD and any later view draw straight into the canvas. */
+ * The HUD and any later view draw straight into the canvas. A canvas taller
+ * than r_sceneHeight lines renders that 3D view at r_sceneHeight and scales
+ * it up as it composes, so the HUD gets the canvas's resolution for the
+ * scene's cost. */
 
 extern const dvar_t *r_glow;
 extern const dvar_t *r_glowRadius[2];
@@ -20,6 +23,7 @@ extern const dvar_t *r_aaSamples;
 extern const dvar_t *r_dof_enable;
 extern const dvar_t *r_filmTweakEnable;
 extern const dvar_t *r_motionBlur;
+extern const dvar_t *r_sceneHeight;
 
 enum {
     SCENE_FX_GLOW0,
@@ -89,7 +93,7 @@ static float s_motionMove[3];
 static float s_motionProjection[2];
 static float s_backdropFrac;
 
-EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples), {
+EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth, int screenHeight), {
     if (typeof GLctx === "undefined" || !GLctx || !GLctx.blitFramebuffer) return 0;
     var gl = GLctx;
     var fx = Module.cod2SceneFx;
@@ -288,10 +292,58 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples), {
                 ["u_scene", "u_bloom", "u_depth", "u_dofMed", "u_dofLarge"],
                 ["u_px", "u_glow", "u_dof", "u_dof2", "u_film", "u_near", "u_tier",
                  "u_motion", "u_motionRotation", "u_motionMove"]);
+            /* A scene smaller than the canvas, filtered up to it with Catmull-Rom
+             * in five bilinear taps (the corner taps weigh under 0.5%), as the
+             * page scales the canvas again with its own bilinear filter. */
+            link("upscale", "uniform sampler2D u_src;\nuniform highp vec2 u_size;\n" +
+                "void main() {\n" +
+                "  highp vec2 p = v_uv * u_size;\n" +
+                "  highp vec2 c1 = floor(p - 0.5) + 0.5;\n" +
+                "  highp vec2 f = p - c1;\n" +
+                "  highp vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));\n" +
+                "  highp vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);\n" +
+                "  highp vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));\n" +
+                "  highp vec2 w3 = f * f * (-0.5 + 0.5 * f);\n" +
+                "  highp vec2 w12 = w1 + w2;\n" +
+                "  highp vec2 t0 = (c1 - 1.0) / u_size, t3 = (c1 + 2.0) / u_size, t12 = (c1 + w2 / w12) / u_size;\n" +
+                "  vec3 c = texture(u_src, vec2(t12.x, t0.y)).rgb * (w12.x * w0.y) +\n" +
+                "    texture(u_src, vec2(t0.x, t12.y)).rgb * (w0.x * w12.y) +\n" +
+                "    texture(u_src, t12).rgb * (w12.x * w12.y) +\n" +
+                "    texture(u_src, vec2(t3.x, t12.y)).rgb * (w3.x * w12.y) +\n" +
+                "    texture(u_src, vec2(t12.x, t3.y)).rgb * (w12.x * w3.y);\n" +
+                "  float total = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;\n" +
+                "  o = vec4(clamp(c / total, 0.0, 1.0), 1.0);\n}\n",
+                ["u_src"], ["u_size"]);
             gl.useProgram(previous);
             if (!ok) return false;
             fx.programs = programs;
             fx.vao = gl.createVertexArray();
+            return true;
+        };
+        /* The canvas's viewport, which a scaled scene's draws set in canvas
+         * pixels, goes to the scene's at its scale. The engine sets no scissor
+         * box, so the canvas-sized default covers the scene's target. */
+        fx.scale = function(screenWidth, screenHeight) {
+            var sx = fx.width / screenWidth, sy = fx.height / screenHeight;
+            var viewport = gl.viewport;
+            fx.screenWidth = screenWidth;
+            fx.screenHeight = screenHeight;
+            fx.ownViewport = Object.getOwnPropertyDescriptor(gl, "viewport");
+            fx.canvasViewport = Array.from(gl.getParameter(gl.VIEWPORT));
+            gl.viewport = function(x, y, w, h) {
+                var x0 = Math.round(x * sx), y0 = Math.round(y * sy);
+                fx.canvasViewport = [x, y, w, h];
+                viewport.call(gl, x0, y0, Math.round((x + w) * sx) - x0, Math.round((y + h) * sy) - y0);
+            };
+            fx.scaled = true;
+            gl.viewport.apply(gl, fx.canvasViewport);
+        };
+        fx.unscale = function() {
+            if (!fx.scaled) return false;
+            fx.scaled = false;
+            if (fx.ownViewport) Object.defineProperty(gl, "viewport", fx.ownViewport);
+            else delete gl.viewport;
+            gl.viewport.apply(gl, fx.canvasViewport);
             return true;
         };
         fx.release = function() {
@@ -352,6 +404,8 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples), {
                 t.ms = framebuffer(null, null, renderbuffer(gl.RGB8), renderbuffer(gl.DEPTH24_STENCIL8));
                 gl.bindRenderbuffer(gl.RENDERBUFFER, null);
             }
+            t.out = texture(gl.RGB8, w, h, gl.LINEAR);
+            t.outFbo = framebuffer(t.out, null, null, null);
             for (var i = 0; i < 2; ++i) {
                 t.q.push(texture(gl.RGBA8, t.qw, t.qh, gl.LINEAR));
                 t.qFbo.push(framebuffer(t.q[i], null, null, null));
@@ -399,6 +453,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples), {
         };
         fx.compose = function(o) {
             var t = fx.t, P = fx.programs, H = HEAPF32;
+            var scaled = fx.unscale();
             if (!t || !P) return;
             var w = fx.width, h = fx.height, qw = t.qw, qh = t.qh, ew = t.ew, eh = t.eh;
             var glow0 = H[o], glow1 = H[o + 1], ads = H[o + 6], motion = H[o + 18], backdrop = H[o + 33];
@@ -493,7 +548,15 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples), {
             }
             var sources = [t.color, t.e[1], t.depth, t.q[0], t.q[1]];
             for (var s = 0; s < sources.length; ++s) fx.texture(s, sources[s]);
-            fx.pass(C, null, w, h);
+            if (scaled) {
+                fx.pass(C, t.outFbo, w, h);
+                gl.useProgram(P.upscale.program);
+                gl.uniform2f(P.upscale.u_size, w, h);
+                fx.texture(0, t.out);
+                fx.pass(P.upscale, null, fx.screenWidth, fx.screenHeight);
+            } else {
+                fx.pass(C, null, w, h);
+            }
             for (var u = sources.length - 1; u >= 0; --u) fx.texture(u, null);
             gl.bindVertexArray(vao);
             gl.useProgram(program);
@@ -514,13 +577,16 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples), {
             return 0;
         }
     }
+    fx.unscale();
     gl.bindFramebuffer(gl.FRAMEBUFFER, fx.t.ms || fx.t.scene);
+    if (width !== screenWidth || height !== screenHeight) fx.scale(screenWidth, screenHeight);
     return 1;
 });
 
 EM_JS(void, WebSceneFx_Compose, (const float *params), {
     var fx = Module.cod2SceneFx;
     if (fx && fx.t) fx.compose(params >>> 2);
+    else if (fx) fx.unscale();
 });
 
 static float WebSceneFx_Clamp(float value, float lo, float hi)
@@ -543,6 +609,22 @@ static int WebSceneFx_GlowEnabled(void)
 static int WebSceneFx_Samples(void)
 {
     return r_aaSamples ? r_aaSamples->current.integer : 1;
+}
+
+/* The scene's size for a view filling a screen this big: r_sceneHeight lines
+ * at the screen's aspect, or the screen's own when it is no taller. */
+static void WebSceneFx_SceneSize(int width, int height, int *sceneWidth, int *sceneHeight)
+{
+    int lines = r_sceneHeight ? r_sceneHeight->current.integer : 0;
+
+    *sceneWidth = width;
+    *sceneHeight = height;
+    if (lines > 0 && lines < height) {
+        *sceneHeight = lines;
+        *sceneWidth = (int)floorf((float)width * (float)lines / (float)height + 0.5f);
+        if (*sceneWidth < 1)
+            *sceneWidth = 1;
+    }
 }
 
 void WebSceneFx_SetAds(float adsFrac, float viewmodelStart, float viewmodelEnd, float nearEnd)
@@ -693,6 +775,9 @@ void WebSceneFx_BeginView(int x, int y, int width, int height, int screenWidth, 
                           float depthHackNearClip, float worldNearClip)
 {
     int samples;
+    int sceneWidth;
+    int sceneHeight;
+    int scaled;
 
     WebSceneFx_EndView();
     if (s_frameUsed || x || y || width != screenWidth || height != screenHeight || width <= 0 || height <= 0)
@@ -703,12 +788,14 @@ void WebSceneFx_BeginView(int x, int y, int width, int height, int screenWidth, 
     if (WebSceneFx_Enabled(r_fullbright))
         return;
     samples = WebSceneFx_Samples();
-    if (!WebSceneFx_GlowEnabled() && !WebSceneFx_Enabled(r_filmTweakEnable) && samples <= 1 &&
+    WebSceneFx_SceneSize(width, height, &sceneWidth, &sceneHeight);
+    scaled = sceneWidth != width || sceneHeight != height;
+    if (!scaled && !WebSceneFx_GlowEnabled() && !WebSceneFx_Enabled(r_filmTweakEnable) && samples <= 1 &&
         !(WebSceneFx_Enabled(r_dof_enable) && s_adsFrac > 0.0f) && s_motionScale <= 0.0f && s_backdropFrac <= 0.0f)
         return;
     s_nearClip = isfinite(depthHackNearClip) && depthHackNearClip > 0.0f ? depthHackNearClip : 0.1f;
     s_worldNearClip = isfinite(worldNearClip) && worldNearClip > 0.0f ? worldNearClip : SCENE_FX_DEFAULT_WORLD_NEAR_CLIP;
-    s_active = WebSceneFx_Bind(width, height, samples);
+    s_active = WebSceneFx_Bind(sceneWidth, sceneHeight, samples, width, height);
 }
 
 void WebSceneFx_EndFrame(void)
