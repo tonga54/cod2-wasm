@@ -32,6 +32,8 @@ const dvar_t *r_dof_enable;
 const dvar_t *r_filmTweakEnable;
 const dvar_t *r_motionBlur;
 const dvar_t *r_sceneHeight;
+const dvar_t *r_materialLighting;
+const dvar_t *r_sunShading;
 #endif
 extern const dvar_t *r_znear;
 extern const dvar_t *r_znear_depthhack;
@@ -516,6 +518,10 @@ void R_RegisterDvars(void)
      * which then draws the HUD at its own resolution; 0 renders it at the
      * canvas's. */
     r_sceneHeight = ri.Dvar_RegisterInt("r_sceneHeight", 720, 0, 2160, 0x2001);
+    /* The material's original normal, specular and detail maps per pixel. */
+    r_materialLighting = ri.Dvar_RegisterBool("r_materialLighting", 1, 0x2001);
+    /* How much the sun's incidence shades lightmapped surfaces, 0 to 1. */
+    r_sunShading = ri.Dvar_RegisterFloat("r_sunShading", 0.65f, 0.0f, 1.0f, 0x2001);
 #endif
 
     r_outdoorAwayBias = ri.Dvar_RegisterFloat("r_outdoorAwayBias", 32.0f, -3.4028235e+38f, 3.4028235e+38f, 0x2000);

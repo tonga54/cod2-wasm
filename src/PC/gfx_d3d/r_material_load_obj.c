@@ -1783,7 +1783,19 @@ static Bool MATERIAL_REGPARM2_ABI Material_FinishLoadingInstance_impl(MaterialOb
             } else {
                 isDx7 = (r_rendererInUse->current.integer == 2);
                 if (isDx7 && (unsigned)(sem - 3) <= 1) {
+#ifdef __EMSCRIPTEN__
+                    /* DX7 techniques never sample normal or specular maps;
+                     * the browser lights them per pixel when they exist. */
+                    const char *imageName = (const char *)((int)mtl + *(int *)(tex + 8));
+                    char path[256];
+                    void *img = 0;
+                    if (snprintf(path, sizeof(path), "images/%s.iwi", imageName) < (int)sizeof(path) &&
+                        FS_ReadFile(path, NULL) > 0)
+                        img = Image_Register(imageName, sem, imageTrack);
+                    *(int *)(tex + 8) = (int)img;
+#else
                     *(int *)(tex + 8) = 0;
+#endif
                 } else {
                     void *img = Image_Register((const char *)((int)mtl + *(int *)(tex + 8)), sem, imageTrack);
                     *(int *)(tex + 8) = (int)img;

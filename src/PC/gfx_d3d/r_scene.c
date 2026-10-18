@@ -789,6 +789,11 @@ void R_RenderScene(const refdef_t *refdef)
     extern float g_webAdsNearEnd;
     WebPointLights_SetScene(scene.dlights, scene.dlightCount);
     WebPointLights_SetShadowCasters(scene.def.entities, scene.def.entityCount, rg_p->viewOrg);
+    {
+        extern GfxWorld s_world;
+        extern void WebMaterials_SetSun(const GfxWorld *world);
+        WebMaterials_SetSun(&s_world);
+    }
     WebSceneFx_SetAds(g_webAdsDofFrac, g_webAdsViewmodelStart, g_webAdsViewmodelEnd, g_webAdsNearEnd);
     WebSceneFx_SetAim(g_webAimFrac);
     WebSceneFx_SetBackdrop(g_webBackdropFrac);

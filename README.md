@@ -130,6 +130,14 @@ retail CoD2:
 - **Smoother baked shadows:** sun visibility uses all four source samples when
   preparing each lightmap texel at map load. Shadow edges have less aliasing,
   with the same uploaded texture size and no additional gameplay render passes.
+- **Material lighting:** the browser applies the original normal, specular and
+  detail maps that the DX7 renderer never sampled: relief, the sun's incidence
+  on lightmapped surfaces (`r_sunShading`, 0 to 1, default 0.65), sun
+  highlights and a sky reflection on weapons and other specular models.
+  `r_materialLighting 0` restores the previous look. Normal and specular maps
+  load at half resolution (`r_picmip_bump`/`r_picmip_spec` 1), about 24 MiB
+  more texture memory per map; uncapped frame rates dropped by about 1%.
+  See [graphics validation and limits](docs/GRAPHICS_2026-10-16.md).
 - **Map atmosphere and farther model detail:** the browser renders each map's
   original fog color/density, with separate world and HUD state and black fog
   for materials that request it. Model detail transitions and finite vegetation

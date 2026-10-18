@@ -28,6 +28,8 @@
   const profileStorageKey = 'cod2-wasm-profile-v1';
   // Saved profiles hold the old 1280x720 default; each takes the new one once.
   const displayStorageKey = 'cod2-wasm-display-v2';
+  // Likewise for the old full-resolution normal and specular maps.
+  const materialMapsStorageKey = 'cod2-wasm-material-maps-v1';
   let browserVersion = 'Browser dev';
   function prepareProfile(context, fs) {
     let saved = '';
@@ -40,13 +42,19 @@
         localStorage.setItem(profileStorageKey, saved);
         localStorage.setItem(displayStorageKey, '1');
       }
+      if (!localStorage.getItem(materialMapsStorageKey)) {
+        saved = saved.replace(/^seta r_picmip_(?:bump|spec) "0"\r?$/gm, '');
+        localStorage.setItem(profileStorageKey, saved);
+        localStorage.setItem(materialMapsStorageKey, '1');
+      }
     } catch { /* Storage can be disabled; settings still work for this visit. */ }
     gametag = validGametag(legacyName) || validGametag(context.preferences?.values().playerName) || 'Player';
     const defaults = {
       // The canvas and HUD at 1080 lines; the 3D view renders at r_sceneHeight.
       name: gametag, r_gpuSync: 'off', com_maxfps: '0', r_mode: '1920x1080',
       r_textureMode: 'anisotropic', r_anisotropy: '16', r_aaSamples: '4',
-      r_picmip_manual: '1', r_picmip: '0', cl_maxpackets: '60', rate: '25000',
+      // Normal and specular maps at half resolution: a quarter of their memory.
+      r_picmip_manual: '1', r_picmip: '0', r_picmip_bump: '1', r_picmip_spec: '1', cl_maxpackets: '60', rate: '25000',
       snaps: '30', g_gametype: 'tdm', ui_mapname: 'mp_toujane', ui_netSource: '0',
       ui_browserShowEmpty: '1', ui_browserShowFull: '1', ui_browserShowPure: '0',
       ui_browserMod: '-1', ui_browserFriendlyfire: '-1', ui_browserKillcam: '-1'

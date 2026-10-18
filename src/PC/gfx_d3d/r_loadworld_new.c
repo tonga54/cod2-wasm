@@ -70,6 +70,19 @@ static float R_FilterSunPenumbra(const byte *pixel, int rowBytes, float centerVi
         R_FilterSunVisibility(pixel + rowBytes * 2, rowBytes));
 }
 
+#ifdef __EMSCRIPTEN__
+/* The DX7 combiners never read the lightmap's alpha. The browser's shaders
+ * scale the baked sun by its incidence and need the visibility it added. */
+static byte R_SunVisibilityByte(float sunVis)
+{
+    if (!(sunVis > 0.0f))
+        return 0;
+    if (sunVis >= 255.0f)
+        return 255;
+    return (byte)(int)(sunVis + 0.5f);
+}
+#endif
+
 static void R_PrintLoadProgress(const char *what)
 {
     ri.Printf(0, "Loading %s...\n", what);
@@ -544,7 +557,11 @@ GfxWorld *R_LoadWorldInternal(const char *name)
                                 loR[0] = (byte)iB;
                                 loR[1] = (byte)iG;
                                 loR[2] = (byte)iR;
+#ifdef __EMSCRIPTEN__
+                                loR[3] = R_SunVisibilityByte(sunVis);
+#else
                                 loR[3] = 0xFF;
+#endif
 
                                 hiResPtr += 2;
                                 loR += 4;

@@ -474,6 +474,12 @@ static void RB_GetTextureFromCode(int codeTexture, void **image, byte *samplerSt
 
 #endif
 
+#ifdef __EMSCRIPTEN__
+/* The browser's model shaders restore the incidence of the sun the DX7
+ * lights fold into the ambient; they need the entity's sun visibility. */
+float g_webEntitySunVisibility;
+#endif
+
 static void RB_SetEntityHwLightsDx7_impl(vec4_t *colorForDir, float sunVisibility)
 {
     D3DLIGHT9 lights[8];
@@ -483,6 +489,9 @@ static void RB_SetEntityHwLightsDx7_impl(vec4_t *colorForDir, float sunVisibilit
     void **vtable;
     int i;
 
+#ifdef __EMSCRIPTEN__
+    g_webEntitySunVisibility = sunVisibility >= 0.0f ? (sunVisibility <= 1.0f ? sunVisibility : 1.0f) : 0.0f;
+#endif
     material = tess.material;
     lightCount = RB_DeriveEntityLights(colorForDir, sunVisibility, material, lights, 8);
 

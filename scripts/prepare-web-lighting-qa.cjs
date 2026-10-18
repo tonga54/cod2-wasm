@@ -9,7 +9,7 @@ const linked=fs.readFileSync(path.join(root,'out/cod2-wasm-core/site/cod2.js'),'
 const start=linked.indexOf('          // COD2_POINT_LIGHT_SHADER:');
 const end=linked.indexOf('          var vsSource =',start);
 if(start<0 || end<=start) throw Error('Build the production WebGL client first');
-const generate=Function('GLImmediate','GLEmulation','fsTexEnvPass',linked.slice(start,end)+'\nreturn {pointDefs,pointPass,fsTexEnvPass};');
+const generate=Function('GLImmediate','GLEmulation','fsTexEnvPass','texUnitVaryingList=""',linked.slice(start,end)+'\nreturn {pointDefs,pointPass,fsTexEnvPass};');
 const shaders=[];
 for(const model of [false,true])for(const matrix of [false,true]){
  const uv=matrix?'(u_textureMatrix0 * v_texCoord0).xy':'v_texCoord0.xy';

@@ -7,7 +7,16 @@
 EM_JS(void, WebDrawPerfAdd, (const char *name, double elapsed), {
     Module.cod2Performance.add(UTF8ToString(name), elapsed);
 });
-extern void WebPointLights_Draw(const float *view, int enabled, int worldShadowEnabled, int colorOrder);
+extern void WebPointLights_Draw(const float *view, int enabled, int worldShadowEnabled, int colorOrder,
+                               int normalMap, int specularMap, int detailMap, float detailX, float detailY,
+                               int lightmapped, float specularScale, float sunShading, float sunVisibility);
+extern float g_webEntitySunVisibility;
+#include "web_materials.h"
+extern const dvar_t *r_materialLighting;
+extern const dvar_t *r_normalMap;
+extern const dvar_t *r_specularMap;
+extern const dvar_t *r_specularColorScale;
+extern const dvar_t *r_sunShading;
 #endif
 
 /* This reconstructed translation unit doesn't include the GL header. Keep
@@ -2429,8 +2438,29 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                 stage0Target == 0x0DE1 && (usesLightmap || dev->lighting);
             int worldShadow = !is2D && dev->zWriteEnable && !dev->alphaBlendEnable &&
                 stage0Target == 0x0DE1 && usesLightmap;
+            unsigned int normalMap = 0, specularMap = 0, detailMap = 0;
+            float detailScale[2] = {0, 0};
+            int materialLighting = pointLight && r_materialLighting && r_materialLighting->current.enabled;
+            if (materialLighting) {
+                extern void *imp_tess;
+                WebMaterialMaps maps;
+                WebMaterials_Select(((materialCommands_t *)imp_tess)->material,
+                                    !r_normalMap || r_normalMap->current.integer == 0,
+                                    !r_specularMap || r_specularMap->current.integer != 2, &maps);
+                normalMap = CDirect3DDevice_GetImageGLId(maps.normal);
+                specularMap = CDirect3DDevice_GetImageGLId(maps.specular);
+                detailMap = CDirect3DDevice_GetImageGLId(maps.detail);
+                if (detailMap) {
+                    detailScale[0] = maps.detailScale[0];
+                    detailScale[1] = maps.detailScale[1];
+                }
+            }
             WebPointLights_Draw(pointLightViewValid ? pointLightView : NULL,
-                pointLight, worldShadow, webColorOrder);
+                pointLight, worldShadow, webColorOrder, (int)normalMap, (int)specularMap, (int)detailMap,
+                detailScale[0], detailScale[1], materialLighting && stage1Bound == 1,
+                r_specularColorScale ? r_specularColorScale->current.value : 1.0f,
+                r_sunShading ? r_sunShading->current.value : 1.0f,
+                materialLighting && dev->lighting ? g_webEntitySunVisibility : 0.0f);
         }
 #endif
 #ifdef __EMSCRIPTEN__

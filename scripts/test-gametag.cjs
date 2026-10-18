@@ -34,6 +34,18 @@ storage.clear();
 storage.set('cod2-wasm-profile-v1','seta r_mode "1600x900"');
 context.prepareProfile(ui,memfs);
 assert.ok(files.get(path).endsWith('seta r_mode "1600x900"\n'));
+// Normal and specular maps default to half resolution; a profile saved with
+// the old full-resolution default takes it once, then keeps the player's pick.
+assert.match(files.get(path),/seta r_picmip "0"\nseta r_picmip_bump "1"\nseta r_picmip_spec "1"\n/);
+storage.clear();
+storage.set('cod2-wasm-profile-v1','seta r_picmip_bump "0"\r\nseta snd_volume "0.5"\nseta r_picmip_spec "2"\nseta r_picmip "0"');
+context.prepareProfile(ui,memfs);
+assert.ok(!/r_picmip_bump "0"/.test(files.get(path)));
+assert.ok(files.get(path).endsWith('\nseta snd_volume "0.5"\nseta r_picmip_spec "2"\nseta r_picmip "0"\n'), 'a chosen level stays');
+assert.equal(storage.get('cod2-wasm-material-maps-v1'),'1');
+storage.set('cod2-wasm-profile-v1','seta r_picmip_bump "0"\nseta r_picmip_spec "2"');
+context.prepareProfile(ui,memfs);
+assert.ok(files.get(path).endsWith('seta r_picmip_bump "0"\nseta r_picmip_spec "2"\n'));
 storage.clear();
 context.prepareProfile(ui,memfs);
 storage.set('cod2-wasm-gametag','Old name');context.prepareProfile(ui,memfs);
@@ -50,4 +62,4 @@ blocked=true;context.prepareProfile(ui,memfs);context.saveProfile(ui,changed);
 assert.equal(messages.length,1);
 assert.ok(!source.includes('await requireGametag'));
 for(const name of ['x;quit','x" +connect evil','x\nquit','é'.repeat(16)]) assert.equal(context.validGametag(name),'');
-console.log('PASS: native name, key bindings, graphics, mouse and sound persist; legacy name migrates, stored values win, disabled storage is handled; the canvas defaults to 1920x1080 and profiles holding the old 1280x720 default take it once');
+console.log('PASS: native name, key bindings, graphics, mouse and sound persist; legacy name migrates, stored values win, disabled storage is handled; the canvas defaults to 1920x1080 and profiles holding the old 1280x720 default take it once; normal and specular maps default to half resolution, taken once by profiles holding full resolution');

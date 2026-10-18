@@ -40,8 +40,68 @@ void WebPointLights_SetScene(const GfxLight *lights, int count)
     WebPointLights_Set(packed, used);
 }
 
-EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShadowEnabled, int colorOrder), {
+EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShadowEnabled, int colorOrder,
+                                  int normalMap, int specularMap, int detailMap, float detailX, float detailY,
+                                  int lightmapped, float specularScale, float sunShading, float sunVisibility), {
     Module.cod2VertexColorOrder = colorOrder;
+    // The material's original maps, for the generated shaders' per-pixel pass.
+    var material = Module.cod2Material;
+    if (!material) material = Module.cod2Material = {
+        surface: new Float32Array(4), detail: new Float32Array(4),
+        sunEye: new Float32Array(3), skyEye: new Float32Array(3), sunColor: new Float32Array(4),
+        model: new Float32Array(4), view: new Float32Array(16),
+        bound: [null, null, null], present: [0, 0, 0], sunRevision: -1
+    };
+    // The engine sets sampler state only on the stages it binds itself:
+    // without mipmaps these maps would sparkle wherever they minify.
+    if (material.sampler === undefined) {
+        var sampler = material.sampler = GLctx.createSampler ? GLctx.createSampler() : null;
+        if (sampler) {
+            GLctx.samplerParameteri(sampler, GLctx.TEXTURE_MIN_FILTER, GLctx.LINEAR_MIPMAP_LINEAR);
+            GLctx.samplerParameteri(sampler, GLctx.TEXTURE_MAG_FILTER, GLctx.LINEAR);
+            GLctx.samplerParameteri(sampler, GLctx.TEXTURE_WRAP_S, GLctx.REPEAT);
+            GLctx.samplerParameteri(sampler, GLctx.TEXTURE_WRAP_T, GLctx.REPEAT);
+            var anisotropic = GLctx.getExtension('EXT_texture_filter_anisotropic');
+            if (anisotropic) GLctx.samplerParameterf(sampler, anisotropic.TEXTURE_MAX_ANISOTROPY_EXT, 4);
+            for (var samplerUnit = 5; samplerUnit < 8; ++samplerUnit) GLctx.bindSampler(samplerUnit, sampler);
+        }
+    }
+    // Compare texture objects: a deleted texture's name can return for another.
+    var maps = [detailMap, normalMap, specularMap], present = material.present, rebound = false;
+    for (var unit = 0; unit < 3; ++unit) {
+        var texture = maps[unit] ? GL.textures[maps[unit]] : null;
+        present[unit] = texture ? 1 : 0;
+        if (!texture || material.bound[unit] === texture) continue;
+        GLctx.activeTexture(GLctx.TEXTURE5 + unit);
+        GLctx.bindTexture(GLctx.TEXTURE_2D, texture);
+        material.bound[unit] = texture;
+        rebound = true;
+    }
+    if (rebound) GLctx.activeTexture(GLctx.TEXTURE0 + GLImmediate.TexEnvJIT.getActiveTexture());
+    var surface = material.surface, detail = material.detail;
+    surface[0] = present[1]; surface[1] = present[2]; surface[2] = lightmapped ? 1 : 0; surface[3] = specularScale;
+    detail[0] = present[0] ? detailX : 0; detail[1] = present[0] ? detailY : 0; detail[2] = present[0];
+    material.model[0] = sunVisibility;
+    var sun = Module.cod2Sun;
+    if (view && sun) {
+        var viewOffset = view >>> 2, viewChanged = false;
+        for (var i = 0; i < 16; ++i)
+            if (material.view[i] !== HEAPF32[viewOffset + i]) { viewChanged = true; break; }
+        if (viewChanged || material.sunRevision !== sun.revision || material.sunColor[3] !== sunShading) {
+            if (viewChanged) material.view.set(HEAPF32.subarray(viewOffset, viewOffset + 16));
+            var v = material.view, w = sun.world;
+            var x = v[0] * w[0] + v[4] * w[1] + v[8] * w[2];
+            var y = v[1] * w[0] + v[5] * w[1] + v[9] * w[2];
+            var z = v[2] * w[0] + v[6] * w[1] + v[10] * w[2];
+            var length = Math.sqrt(x * x + y * y + z * z) || 1;
+            material.sunEye[0] = x / length; material.sunEye[1] = y / length; material.sunEye[2] = z / length;
+            length = Math.sqrt(v[8] * v[8] + v[9] * v[9] + v[10] * v[10]) || 1;
+            material.skyEye[0] = v[8] / length; material.skyEye[1] = v[9] / length; material.skyEye[2] = v[10] / length;
+            material.sunColor.set(sun.color);
+            material.sunColor[3] = sunShading;
+            material.sunRevision = sun.revision;
+        }
+    }
     var lights = Module.cod2PointLights;
     if (!lights) return;
     lights.drawCount = enabled && view ? lights.count : 0;

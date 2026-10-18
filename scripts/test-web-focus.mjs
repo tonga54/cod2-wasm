@@ -8,7 +8,7 @@ fs.mkdirSync(outputDir,{recursive:true});
 const fragments={};
 for(const [name,file] of Object.entries({before:baseline,after:candidate})){
  const source=fs.readFileSync(file,'utf8'),start=source.indexOf('          // COD2_POINT_LIGHT_SHADER:'),end=source.indexOf('          var vsSource =',start);
- const generate=Function('GLImmediate','GLEmulation','fsTexEnvPass',source.slice(start,end)+';return {pointDefs,pointPass,fsTexEnvPass};');
+ const generate=Function('GLImmediate','GLEmulation','fsTexEnvPass','texUnitVaryingList=""',source.slice(start,end)+';return {pointDefs,pointPass,fsTexEnvPass};');
  fragments[name]=[];
  for(const model of [false,true])for(const matrix of [false,true]){
   const uv=matrix?'(u_textureMatrix0 * v_texCoord0).xy':'v_texCoord0.xy';

@@ -230,6 +230,134 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
               }
               pointPass += "gl_FragColor.rgb *= cod2Shadow;\n}\n";
             }
+            // COD2_MATERIAL_LIGHTING: the original normal, specular and detail
+            // maps, bound by the device on units 5-7. Uniform flags select them
+            // per draw, so materials never add shader variants.
+            var materialLightmap = !pointNormal && this.usedTexUnitList.indexOf(1) !== -1 &&
+              GLImmediate.TexEnvJIT.getTexUnitType(1) == 0x0DE1;
+            // Derivatives of fp16 UVs are noise on GPUs that honor mediump.
+            texUnitVaryingList = texUnitVaryingList.replace(/varying vec4 v_texCoord([01]);/g,
+              "varying highp vec4 v_texCoord$1;");
+            pointDefs += "uniform sampler2D u_cod2DetailMap; uniform sampler2D u_cod2NormalMap; uniform sampler2D u_cod2SpecMap;\n" +
+              "uniform vec4 u_cod2Surface; uniform vec4 u_cod2Detail; uniform vec4 u_cod2Model;\n" +
+              "uniform highp vec3 u_cod2SunEye; uniform highp vec3 u_cod2SkyEye; uniform vec4 u_cod2SunColor;\n" +
+              // Tangent frame from screen derivatives: DX7 vertices have no tangents.
+              // The map decodes as CoD2's DX9 shaders do, N + x T + y B, where the
+              // BSP's tangents follow +u and +v. Relief flattens as the map
+              // minifies: a pixel averaging several texels of it would otherwise
+              // sparkle in the sun.
+              "highp vec3 cod2Bump(highp vec3 n, highp vec2 uv, float strength) {\n" +
+              "  highp vec2 du1 = dFdx(uv), du2 = dFdy(uv);\n" +
+              "  highp vec2 size = vec2(textureSize(u_cod2NormalMap, 0));\n" +
+              "  highp float texels = sqrt(max(dot(du1 * size, du1 * size), dot(du2 * size, du2 * size)));\n" +
+              "  vec2 t = (texture2D(u_cod2NormalMap, uv).ag * 2.0 - 1.0) * (strength * clamp(1.5 - 0.5 * texels, 0.15, 1.0));\n" +
+              "  highp vec3 dp1 = dFdx(v_cod2Eye), dp2 = dFdy(v_cod2Eye);\n" +
+              "  highp vec3 a = cross(dp2, n), b = cross(n, dp1);\n" +
+              "  highp vec3 tu = a * du1.x + b * du2.x, tv = a * du1.y + b * du2.y;\n" +
+              "  highp float s = inversesqrt(max(max(dot(tu, tu), dot(tv, tv)), 1e-30));\n" +
+              "  highp vec3 r = mat3(tu * s, tv * s, n) * vec3(t, 1.0);\n" +
+              "  return r * inversesqrt(max(dot(r, r), 1e-30));\n}\n" +
+              // CoD2's specularity table: alpha picks one of 32 exponents. The
+              // narrowest cosines round to 1 at mediump.
+              "highp float cod2SpecPower(float a) {\n" +
+              "  highp float p = floor(a * 31.0 + 0.5);\n" +
+              "  if (p > 30.5) return 30.0;\n" +
+              "  highp float c = min(cos((180.0 - 175.0 * p / 30.0) * 0.0043633231), 0.9999999);\n" +
+              "  return min(-2.3025851 / log(c), 2048.0);\n}\n" +
+              // Indirect light comes mostly from the sky: a normal map shades it
+              // relative to the surface's own normal.
+              "float cod2Sky(highp vec3 n) { return 1.0 + 0.35 * dot(n, u_cod2SkyEye); }\n" +
+              "float cod2Phong(highp vec3 n, highp vec3 l, highp float power) {\n" +
+              "  highp vec3 v = -v_cod2Eye * inversesqrt(max(dot(v_cod2Eye, v_cod2Eye), 1e-30));\n" +
+              "  highp float h = max(dot(n, normalize(l + v)), 0.0);\n" +
+              "  return pow(h, power) * step(0.0001, dot(n, l));\n}\n";
+            var materialPass = "if (u_cod2Detail.z > 0.5)\n" +
+              "  gl_FragColor.rgb *= texture2D(u_cod2DetailMap, " + pointUV + " * u_cod2Detail.xy).rgb * 2.0;\n";
+            if (pointNormal) {
+              var materialLights = [];
+              for (var materialLight = 0; materialLight < GLEmulation.MAX_LIGHTS; ++materialLight)
+                if (GLEmulation.lightEnabled[materialLight]) materialLights.push(materialLight);
+              pointDefs += "uniform highp vec4 u_lightModelAmbient; uniform highp vec4 u_materialAmbient; uniform highp vec4 u_materialDiffuse;\n";
+              for (var lightIndex = 0; lightIndex < materialLights.length; ++lightIndex) {
+                var id = materialLights[lightIndex];
+                pointDefs += "uniform highp vec4 u_lightAmbient" + id + "; uniform highp vec4 u_lightDiffuse" + id +
+                  "; uniform highp vec4 u_lightPosition" + id + ";\n";
+              }
+              materialPass += "if (u_cod2Surface.x > 0.5 || u_cod2Surface.y > 0.5 || u_cod2Model.x > 0.0) {\n" +
+                "highp vec3 cod2N = v_cod2Normal;\n" +
+                "cod2N *= inversesqrt(max(dot(cod2N, cod2N), 1e-30));\n" +
+                "highp vec3 cod2B = cod2N;\n" +
+                "if (u_cod2Surface.x > 0.5) cod2B = cod2Bump(cod2N, " + pointUV + ", 1.0);\n" +
+                "vec4 cod2S = u_cod2Surface.y > 0.5 ? texture2D(u_cod2SpecMap, " + pointUV + ") : vec4(0.0);\n" +
+                "highp float cod2P = cod2SpecPower(cod2S.a);\n" +
+                // Relight the vertex color with the bumped normal: the ratio
+                // keeps the original grid lights, clamp and tint.
+                "vec3 cod2Ambient = u_lightModelAmbient.rgb, cod2Diffuse = vec3(0.0);\n" +
+                "vec3 cod2Flat = vec3(0.0), cod2Bumped = vec3(0.0), cod2Spec = vec3(0.0);\n";
+              for (var lightIndex = 0; lightIndex < materialLights.length; ++lightIndex) {
+                var id = materialLights[lightIndex];
+                materialPass += "{ highp vec3 l = normalize(u_lightPosition" + id + ".xyz);\n" +
+                  "vec3 d = u_lightDiffuse" + id + ".rgb * u_materialDiffuse.rgb;\n" +
+                  "cod2Ambient += u_lightAmbient" + id + ".rgb; cod2Diffuse += d;\n" +
+                  "cod2Flat += d * max(dot(cod2N, l), 0.0); cod2Bumped += d * max(dot(cod2B, l), 0.0); }\n";
+              }
+              // The grid's strongest light leads, the sun comes last; DX7
+              // colors are half scale for MODULATE2X.
+              var specularLights = materialLights.length > 1 ?
+                [materialLights[0], materialLights[materialLights.length - 1]] : materialLights;
+              for (var lightIndex = 0; lightIndex < specularLights.length; ++lightIndex) {
+                var id = specularLights[lightIndex];
+                materialPass += "cod2Spec += u_lightDiffuse" + id + ".rgb * cod2Phong(cod2B, normalize(u_lightPosition" + id + ".xyz), cod2P);\n";
+              }
+              // Most models get only the grid's average: the engine folds the
+              // sun into that ambient at full strength, whatever the angle.
+              materialPass += "cod2Ambient *= u_materialAmbient.rgb;\n" +
+                "vec3 cod2Sun = dot(cod2Diffuse, vec3(1.0)) < 0.0001 ? u_cod2SunColor.rgb * u_cod2Model.x * u_materialAmbient.rgb : vec3(0.0);\n" +
+                "float cod2NLG = max(dot(cod2N, u_cod2SunEye), 0.0), cod2NLB = max(dot(cod2B, u_cod2SunEye), 0.0);\n" +
+                "float cod2Incidence = mix(1.0 + cod2NLB - cod2NLG, cod2NLB, u_cod2SunColor.a);\n" +
+                "cod2Flat += cod2Ambient;\n" +
+                "cod2Bumped += (cod2Ambient - cod2Sun) * (cod2Sky(cod2B) / cod2Sky(cod2N)) + cod2Sun * cod2Incidence;\n" +
+                "gl_FragColor.rgb *= max(cod2Bumped, vec3(0.0)) / max(cod2Flat, vec3(0.004));\n" +
+                "cod2Spec += cod2Sun * cod2Phong(cod2B, u_cod2SunEye, cod2P);\n" +
+                "gl_FragColor.rgb += cod2S.rgb * cod2Spec * (2.0 * u_cod2Surface.w);\n" +
+                // A broad reflection of the sky and ground, stronger at grazing
+                // angles: what keeps metal reading as metal in the shade.
+                "if (u_cod2Surface.y > 0.5) {\n" +
+                "highp vec3 cod2V = -v_cod2Eye * inversesqrt(max(dot(v_cod2Eye, v_cod2Eye), 1e-30));\n" +
+                "float cod2Up = dot(reflect(-cod2V, cod2B), u_cod2SkyEye);\n" +
+                "float cod2Fresnel = 0.2 + 0.8 * pow(1.0 - max(dot(cod2B, cod2V), 0.0), 5.0);\n" +
+                "vec3 cod2Env = (cod2Ambient - cod2Sun) * 2.0 * mix(0.35, 1.0, smoothstep(-0.3, 0.7, cod2Up));\n" +
+                "gl_FragColor.rgb += cod2S.rgb * cod2Env * (cod2Fresnel * clamp(cod2P / 48.0, 0.25, 1.0) * u_cod2Surface.w);\n}\n}\n";
+            } else if (materialLightmap) {
+              var lightmapUV = GLImmediate.useTextureMatrix ? "(u_textureMatrix1 * v_texCoord1).xy" : "v_texCoord1.xy";
+              var lightmapSample = "texture2D(u_texUnit1, " + lightmapUV + ")";
+              var lightmapTexel = lightmapSample;
+              if (fsTexEnvPass.indexOf(lightmapSample) !== -1) {
+                fsTexEnvPass = "vec4 cod2LightmapTexel = " + lightmapSample + ";\n" +
+                  fsTexEnvPass.split(lightmapSample).join("cod2LightmapTexel");
+                lightmapTexel = "cod2LightmapTexel";
+              }
+              // The browser stores the sun's visibility in the lightmap alpha;
+              // the DX7 bake added the sun at full strength whatever the angle.
+              materialPass += "if (u_cod2Surface.z > 0.5) {\n" +
+                "highp vec3 cod2N = cross(dFdx(v_cod2Eye), dFdy(v_cod2Eye));\n" +
+                "cod2N *= inversesqrt(max(dot(cod2N, cod2N), 1e-30));\n" +
+                "if (dot(cod2N, v_cod2Eye) > 0.0) cod2N = -cod2N;\n" +
+                "highp vec3 cod2B = cod2N;\n" +
+                "if (u_cod2Surface.x > 0.5) cod2B = cod2Bump(cod2N, " + pointUV + ", 0.75);\n" +
+                "vec4 cod2S = u_cod2Surface.y > 0.5 ? texture2D(u_cod2SpecMap, " + pointUV + ") : vec4(0.0);\n" +
+                "vec4 cod2L = " + lightmapTexel + ";\n" +
+                "vec3 cod2SunPart = u_cod2SunColor.rgb * cod2L.a;\n" +
+                "float cod2NLG = max(dot(cod2N, u_cod2SunEye), 0.0), cod2NLB = max(dot(cod2B, u_cod2SunEye), 0.0);\n" +
+                // Strength 1 is the DX9 incidence; 0 keeps the flat bake and
+                // applies only the normal map's relief.
+                "float cod2Incidence = mix(1.0 + cod2NLB - cod2NLG, cod2NLB, u_cod2SunColor.a);\n" +
+                "vec3 cod2Indirect = max(cod2L.rgb - cod2SunPart, vec3(0.0));\n" +
+                "vec3 cod2Lit = cod2Indirect * (cod2Sky(cod2B) / cod2Sky(cod2N)) + cod2SunPart * cod2Incidence;\n" +
+                "gl_FragColor.rgb *= max(cod2Lit, vec3(0.0)) / max(cod2L.rgb, vec3(0.004));\n" +
+                "gl_FragColor.rgb += cod2S.rgb * cod2SunPart * (2.0 * u_cod2Surface.w * cod2Phong(cod2B, u_cod2SunEye, cod2SpecPower(cod2S.a)));\n}\n";
+            }
+            pointPass = materialPass + pointPass;
           }
           var vsSource = ['''
 POINT_VERTEX_ORIGINAL = 'vsPointSizeDefs, vsClipPlaneDefs, vsLightingDefs, "void main()"'
@@ -259,6 +387,16 @@ POINT_UNIFORMS_REPLACEMENT = r'''        this.normalMatrixLocation = GLctx.getUn
         this.cod2LightColorLocation = GLctx.getUniformLocation(this.program, "u_cod2LightColor[0]");
         this.cod2ShadowCountLocation = GLctx.getUniformLocation(this.program, "u_cod2ShadowCount");
         this.cod2ShadowEyeLocation = GLctx.getUniformLocation(this.program, "u_cod2ShadowEye[0]");
+        this.cod2SurfaceLocation = GLctx.getUniformLocation(this.program, "u_cod2Surface");
+        this.cod2DetailLocation = GLctx.getUniformLocation(this.program, "u_cod2Detail");
+        this.cod2SunEyeLocation = GLctx.getUniformLocation(this.program, "u_cod2SunEye");
+        this.cod2SunColorLocation = GLctx.getUniformLocation(this.program, "u_cod2SunColor");
+        this.cod2ModelLocation = GLctx.getUniformLocation(this.program, "u_cod2Model");
+        this.cod2SkyEyeLocation = GLctx.getUniformLocation(this.program, "u_cod2SkyEye");
+        this.cod2DetailMapLocation = GLctx.getUniformLocation(this.program, "u_cod2DetailMap");
+        this.cod2NormalMapLocation = GLctx.getUniformLocation(this.program, "u_cod2NormalMap");
+        this.cod2SpecMapLocation = GLctx.getUniformLocation(this.program, "u_cod2SpecMap");
+        this.cod2MaterialUniforms = null;
         this.cod2LightCount = -1;
         this.cod2LightRevision = -1;
         this.cod2ShadowCount = -1;
@@ -301,6 +439,41 @@ POINT_UPLOAD_REPLACEMENT = r'''        // COD2_POINT_LIGHT_UNIFORMS: cache per p
             GLctx.uniform4fv(this.cod2LightEyeLocation, lights.eye);
             GLctx.uniform4fv(this.cod2LightColorLocation, lights.color);
             this.cod2LightRevision = lights.eyeRevision;
+          }
+        }
+        // COD2_MATERIAL_UNIFORMS: the device sets Module.cod2Material per draw.
+        // Every point-light program applies the detail map.
+        var cod2Material = Module.cod2Material;
+        if (cod2Material && this.cod2DetailLocation !== null && this.cod2DetailLocation !== undefined) {
+          var materialUniforms = this.cod2MaterialUniforms;
+          if (!materialUniforms) {
+            GLctx.uniform1i(this.cod2DetailMapLocation, 5);
+            GLctx.uniform1i(this.cod2NormalMapLocation, 6);
+            GLctx.uniform1i(this.cod2SpecMapLocation, 7);
+            // Values are compared per program: world and model draws
+            // alternate, but each program mostly sees the same ones.
+            materialUniforms = this.cod2MaterialUniforms = [];
+            var materialNames = ["surface", "detail", "sunEye", "sunColor", "skyEye", "model"];
+            var materialLocations = [this.cod2SurfaceLocation, this.cod2DetailLocation, this.cod2SunEyeLocation,
+              this.cod2SunColorLocation, this.cod2SkyEyeLocation, this.cod2ModelLocation];
+            for (var materialIndex = 0; materialIndex < materialNames.length; ++materialIndex) {
+              if (materialLocations[materialIndex] === null) continue;
+              materialUniforms.push({name: materialNames[materialIndex], location: materialLocations[materialIndex],
+                last: new Float32Array(cod2Material[materialNames[materialIndex]].length).fill(NaN)});
+            }
+          }
+          for (var materialIndex = 0; materialIndex < materialUniforms.length; ++materialIndex) {
+            var materialUniform = materialUniforms[materialIndex], materialValue = cod2Material[materialUniform.name];
+            var materialLast = materialUniform.last, materialChanged = false;
+            for (var materialComponent = 0; materialComponent < materialLast.length; ++materialComponent) {
+              if (materialLast[materialComponent] !== materialValue[materialComponent]) {
+                materialLast[materialComponent] = materialValue[materialComponent];
+                materialChanged = true;
+              }
+            }
+            if (!materialChanged) continue;
+            if (materialLast.length === 3) GLctx.uniform3fv(materialUniform.location, materialValue);
+            else GLctx.uniform4fv(materialUniform.location, materialValue);
           }
         }
         if (this.cod2ShadowCountLocation !== null && this.cod2ShadowCountLocation !== undefined) {
