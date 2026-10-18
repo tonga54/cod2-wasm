@@ -117,8 +117,9 @@ Two statuses keep the Pi on its installed build until someone acts:
   commit the manifest. On October 16, 2026 the Pi rejected `428bcbc` and
   `fd9057b` this way: its renderer archive was 848 bytes larger than the
   published one, and the build machine produced the same archive once rerun.
-  A missing or different [owner hit sound](#owner-hit-sound) causes the same
-  status, because the published audio archive includes the build machine's.
+  A missing or different [owner hit sound](#owner-hit-sound) or
+  [menu music](#owner-menu-music) causes the same status, because the
+  published audio archive includes the build machine's.
 - `At least 1.5 GiB free space is needed for a staged update`: every run
   downloads only `manifest.json` and waits. Check `df -h /` and
   `docker system df`. Build cache from manual Pi builds can be removed with
@@ -172,6 +173,26 @@ rejects anything else. Every host that prepares the published build needs a
 byte-identical copy: `data/main/hitmarker.wav` on the build machine and
 `~/cod2-original/main/hitmarker.wav` on the Pi. Changing the file changes the
 asset version, so each browser downloads the archives again once.
+
+### Owner menu music
+
+An optional `menumusic.mp3` beside the original IWDs replaces the main menu
+music: the stream of `music_mainmenu` and `music_mainmenu_mp`, which
+`ui_mp/main.menu` loops. Like the hit sound it belongs to the owner, is never
+committed and needs a byte-identical copy on every host that prepares the
+published build (`data/main/` and `~/cod2-original/main/`). The generator
+stores it unchanged as `sound/browser/menumusic.mp3` in
+`cod2_browser_audio.iwd`, and moves both aliases to
+`soundaliases/browser_menumusic.csv`. The rows keep the original volume
+(0.3), `menu` channel, looping and load spec. The original
+`music/menu_GRTEMP.mp3` is then left out. `check-private-assets.py` verifies
+the rows and the packaged bytes against the owner file. Without the file the
+archive keeps the original music.
+
+The file must be MPEG audio layer III throughout, as the engine reads its
+frames before the browser decodes it, and last 1 to 240 seconds. The browser
+decodes a stream whole, 384 KB a second at 48 kHz in stereo, while the menu
+is open. Native builds play no streams, so they have no menu music either way.
 
 ## Version checks
 

@@ -10,6 +10,14 @@ HIT_SOUND_OWNER_FILE = 'hitmarker.wav'
 HIT_SOUND_ALIAS = 'mp_hit_alert'
 HIT_SOUND_FILE = 'browser/hitmarker.wav'
 HIT_SOUND_TABLE = 'soundaliases/browser_hitmarker.csv'
+# Main menu music of the owner's may sit there too, likewise never in Git. It
+# replaces the stream of the menus' music aliases.
+MENU_MUSIC_OWNER_FILE = 'menumusic.mp3'
+MENU_MUSIC_ALIASES = ('music_mainmenu', 'music_mainmenu_mp')
+MENU_MUSIC_FILE = 'browser/menumusic.mp3'
+MENU_MUSIC_TABLE = 'soundaliases/browser_menumusic.csv'
+# The browser decodes a stream whole, 384 KB a second at 48 kHz in stereo.
+MENU_MUSIC_MAX_SECONDS = 240
 
 
 def alias_table(text):
@@ -69,6 +77,63 @@ def package_hit_sound(data):
     return b'RIFF' + struct.pack('<I', len(body)) + body
 
 
+def mp3_frames(data):
+    """An MP3's ID3v2 tag length, rate, channels, frames, seconds and frame bytes, read as the engine's
+    WebAudio_Mp3Info reads them before the browser decodes the stream, or None for a tag it refuses."""
+    rates = (44100, 48000, 32000)
+    v1 = (0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0)
+    v2 = (0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0)
+    position = tag = rate = channels = frames = covered = 0
+    seconds = 0.0
+    if len(data) >= 10 and data[:3] == b'ID3':
+        if any(byte & 0x80 for byte in data[6:10]):
+            return None
+        position = tag = 10 + (data[6] << 21) + (data[7] << 14) + (data[8] << 7) + data[9]
+    while position + 4 <= len(data):
+        header = int.from_bytes(data[position:position + 4], 'big')
+        version, layer, bitrate, rate_index = header >> 19 & 3, header >> 17 & 3, header >> 12 & 15, header >> 10 & 3
+        if header & 0xffe00000 != 0xffe00000 or version == 1 or layer != 1 or rate_index == 3 or bitrate in (0, 15):
+            position += 1
+            continue
+        hz = rates[rate_index] // (1 if version == 3 else 2 if version == 2 else 4)
+        length = (144000 if version == 3 else 72000) * (v1 if version == 3 else v2)[bitrate] // hz + (header >> 9 & 1)
+        if length < 4 or length > len(data) - position:
+            break
+        if not frames:
+            rate, channels = hz, 1 if header >> 6 & 3 == 3 else 2
+        seconds += (1152 if version == 3 else 576) / hz
+        frames += 1
+        covered += length
+        position += length
+    return tag, rate, channels, frames, seconds, covered
+
+
+def check_menu_music(data):
+    """Return the owner's menu music if the engine opens it as a stream and the browser can hold it decoded.
+
+    It must be MPEG audio layer III, frames from its ID3v2 tag on but for an
+    ID3v1 tag at its end, from 1 s to MENU_MUSIC_MAX_SECONDS long."""
+    def invalid(reason):
+        return ValueError(f'{MENU_MUSIC_OWNER_FILE}: {reason}')
+
+    info = mp3_frames(data)
+    if info is None or not info[3]:
+        raise invalid('not an MP3 file')
+    tag, _, _, _, seconds, covered = info
+    audio = len(data) - tag - (128 if data[-128:-125] == b'TAG' else 0)
+    if covered * 10 < audio * 9:
+        raise invalid('not MPEG audio layer III throughout')
+    if not 1 <= seconds <= MENU_MUSIC_MAX_SECONDS:
+        raise invalid(f'{seconds:.0f} s long; use 1 to {MENU_MUSIC_MAX_SECONDS} s')
+    return data
+
+
+def menu_music_row(header, fields):
+    """An original menu music row streaming the owner's music."""
+    values = dict(fields, file=MENU_MUSIC_FILE)
+    return [values.get(name, '') for name in header]
+
+
 def hit_sound_row(header, fields):
     """An original MP_hit_alert row playing the owner's sound, without its delay."""
     values = dict(fields, file=HIT_SOUND_FILE, startdelay='', secondaryaliasname='')
@@ -98,7 +163,32 @@ def verify_hit_sound(entries, original_rows, owner):
                        for row in other_rows), 'Original MP_hit_alert kept beside the hit sound: ' + name
 
 
-def collect_sound_assets(root, asset_index, originals, renderer, maps, hit_sound=None):
+def verify_menu_music(entries, original_rows, owner):
+    """Check that a package streams the owner's music, and only it, for the menus' music aliases.
+
+    original_rows holds (header, fields) for every original row of those
+    aliases; owner is the owner's file content, or None without one."""
+    table = entries.get(MENU_MUSIC_TABLE)
+    music = entries.get('sound/' + MENU_MUSIC_FILE)
+    if owner is None:
+        assert table is None and music is None, 'Menu music packaged without the owner file'
+        return
+    assert music == check_menu_music(owner), 'Packaged menu music differs from the owner file'
+    assert table is not None, 'Missing the menu music aliases'
+    header, rows = alias_table(table.decode('utf-8'))
+    names = [dict(zip(header, row)).get('name', '').lower() for row in rows]
+    assert names == list(MENU_MUSIC_ALIASES) and all(
+        any(original_header == header and fields.get('name', '').lower() == name and row == menu_music_row(header, fields)
+            for original_header, fields in original_rows)
+        for name, row in zip(names, rows)), 'The menu music aliases differ from the originals'
+    for name, data in entries.items():
+        if name.startswith('soundaliases/') and name.endswith('.csv') and name != MENU_MUSIC_TABLE:
+            other_header, other_rows = alias_table(data.decode('utf-8'))
+            assert all(dict(zip(other_header, row)).get('name', '').lower() not in MENU_MUSIC_ALIASES
+                       for row in other_rows), 'Original menu music kept beside the owner\'s: ' + name
+
+
+def collect_sound_assets(root, asset_index, originals, renderer, maps, hit_sound=None, menu_music=None):
     def read(name):
         path, original_name = asset_index[name]
         return originals[path].read(original_name)
@@ -131,7 +221,7 @@ def collect_sound_assets(root, asset_index, originals, renderer, maps, hit_sound
     # Dynamic quick-message names are assembled by faction at runtime.
     references.update(alias for alias in aliases if alias.startswith(('uk_mp_', 'us_mp_', 'ge_mp_')))
     pending = sorted(references & aliases.keys())
-    chosen, files, missing, replaced = set(), {}, set(), []
+    chosen, files, missing, replaced, music = set(), {}, set(), [], {}
     while pending:
         alias = pending.pop()
         if alias in chosen:
@@ -145,6 +235,9 @@ def collect_sound_assets(root, asset_index, originals, renderer, maps, hit_sound
                 continue
             if hit_sound is not None and alias == HIT_SOUND_ALIAS:
                 replaced.append((tables[table][0], fields))
+                continue
+            if menu_music is not None and alias in MENU_MUSIC_ALIASES:
+                music.setdefault(alias, (tables[table][0], fields))
                 continue
             sound = 'sound/' + fields.get('file', '').replace('\\', '/').lower()
             if sound not in asset_index:
@@ -168,6 +261,20 @@ def collect_sound_assets(root, asset_index, originals, renderer, maps, hit_sound
         files[HIT_SOUND_TABLE] = output.getvalue().encode('utf-8')
         files['sound/' + HIT_SOUND_FILE] = package_hit_sound(hit_sound)
         print(f'Hit confirmation: the owner\'s {HIT_SOUND_OWNER_FILE} replaces MP_hit_alert')
+    if menu_music is not None:
+        if len(music) != len(MENU_MUSIC_ALIASES):
+            raise ValueError('No original ' + ', '.join(sorted(set(MENU_MUSIC_ALIASES) - set(music))) +
+                             ' alias for the owner menu music to replace')
+        header = music[MENU_MUSIC_ALIASES[0]][0]
+        if any(music[alias][0] != header for alias in MENU_MUSIC_ALIASES):
+            raise ValueError('The original menu music aliases have different columns')
+        output = io.StringIO(newline='')
+        writer = csv.writer(output, lineterminator='\r\n')
+        writer.writerow(header)
+        writer.writerows(menu_music_row(header, music[alias][1]) for alias in MENU_MUSIC_ALIASES)
+        files[MENU_MUSIC_TABLE] = output.getvalue().encode('utf-8')
+        files['sound/' + MENU_MUSIC_FILE] = check_menu_music(menu_music)
+        print(f'Menu music: the owner\'s {MENU_MUSIC_OWNER_FILE} replaces {" and ".join(MENU_MUSIC_ALIASES)}')
     for name, (header, rows) in tables.items():
         if rows:
             output = io.StringIO(newline='')

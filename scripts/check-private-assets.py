@@ -15,7 +15,8 @@ from browser_settings_menu import apply_settings_menu
 from browser_objective_assets import objective_asset_roots
 from browser_spawn_safety import apply_spawn_safety
 from browser_sound_assets import (HIT_SOUND_ALIAS, HIT_SOUND_FILE, HIT_SOUND_OWNER_FILE, HIT_SOUND_TABLE,
-                                  alias_table, verify_hit_sound)
+                                  MENU_MUSIC_ALIASES, MENU_MUSIC_FILE, MENU_MUSIC_OWNER_FILE, MENU_MUSIC_TABLE,
+                                  alias_table, verify_hit_sound, verify_menu_music)
 
 root = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
@@ -41,7 +42,7 @@ try:
             for name in archive.namelist():
                 data = archive.read(name)
                 entries[name] = data
-                if name in (HIT_SOUND_TABLE, "sound/" + HIT_SOUND_FILE):
+                if name in (HIT_SOUND_TABLE, "sound/" + HIT_SOUND_FILE, MENU_MUSIC_TABLE, "sound/" + MENU_MUSIC_FILE):
                     continue
                 if name.endswith('.arena'):
                     mapname = 'mp_' + Path(name).stem
@@ -120,15 +121,22 @@ try:
                 aliases.setdefault(row["name"].lower(), []).append(row)
                 sound = "sound/" + row["file"].replace("\\", "/").lower()
                 assert sound in entries, "Missing sound file: " + sound
-    original_hit_rows = []
+    original_hit_rows, original_music_rows = [], []
     for name, (source, original_name) in index.items():
         if name.startswith("soundaliases/") and name.endswith(".csv"):
             header, rows = alias_table(source.read(original_name).decode("utf-8-sig", "replace"))
-            original_hit_rows.extend((header, fields) for fields in (dict(zip(header, row)) for row in rows)
-                                     if fields.get("name", "").lower() == HIT_SOUND_ALIAS)
+            for fields in (dict(zip(header, row)) for row in rows):
+                alias = fields.get("name", "").lower()
+                if alias == HIT_SOUND_ALIAS:
+                    original_hit_rows.append((header, fields))
+                elif alias in MENU_MUSIC_ALIASES:
+                    original_music_rows.append((header, fields))
     owner_hit_sound = root / "data/main" / HIT_SOUND_OWNER_FILE
     verify_hit_sound(entries, original_hit_rows,
                      owner_hit_sound.read_bytes() if owner_hit_sound.is_file() else None)
+    owner_menu_music = root / "data/main" / MENU_MUSIC_OWNER_FILE
+    verify_menu_music(entries, original_music_rows,
+                      owner_menu_music.read_bytes() if owner_menu_music.is_file() else None)
     for name in ("weap_sten_fire_plr", "weap_mp40_fire", "step_run_plr_default",
                  "bullet_small_flesh", "ambient_africa", "ambient_france", "music_mainmenu_mp",
                  "us_mp_cmd_followme"):
@@ -170,7 +178,8 @@ try:
             material = bsp[position:position + 64].split(b"\0", 1)[0].decode().lower()
             assert "materials/" + material in entries, "Missing BSP material: " + material
     hit_sound = "the owner's" if owner_hit_sound.is_file() else "the retail"
-    print(f"PASS: {len(entries)} private entries, {total} bytes, retail bytes/reviewed overrides, Toujane/Carentan/Dawnville, five retail modes, all three BSPs and factions, {hit_sound} hit sound")
+    menu_music = "the owner's" if owner_menu_music.is_file() else "the retail"
+    print(f"PASS: {len(entries)} private entries, {total} bytes, retail bytes/reviewed overrides, Toujane/Carentan/Dawnville, five retail modes, all three BSPs and factions, {hit_sound} hit sound, {menu_music} menu music")
 finally:
     for archive in originals:
         archive.close()
