@@ -59,7 +59,9 @@ The client `snaps` setting and non-LAN snapshot interval still cap requests at
 30. This test's gateway addresses take the server's LAN send-every-tick path,
 which is why the 50 Hz light test really delivered about 50 messages/s. A future
 general 50 Hz change must review all three settings, script timing, bandwidth
-and load; changing `sv_fps` alone is not complete validation.
+and load; changing `sv_fps` alone is not complete validation. (Script waits
+have since followed game time at any rate; see RUNBOOK, "Script clock and full
+killcam".)
 
 ## Fractional-position correction
 

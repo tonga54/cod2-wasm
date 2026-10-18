@@ -282,6 +282,7 @@ float Scr_GetFloat(unsigned int index);
 int Scr_GetInt(unsigned int index);
 void Scr_RunCurrentThreads(void);
 void Scr_IncTime(void);
+void Scr_AdvanceTime(int msec);
 __attribute__((noinline)) unsigned int __attribute_regparm__(3) VM_ExecuteExtCall(unsigned int threadId, const char *pos, unsigned int paramcount);
 void Scr_AddExecThread(scr_func_t handle, unsigned int paramcount);
 scr_thread_t Scr_ExecEntThreadNum(int entnum, int classnum, scr_func_t handle, unsigned int paramcount);

@@ -3554,3 +3554,51 @@ soldier preview using only simulated D-pad input, plus Options navigation and
 A/Cross activation. Evidence: `out/gamepad-team-focus.png`.
 The Controller Buttons 1 page also displayed `Crouch / hold prone` mapped
 to B/Circle at 640x480: `out/gamepad-stance-controls.png`.
+
+
+## Script clock and full killcam — 2026-10-18
+
+The killcam ended before the kill. Measured in one 30 Hz TDM room with 10
+Hard bots, from the cgame's own state (`viewpos` with `PTRACE`, every 150 ms),
+three replays started 2.0 to 2.1 s after the death, lasted about 6.5 s and
+showed the killer from 7.9 s to 1.5 s before it, although the archive delay
+was 10.065 s.
+
+The script VM counts waits in twentieths of a second
+(`VM_CandidateWaitTimeFromValue`) and ticked once a server frame
+(`Scr_IncTime` in `G_RunFrame`). Since the tick rose to 30 Hz (`24f9153`),
+every `wait` lasted two thirds of what it said: the TDM death delay's 3 s took
+2 s and `_killcam.gsc`'s `wait (archivetime - 0.05)` 6.63 s, while the replay's
+archive delay and `getTime()` stay in milliseconds. The end of a match's
+`wait 10` took 6.6 s for the same reason.
+
+`G_RunFrame` now calls `Scr_AdvanceTime(level.frametime)`. The VM ticks once
+each 50 ms of game time and at most once a frame, as it did every frame at
+20 Hz; pending threads and freed entities still run every frame. A slower
+server ticks every frame without banking time, so a later faster rate does
+not run scripts ahead. Every script wait now lasts as long as it says: the TDM
+respawn matches its three-second countdown, the killcam replays the seven
+seconds before the kill and three after it, and per-tick script loops such as
+health regeneration run 20 times a second again. Bot deadlines already used
+`getTime()`.
+
+Validation:
+
+- The same room after the change: replays started 3.0 to 3.1 s after the
+  death and showed it from 7.0 s before to 2.7 to 2.9 s after, for 9.8 to
+  9.9 s. A third replay was trimmed to 4.98 s: the engine starts it at the
+  killer's first usable archived frame, 2 s before the kill here, as the
+  retail code does. It still ran to 2.8 s past the death.
+- A one-minute TDM match's intermission (time limit to map change) took
+  10.04 s, against 6.65 s before.
+- `scripts/test-script-clock.py` runs the production `Scr_AdvanceTime` at 20,
+  25, 30, 40 and 60 Hz, a 10 Hz stretch then 30 Hz, zero and negative frames,
+  and the killcam's waits against its ten-second archive. It checks the frame
+  loop's wiring and rejects five regressions. `test-killcam-timing.py`,
+  `test-bot-frame-cadence.py` and `test-objective-visibility.py` pass
+  unchanged, and so does the full `scripts/test-static.sh`.
+- Both native binaries and the WASM build compile without warnings in the
+  changed files.
+
+Raw evidence and harnesses are in ignored `out/kc-qa/` (`timing.mjs`,
+`analyse.py`, `kt1` before, `kt2` after, `eg-clock`).

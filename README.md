@@ -238,6 +238,8 @@ retail CoD2:
   cover can still block splash damage.
 - Blast shellshock keeps the first-person weapon visible. Killcam samples use
   actual archive timestamps, including when the server tick rate changes.
+  Script waits follow game time at the 30 Hz tick, so the killcam replays the
+  seven seconds before the kill and the three after it.
 - The player console is disabled, including its toggle command and saved bindings.
 - Hits show the original red directional damage arc and low-health blood overlay.
   Teammate names remain visible without aiming at them. Kill notifications reach

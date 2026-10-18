@@ -371,6 +371,7 @@ static unsigned int VM_Execute(struct function_stack_t fs);
 static void VM_Resume(unsigned int timeId);
 void Scr_RunCurrentThreads(void);
 void Scr_IncTime(void);
+void Scr_AdvanceTime(int msec);
 void Scr_AddExecThread(scr_func_t handle, unsigned int paramcount);
 scr_thread_t Scr_ExecEntThreadNum(int entnum, int classnum, scr_func_t handle, unsigned int paramcount);
 scr_thread_t Scr_ExecThread(scr_func_t handle, unsigned int paramcount);
@@ -8082,6 +8083,27 @@ void Scr_IncTime(void)
 
     svp = (struct scrVarPub_t *)imp_scrVarPub;
     svp->time = (svp->time + 1) & 0x00FFFFFF;
+}
+
+/* Waits count 20 ticks a second (VM_CandidateWaitTimeFromValue). The VM
+ * ticks once each 50 ms of game time and at most once a frame, so on a
+ * server faster than 20 Hz a wait lasts as long as it says. */
+#define SCR_TICK_MSEC 50
+
+void Scr_AdvanceTime(int msec)
+{
+    static int residual;
+
+    residual += msec > 0 ? msec : 0;
+    if (residual < SCR_TICK_MSEC) {
+        Scr_RunPendingThreads();
+        Scr_FreeEntityList();
+        return;
+    }
+    residual -= SCR_TICK_MSEC;
+    if (residual >= SCR_TICK_MSEC)
+        residual = 0;
+    Scr_IncTime();
 }
 
 #if defined(_MSC_VER)

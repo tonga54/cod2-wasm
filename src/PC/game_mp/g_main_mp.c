@@ -495,7 +495,7 @@ extern void SV_DObjDisplayAnim(gentity_t *ent);
 extern void SV_DObjInitServerTime(gentity_t *ent, float dt);
 extern int G_DObjUpdateServerTime(gentity_t *ent, int bNotify);
 extern void Scr_RunCurrentThreads(void);
-extern void Scr_IncTime(void);
+extern void Scr_AdvanceTime(int msec);
 extern void Com_Memcpy(void *dest, const void *src, int count);
 extern int stricmp(const char *s1, const char *s2);
 extern void ClientEndFrame(gentity_t *ent);
@@ -735,7 +735,7 @@ extern void SV_DObjDisplayAnim(gentity_t *ent);
 extern void SV_DObjInitServerTime(gentity_t *ent, float dt);
 extern int G_DObjUpdateServerTime(gentity_t *ent, int bNotify);
 extern void Scr_RunCurrentThreads(void);
-extern void Scr_IncTime(void);
+extern void Scr_AdvanceTime(int msec);
 extern void Com_Memcpy(void *dest, const void *src, int count);
 extern int stricmp(const char *s1, const char *s2);
 extern void ClientEndFrame(gentity_t *ent);
@@ -1336,7 +1336,7 @@ int G_RunFrame(int levelTime)
         }
     }
 
-    Scr_IncTime();
+    Scr_AdvanceTime(level.frametime);
 
     level.currentEntityThink = 0;
     for (i = 0; i < level.num_entities; i++) {
