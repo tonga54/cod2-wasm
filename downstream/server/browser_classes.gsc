@@ -221,8 +221,12 @@ onPlayerSpawned()
 // come before the ammunition, which fills an extended magazine and reserve.
 applyClass()
 {
+	// Without a class nothing is painted, not even a gun picked up last life.
 	if(!isDefined(self.pers["browser_class"]) || !isDefined(self.pers["weapon"]))
+	{
+		self setWeaponCamos("");
 		return;
+	}
 	loadout = self.pers["browser_class"];
 	// A restricted or different weapon was chosen since; keep the gametype's.
 	if(loadout[0] != self.pers["weapon"])

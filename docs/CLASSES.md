@@ -125,6 +125,12 @@ range, as in WWII.
 WWII's Extended Mag gives the Bren a 100-round pan; here it takes the +50% of
 the others, as its longer box magazine shows.
 
+A gun dropped on death or swapped keeps its camouflage and attachments: on the
+ground it shows its paint, and whoever picks it up gets them on it, its longer
+clip and reserve included. Picking up a gun the player already has only takes
+its ammunition, and theirs keeps its own set. The next spawn paints the class's
+guns again, or nothing for a player without a class.
+
 Sources: [Prima's WWII guide](https://primagames.com/eguides/call-of-duty-wwii/multiplayer-introduction/firing-range/primary-weapons)
 and the Call of Duty Wiki's [Bren](https://callofduty.fandom.com/wiki/Bren) and
 [Advanced Rifling](https://callofduty.fandom.com/wiki/Advanced_Rifling) pages
@@ -153,7 +159,14 @@ Steady Aim.
 - The set travels in the player state's `weaponslots[4..7]`, two bytes a slot
   that multiplayer never used and the snapshot already sent: no protocol change.
   Movement prediction and the server read the same set. A slot drops its
-  attachments with its weapon, so a weapon picked up has none.
+  attachments with its weapon.
+- `Drop_Weapon` writes the dropped gun's camouflage, from the dropper's
+  configstring, and its slot's attachments into the item's `legsAnim` and
+  `torsoAnim`, ten bits each that items never used and the snapshot already
+  sent. `Touch_Item` gives a picked-up gun's slot those of them its weapon
+  takes, sizes the clip and reserve with them, and rewrites the picker's
+  camouflage configstring for the guns now in their slots; the client paints
+  a gun on the ground from the item.
 - `BG_GetPlayerWeaponDef` gives a copy of the weapon's definition with the
   player's attachments, kept in a cache of 128 that empties when the weapons
   reload. Reloads, fire timing, aiming, spread, recoil, sway, zoom, the scope,
@@ -531,15 +544,15 @@ on canvases the generator accepts, for the day a class weapon matches one.
   reloads through its stripper or en-bloc clip, as its retail animation does.
 - A suppressed shot is the gun's own sound made quieter, not a suppressed
   recording; the Suppressor cannot be taken off in a match as WWII's D-pad does.
-- Attachments belong to the class's guns. A weapon picked up from the ground,
-  even one a suppressed player dropped, has none. Bots use none.
+- A gun on the ground shows its camouflage but none of its attachments' models,
+  as every gun in third person. Bots use none.
 - A script `notify("x", a, b)` reaches `waittill("x", p, q)` with the arguments
   reversed (`p` is `b`). Menu responses from real clients are engine notifies
   and arrive in order, so classes are unaffected. The retail `scr_testclients`
   helper in `_teams.gsc` sends menu responses with script notifies and is
   affected. The VM is not changed here; the runtime test calls the gametype's
   weapon callback directly, as the retail menu handler does.
-- Guns lying on the ground and mounted guns are not painted.
+- Mounted guns are not painted.
 - The paint mask is read from the color map's colors: a warm-tinted metal
   part can take paint, and very dark wood can stay bare.
 - Pistol silhouettes come from the small HUD icons and look blocky at the
@@ -583,15 +596,21 @@ on canvases the generator accepts, for the day a class weapon matches one.
   model looked up once, a missing or broken one left off, the view DObj's room
   kept; and that `cg_weapons.c` rebuilds the view weapon when its visible
   attachments change. It rejects 16 mutations.
+- `python3 scripts/test-dropped-weapon-state.py` compiles `g_items_mp.c`'s
+  dropped-gun helpers with sanitizers: the clip and reserve by the attachments,
+  the attachments the weapon takes, given to the slot the gun lands in with its
+  camouflage; and that `Drop_Weapon` and `Touch_Item` write and read them where
+  the ammunition moves. It rejects 7 mutations.
 - `python3 scripts/test-xanim-final-frame.py` checks that a finished anim holds
   its last key, over every key table, which is what puts an aimed gun's sights
   on the view axis. It rejects the frame-short mutation.
 - `python3 scripts/test-attachments.py` compiles the attachment rules, the
   attachment masks in the player state and the production weapon code with
   sanitizers. It covers every weapon's list, the limits and the one-optic rule,
-  each attachment's numbers, the cached player definitions, and reload, spread,
-  fire rate, aim time, recoil and the suppressed fire event. It rejects 24
-  mutations.
+  each attachment's numbers, the cached player definitions, reload, spread,
+  fire rate, aim time, recoil and the suppressed fire event, and a dropped
+  gun's camouflage and attachments in its item's animation fields. It rejects
+  28 mutations.
 - `python3 scripts/test-suppressed-shots.py` runs the client's `CG_FireWeapon`
   on 120 fire events. Only a player's shot marked suppressed loses its flash
   and minimap ping and plays the quiet copy of its sound, one copy per sound.
@@ -615,7 +634,9 @@ on canvases the generator accepts, for the day a class weapon matches one.
   deterministic patterns, the per-material masks (wood or the whole gun,
   specks cleared, every mip level), the per-frame entity tags, the painted
   menu pictures and their cache, the configstring read by weapon name and the
-  `setWeaponCamos` method's checks, and rejects 31 mutations.
+  `setWeaponCamos` method's checks, a dropped gun painted from its item, and
+  the server reading a weapon's camouflage and rewriting the string when a
+  painted gun is picked up. It rejects 41 mutations.
 - `python3 scripts/test-class-camo.py` runs the production class menu on a
   recording UI: the camouflage lines, F2, Y and click opening the pickers, the
   grid's keys and clicks, saving only a change, the painted tiles and
@@ -679,6 +700,12 @@ on canvases the generator accepts, for the day a class weapon matches one.
   network. It makes 9 checks: G sets one down, a held Use takes it back and a
   tap leaves it, both go down and come back, and a mine stays through its
   owner's death and goes when they spawn again with both.
+- `python3 scripts/test-dropped-weapon-runtime.py --assets PREPARED_MAIN`
+  plays two test clients through the dedicated server, with no network: a
+  Thompson with an Extended Mag and a Suppressor spawns with its 30-round
+  clip and drops on death, and the other player, standing on it and holding
+  Use, takes it with that clip and its 240 reserve. The server from before
+  dropped guns kept their attachments gives that player 20 and 160 and fails.
 - In the browser, against an isolated stack:
   - Every screen was created, edited and renamed. The edits persisted across a
     reload, and the class list, the editor and back all worked with the mouse.
@@ -714,4 +741,5 @@ on canvases the generator accepts, for the day a class weapon matches one.
     Kar98k's scope and box magazine, the Bren's scope beside its magazine and
     the MP44's two magazines, painted. In a match the MP44's Lens Sight put
     the amber reticle on its front sight, the Kar98k painted Ember carried its
-    scope with 7 rounds after a reload, and the Luger its can.
+    scope with 7 rounds after a reload, and the Luger its can. Killed by its
+    own grenade, the player's Splinter MP44 lay painted on the ground.

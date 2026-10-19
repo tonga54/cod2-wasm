@@ -85,6 +85,8 @@ extern void Scr_Notify(gentity_t *ent, int stringValue, unsigned int paramcount)
 extern void G_AddPredictableEvent(gentity_t *ent, int event, int eventParm);
 extern unsigned char G_AddEvent(gentity_t *ent, int event, int eventParm);
 extern void Com_Printf(const char *fmt, ...);
+extern int G_GetClientWeaponCamo(int clientNum, int weapon);
+extern void G_SetClientSlotCamos(int clientNum, const playerState_t *ps, int weapon, int camo);
 
 #define _ENT(e) ((gentity_t *)(e))
 
@@ -132,6 +134,40 @@ static void G_ItemGroundAngles(const vec_t *currentAngles, const vec_t *normal,
     AxisToAngles(axis, angles);
     if (weapon)
         angles[2] += 90.0f;
+}
+
+/* A dropped gun's clip and reserve, with the attachments it was dropped with. */
+static int G_ItemClipSize(int weapon, unsigned attachments)
+{
+    return attachments ? BG_GetAttachedWeaponDef(weapon, attachments)->iClipSize
+                       : BG_GetAmmoClipSize(BG_ClipForWeapon(weapon));
+}
+
+static int G_ItemMaxAmmo(int weapon, unsigned attachments)
+{
+    return attachments ? BG_GetAttachedWeaponDef(weapon, attachments)->iMaxAmmo
+                       : BG_GetAmmoTypeMax(BG_AmmoForWeapon(weapon));
+}
+
+/* The attachments a gun on the ground carries that its weapon takes. */
+static unsigned G_ItemWeaponAttachments(const gentity_t *item, int weapon)
+{
+    return BG_GetItemWeaponAttachments(&item->s) & BG_AttachmentsAllowed(BG_GetWeaponDef(weapon)->szInternalName);
+}
+
+/* The gun just taken keeps what it was dropped with: its slot the
+ * attachments, the player's configstring the camouflage. */
+static void G_TakeItemWeaponState(gentity_t *other, const gentity_t *item, int weapon)
+{
+    playerState_t *ps = &other->client->ps;
+    unsigned attachments = G_ItemWeaponAttachments(item, weapon);
+    int slot;
+
+    for (slot = 1; slot <= 2; slot++) {
+        if ((unsigned char)ps->weaponslots[slot] == weapon)
+            BG_SetSlotAttachments(ps, slot, attachments);
+    }
+    G_SetClientSlotCamos(other->s.number, ps, weapon, BG_GetItemWeaponCamo(&item->s));
 }
 
 void DroppedItemClearOwner(gentity_t *pSelf);
@@ -873,6 +909,8 @@ gentity_t *Drop_Weapon(gentity_t *pEnt, int iWeaponIndex, unsigned int tag)
     pDrop = Drop_Item(pEnt, pWeapItem, 0.0f, 0);
 
     if (ps) {
+        BG_SetItemWeaponState(&pDrop->s, G_GetClientWeaponCamo(pEnt->s.number, iWeaponIndex),
+                              BG_GetWeaponAttachments(ps, iWeaponIndex));
         iMin = ps->ammo[iAmmoIndex];
         ps->ammo[iAmmoIndex] = 0;
 
@@ -1106,6 +1144,7 @@ void Touch_Item(gentity_t *ent, gentity_t *other, qboolean bTouched)
     case IT_WEAPON: {
         int weapon = item->giTag;
         WeaponDef *weapDef = BG_GetWeaponDef(weapon);
+        unsigned attachments = G_ItemWeaponAttachments(ent, weapon);
         int quantity;
         int clipAmmo;
         gentity_t *dropped = NULL;
@@ -1138,8 +1177,8 @@ void Touch_Item(gentity_t *ent, gentity_t *other, qboolean bTouched)
             ent->count = quantity;
         }
 
-        if (quantity > BG_GetAmmoTypeMax(BG_AmmoForWeapon(weapon))) {
-            ent->count = BG_GetAmmoTypeMax(BG_AmmoForWeapon(weapon));
+        if (quantity > G_ItemMaxAmmo(weapon, attachments)) {
+            ent->count = G_ItemMaxAmmo(weapon, attachments);
             quantity = ent->count;
         }
 
@@ -1151,7 +1190,7 @@ void Touch_Item(gentity_t *ent, gentity_t *other, qboolean bTouched)
             ent->chain = 0;
             clipAmmo = 0;
         } else {
-            clipAmmo = BG_GetAmmoClipSize(BG_ClipForWeapon(weapon));
+            clipAmmo = G_ItemClipSize(weapon, attachments);
             if (clipAmmo > ent->count)
                 clipAmmo = ent->count;
             ent->chain = clipAmmo;
@@ -1159,10 +1198,10 @@ void Touch_Item(gentity_t *ent, gentity_t *other, qboolean bTouched)
             quantity = ent->count;
         }
 
-        if (clipAmmo > BG_GetAmmoClipSize(BG_ClipForWeapon(weapon))) {
-            clipAmmo -= BG_GetAmmoClipSize(BG_ClipForWeapon(weapon));
+        if (clipAmmo > G_ItemClipSize(weapon, attachments)) {
+            clipAmmo -= G_ItemClipSize(weapon, attachments);
             quantity += clipAmmo;
-            clipAmmo = BG_GetAmmoClipSize(BG_ClipForWeapon(weapon));
+            clipAmmo = G_ItemClipSize(weapon, attachments);
         }
 
         if (ps->weapons[weapon >> 5] & (1 << (weapon & 31))) {
@@ -1249,14 +1288,15 @@ void Touch_Item(gentity_t *ent, gentity_t *other, qboolean bTouched)
             }
 
             G_GivePlayerWeapon(ps, weapon);
+            G_TakeItemWeaponState(other, ent, weapon);
             if (!bTouched)
                 G_SelectWeaponIndex(clientNum, weapon);
 
             if (clipAmmo >= 0) {
-                if (clipAmmo > BG_GetAmmoClipSize(BG_ClipForWeapon(weapon))) {
-                    clipAmmo -= BG_GetAmmoClipSize(BG_ClipForWeapon(weapon));
+                if (clipAmmo > BG_GetPlayerClipSize(ps, weapon)) {
+                    clipAmmo -= BG_GetPlayerClipSize(ps, weapon);
                     quantity += clipAmmo;
-                    clipAmmo = BG_GetAmmoClipSize(BG_ClipForWeapon(weapon));
+                    clipAmmo = BG_GetPlayerClipSize(ps, weapon);
                 }
                 ps->ammoclip[BG_ClipForWeapon(weapon)] = clipAmmo;
             }

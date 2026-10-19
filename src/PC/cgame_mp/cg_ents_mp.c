@@ -315,6 +315,8 @@ void CG_AddCEntityToScene(const GfxEntity *ent, const struct DObj_s *obj, const 
     /* A player's model carries the weapon in hand, except on a turret. */
     if (cent->nextState.eType == 1 && !(cent->nextState.eFlags & 0x300))
         CG_SetWeaponCamo(sceneEnt, obj, cent->nextState.clientNum, cent->nextState.weapon);
+    else if (cent->nextState.eType == 3)
+        CG_SetItemWeaponCamo(sceneEnt, obj, &cent->nextState);
 
     if (cent->cullIn == 1) {
         ((centity_t *)cent)->cullIn = 0;

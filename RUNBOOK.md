@@ -3740,3 +3740,32 @@ Validation:
 - `scripts/test-placed-explosives-runtime.py` on Toujane through the dedicated
   server: 9 checks, a mine set down stays while its owner lies dead and is
   gone once they spawn again with both mines back in the kit.
+
+## Dropped guns keep their camouflage and attachments — 2026-10-19
+
+A gun dropped on death or swapped lost both: the picker got a plain gun, with
+the plain clip and reserve, and the gun on the ground was never painted.
+`Drop_Weapon` now writes the camouflage the dropper's configstring gives the
+gun and its slot's attachments into the item's `legsAnim` and `torsoAnim`,
+which items never used. `Touch_Item` gives the slot it lands in the
+attachments its weapon takes, sizes the clip and reserve with them, and
+rewrites the picker's camouflage configstring for the guns in their slots; the
+client paints the item. Picking up a gun the player already has only takes its
+ammunition, as before. The next spawn paints the class's guns again;
+`applyClass` (`browser_classes.gsc`) now also clears the paint for a player
+without a class, such as a bot, who could otherwise keep a picked-up gun's
+camouflage on their own gun of the same kind.
+
+Validation:
+
+- `scripts/test-dropped-weapon-runtime.py` (new) through the dedicated server:
+  4 checks. A Thompson with an Extended Mag and a Suppressor drops on death,
+  and the player who takes it has its 30-round clip and 240 reserve. On the
+  server built before this change the same player got 20 and 160.
+- `scripts/test-dropped-weapon-state.py` (new, 7 mutants),
+  `test-attachments.py` (the item's ten-bit fields, 28 mutants) and
+  `test-weapon-camo.py` (the painted item and the configstring rewrite, 41
+  mutants); `test-class-data.py` checks that both of `applyClass`'s early
+  returns clear the paint, and fails without either.
+- In the browser on Carentan, the player's Splinter MP44 lay painted on the
+  ground after they died.

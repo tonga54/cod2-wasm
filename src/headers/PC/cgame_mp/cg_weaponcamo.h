@@ -7,5 +7,7 @@ int CG_GetClientWeaponCamo(int clientNum, int weapon);
 /* Paints the weapon a scene entity holds, as R_AddRefEntityToScene returned
  * it, when it is clientNum's class weapon with a camouflage. */
 void CG_SetWeaponCamo(GfxEntity *sceneEnt, const struct DObj_s *obj, int clientNum, int weapon);
+/* Paints a gun on the ground in the camouflage it was dropped with. */
+void CG_SetItemWeaponCamo(GfxEntity *sceneEnt, const struct DObj_s *obj, const entityState_t *es);
 
 #endif

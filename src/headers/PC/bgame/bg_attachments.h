@@ -21,5 +21,12 @@ int BG_GetPlayerClipSize(const playerState_t *ps, int weapon);
 int BG_GetPlayerMaxAmmo(const playerState_t *ps, int weapon);
 void BG_ApplyAttachments(WeaponDef *def, unsigned mask);
 void BG_ResetAttachedWeaponDefs(void);
+/* A gun on the ground keeps the camouflage and attachments it was dropped
+ * with, in its item entity's player animation fields, which items never use
+ * and the snapshot already sends: legsAnim holds the attachments' low ten
+ * bits, torsoAnim the rest under the camouflage. */
+void BG_SetItemWeaponState(entityState_t *es, int camo, unsigned attachments);
+int BG_GetItemWeaponCamo(const entityState_t *es);
+unsigned BG_GetItemWeaponAttachments(const entityState_t *es);
 
 #endif

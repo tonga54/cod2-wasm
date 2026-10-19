@@ -1,5 +1,6 @@
 #include "common_types.h"
 #include "imports.h"
+#include "headers/PC/bgame/bg_attachments.h"
 #include "headers/PC/bgame/bg_weapon_camo.h"
 #include "headers/PC/cgame_mp/cg_weaponcamo.h"
 #include "headers/PC/gfx_d3d/r_weapon_camo.h"
@@ -87,6 +88,23 @@ void CG_SetWeaponCamo(GfxEntity *sceneEnt, const struct DObj_s *obj, int clientN
     if (!camo || !sceneEnt || !obj)
         return;
     gun = BG_WeaponCamo_Gun(BG_GetWeaponDef(weapon)->szInternalName);
+    if (gun)
+        R_SetEntityWeaponCamo(sceneEnt, obj, gun->material, camo, gun->style);
+}
+
+void CG_SetItemWeaponCamo(GfxEntity *sceneEnt, const struct DObj_s *obj, const entityState_t *es)
+{
+    int camo = BG_GetItemWeaponCamo(es), index = es->index.item;
+    const gitem_t *item;
+    const WeaponCamoGun *gun;
+
+    if (camo <= WEAPON_CAMO_NONE || camo >= WEAPON_CAMO_COUNT || !sceneEnt || !obj || index <= 0 ||
+        index >= *(int *)imp_bg_numItems)
+        return;
+    item = &((const gitem_t *)imp_bg_itemlist)[index];
+    if (item->giType != IT_WEAPON || item->giTag <= 0 || item->giTag > BG_GetNumWeapons())
+        return;
+    gun = BG_WeaponCamo_Gun(BG_GetWeaponDef(item->giTag)->szInternalName);
     if (gun)
         R_SetEntityWeaponCamo(sceneEnt, obj, gun->material, camo, gun->style);
 }

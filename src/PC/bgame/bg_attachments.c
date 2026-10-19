@@ -1,5 +1,6 @@
 #include "common_types.h"
 #include "headers/PC/bgame/bg_attachments.h"
+#include "headers/PC/bgame/bg_weapon_camo.h"
 #include <string.h>
 
 extern int bg_iNumWeapons;
@@ -218,4 +219,24 @@ int BG_GetPlayerMaxAmmo(const playerState_t *ps, int weapon)
     if (!mask || weapon > bg_iNumWeapons)
         return BG_GetAmmoTypeMax(bg_weaponDefs[weapon]->iAmmoIndex);
     return BG_GetAttachedWeaponDef(weapon, mask)->iMaxAmmo;
+}
+
+/* legsAnim and torsoAnim travel in 10 bits each. */
+typedef char BG_ItemAttachmentsFit[ATT_COUNT <= 16 ? 1 : -1];
+typedef char BG_ItemCamoFits[WEAPON_CAMO_COUNT <= 16 ? 1 : -1];
+
+void BG_SetItemWeaponState(entityState_t *es, int camo, unsigned attachments)
+{
+    es->legsAnim = (int)(attachments & 0x3ff);
+    es->torsoAnim = (int)((attachments >> 10 & 0x3f) | (unsigned)(camo & 0xf) << 6);
+}
+
+int BG_GetItemWeaponCamo(const entityState_t *es)
+{
+    return (int)((unsigned)es->torsoAnim >> 6 & 0xf);
+}
+
+unsigned BG_GetItemWeaponAttachments(const entityState_t *es)
+{
+    return ((unsigned)es->legsAnim & 0x3ff) | ((unsigned)es->torsoAnim & 0x3f) << 10;
 }

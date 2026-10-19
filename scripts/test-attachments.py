@@ -61,6 +61,7 @@ typedef struct {
     float overlayWidth, overlayHeight, fOOPosAnimLength[2];
     int hasDetonator;
 } WeaponDef;
+typedef struct { int legsAnim, torsoAnim; } entityState_t;
 typedef struct { playerState_t *ps; struct { int buttons, serverTime; } cmd; } pmove_t;
 typedef struct { int msec; } pml_t;
 '''
@@ -413,8 +414,31 @@ int main(void)
     assert(!ps.weaponslots[1] && !ps.weaponslots[4] && !ps.weaponslots[5]);
     assert(BG_GetSlotAttachments(&ps, 2) == ATT_BIT(ATT_SUPPRESSOR) && ps.weaponslots[2] == COLT);
     assert(!BG_TakePlayerWeapon(&ps, THOMPSON));
+
+    /* A gun on the ground carries its camouflage and every attachment in the ten bits each of its legs and torso
+     * animations, and nothing else. */
+    {
+        entityState_t es = { 0, 0 };
+        unsigned every = (1u << ATT_COUNT) - 1;
+        BG_SetItemWeaponState(&es, 10, every);
+        assert(BG_GetItemWeaponCamo(&es) == 10 && BG_GetItemWeaponAttachments(&es) == every);
+        assert(es.legsAnim >= 0 && es.legsAnim < 1024 && es.torsoAnim >= 0 && es.torsoAnim < 1024);
+        for (int camo = 0; camo <= 10; camo++)
+            for (int a = 0; a < ATT_COUNT; a++) {
+                unsigned mask = ATT_BIT(a) | ATT_BIT((a + 5) % ATT_COUNT);
+                BG_SetItemWeaponState(&es, camo, mask);
+                assert(BG_GetItemWeaponCamo(&es) == camo && BG_GetItemWeaponAttachments(&es) == mask);
+            }
+        BG_SetItemWeaponState(&es, 0, 0);
+        assert(!es.legsAnim && !es.torsoAnim && !BG_GetItemWeaponCamo(&es) && !BG_GetItemWeaponAttachments(&es));
+        /* What the snapshot's ten bits would leave of a wider value is all that is read. */
+        es.legsAnim = 0x400 | 5;
+        es.torsoAnim = 0x400 | 3 << 6;
+        assert(BG_GetItemWeaponAttachments(&es) == 5 && BG_GetItemWeaponCamo(&es) == 3);
+    }
     puts("PASS: WWII's lists and limits, every attachment's numbers, the slots' masks in the player state, "
-         "cached player definitions, and reload, spread, fire rate, aim time, recoil and suppressed shots");
+         "cached player definitions, and reload, spread, fire rate, aim time, recoil and suppressed shots; a "
+         "dropped gun's camouflage and attachments in its animation fields");
     return 0;
 }
 '''
@@ -443,6 +467,12 @@ mutants = [
     (glue_path, '    if (def->iAdsTransInTime > 0)\n        def->fOOPosAnimLength[0] = 1.0f / (float)def->iAdsTransInTime;\n', ''),
     (glue_path, '    return BG_GetAttachedWeaponDef(weapon, mask)->iClipSize;', '    return BG_GetAmmoClipSize(bg_weaponDefs[weapon]->iClipIndex);'),
     (glue_path, '    s_attachedDefCount = 0;\n', ''),
+    (glue_path, '    es->torsoAnim = (int)((attachments >> 10 & 0x3f) | (unsigned)(camo & 0xf) << 6);',
+     '    es->torsoAnim = (int)((unsigned)(camo & 0xf) << 6);'),
+    (glue_path, '    return (int)((unsigned)es->torsoAnim >> 6 & 0xf);', '    return (int)((unsigned)es->torsoAnim >> 6);'),
+    (glue_path, '    return ((unsigned)es->legsAnim & 0x3ff) | ((unsigned)es->torsoAnim & 0x3f) << 10;',
+     '    return (unsigned)es->legsAnim | ((unsigned)es->torsoAnim & 0x3f) << 10;'),
+    (glue_path, '    es->legsAnim = (int)(attachments & 0x3ff);', '    es->legsAnim = (int)attachments;'),
     (weapons_path, '    clipSize = BG_GetPlayerClipSize(ps, ps->weapon);\n    ammoToAdd = clipSize - clipAmmo;',
      '    clipSize = bg_weapClips[clipIndex]->iClipSize;\n    ammoToAdd = clipSize - clipAmmo;'),
     (weapons_path, '        BG_SetSlotAttachments(pPS, slot, 0);\n', ''),

@@ -52,6 +52,22 @@ apply = gsc[gsc.index('applyClass()\n{'):]
 for slot, index, weapon in (('primaryb', 7, 1), ('primary', 6, 0)):
     fit = apply.index(f'self setWeaponSlotAttachments("{slot}", loadout[{index}]);')
     assert apply.index(f'self giveMaxAmmo(loadout[{weapon}]);') > fit, slot
+
+
+# A spawn that keeps the gametype's loadout clears the camouflage, which a
+# painted gun picked up in an earlier life may have left.
+def clears_before_keeping(text):
+    head = text[text.index('applyClass()\n{'):]
+    parts = head[:head.index('self takeAllWeapons();')].split('return;')[:-1]
+    return len(parts) == 2 and all(part.rstrip().endswith('self setWeaponCamos("");') for part in parts)
+
+
+assert clears_before_keeping(gsc)
+unpainted = '\t{\n\t\tself setWeaponCamos("");\n\t\treturn;\n\t}\n'
+assert gsc.count(unpainted) == 2
+for kept in (0, 1):
+    first = gsc.index(unpainted) if kept == 0 else gsc.index(unpainted, gsc.index(unpainted) + 1)
+    assert not clears_before_keeping(gsc[:first] + '\t\treturn;\n' + gsc[first + len(unpainted):]), kept
 # The S-Mine's and C4's icons and strings are the generated ones
 # (browser_explosives.py); every other image is a retail menu image or HUD icon.
 import sys

@@ -59,8 +59,12 @@ typedef struct { const char *szInternalName; } WeaponDef;
 typedef struct { unsigned short entnum, classnum; } scr_entref_t;
 typedef struct { int client; } gclient_t;
 typedef struct { int number; gclient_t *client; } gentity_t;
+typedef struct { char weaponslots[8]; } playerState_t;
+typedef struct { union { int item; } index; int legsAnim, torsoAnim; } entityState_t;
+enum { IT_BAD, IT_WEAPON, IT_AMMO };
+typedef struct { int giType, giTag; } gitem_t;
 '''
-imports = 'extern void *imp_g_entities;\n'
+imports = 'extern void *imp_g_entities;\nextern void *imp_bg_itemlist;\nextern void *imp_bg_numItems;\n'
 
 catalog_checks = r'''
 #include <assert.h>
@@ -561,8 +565,15 @@ static WeaponDef defs[8] = { { "none" }, { "kar98k_mp" }, { "luger_mp" }, { "mp4
 static int weaponCount = 5;
 WeaponDef *BG_GetWeaponDef(int weapon) { assert(weapon >= 0 && weapon <= weaponCount); return &defs[weapon]; }
 int BG_GetNumWeapons(void) { return weaponCount; }
-static struct { GfxEntity *ent; const struct DObj_s *obj; const char *material; int camo, style; } painted[8];
+static struct { GfxEntity *ent; const struct DObj_s *obj; const char *material; int camo, style; } painted[16];
 static int paints;
+/* The item list: a Kar98k, the MP40's ammunition, a grenade. */
+static gitem_t items[4] = { { IT_BAD, 0 }, { IT_WEAPON, 1 }, { IT_AMMO, 3 }, { IT_WEAPON, 4 } };
+static int itemCount = 4;
+void *imp_bg_itemlist = items;
+void *imp_bg_numItems = &itemCount;
+int BG_GetItemWeaponCamo(const entityState_t *es) { return (int)((unsigned)es->torsoAnim >> 6 & 0xf); }
+static entityState_t dropped(int item, int camo) { entityState_t es = { { item }, 0x3ff, camo << 6 | 0x3f }; return es; }
 void R_SetEntityWeaponCamo(GfxEntity *ent, const struct DObj_s *obj, const char *material, int camo, int style)
 {
     painted[paints].ent = ent; painted[paints].obj = obj; painted[paints].material = material;
@@ -605,14 +616,41 @@ int main(void)
     assert(painted[0].ent == &ent && painted[0].obj == obj && !strcmp(painted[0].material, "mtl_weapon_kar98") &&
            painted[0].camo == frogskin && painted[0].style == WEAPON_CAMO_WOOD);
     assert(!strcmp(painted[1].material, "mtl_weapon_luger") && painted[1].camo == ember && painted[1].style == WEAPON_CAMO_BODY);
+    /* A gun on the ground in the camouflage it was dropped with, whoever's configstring says what. */
+    {
+        entityState_t es = dropped(1, ember);
+        configstrings[CS_WEAPON_CAMOS + 5] = "";
+        CG_SetItemWeaponCamo(&ent, obj, &es);
+        assert(paints == 3 && painted[2].ent == &ent && painted[2].obj == obj && painted[2].camo == ember);
+        assert(!strcmp(painted[2].material, "mtl_weapon_kar98") && painted[2].style == WEAPON_CAMO_WOOD);
+        /* Not without a camouflage, nor with one past the catalog, nor an item past the list, an item not a weapon,
+         * a weapon without paint, nor without an entity or object. */
+        es = dropped(1, WEAPON_CAMO_NONE);
+        CG_SetItemWeaponCamo(&ent, obj, &es);
+        es = dropped(1, 15);
+        CG_SetItemWeaponCamo(&ent, obj, &es);
+        es = dropped(0, ember);
+        CG_SetItemWeaponCamo(&ent, obj, &es);
+        es = dropped(4, ember);
+        CG_SetItemWeaponCamo(&ent, obj, &es);
+        es = dropped(2, ember);
+        CG_SetItemWeaponCamo(&ent, obj, &es);
+        es = dropped(3, ember);
+        CG_SetItemWeaponCamo(&ent, obj, &es);
+        es = dropped(1, ember);
+        CG_SetItemWeaponCamo(NULL, obj, &es);
+        CG_SetItemWeaponCamo(&ent, NULL, &es);
+        assert(paints == 3);
+    }
     puts("PASS: each client's configstring read by weapon name, reread when it changes, bounded tokens; "
-         "a class gun painted in its own material and style");
+         "a class gun painted in its own material and style; a dropped gun in the camouflage it carries");
     return 0;
 }
 '''
 
 server_checks = r'''
 #include <assert.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include "@SOURCE@"
@@ -622,12 +660,45 @@ void *imp_g_entities = entities;
 static int params = 1, errors, objectErrors, paramErrors, sets;
 static const char *argument = "", *setValue;
 static int setIndex;
+static char configstrings[0x800][128];
 unsigned int Scr_GetNumParam(void) { return (unsigned int)params; }
 const char *Scr_GetString(unsigned int index) { assert(index == 0); return argument; }
 void Scr_Error(const char *msg) { (void)msg; errors++; }
 void Scr_ObjectError(const char *msg) { (void)msg; objectErrors++; }
 void Scr_ParamError(unsigned int index, const char *msg) { assert(index == 0); (void)msg; paramErrors++; }
-void SV_SetConfigstring(int index, const char *val) { setIndex = index; setValue = val; sets++; }
+void SV_SetConfigstring(int index, const char *val)
+{
+    assert(index >= 0 && index < 0x800 && strlen(val) < sizeof(configstrings[0]));
+    strcpy(configstrings[index], val);
+    setIndex = index;
+    setValue = configstrings[index];
+    sets++;
+}
+const char *SV_GetConfigstringConst(int index) { assert(index >= 0 && index < 0x800); return configstrings[index]; }
+static char longName[100];
+static WeaponDef defs[6] = { { "none" }, { "kar98k_mp" }, { "luger_mp" }, { "mp40_mp" }, { "frag_grenade_german_mp" },
+                             { longName } };
+WeaponDef *BG_GetWeaponDef(int weapon) { assert(weapon > 0 && weapon <= 5); return &defs[weapon]; }
+int BG_GetNumWeapons(void) { return 5; }
+int Com_sprintf(char *dest, int size, const char *fmt, ...)
+{
+    va_list ap;
+    int length;
+    assert(size > 0);
+    va_start(ap, fmt);
+    length = vsnprintf(dest, (size_t)size, fmt, ap);
+    va_end(ap);
+    dest[size - 1] = '\0';
+    return length;
+}
+static playerState_t holding(int primary, int secondary)
+{
+    playerState_t ps;
+    memset(&ps, 0, sizeof(ps));
+    ps.weaponslots[1] = (char)primary;
+    ps.weaponslots[2] = (char)secondary;
+    return ps;
+}
 static void call(int entnum, int classnum, const char *text)
 {
     scr_entref_t ref = { (unsigned short)entnum, (unsigned short)classnum };
@@ -667,8 +738,61 @@ int main(void)
     call(3, 0, "kar98k_mp frogskin");
     assert(errors == 2 && sets == 4);
     assert(!G_ValidWeaponCamos(NULL) && G_ValidWeaponCamos("") && G_ValidWeaponCamos("abc_09 XYZ"));
+
+    /* The camouflage a player's configstring gives a weapon, by its name; none for the rest. */
+    {
+        const int frogskin = BG_WeaponCamo_Find("frogskin"), ember = BG_WeaponCamo_Find("ember");
+        const int winter = BG_WeaponCamo_Find("winter");
+        playerState_t ps;
+        int before;
+        strcpy(configstrings[CS_WEAPON_CAMOS + 3], "  kar98k_mp frogskin luger_mp none mp40_mp tiger");
+        assert(G_GetClientWeaponCamo(3, 1) == frogskin && G_GetClientWeaponCamo(3, 2) == WEAPON_CAMO_NONE);
+        assert(G_GetClientWeaponCamo(3, 3) == WEAPON_CAMO_NONE && G_GetClientWeaponCamo(3, 4) == WEAPON_CAMO_NONE);
+        assert(G_GetClientWeaponCamo(3, 0) == WEAPON_CAMO_NONE && G_GetClientWeaponCamo(3, 6) == WEAPON_CAMO_NONE);
+        assert(G_GetClientWeaponCamo(-1, 1) == WEAPON_CAMO_NONE && G_GetClientWeaponCamo(64, 1) == WEAPON_CAMO_NONE);
+        /* A token too long for a name ends the reading. */
+        strcpy(configstrings[CS_WEAPON_CAMOS + 4], "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa frogskin kar98k_mp ember");
+        assert(G_GetClientWeaponCamo(4, 1) == WEAPON_CAMO_NONE);
+
+        /* Picking up a painted MP40 in place of the Luger: the Kar98k keeps its paint, the MP40 takes the ground's,
+         * the Luger's goes. */
+        strcpy(configstrings[CS_WEAPON_CAMOS + 3], "kar98k_mp frogskin luger_mp ember");
+        ps = holding(1, 3);
+        before = sets;
+        G_SetClientSlotCamos(3, &ps, 3, winter);
+        assert(sets == before + 1 && setIndex == CS_WEAPON_CAMOS + 3 && !strcmp(setValue, "kar98k_mp frogskin mp40_mp winter"));
+        /* The same again changes nothing; an unpainted one is left out; the Kar98k's own paint when it is the one. */
+        G_SetClientSlotCamos(3, &ps, 3, winter);
+        assert(sets == before + 1);
+        G_SetClientSlotCamos(3, &ps, 3, WEAPON_CAMO_NONE);
+        assert(sets == before + 2 && !strcmp(setValue, "kar98k_mp frogskin"));
+        G_SetClientSlotCamos(3, &ps, 1, ember);
+        assert(sets == before + 3 && !strcmp(setValue, "kar98k_mp ember"));
+        /* Empty slots and others' weapons count for nothing; an out-of-range player has no string. */
+        ps = holding(6, 4);
+        G_SetClientSlotCamos(3, &ps, 6, ember);
+        assert(sets == before + 4 && !strcmp(setValue, ""));
+        ps = holding(0, 4);
+        G_SetClientSlotCamos(3, &ps, 2, ember);
+        assert(sets == before + 4);
+        G_SetClientSlotCamos(64, &ps, 1, ember);
+        G_SetClientSlotCamos(-1, &ps, 1, ember);
+        assert(sets == before + 4);
+        /* Past the clients' copy, the string stays as it was. */
+        memset(longName, 'a', sizeof(longName) - 1);
+        strcpy(configstrings[CS_WEAPON_CAMOS + 3], "kar98k_mp frogskin");
+        ps = holding(1, 5);
+        G_SetClientSlotCamos(3, &ps, 5, ember);
+        assert(sets == before + 4 && !strcmp(configstrings[CS_WEAPON_CAMOS + 3], "kar98k_mp frogskin"));
+        /* One that just fits is written. */
+        memset(longName, 0, sizeof(longName));
+        memset(longName, 'b', WEAPON_CAMO_STRING_MAX - 1 - (int)strlen(" ember") - (int)strlen("kar98k_mp frogskin "));
+        G_SetClientSlotCamos(3, &ps, 5, ember);
+        assert(sets == before + 5 && strlen(setValue) == WEAPON_CAMO_STRING_MAX - 1);
+    }
     puts("PASS: setWeaponCamos sets its player's configstring, takes names and ids between spaces up to the "
-         "clients' copy, refuses other entities and wrong counts");
+         "clients' copy, refuses other entities and wrong counts; a weapon's camouflage read by name, and the "
+         "string rewritten for the guns in the slots when one is picked up, kept when it would not fit");
     return 0;
 }
 '''
@@ -707,7 +831,14 @@ cgame_mutants = [
     ('    if (strcmp(camos->text, text))\n        CG_ParseWeaponCamos(text, camos);', '    if (!camos->text[0])\n        CG_ParseWeaponCamos(text, camos);'),
     ('weapon <= 0 || weapon > BG_GetNumWeapons()', 'weapon <= 0'),
     ('        if (length >= CG_CAMO_WEAPON_NAME)\n            return;', '        if (length >= CG_CAMO_WEAPON_NAME)\n            length = CG_CAMO_WEAPON_NAME - 1;'),
-    ('        R_SetEntityWeaponCamo(sceneEnt, obj, gun->material, camo, gun->style);', '        R_SetEntityWeaponCamo(sceneEnt, obj, gun->material, camo, WEAPON_CAMO_WOOD);'),
+    ('    if (gun)\n        R_SetEntityWeaponCamo(sceneEnt, obj, gun->material, camo, gun->style);\n}\n\nvoid CG_SetItemWeaponCamo',
+     '    if (gun)\n        R_SetEntityWeaponCamo(sceneEnt, obj, gun->material, camo, WEAPON_CAMO_WOOD);\n}\n\nvoid CG_SetItemWeaponCamo'),
+    ('    if (camo <= WEAPON_CAMO_NONE || camo >= WEAPON_CAMO_COUNT || !sceneEnt || !obj || index <= 0 ||',
+     '    if (camo >= WEAPON_CAMO_COUNT || !sceneEnt || !obj || index <= 0 ||'),
+    ('    if (camo <= WEAPON_CAMO_NONE || camo >= WEAPON_CAMO_COUNT || !sceneEnt || !obj || index <= 0 ||',
+     '    if (camo <= WEAPON_CAMO_NONE || !sceneEnt || !obj || index <= 0 ||'),
+    ('        index >= *(int *)imp_bg_numItems)', '        0)'),
+    ('    if (item->giType != IT_WEAPON || item->giTag <= 0', '    if (item->giTag <= 0'),
 ]
 server_mutants = [
     ('    SV_SetConfigstring(CS_WEAPON_CAMOS + entref.entnum, text);', '    SV_SetConfigstring(CS_WEAPON_CAMOS, text);'),
@@ -715,6 +846,12 @@ server_mutants = [
     ('    if (!text || length >= WEAPON_CAMO_STRING_MAX)', '    if (!text)'),
     ('    if (entref.classnum != 0 || entref.entnum >= WEAPON_CAMO_CLIENTS ||', '    if (entref.entnum >= WEAPON_CAMO_CLIENTS ||'),
     ('    if (Scr_GetNumParam() != 1) {', '    if (Scr_GetNumParam() < 1) {'),
+    ('            return camo > WEAPON_CAMO_NONE ? camo : WEAPON_CAMO_NONE;', '            return camo;'),
+    ('    if (!length || length >= size)\n        return 0;', '    if (!length)\n        return 0;'),
+    ('        paint = held == weapon ? camo : G_GetClientWeaponCamo(clientNum, held);', '        paint = camo;'),
+    ('        if (length >= (int)sizeof(text))\n            return;', ''),
+    ('    if (strcmp(text, SV_GetConfigstringConst(CS_WEAPON_CAMOS + clientNum)))\n', ''),
+    ('        if (held <= 0 || held > BG_GetNumWeapons())\n            continue;', '        if (held <= 0)\n            continue;'),
 ]
 
 
