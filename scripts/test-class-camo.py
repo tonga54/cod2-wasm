@@ -3,8 +3,9 @@
 gun's tile, F2, a controller's Y or a click opening WWII's Primary or Secondary
 Camouflage, the swatches' keys and clicks, equipping a pattern (saved only when
 it changes), the guns painted in the tiles and the picker's preview (the
-owner's picture of a gun when there is one), the editor's camouflage lines and
-attachment boxes together, and the class a match receives."""
+owner's picture of a gun when there is one), the list's panel with each slot's
+caption clear of the tile above, the editor's camouflage lines and attachment
+boxes together, and the class a match receives."""
 from pathlib import Path
 import re
 import subprocess
@@ -289,6 +290,27 @@ int main(void) {
            lastPicture.style == WEAPON_CAMO_BODY && pics(karImage) == 1);
     cases++;
 
+    /* The panel's tiles in their order, each slot's caption clear of the
+     * tile above it, the last ending above the prompts' keycaps, 58.2 from
+     * the bottom. */
+    {
+        static const char *const captions[CLASS_SLOT_COUNT] = { "PRIMARY", "SECONDARY", "LETHAL", "TACTICAL" };
+        const Drawn *tiles[CLASS_SLOT_COUNT];
+        int found = 0;
+
+        for (int i = 0; i < drawCount && found < CLASS_SLOT_COUNT; i++)
+            if (drawn[i].kind == PIC && drawn[i].material == &white && same(drawn[i].color, s_cacTile) &&
+                near(drawn[i].x, -(CAC_SIDE_RIGHT + CAC_SIDE_WIDTH)))
+                tiles[found++] = &drawn[i];
+        assert(found == CLASS_SLOT_COUNT);
+        for (int slot = 1; slot < CLASS_SLOT_COUNT; slot++) {
+            const Drawn *caption = text(captions[slot]);
+            assert(caption && caption->y - CAC_TILE_CAPTION_CAP >= tiles[slot - 1]->y + tiles[slot - 1]->h + 4.0f);
+        }
+        assert(tiles[CLASS_SLOT_TACTICAL]->y + tiles[CLASS_SLOT_TACTICAL]->h < 480.0f - 58.2f);
+    }
+    cases++;
+
     /* Modify: under each gun, its camouflage with a swatch of the pattern;
      * F2 customizes a gun, as WWII's Y. */
     assert(key(&createMenu, 0x0d) && s_cac.screen == CAC_SCREEN_EDIT && s_cac.slotFocus == CLASS_SLOT_PRIMARY);
@@ -546,6 +568,7 @@ mutants = [
     ('    Cac_GunPicture(weapon, Cac_SlotCamo(loadout, slot), &box, UI_WWIIMenu_Color(WWII_COLOR_WHITE));\n    Cac_Stats(weapon, mask,',
      '    Cac_Picture(weapon, &box, UI_WWIIMenu_Color(WWII_COLOR_WHITE));\n    Cac_Stats(weapon, mask,'),
     ('        Cac_ReturnToAttachment(s_cac.attachSlot, s_cac.attachPosition);\n    } else if', '    } else if'),
+    ('(slot ? 90.0f + (float)(slot - 1) * 50.0f : 0.0f)', '(slot ? 84.0f + (float)(slot - 1) * 42.0f : 0.0f)'),
 ]
 
 
@@ -588,7 +611,8 @@ with tempfile.TemporaryDirectory(prefix='cod2-class-camo-') as directory:
         result = run(directory, f'camo{index}', program(menu.replace(old, new)), ['-w'], objects)
         assert result.returncode != 0, f'mutant survived: {new!r}'
 
-print(f'PASS: Create a Class paints each gun\'s camouflage under its tile and in the list\'s panel; F2, a controller\'s Y '
+print(f'PASS: Create a Class paints each gun\'s camouflage under its tile and in the list\'s panel, whose slot captions '
+      f'clear the tiles above them; F2, a controller\'s Y '
       f'or a click opens Primary or Secondary Camouflage on the gun\'s own, a grid of the eleven swatches with the '
       f'focused one\'s note and the gun, or the owner\'s picture of it, painted in it; keys and clicks move and equip, '
       f'saving only a change; grenades '

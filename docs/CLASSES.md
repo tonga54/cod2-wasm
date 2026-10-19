@@ -511,9 +511,10 @@ on canvases the generator accepts, for the day a class weapon matches one.
 - `python3 scripts/test-class-camo.py` runs the production class menu on a
   recording UI: the camouflage lines, F2, Y and click opening the pickers, the
   grid's keys and clicks, saving only a change, the painted tiles and
-  previews, Select Class's painted Custom classes, the camouflage lines and
+  previews, the list's side panel with each slot's caption clear of the tile
+  above it, Select Class's painted Custom classes, the camouflage lines and
   attachment boxes laid out together, Modify Attachment's painted gun, and the
-  responses sent with both. It rejects 24 mutations.
+  responses sent with both. It rejects 25 mutations.
 - `node scripts/test-web-point-lights.cjs` checks the generated shaders'
   camouflage pass, that the pattern and mask bind on units clear of the scene
   compositor's, and their uploads; `python3 scripts/test-gamepad.py` that Y

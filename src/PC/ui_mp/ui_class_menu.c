@@ -1402,8 +1402,9 @@ static void Cac_PaintList(displayContextDef_t *dc)
                                 CAC_ALIGN_RIGHT);
         Cac_Fill(&line, s_cacEdge);
     }
+    /* 20 between a tile and the next: the two lines over each take 15.4. */
     for (slot = 0; slot < CLASS_SLOT_COUNT; slot++) {
-        float rowTop = CAC_ROW_TOP + 22.0f + (slot ? 84.0f + (float)(slot - 1) * 42.0f : 0.0f);
+        float rowTop = CAC_ROW_TOP + 22.0f + (slot ? 90.0f + (float)(slot - 1) * 50.0f : 0.0f);
         float height = slot ? 30.0f : 70.0f;
         CacRect tile = Cac_Rect(-(CAC_SIDE_RIGHT + CAC_SIDE_WIDTH), rowTop, slot ? 96.0f : CAC_SIDE_WIDTH, height,
                                 CAC_ALIGN_RIGHT);
