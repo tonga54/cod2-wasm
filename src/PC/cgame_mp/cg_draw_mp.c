@@ -2321,8 +2321,10 @@ unsigned int CG_Draw2D(void)
             }
             alpha = fade[3];
         }
-        /* Keep the kill/server feed below the team scores, at the top left. */
-        Con_DrawNotify(6, 84 + (int)CG_MinimapTopLeftOffset(), alpha, MWM_TOPDOWN);
+        /* Keep the kill/server feed below the team scores, at the top left,
+         * where the countdown before a match names the mode instead. */
+        if (!prematch)
+            Con_DrawNotify(6, 84 + (int)CG_MinimapTopLeftOffset(), alpha, MWM_TOPDOWN);
         CG_Draw2D_DrawBottomOverlays(cg);
     }
 

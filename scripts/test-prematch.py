@@ -39,9 +39,9 @@ def ordered(text, *parts):
 # The cgame starts it with the HUD and takes the server's countdown from its
 # client dvar. Every frame, before anything can return, it sets how gray the
 # next scene is; for a player waiting in the countdown it stands in for the
-# minimap, the menus and the HUD widgets, and the crosshair goes while a scope
-# keeps its overlay. The renderer takes the gray each scene, and the team's
-# emblem has an image slot of its own.
+# minimap, the menus, the HUD widgets and the game messages under its title,
+# and the crosshair goes while a scope keeps its overlay. The renderer takes
+# the gray each scene, and the team's emblem has an image slot of its own.
 for source in (main, draw, servercmds):
     assert source.count('#include "headers/PC/cgame_mp/cg_prematch.h"\n') == 1
 assert main.count('    CG_EndgameInit();\n    CG_PrematchInit();\n') == 1
@@ -55,7 +55,8 @@ ordered(function(draw, 'unsigned int CG_Draw2D(void)\n{'),
         '    CG_MinimapSetHudVisible(drawHudMenus && pm_type != 4 && pm_type != 5 && !killcam && !prematch);\n',
         '        if (drawHudMenus && !prematch)\n            Menu_PaintAll((void *)imp_cgDC);\n',
         '        if (drawHudMenus && prematch) {\n            CG_DrawPrematch();\n        } else if (drawHudMenus) {\n'
-        '            CG_DrawScorePanel();\n')
+        '            CG_DrawScorePanel();\n',
+        '        if (!prematch)\n            Con_DrawNotify(6, 84 + (int)CG_MinimapTopLeftOffset(), alpha, MWM_TOPDOWN);\n')
 ordered(function(draw, 'unsigned int CG_DrawCrosshair(void)\n{'),
         '    reticleVisibility = CG_DrawWeapReticle();\n',
         '    if (!drawHudMenus || CG_PrematchActive())\n        return 0;\n')
