@@ -792,6 +792,8 @@ void R_RenderScene(const refdef_t *refdef)
     extern float g_webAdsViewmodelStart;
     extern float g_webAdsViewmodelEnd;
     extern float g_webAdsNearEnd;
+    extern void WebSceneFx_SetScope(const float *);
+    extern float g_webScopeLens[13];
     WebPointLights_SetScene(scene.dlights, scene.dlightCount);
     WebPointLights_SetShadowCasters(scene.def.entities, scene.def.entityCount, rg_p->viewOrg);
     {
@@ -804,6 +806,7 @@ void R_RenderScene(const refdef_t *refdef)
     WebSceneFx_SetBackdrop(g_webBackdropFrac > g_webMenuBackdropFrac ? g_webBackdropFrac : g_webMenuBackdropFrac);
     WebSceneFx_SetBackdropGray(g_webBackdropGray);
     WebSceneFx_SetGray(g_webGrayFrac);
+    WebSceneFx_SetScope(g_webScopeLens);
 #endif
 
     drawSurfStart = (int)(intptr_t)scene.drawSurfs;

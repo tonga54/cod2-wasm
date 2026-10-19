@@ -60,6 +60,10 @@ static int BG_IsAimDownSightWeapon(int weapon) {return 1;}
 static void BG_CalculateWeaponPosition_Sway(playerState_t *ps,vec_t *a,vec_t *b,vec_t *c,float scale,int time) {}
 static GfxEntity lastHand;static int draws;
 static void CG_AddPlayerWeapon(GfxEntity *hand,playerState_t *ps,centity_t *cent,int drawGun) {lastHand=*hand;draws+=drawGun;}
+/* An open-sighted rifle: no WWII scope moves it. */
+static const void *CG_WwiiScopeGlassForWeapon(int weapon) {return NULL;}
+static void CG_WwiiScopeAdjustViewWeapon(playerState_t *ps,int weapon,vec_t *angles) {}
+static void CG_WwiiScopePlaceViewWeapon(playerState_t *ps,int weapon,vec_t *origin) {}
 '''
 recoil = function('src/PC/bgame/bg_weapons.c', 'BG_CalculateWeaponPosition_GunRecoil_SingleAngle')
 viewstub = r'''

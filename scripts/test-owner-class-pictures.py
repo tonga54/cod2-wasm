@@ -306,6 +306,7 @@ with tempfile.TemporaryDirectory(prefix='cod2-class-pictures-') as directory:
 
 support = r'''
 #include <assert.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -501,7 +502,7 @@ def build_and_run(body, directory, name):
     binary = Path(directory) / name
     source.write_text(support + body + checks_c)
     subprocess.run(['cc', '-std=gnu99', '-O1', '-g', '-fsanitize=address,undefined', '-fno-sanitize-recover=all',
-                    '-Wno-unused-function', str(source), '-o', str(binary)], check=True)
+                    '-Wno-unused-function', str(source), '-lm', '-o', str(binary)], check=True)
     return subprocess.run([str(binary), directory], capture_output=True, text=True)
 
 

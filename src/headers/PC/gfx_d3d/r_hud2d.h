@@ -34,7 +34,11 @@ typedef struct HudVertex2D {
 #define R_HUD_IMAGE_MENU_ROUNDEL 17
 #define R_HUD_IMAGE_MINIMAP_OVERVIEW 18
 #define R_HUD_IMAGE_PAUSE_EMBLEMS 19
-#define R_HUD_IMAGE_COUNT 20
+/* The lens of each scope overlay a match uses (cg_wwiiscope_mp.c), in four
+ * slots from this one. */
+#define R_HUD_IMAGE_SCOPE_LENS 20
+#define R_HUD_IMAGE_SCOPE_LENS_COUNT 4
+#define R_HUD_IMAGE_COUNT 24
 
 /* Icons whose white silhouette or emblem has been built; each is read once. */
 #define R_HUD_SILHOUETTE_COUNT 64
@@ -79,6 +83,20 @@ int R_DecodeGrayImage(const byte *file, int fileLen, byte *bgra, const byte *ton
  * aspect gets its width over its height. Returns NULL, with aspect 0, when the
  * image is not one R_DecodeGrayImage reads. */
 MaterialHandle R_CreateHudGrayMaterial(int slot, MaterialHandle source, const byte *tone, float *aspect);
+/* Lens images are at most this many texels a side. */
+#define R_HUD_LENS_MAX_SIZE 512
+/* The top mip of a DXT1, DXT3 or DXT5 IWi file of at most R_HUD_GRAY_MAX_SIZE
+ * texels a side as BGRA texels in their own colors, halved until it fits
+ * R_HUD_LENS_MAX_SIZE. width and height get the result's size. */
+int R_DecodeLensImage(const byte *file, int fileLen, byte *bgra, int *width, int *height);
+/* A scope overlay's lens without the black around it: within the circle
+ * where the centred image first turns opaque it keeps the reticle, the dirt
+ * and the darkening rim, and outside it is clear. Returns that radius as a
+ * fraction of the image's half width. */
+float R_ClearOutsideLens(byte *bgra, int width, int height);
+/* R_ClearOutsideLens applied to a 2D material's image, built into slot. edge
+ * gets the lens radius as a fraction of the half width, 0 on failure. */
+MaterialHandle R_CreateHudLensMaterial(int slot, MaterialHandle overlay, float *edge);
 void R_ShutdownHudImages(void);
 /* Changes whenever R_ShutdownHudImages releases the images and the fonts
  * shut down with them, so materials and fonts kept from before are gone. */

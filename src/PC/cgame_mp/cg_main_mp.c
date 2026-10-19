@@ -15,6 +15,7 @@
 #include "headers/PC/cgame_mp/cg_grenadewarning.h"
 #include "headers/PC/cgame_mp/cg_prematch.h"
 #include "headers/PC/cgame_mp/cg_scoretable.h"
+#include "headers/PC/cgame_mp/cg_wwiiscope.h"
 #include <float.h>
 
 extern const dvar_t *com_sv_running;
@@ -1234,6 +1235,7 @@ void CG_Init(int serverMessageNum, int serverCommandSequence, int clientNum)
     CG_EndgameInit();
     CG_PrematchInit();
     CG_HitMarkerInit();
+    CG_WwiiScopeInit();
     CG_LoadingString("sounds");
     CG_RegisterSounds();
     CG_LoadingString("clients");

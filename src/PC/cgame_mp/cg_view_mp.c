@@ -2,6 +2,7 @@
 #include "common_types.h"
 #include "imports.h"
 #include "headers/PC/cgame_mp/cg_local.h"
+#include "headers/PC/cgame_mp/cg_wwiiscope.h"
 #include <math.h>
 
 #ifdef __EMSCRIPTEN__
@@ -281,7 +282,7 @@ float CG_GetViewFov(void)
                     float normalizedLerp;
 
                     if (cg->playerEntity.bPositionToADS != 0) {
-                        transTime = ((WeaponDef *)weapDef)->fAdsZoomInFrac;
+                        transTime = CG_WwiiScopeZoomInFrac(weapIndex);
                     } else {
                         transTime = ((WeaponDef *)weapDef)->fAdsZoomOutFrac;
                     }

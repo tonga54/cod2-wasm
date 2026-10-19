@@ -17,6 +17,7 @@
 #include "headers/PC/cgame_mp/cg_scorepanel.h"
 #include "headers/PC/cgame_mp/cg_scoretable.h"
 #include "headers/PC/cgame_mp/cg_playernames.h"
+#include "headers/PC/cgame_mp/cg_wwiiscope.h"
 
 extern const dvar_t *cg_centerPrintY;
 extern const dvar_t *cg_centertime;
@@ -1567,6 +1568,12 @@ float CG_DrawWeapReticle(void)
     MaterialHandle material;
     vec2_t drawPos;
     vec2_t drawSize;
+    float wwiiVisibility;
+
+    /* A WWII scope's rifle stays drawn and its reticle sits on the glass. */
+    wwiiVisibility = CG_DrawWwiiScopeReticle();
+    if (wwiiVisibility >= 0.0f)
+        return wwiiVisibility;
 
     if (!weapDef->szOverlayMaterial[0] && !weapDef->overlayReticle)
         return 1.0f;

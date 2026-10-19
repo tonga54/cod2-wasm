@@ -61,6 +61,7 @@ static EffectTemplate *CG_EnhanceMuzzleFlash(const EffectTemplate *original)
     return effect;
 }
 #include "headers/PC/cgame_mp/cg_local.h"
+#include "headers/PC/cgame_mp/cg_wwiiscope.h"
 
 extern const dvar_t *cg_weaponCycleDelay;
 extern const dvar_t *loc_warnings;
@@ -1326,7 +1327,7 @@ void CG_AddPlayerWeapon(GfxEntity *parent, playerState_t *ps, centity_t *cent, q
         const vec_t *origin;
 
         if (bViewModel) {
-            fx = bDrawGun ? weapInfo->viewFlashEffect :
+            fx = bDrawGun && !CG_WwiiScopeMuzzleLightsOnly() ? weapInfo->viewFlashEffect :
                 ((unsigned int)weaponNum < 128 ? muzzleLightEffects[weaponNum] : NULL);
             origin = cg->viewModelOrigin;
             bolt[0] = CG_WeaponDObjHandle(weaponNum);
@@ -1503,6 +1504,9 @@ static void CG_UpdateWebWeaponPresentation(playerState_t *ps, int weaponIndex, q
         WeaponDef *weapDef = (WeaponDef *)BG_GetWeaponDef(fireWeapon);
         s_pendingLocalFireTime = 0;
         if (weapDef && weapDef->weapType == 0 && cg_tracerChance->current.value > 0.0f) {
+            /* Like the muzzle sprites, the shooter's own tracer stays out of
+             * a WWII scope's window; the server's copy is still suppressed. */
+            int scoped = CG_WwiiScopeLens()->presence > 0.0f;
             vec3_t muzzle, shotAngles, forward, right, up;
             unsigned int flashTag = *(unsigned short *)s_barrelTags[barrel];
             struct DObj_s *viewModel = (*(weaponInfo_t **)imp_cg_weapons)[fireWeapon].viewModelDObj;
@@ -1547,7 +1551,7 @@ static void CG_UpdateWebWeaponPresentation(playerState_t *ps, int weaponIndex, q
                     end[i] = cg->refdef.vieworg[i] + range * forward[i] +
                              rightOfs * right[i] + upOfs * up[i];
                 }
-                if (randomf() >= cg_tracerChance->current.value)
+                if (scoped || randomf() >= cg_tracerChance->current.value)
                     continue;
                 CG_TraceCapsule(&trace, cg->refdef.vieworg, zeroBounds, zeroBounds,
                                 end, ps->clientNum, 0x2802831);
@@ -1614,6 +1618,7 @@ void CG_AddViewWeapon(playerState_t *ps)
     playerState = ps;
 #ifdef __EMSCRIPTEN__
     g_webAimFrac = playerState->fWeaponPosFrac;
+    CG_WwiiScopeClear();
 #endif
 
     if (playerState->pm_type == 4 || playerState->pm_type == 5) {
@@ -1630,8 +1635,10 @@ void CG_AddViewWeapon(playerState_t *ps)
         return;
     }
 
+    /* A WWII scope keeps its rifle on screen around the window. */
     drawGun = 0;
-    if (!cg->cubemapShot && cg_drawGun->current.enabled && !CG_GetWeapReticleZoom(&zoom))
+    if (!cg->cubemapShot && cg_drawGun->current.enabled &&
+        (!CG_GetWeapReticleZoom(&zoom) || CG_WwiiScopeGlassForWeapon(BG_GetViewmodelWeaponIndex(playerState))))
         drawGun = 1;
 
     if (playerState->eFlags & 0x300) {
@@ -1702,6 +1709,7 @@ void CG_AddViewWeapon(playerState_t *ps)
     weaponAngles[0] += sprintBlend * (10.0f + 2.0f * sinf(sprintCycle));
     weaponAngles[1] += sprintBlend * (-10.0f + 2.0f * cosf(sprintCycle));
     weaponAngles[2] += sprintBlend * (12.0f + 3.0f * sinf(sprintCycle));
+    CG_WwiiScopeAdjustViewWeapon(playerState, weaponIndex, weaponAngles);
 
     AnglesToAxis(weaponAngles, weaponAxis);
     MatrixMultiply(weaponAxis, cg->refdef.viewaxis, finalAxis);
@@ -1733,6 +1741,7 @@ void CG_AddViewWeapon(playerState_t *ps)
     CG_Madd(hand.origin, finalAxis[0], cg->swayOffset[0] + CG_DvarValue(imp_cg_gun_x));
     CG_Madd(hand.origin, finalAxis[1], cg->swayOffset[1] + CG_DvarValue(imp_cg_gun_y));
     CG_Madd(hand.origin, finalAxis[2], cg->swayOffset[2] + CG_DvarValue(imp_cg_gun_z));
+    CG_WwiiScopePlaceViewWeapon(playerState, weaponIndex, hand.origin);
 
     if (BG_IsAimDownSightWeapon(weaponIndex) && playerState->fWeaponPosFrac > 0.0f) {
         vec3_t worldAngles;
@@ -1759,6 +1768,7 @@ void CG_AddViewWeapon(playerState_t *ps)
     }
     CG_AddPlayerWeapon(&hand, playerState, &cg->predictedPlayerEntity, drawGun);
 #ifdef __EMSCRIPTEN__
+    CG_WwiiScopeUpdate(playerState, weaponIndex, drawGun);
     CG_UpdateWebWeaponPresentation(playerState, weaponIndex, drawGun);
 #endif
 }

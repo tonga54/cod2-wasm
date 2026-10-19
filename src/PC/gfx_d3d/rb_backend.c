@@ -239,6 +239,13 @@ extern float Vec3Normalize(float *v);
 extern void R_DecomposeSort(unsigned int sortKey, int *entityIndex, const Material **material, int *lightmap);
 extern void RB_SetDepthRange(float near, float far);
 extern void RB_SetDepthHackNearClip(float nearClip);
+#ifdef __EMSCRIPTEN__
+extern void RB_SetViewmodelProjection(float nearClip, const float *scale);
+extern const float *WebSceneFx_ViewmodelProjection(void);
+extern float WebSceneFx_ViewmodelNearClip(float nearClip);
+extern void WebSceneFx_BeginViewmodel(void);
+extern void WebSceneFx_EndViewmodel(void);
+#endif
 extern void RB_SetWorldMatrixForEntity(const void *entity);
 extern int RB_FogOffset(void);
 extern Glyph *R_GetCharacterGlyph(FontHandle font, int charCode);
@@ -1748,6 +1755,10 @@ do_entity_setup:
         if (!isWorldSpaceEntPrev)
             RB_PopMatrixStack();
         if (depthRangePrev) {
+#ifdef __EMSCRIPTEN__
+            if (depthRangePrev == 8)
+                WebSceneFx_EndViewmodel();
+#endif
             RB_SetDepthRange(0.0f, 1.0f);
             depthRangePrev = 0;
         }
@@ -1774,7 +1785,13 @@ do_entity_setup:
 
             if (depthRange == 8) {
 
+#ifdef __EMSCRIPTEN__
+                RB_SetViewmodelProjection(WebSceneFx_ViewmodelNearClip(backEnd.viewParms->depthHackNearClip),
+                                          WebSceneFx_ViewmodelProjection());
+                WebSceneFx_BeginViewmodel();
+#else
                 RB_SetDepthHackNearClip(backEnd.viewParms->depthHackNearClip);
+#endif
                 RB_SetDepthRange(0.0f, 0.2f);
             } else if (depthRange == 0x10 || depthRange == 0x18) {
                 RB_SetDepthRange(0.0f, 0.5f);
@@ -1786,7 +1803,12 @@ do_entity_setup:
                 float nc = ((const float *)&backEnd.viewParms->projectionMatrix)[14];
 
                 *(int *)&nc ^= 0x80000000;
+#ifdef __EMSCRIPTEN__
+                WebSceneFx_EndViewmodel();
+                RB_SetViewmodelProjection(nc, NULL);
+#else
                 RB_SetDepthHackNearClip(nc);
+#endif
             }
             depthRangePrev = depthRange;
         }
@@ -1826,7 +1848,12 @@ cleanup:
         if (depthRange == 8) {
             float nc = ((const float *)&backEnd.viewParms->projectionMatrix)[14];
             *(int *)&nc ^= 0x80000000;
+#ifdef __EMSCRIPTEN__
+            WebSceneFx_EndViewmodel();
+            RB_SetViewmodelProjection(nc, NULL);
+#else
             RB_SetDepthHackNearClip(nc);
+#endif
         }
     }
 

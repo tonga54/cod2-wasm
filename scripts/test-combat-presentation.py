@@ -55,6 +55,9 @@ static WeaponDef testWeapon={.weapType=0,.weapClass=0,.shotCount=1,.fAdsSpread=0
 static float traceFraction=0.25f,traceEnd[3];static int traceSkip,traceMask;
 static float g_webAdsDofFrac,g_webAdsViewmodelStart=6.f,g_webAdsViewmodelEnd=15.f,g_webAdsNearEnd=512.f;
 static int s_pendingLocalFireWeapon,s_pendingLocalFireBarrel,s_pendingLocalFireTime,s_localTracerSpawnedTime;
+typedef struct {float center[2],axes[2][2],presence,open,blur,dark,projection[2];} CgWwiiScopeLens;
+static CgWwiiScopeLens scopeLens;
+static const CgWwiiScopeLens *CG_WwiiScopeLens(void){return &scopeLens;}
 static localEntity_t *CG_AllocLocalEntity(void){immediateSpawns++;return &immediateLe;}
 static int BG_IsAimDownSightWeapon(int w){return w==1;}
 static void *BG_GetWeaponDef(int w){return &testWeapon;}
@@ -188,6 +191,12 @@ int main(void){
  cg->time=5050;s_pendingLocalFireWeapon=1;s_pendingLocalFireTime=5050;immediateSpawns=0;
  CG_UpdateWebWeaponPresentation(&ps,1,1);
  assert(immediateSpawns==3);
+ // Through a WWII scope's window the shooter sees no tracer of their own,
+ // and the server's copy of the shot stays suppressed all the same.
+ scopeLens.presence=0.4f;cg->time=5066;s_pendingLocalFireWeapon=1;s_pendingLocalFireTime=5066;
+ immediateSpawns=0;traces=0;CG_UpdateWebWeaponPresentation(&ps,1,1);
+ assert(immediateSpawns==0 && traces==1 && s_localTracerSpawnedTime==5066);
+ scopeLens.presence=0.f;
  ps.fWeaponPosFrac=0.f;CG_UpdateWebWeaponPresentation(&ps,1,1);
  assert(g_webAdsDofFrac==0.f);
  // Only other live players around the view keep the near blur short of them.

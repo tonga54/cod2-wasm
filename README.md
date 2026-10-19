@@ -179,6 +179,14 @@ retail CoD2:
   load at half resolution (`r_picmip_bump`/`r_picmip_spec` 1), about 24 MiB
   more texture memory per map; uncapped frame rates dropped by about 1%.
   See [graphics validation and limits](docs/GRAPHICS_2026-10-16.md).
+- **WWII sniper scopes:** the scoped Kar98k, Springfield, Lee-Enfield and
+  Mosin-Nagant stay on screen while raised, as in Call of Duty: WWII. The
+  eyepiece's glass becomes a window onto the magnified world with the reticle
+  on it, the world around the eyepiece blurs, and holding the breath (Shift)
+  blacks out everything but the scope. The glass shows a dim reflection while
+  the scope comes up or goes down, and working the bolt rolls the scope aside
+  and back. `cg_wwiiScope 0` restores the stock full-screen overlay. See
+  [graphics validation and limits](docs/GRAPHICS_2026-10-16.md).
 - **Map atmosphere and farther model detail:** the browser renders each map's
   original fog color/density, with separate world and HUD state and black fog
   for materials that request it. Model detail transitions and finite vegetation

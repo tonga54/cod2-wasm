@@ -49,9 +49,15 @@ assert begin.index('#ifdef __EMSCRIPTEN__') < begin.index('WebSceneFx_BeginFrame
 # with the depth hack's near clip as the projection's fourth-row z term.
 assert 'gun.renderFxFlags = 0x8c;' in (root / 'src/PC/cgame_mp/cg_weapons.c').read_text() and (0x8c & 0x18) == 8
 backend = (root / 'src/PC/gfx_d3d/rb_backend.c').read_text()
-assert re.search(r'if \(depthRange == 8\) \{\s+RB_SetDepthHackNearClip\(backEnd\.viewParms->depthHackNearClip\);'
+assert re.search(r'if \(depthRange == 8\) \{\s+#ifdef __EMSCRIPTEN__\s+'
+                 r'RB_SetViewmodelProjection\(WebSceneFx_ViewmodelNearClip\(backEnd\.viewParms->depthHackNearClip\),'
+                 r'\s+WebSceneFx_ViewmodelProjection\(\)\);\s+WebSceneFx_BeginViewmodel\(\);\s+#else'
+                 r'\s+RB_SetDepthHackNearClip\(backEnd\.viewParms->depthHackNearClip\);\s+#endif'
                  r'\s+RB_SetDepthRange\(0\.0f, 0\.2f\);', backend)
-assert 'activeMatrices->projection.matrix[0]._43 = -nearClip;' in (root / 'src/PC/gfx_d3d/rb_state.c').read_text()
+rb_state = (root / 'src/PC/gfx_d3d/rb_state.c').read_text()
+assert 'activeMatrices->projection.matrix[0]._43 = -nearClip;' in rb_state
+assert function(rb_state, 'void RB_SetViewmodelProjection(float nearClip, const float *scale)').count(
+    '    RB_SetDepthHackNearClip(nearClip);\n') == 1
 # The compositor reads the viewmodel parameters where the C side writes them,
 # uploads the rows the C side fills, and binds no buffer the GL emulation
 # tracks: its vertices come from the mesh texture.
@@ -107,6 +113,14 @@ void WebSceneFx_Compose(const float *params, const float *mesh)
     ++composes;
     memcpy(composed, params, sizeof(composed));
     assert(mesh == s_vmMesh);
+}
+void WebSceneFx_ScopeStencil(const float *scope)
+{
+    (void)scope;
+}
+void WebSceneFx_ScopeMask(int on)
+{
+    (void)on;
 }
 /* Every effect but motion blur off: only motion composes. */
 static void quiet(void)
@@ -200,7 +214,7 @@ int main(void)
 {
     assert(SCENE_FX_VM_MOTION == 35 && SCENE_FX_VM_TRIANGLES == 36 && SCENE_FX_VM_INDEX_ROW == 37 &&
            SCENE_FX_VM_TILE_ROW == 38 && SCENE_FX_VM_ROWS == 39 && SCENE_FX_VM_TILE == 40 &&
-           SCENE_FX_VM_TILES_X == 41 && SCENE_FX_PARAM_COUNT == 42);
+           SCENE_FX_VM_TILES_X == 41 && SCENE_FX_SCOPE == 42 && SCENE_FX_PARAM_COUNT == 55);
     /* The mesh texture holds the most vertices, indices and tiles at once. */
     assert(SCENE_FX_VM_MESH_WIDTH == 1024 && SCENE_FX_VM_MESH_ROWS == 64);
     assert(SCENE_FX_VM_MAX_VERTICES * 2 / 1024 + SCENE_FX_VM_MAX_TRIANGLES * 3 / 4096 +
@@ -361,7 +375,25 @@ int main(void)
         begin(10, 0.34f, 161.5f); quad(&keyA, 20, 2.5f, 0); present();
         assert(!s_vmOverflow && near(s_vmMotion, 9.52f));
     }
-    puts("PASS: viewmodel vertices smear by their own screen motion over the camera's 10 ms exposure at any frame rate, capped at 3% of the height, the camera's motion cancelled; clip positions use the depth hack's near clip; triangles, indices after the vertices and tiles holding the largest smear within a tile; cuts, swapped poses, new or changed surfaces, repeated surfaces, r_motionBlur 0, fullbright and partial views, still and off-screen motion, triangles behind the eye, spread vertices and an oversized viewmodel");
+    /* A raised WWII scope draws the rifle with its own 1.7 x 3 projection and
+     * 0.8 near clip: the mesh and the smear follow where it is drawn. */
+    {
+        const float scope[13] = {0, 0, 0.5f, 0, 0, 0.9f, 1, 1, 0, 0, 1.7f, 3.0f, 0.8f};
+        WebSceneFx_SetScope(scope);
+        begin(10, 0.34f, 161.5f); quad(&keyA, 20, 0, 0); present();
+        begin(10, 0.34f, 161.5f); quad(&keyA, 20, 0.5f, 0); present();
+        for (int i = 0; i < 4; ++i) {
+            float z = 20 + corners[i][0], x = 0.5f - corners[i][1], y = corners[i][2];
+            assert(near(s_vmMesh[i * 8], 1.7f * x) && near(s_vmMesh[i * 8 + 1], 3.0f * y));
+            assert(near(s_vmMesh[i * 8 + 2], 2 * (0.9995f * z - 0.8f) - z) && near(s_vmMesh[i * 8 + 3], z));
+            assert(near(smearOf(i, 0), smearX(ndcX(i, 20, 0), ndcX(i, 20, 0.5f), 10) * 1.7f / 1.19f) &&
+                   still(smearOf(i, 1)));
+        }
+        WebSceneFx_SetScope(NULL);
+        begin(10, 0.34f, 161.5f); quad(&keyA, 20, 0.5f, 0); present();
+        assert(near(s_vmMesh[0], 1.19f * (0.5f - corners[0][1])));
+    }
+    puts("PASS: viewmodel vertices smear by their own screen motion over the camera's 10 ms exposure at any frame rate, capped at 3% of the height, the camera's motion cancelled; clip positions use the depth hack's near clip, or a raised WWII scope's projection and near clip; triangles, indices after the vertices and tiles holding the largest smear within a tile; cuts, swapped poses, new or changed surfaces, repeated surfaces, r_motionBlur 0, fullbright and partial views, still and off-screen motion, triangles behind the eye, spread vertices and an oversized viewmodel");
     return 0;
 }
 '''
@@ -395,6 +427,9 @@ mutants = [
     ('(const char *)positions + (size_t)i * (size_t)stride', '(const char *)positions + (size_t)i * 12'),
     ('    s_vmOverflow = 0;\n}', '}'),
     ('tile = (int)ceilf(cap);', 'tile = (int)ceilf(cap) + 8;'),
+    ('        lens[0] = s_scope[SCENE_FX_SCOPE_PROJECTION - SCENE_FX_SCOPE];\n', ''),
+    ('        lens[5] = s_scope[SCENE_FX_SCOPE_PROJECTION + 1 - SCENE_FX_SCOPE];\n', ''),
+    ('        nearClip = WebSceneFx_ScopeNearClip(nearClip);\n', ''),
 ]
 
 # r_model.c's capture hooks, compiled against the engine's own structures.
