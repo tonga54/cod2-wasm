@@ -82,8 +82,9 @@ gun the list of its WWII class:
 | CoD2 weapons | WWII class | Attachments |
 | --- | --- | --- |
 | Thompson, Grease Gun, Sten, PPS-42, PPSh, MP40 | SMG | Reflex Sight, Lens Sight, Quickdraw, Grip, Steady Aim, Rapid Fire, Extended Mag, FMJ, Advanced Rifling, Suppressor |
-| M1 Garand, M1A1 Carbine, SVT-40, G43, MP44, BAR | Rifle | Reflex Sight, Lens Sight, 4x Optic, Quickdraw, Grip, Steady Aim, Rapid Fire, Extended Mag, FMJ, High Caliber, Advanced Rifling |
-| Bren | LMG | The rifle list without the Lens Sight |
+| M1 Garand, SVT-40, G43, MP44, BAR | Rifle | Reflex Sight, Lens Sight, 4x Optic, Quickdraw, Grip, Steady Aim, Rapid Fire, Extended Mag, FMJ, High Caliber, Advanced Rifling |
+| M1A1 Carbine | Rifle | The rifle list without the Lens Sight, as WWII's carbine |
+| Bren | LMG | Reflex Sight, 4x Optic, Quickdraw, Grip, Steady Aim, Rapid Fire, Extended Mag, FMJ |
 | Springfield; scoped Lee-Enfield, Mosin-Nagant and Kar98k | Sniper | 4x Optic, Ballistic Calibration, Rapid Fire, Extended Mag, FMJ |
 | Lee-Enfield, Mosin-Nagant, Kar98k | Sniper on its Iron Sight | The sniper list |
 | M1897 Trench Gun | Shotgun | Reflex Sight, Quickdraw, Steady Aim, Rapid Fire, Extended Mag, Advanced Rifling |
@@ -104,7 +105,7 @@ numbers are WWII's where they are published, otherwise this port's:
 | Quickdraw | Aim-in time −60% on SMGs, −40% on pistols, −20% on the others | Community measurements; pistols ours |
 | Steady Aim | Hip-fire spread −55%, −35% on the Thompson and PPSh | WWII (M1928, PPSh-41) |
 | Grip | Aimed view and gun kick −35% | Ours |
-| Advanced Rifling | Damage ranges ×2 on rifles, ×1.3 on SMGs, ×1.25 on the BAR, Bren and pistols, ×1.13 on the Trench Gun | WWII |
+| Advanced Rifling | Damage ranges ×2 on rifles, ×1.3 on SMGs, ×1.25 on the BAR and pistols, ×1.13 on the Trench Gun | WWII |
 | Suppressor | Damage ranges −30% on SMGs, −15% on pistols; quiet, no flash, off the minimap | WWII |
 | High Caliber | Helmet and head multipliers ×1.5 | WWII |
 | FMJ | Penetrates as armor-piercing: 25% more depth, so less damage lost, through cover | Ours, on the existing penetration |
@@ -121,7 +122,12 @@ be held and shots follow the scope's view. Two attachments that change the same
 value multiply: a Suppressor on Advanced Rifling leaves an SMG 9% short of its
 range, as in WWII.
 
+WWII's Extended Mag gives the Bren a 100-round pan; here it takes the +50% of
+the others, as its longer box magazine shows.
+
 Sources: [Prima's WWII guide](https://primagames.com/eguides/call-of-duty-wwii/multiplayer-introduction/firing-range/primary-weapons)
+and the Call of Duty Wiki's [Bren](https://callofduty.fandom.com/wiki/Bren) and
+[Advanced Rifling](https://callofduty.fandom.com/wiki/Advanced_Rifling) pages
 for the lists and descriptions, the
 [Divisions update](https://www.callofduty.com/blog/archives/the-call-of-duty-wwii-division-overhaul---six-ways-to-renew-your-loadout)
 for the limits and suppressors, the Call of Duty Wiki's

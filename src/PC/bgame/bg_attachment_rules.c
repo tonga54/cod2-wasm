@@ -30,8 +30,7 @@ const AttachmentInfo g_attachments[ATT_COUNT] = {
     (A(LENS) | A(QUICKDRAW) | A(GRIP) | A(REFLEX) | A(HIGHCAL) | A(STEADYAIM) | A(FMJ) | A(OPTIC4X) |           \
      A(RAPIDFIRE) | A(EXTMAG) | A(RIFLING))
 #define LMG_ATTACHMENTS                                                                                           \
-    (A(QUICKDRAW) | A(GRIP) | A(REFLEX) | A(STEADYAIM) | A(FMJ) | A(OPTIC4X) | A(EXTMAG) | A(RAPIDFIRE) |      \
-     A(HIGHCAL) | A(RIFLING))
+    (A(QUICKDRAW) | A(GRIP) | A(REFLEX) | A(STEADYAIM) | A(FMJ) | A(OPTIC4X) | A(EXTMAG) | A(RAPIDFIRE))
 #define SNIPER_ATTACHMENTS (A(OPTIC4X) | A(CALIBRATION) | A(FMJ) | A(EXTMAG) | A(RAPIDFIRE))
 #define SHOTGUN_ATTACHMENTS (A(REFLEX) | A(QUICKDRAW) | A(STEADYAIM) | A(EXTMAG) | A(RIFLING) | A(RAPIDFIRE))
 #define PISTOL_ATTACHMENTS                                                                                        \
@@ -45,7 +44,8 @@ const AttachmentWeapon g_attachmentWeapons[] = {
     { "ppsh_mp", ATT_KIND_FAST_SMG, ATT_NATION_USSR, SMG_ATTACHMENTS },
     { "mp40_mp", ATT_KIND_SMG, ATT_NATION_DE, SMG_ATTACHMENTS },
     { "m1garand_mp", ATT_KIND_RIFLE, ATT_NATION_US, RIFLE_ATTACHMENTS },
-    { "m1carbine_mp", ATT_KIND_RIFLE, ATT_NATION_US, RIFLE_ATTACHMENTS },
+    /* WWII's M1A1 Carbine has no Lens Sight. */
+    { "m1carbine_mp", ATT_KIND_RIFLE, ATT_NATION_US, RIFLE_ATTACHMENTS & ~A(LENS) },
     { "enfield_mp", ATT_KIND_BOLT, ATT_NATION_UK, SNIPER_ATTACHMENTS },
     { "mosin_nagant_mp", ATT_KIND_BOLT, ATT_NATION_USSR, SNIPER_ATTACHMENTS },
     { "SVT40_mp", ATT_KIND_RIFLE, ATT_NATION_USSR, RIFLE_ATTACHMENTS },

@@ -267,7 +267,13 @@ int main(void)
     assert(NEAR(d.fMaxDamageRange, 1040.0f) && NEAR(d.fMinDamageRange, 2080.0f));
     assert(NEAR(Attached(GARAND, ATT_BIT(ATT_RIFLING)).fMaxDamageRange, 4000.0f));
     assert(NEAR(Attached(BAR, ATT_BIT(ATT_RIFLING)).fMaxDamageRange, 1875.0f));
-    assert(NEAR(Attached(BREN, ATT_BIT(ATT_RIFLING)).fMaxDamageRange, 1500.0f));
+    /* WWII's light machine guns take neither Advanced Rifling nor High Caliber, nor its carbine a Lens Sight. */
+    assert(NEAR(Attached(BREN, ATT_BIT(ATT_RIFLING)).fMaxDamageRange, 1200.0f));
+    assert(NEAR(Attached(BREN, ATT_BIT(ATT_HIGHCAL)).locationDamageMultipliers[HITLOC_HEAD],
+                defs[BREN].locationDamageMultipliers[HITLOC_HEAD]));
+    assert(!(BG_AttachmentsAllowed("bren_mp") & (ATT_BIT(ATT_RIFLING) | ATT_BIT(ATT_HIGHCAL))));
+    assert(!(BG_AttachmentsAllowed("m1carbine_mp") & ATT_BIT(ATT_LENS)) &&
+           (BG_AttachmentsAllowed("m1garand_mp") & ATT_BIT(ATT_LENS)));
     assert(NEAR(Attached(COLT, ATT_BIT(ATT_RIFLING)).fMaxDamageRange, 480.0f));
     assert(NEAR(Attached(SHOTGUN, ATT_BIT(ATT_RIFLING)).fMaxDamageRange, 433.92f));
     assert(NEAR(Attached(THOMPSON, ATT_BIT(ATT_SUPPRESSOR)).fMaxDamageRange, 560.0f));
