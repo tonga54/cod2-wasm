@@ -36,7 +36,8 @@ typedef struct {int pm_flags,pm_type,weaponstate,weapon,weaponTime,weaponDelay,o
  eFlags,weapAnim,cursorHint,cursorHintString,cursorHintEntIndex,commandTime,weaponRestrictKickTime,stats[6],ammoclip[128],eventSequence,events[4],eventParms[4];vec3_t origin,viewangles;float viewHeightCurrent;}playerState_t;
 typedef struct {int serverTime,buttons,weapon;}usercmd_t;
 typedef struct {playerState_t *ps;usercmd_t cmd;}pmove_t;typedef struct {int msec;}pml_t;
-typedef struct {playerState_t ps;struct {int connected;usercmd_t oldcmd;struct {int team;}cs;int sessionState;}sess;}gclient_t;
+typedef struct {playerState_t ps;struct {int connected;usercmd_t oldcmd;struct {int team;}cs;int sessionState;}sess;int lastSpawnTime;}gclient_t;
+#define SESS_STATE_SPECTATOR 2
 typedef struct gentity_s {
  struct {int number,eType,eFlags,weapon,otherEntityNum,groundEntityNum,surfType,time,time2,eventParm,scale;vec3_t origin2;trajectory_t pos,apos;}s;
  struct {int ownerNum,inuse,svFlags,contents;vec3_t currentOrigin,currentAngles;}r;
@@ -115,7 +116,7 @@ static void BG_AnimScriptEvent(playerState_t *ps,int a,int b,int c){}
 static gentity_t *fire_grenade(gentity_t *,vec_t *,vec_t *,int,int);
 typedef int SoundAlias;static SoundAlias G_SoundAliasIndex(const char *n){return 1;}
 static int OnSameTeam(gentity_t *a,gentity_t *b){return a->client&&b->client&&a->client->sess.cs.team&&a->client->sess.cs.team==b->client->sess.cs.team;}
-static int s_placedSequence;
+static int s_placedSequence,s_placedSpawnTime[1024];
 '''
 
 defines = '\n'.join(s for s in weapons.splitlines() if s.startswith('#define WEAPON_') or s.startswith('#define PM_WEAPON_'))

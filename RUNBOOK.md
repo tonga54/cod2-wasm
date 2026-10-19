@@ -3718,3 +3718,25 @@ Validation:
   offered again only once no weapon is.
 - `scripts/test-weapon-prompt.py`, `test-owner-sound-pack.py`,
   `test-grenade-lifecycle.py` and `test-grenade-indicators.py` pass unchanged.
+
+## S-Mines and C4 go when their owner spawns again — 2026-10-19
+
+A mine set down stayed in the world after its owner died, through every later
+life, until they left, changed sides or set a third one down. As in WWII, a
+placed explosive now belongs to the life that placed it: it stays through its
+owner's death and the killcam, so it can still score, and goes when they
+spawn again or watch as a spectator, as Search and Destroy's dead do until the
+round ends. `G_PlaceExplosive` (`g_missile_mp.c`) notes the owner's spawn
+time, and `G_PlacedOwner` loses the owner once it changes.
+This supersedes the premise of the entry above: there is no mine from an
+earlier life left to take back. Taking one back within a life, the prompt, the
+hold and the reach are unchanged.
+
+Validation:
+
+- `scripts/test-placed-explosives.py`: disconnect, team change, respawn and
+  spectator lose the owner; a dead owner keeps it. 45 mutants fail, among them
+  removing the spawn-time or the spectator check or the setter.
+- `scripts/test-placed-explosives-runtime.py` on Toujane through the dedicated
+  server: 9 checks, a mine set down stays while its owner lies dead and is
+  gone once they spawn again with both mines back in the kit.

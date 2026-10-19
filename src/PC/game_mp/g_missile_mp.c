@@ -371,6 +371,8 @@ void G_EndGrenadeInput(gentity_t *player)
 }
 
 static int s_placedSequence;
+/* The spawn of its owner each placed explosive belongs to, by entity number. */
+static int s_placedSpawnTime[1024];
 
 static int G_PlacedTeam(const gentity_t *owner)
 {
@@ -389,13 +391,15 @@ static void G_PlacedSound(gentity_t *ent, const char *alias)
 }
 
 /* An explosive stays its owner's while they are connected on the side that
- * placed it. */
+ * placed it, in the life that placed it: as in WWII, through their death and
+ * its killcam, until they spawn again or watch as a spectator. */
 static gentity_t *G_PlacedOwner(gentity_t *ent)
 {
     gentity_t *owner = COD2_GEntityFromHandle(ent->parent);
 
     if (!owner || !owner->r.inuse || !owner->client || owner->client->sess.connected != 2 ||
-        G_PlacedTeam(owner) != ent->team)
+        G_PlacedTeam(owner) != ent->team || owner->client->sess.sessionState == SESS_STATE_SPECTATOR ||
+        owner->client->lastSpawnTime != s_placedSpawnTime[ent->s.number & 1023])
         return NULL;
     return owner;
 }
@@ -452,6 +456,7 @@ static void G_PlaceExplosive(gentity_t *owner, gentity_t *ent, const WeaponDef *
     ent->nextthink = 0;
     ent->s.otherEntityNum = owner->s.number;
     ent->team = (byte)G_PlacedTeam(owner);
+    s_placedSpawnTime[ent->s.number & 1023] = owner->client ? owner->client->lastSpawnTime : 0;
     ent->count = 0;
     ent->spawnflags = 0;
     ent->maxHealth = ++s_placedSequence;
@@ -610,8 +615,7 @@ static void G_ListMines(void)
 }
 
 /* The nearest of the player's own mines lying still within reach and in
- * sight, whatever their kit holds (a mine outlives its owner's life, and the
- * next one starts with a full kit); NULL otherwise. */
+ * sight, whatever their kit holds; NULL otherwise. */
 static gentity_t *G_FindOwnMine(gentity_t *player)
 {
     float nearest = GMISSILE_PICKUP_REACH * GMISSILE_PICKUP_REACH;

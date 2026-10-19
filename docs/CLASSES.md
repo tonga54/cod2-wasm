@@ -375,9 +375,8 @@ archives are prepared (`scripts/browser_explosives.py`,
   feet within 40 units click it and it goes off 0.15 s later. Its owner takes
   it back by holding Use (F, or X on a controller) for half a second within
   52 units of it, with it in sight: "Press and hold F to pickup S-Mine 44"
-  shows under the crosshair. A mine outlives its owner's life and is taken
-  back the same way after a respawn; it returns to the kit when there is room
-  for it, so a full kit stays at two.
+  shows under the crosshair. It returns to the kit when there is room for it,
+  so a full kit stays at two.
 - **C4**, CoD4's charge with CoD2's sticky bomb. G takes out the detonator,
   fire throws a charge that sticks where it lands, and aim sets off every
   charge the player placed, wherever they are.
@@ -388,7 +387,9 @@ archives are prepared (`scripts/browser_explosives.py`,
   explosive, drawn between 22 and 96 virtual units across. `cg_hudExplosiveIcons
   0` hides it.
 - Each player keeps two of each kind; a third replaces the oldest. Both go
-  away when their owner leaves or changes sides.
+  away when their owner leaves or changes sides, and, as in WWII, when their
+  owner spawns again or watches as a spectator: they stay through the owner's
+  death and its killcam, so they can still score after it.
 
 ## Download and runtime cost
 
@@ -676,8 +677,8 @@ on canvases the generator accepts, for the day a class weapon matches one.
 - `python3 scripts/test-placed-explosives-runtime.py --assets PREPARED_MAIN`
   plays a test client with the S-Mine through the dedicated server, with no
   network. It makes 9 checks: G sets one down, a held Use takes it back and a
-  tap leaves it, both go down and come back, and a mine left from a life that
-  ended is taken back with the full kit the next life starts with.
+  tap leaves it, both go down and come back, and a mine stays through its
+  owner's death and goes when they spawn again with both.
 - In the browser, against an isolated stack:
   - Every screen was created, edited and renamed. The edits persisted across a
     reload, and the class list, the editor and back all worked with the mouse.

@@ -61,7 +61,8 @@ typedef struct {int pm_flags,pm_type,weaponstate,weapon,weaponTime,weaponDelay,o
  viewangles;float viewHeightCurrent;}playerState_t;
 typedef struct {int serverTime,buttons,weapon;}usercmd_t;
 typedef struct {playerState_t ps;struct {int connected;usercmd_t oldcmd;struct {int team;}cs;int sessionState;}sess;
- int buttons;}gclient_t;
+ int buttons,lastSpawnTime;}gclient_t;
+#define SESS_STATE_SPECTATOR 2
 typedef struct {int number,eType,eFlags,weapon,otherEntityNum,groundEntityNum,surfType,time,time2,eventParm,scale;
  vec3_t origin2;trajectory_t pos,apos;} entityState_t;
 typedef struct gentity_s {
@@ -148,7 +149,7 @@ static void G_MissileLandAngles(gentity_t *e,trace_t *t,vec_t *a,qboolean b){mem
 void G_ExplodeMissile(gentity_t *e);
 static int G_RunThink(gentity_t *e){if(e->nextthink>0&&e->nextthink<=level.time){e->nextthink=0;G_ExplodeMissile(e);}return 0;}
 static SoundAlias G_SoundAliasIndex(const char *n){assert(n&&*n);return 1;}
-static int s_placedSequence;
+static int s_placedSequence,s_placedSpawnTime[1024];
 static int s_mineListTime=-1,s_mineCount,s_minePickupStart[64],s_minePickupEntity[64];
 static unsigned short s_mineList[128];
 gentity_t *fire_grenade(gentity_t *,vec_t *,vec_t *,int,int);
@@ -166,11 +167,12 @@ server_checks = r'''
 enum {MINE=1,CHARGE=2,FRAG=3,WORLD=1022};
 static gentity_t *player(int n,int side){gentity_t *p=&g_entities[n];memset(p,0,sizeof(*p));p->s.number=n;p->r.inuse=1;
  p->health=100;p->client=&clients[n];memset(p->client,0,sizeof(gclient_t));p->client->sess.connected=2;
- p->client->sess.cs.team=side;return p;}
+ p->client->sess.cs.team=side;p->client->lastSpawnTime=700+n;return p;}
 static void at(gentity_t *p,float x,float y,float z){p->r.currentOrigin[0]=x;p->r.currentOrigin[1]=y;p->r.currentOrigin[2]=z;}
 static void reset(void){
  memset(g_entities,0,sizeof(g_entities));memset(clients,0,sizeof(clients));memset(defs,0,sizeof(defs));
  level.time=1000;level.previousTime=950;level.num_entities=72;s_placedSequence=0;s_mineListTime=-1;
+ memset(s_placedSpawnTime,0,sizeof(s_placedSpawnTime));
  memset(s_minePickupStart,0,sizeof(s_minePickupStart));world=blockSight=0;floorZ=0;wallX=1e9f;
  floorNormal[0]=floorNormal[1]=0;floorNormal[2]=1;
  explosions=radiusCalls=bounces=sounds=tempCount=0;lastAttacker=NULL;hit=(trace_t){.fraction=1,.entityNum=1023};
@@ -227,11 +229,17 @@ int main(void){
  /* Free-for-all: anyone but the owner, even on top of it. */
  reset();owner=player(0,0);enemy=player(1,0);m=armedMine(owner);at(owner,0,0,0);frame(m,50);assert(!(m->spawnflags&2));
  at(enemy,5,5,0);frame(m,50);assert(m->spawnflags&2);cases+=2;
- /* Gone with its owner, or when the owner changes sides. */
- for(int loss=0;loss<2;loss++){
-  reset();owner=player(0,2);m=place(owner,loss?CHARGE:MINE);rest(m,0,0);frame(m,50);assert(m->r.inuse);
-  if(loss)owner->client->sess.cs.team=1;else owner->client->sess.connected=0;
-  frame(m,50);assert(!m->r.inuse&&!explosions);cases++;
+ /* Gone with its owner, when the owner changes sides, spawns again or watches
+  * as a spectator; there through the owner's death and its killcam. */
+ for(int loss=0;loss<5;loss++){
+  reset();owner=player(0,2);m=place(owner,loss&1?CHARGE:MINE);rest(m,0,0);frame(m,50);assert(m->r.inuse);
+  if(loss==0)owner->client->sess.connected=0;
+  if(loss==1)owner->client->sess.cs.team=1;
+  if(loss==2)owner->client->lastSpawnTime=level.time;
+  if(loss==3)owner->client->sess.sessionState=SESS_STATE_SPECTATOR;
+  if(loss==4){owner->health=0;owner->client->sess.sessionState=1;}
+  for(int k=0;k<4;k++)frame(m,50);
+  assert(!m->r.inuse==(loss<4)&&!explosions);cases++;
  }
  /* Two of a kind each: a third replaces the oldest, apart from other kinds and players. */
  reset();owner=player(0,2);enemy=player(1,1);
@@ -317,8 +325,8 @@ int main(void){
  owner->client->buttons=0x20;calls=0;
  while(m->r.inuse&&calls<20){level.time+=50;owner->client->ps.cursorHint=0;G_UpdateMinePickup(owner);calls++;}
  assert(calls==11&&owner->client->ps.ammoclip[5]==1);cases++;
- /* A full kit, as after a respawn with the mine still down, or a kit without
-  * the mine takes it back too, without going past the clip. */
+ /* A full kit, or a kit without the mine, takes it back too, without going
+  * past the clip. */
  for(int c=0;c<2;c++){
   reset();owner=player(0,2);owner->client->ps.weapons[0]=c?1<<CHARGE:1<<MINE;owner->client->ps.ammoclip[5]=c?0:2;
   owner->client->buttons=USE;m=place(owner,MINE);rest(m,20,0);
@@ -630,7 +638,10 @@ mutants = [
     ('server', '(weapDef->iProximityArmTime > 0 ? weapDef->iProximityArmTime : 1)', '1'),
     ('server', 'delta[2] < -GMISSILE_PROXIMITY_BELOW || delta[2] > GMISSILE_PROXIMITY_ABOVE', '0'),
     ('server', '    if (ent->spawnflags & GMISSILE_PLACED_STUCK) {\n        G_RunThink(ent);\n        return 1;\n    }\n', ''),
-    ('server', '        G_PlacedTeam(owner) != ent->team)', '        0)'),
+    ('server', '        G_PlacedTeam(owner) != ent->team ||', '        0 ||'),
+    ('server', ' || owner->client->sess.sessionState == SESS_STATE_SPECTATOR ||', ' ||'),
+    ('server', '        owner->client->lastSpawnTime != s_placedSpawnTime[ent->s.number & 1023])', '        0)'),
+    ('server', '    s_placedSpawnTime[ent->s.number & 1023] = owner->client ? owner->client->lastSpawnTime : 0;\n', ''),
     ('server', '        if (count < limit || !oldest)', '        if (count <= limit || !oldest)'),
     ('server', ' || COD2_GEntityFromHandle(ent->parent) != player)', ')'),
     ('server', 'weapDef->stickiness == WEAPSTICKINESS_ALL && !(_ENT(other)->client)', 'weapDef->stickiness == WEAPSTICKINESS_ALL'),

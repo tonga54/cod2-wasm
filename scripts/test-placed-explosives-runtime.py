@@ -3,9 +3,8 @@
 
 Requires Docker, the native server image and the private browser archives;
 no network. A test client answers the class menu with the S-Mine, sets mines
-down with G and takes them back by holding Use, as a player does, including
-the mine left down from a life that ended, taken back with the full kit the
-next life starts with.
+down with G and takes them back by holding Use, as a player does; a mine left
+down stays through its owner's death and goes when they spawn again.
 """
 import argparse
 from pathlib import Path
@@ -104,23 +103,17 @@ run()
 	use(p, 1);
 	check("a-hold-takes-it", p getAmmoCount("mine_mp") == 2 && mines().size == 0, state(p));
 
-	// The mine outlives its owner, who comes back with both again and returns
-	// to where they stood when they set it down.
-	stand = p.origin;
-	view = p getPlayerAngles();
+	// As in WWII, the mine stays through its owner's death and goes when they
+	// spawn again, with both mines.
 	place(p);
 	p suicide();
+	wait .05;
+	check("stays-through-the-death", !isAlive(p) && mines().size == 1, state(p));
 	for(i = 0; i < 40 && !isAlive(p); i++)
 		wait .25;
 	wait 1;
 	p botStop();
-	check("respawns-full-with-the-mine-down", isAlive(p) && p getAmmoCount("mine_mp") == 2 && mines().size == 1,
-		state(p));
-	p setOrigin(stand);
-	p botAngles(view);
-	wait .5;
-	use(p, 1);
-	check("full-kit-takes-the-old-mine-back", isAlive(p) && p getAmmoCount("mine_mp") == 2 && mines().size == 0,
+	check("gone-when-its-owner-spawns-again", isAlive(p) && p getAmmoCount("mine_mp") == 2 && mines().size == 0,
 		state(p));
 	println("[mine-qa] DONE");
 }
@@ -178,7 +171,7 @@ def main():
         raise SystemExit('\n'.join(errors + failures) + f'\n{len(passes)}/{EXPECTED} passed; log: {args.log}')
     print(f'PASS: {EXPECTED} S-Mine checks on {args.map} through the dedicated server: a class with the S-Mine spawns '
           'with two, G sets one down, a held Use takes it back and a tap leaves it, both go down and come back, and '
-          'a mine left from a life that ended is taken back with the full kit the next life starts with')
+          'a mine stays through its owner\'s death and goes when they spawn again with both')
 
 
 if __name__ == '__main__':
