@@ -59,7 +59,8 @@ assert 'if (scoped || randomf() >= cg_tracerChance->current.value)' in weapons
 # The world zooms over at least the scope's share of the raise, on the curve
 # CG_WwiiScopeZoomFraction follows below.
 view = (root / 'src/PC/cgame_mp/cg_view_mp.c').read_text()
-assert 'transTime = CG_WwiiScopeZoomInFrac(weapIndex);' in view
+assert 'weapDef = (char *)BG_GetPlayerWeaponDef(&cg->predictedPlayerState, weapIndex);' in view
+assert 'transTime = CG_WwiiScopeZoomInFrac(weapIndex, ((WeaponDef *)weapDef)->fAdsZoomInFrac);' in view
 assert 'normalizedLerp = normalizedLerp * normalizedLerp * (3.0f - 2.0f * normalizedLerp);' in view
 # The reticle replaces the stock overlay while the WWII scope draws.
 reticle = function((root / 'src/PC/cgame_mp/cg_draw_mp.c').read_text(), 'CG_DrawWeapReticle')
@@ -748,8 +749,33 @@ if archives:
     asset_note = (f'the {len(glass_rows)} glasses against their viewmodels\' rings, the eyepieces beyond the '
                   f'{near_clip}-unit near clip, and {len(overlays)} retail lens edges')
 
+# The zoom's share of the raise is the weapon's own, with its player's
+# attachments, raised to the scope's for a rifle the WWII scope draws.
+zoom_body = function(scope, 'CG_WwiiScopeZoomInFrac')
+zoom_support = r'''
+#include <assert.h>
+typedef struct CgWwiiScopeGlass CgWwiiScopeGlass;
+static int glassWeapon = 3;
+static const CgWwiiScopeGlass *CG_WwiiScopeGlassForWeapon(int weapon) {
+    return weapon == glassWeapon ? (const CgWwiiScopeGlass *)&glassWeapon : 0;
+}
+''' + re.search(r'^#define CG_WWIISCOPE_ZOOM_IN_FRAC [^\n]+\n', scope, re.M)[0]
+zoom_checks = r'''
+int main(void) {
+    /* A 4x Optic's 0.42 on an iron-sighted gun stays its own. */
+    assert(CG_WwiiScopeZoomInFrac(5, 0.42f) == 0.42f && CG_WwiiScopeZoomInFrac(5, 0.1f) == 0.1f);
+    assert(CG_WwiiScopeZoomInFrac(3, 0.1f) == CG_WWIISCOPE_ZOOM_IN_FRAC && CG_WwiiScopeZoomInFrac(3, 0.6f) == 0.6f);
+    return 0;
+}
+'''
+zoom_mutants = [('frac < CG_WWIISCOPE_ZOOM_IN_FRAC', 'frac > CG_WWIISCOPE_ZOOM_IN_FRAC'),
+                ('    return frac;\n', '    return CG_WWIISCOPE_ZOOM_IN_FRAC;\n')]
+
 strict = ['-Wall', '-Werror', '-Wno-unused-function']
 with tempfile.TemporaryDirectory(prefix='cod2-wwii-scope-') as directory:
+    run(directory, 'zoom', zoom_support + zoom_body + zoom_checks, strict, True)
+    for index, (before, after) in enumerate(zoom_mutants):
+        run(directory, f'zoom{index}', zoom_support + mutate(zoom_body, before, after) + zoom_checks, ['-w'], False)
     math_cases = int(run(directory, 'scope', math_support + math_body + math_checks, strict, True).stdout)
     for index, (before, after) in enumerate(math_mutants):
         if before.startswith('static const float s_rechamberKeep'):
@@ -770,4 +796,5 @@ with tempfile.TemporaryDirectory(prefix='cod2-wwii-scope-') as directory:
 print(f'PASS: the WWII scope\'s hooks in the view weapon, reticle, zoom and start-up; {math_cases} cases of its glass '
       f'outline, rifle projection, zoom, blackout, centring, bolt and reticle math, the rifle\'s pose held by its '
       f'fire and rechamber anims\' weights past their states; {lens_cases} cases of lens images decoded, halved by '
-      f'alpha and cleared outside their edge; {len(math_mutants) + len(lens_mutants)} mutants fail; {asset_note}')
+      f'alpha and cleared outside their edge; the zoom\'s share of the raise as the attachments leave it; '
+      f'{len(math_mutants) + len(lens_mutants) + len(zoom_mutants)} mutants fail; {asset_note}')

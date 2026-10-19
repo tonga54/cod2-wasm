@@ -2,6 +2,7 @@
 #include "imports.h"
 #include "bytematch.h"
 #include "cod2_grenade.h"
+#include "headers/PC/bgame/bg_attachments.h"
 
 /* Unused bit inside the existing 27-bit replicated pm_flags field. The latch
  * must be part of player state so prediction replays the same trigger history
@@ -115,6 +116,7 @@ void BG_CalculateViewAngles(viewState_t *vs, vec_t *angles);
 void BG_ShutdownWeaponDefFiles(void)
 {
     bg_iNumWeapons = 0;
+    BG_ResetAttachedWeaponDefs();
 }
 
 WeaponDef *BG_GetWeaponDef(int iWeapon)
@@ -148,6 +150,7 @@ void BG_ClearWeaponDef(void)
 
     BG_LoadPlayerAnimTypes();
     BG_InitWeaponStrings();
+    BG_ResetAttachedWeaponDefs();
 }
 
 int BG_GetNumWeapons(void)
@@ -462,7 +465,7 @@ qboolean BG_IsPlayerWeaponAnAlt(int iWeaponIndex, int iAltIndex)
 
 void BG_GetSpreadForWeapon(const playerState_t *ps, int weaponIndex, float *minSpread, float *maxSpread)
 {
-    const WeaponDef *weapDef = bg_weaponDefs[weaponIndex];
+    const WeaponDef *weapDef = BG_GetPlayerWeaponDef(ps, weaponIndex);
     float frac;
 
     if (ps->viewHeightCurrent > 40.0f) {
@@ -591,7 +594,7 @@ int BG_GetTotalAmmoReserve(const playerState_t *ps, int weaponIndex)
 
 static void __attribute_regparm__(1) PM_ReloadClip(playerState_t *ps)
 {
-    WeaponDef *weapDef = bg_weaponDefs[ps->weapon];
+    WeaponDef *weapDef = BG_GetPlayerWeaponDef(ps, ps->weapon);
     int reloadState = ps->weaponstate - 7;
     int ammoIndex;
     int clipIndex;
@@ -608,7 +611,7 @@ static void __attribute_regparm__(1) PM_ReloadClip(playerState_t *ps)
     clipIndex = weapDef->iClipIndex;
     ammoReserve = ps->ammo[ammoIndex];
     clipAmmo = ps->ammoclip[clipIndex];
-    clipSize = bg_weapClips[clipIndex]->iClipSize;
+    clipSize = BG_GetPlayerClipSize(ps, ps->weapon);
     ammoToAdd = clipSize - clipAmmo;
     if (ammoReserve < ammoToAdd)
         ammoToAdd = ammoReserve;
@@ -629,7 +632,7 @@ static void __attribute_regparm__(1) PM_ReloadClip(playerState_t *ps)
 
 static qboolean __attribute_regparm__(1) PM_Weapon_AllowReload(playerState_t *ps)
 {
-    WeaponDef *weapDef = bg_weaponDefs[ps->weapon];
+    WeaponDef *weapDef = BG_GetPlayerWeaponDef(ps, ps->weapon);
     int ammoReserve = ps->ammo[weapDef->iAmmoIndex];
     int clipIndex = weapDef->iClipIndex;
     int clipAmmo;
@@ -640,7 +643,7 @@ static qboolean __attribute_regparm__(1) PM_Weapon_AllowReload(playerState_t *ps
         return 0;
 
     clipAmmo = ps->ammoclip[clipIndex];
-    clipSize = bg_weapClips[clipIndex]->iClipSize;
+    clipSize = BG_GetPlayerClipSize(ps, ps->weapon);
     if (clipAmmo >= clipSize)
         return 0;
 
@@ -829,7 +832,7 @@ static BM_ALWAYS_INLINE float BG_RandomBetween(float min, float max)
 
 void BG_WeaponFireRecoil(const playerState_t *ps, vec_t *vGunSpeed, vec_t *kickAVel)
 {
-    WeaponDef *weapDef = bg_weaponDefs[BG_GetViewmodelWeaponIndex_core(ps)];
+    WeaponDef *weapDef = BG_GetPlayerWeaponDef(ps, BG_GetViewmodelWeaponIndex_core(ps));
     float fPosLerp = ps->fWeaponPosFrac;
     float fReducePercent = 1.0f;
     float pitch;
@@ -886,7 +889,7 @@ void BG_CalculateWeaponPosition_Sway(playerState_t *ps, vec_t *swayViewAngles, v
     if (!frametime)
         return;
 
-    weapDef = bg_weaponDefs[BG_GetViewmodelWeaponIndex(ps)];
+    weapDef = BG_GetPlayerWeaponDef(ps, BG_GetViewmodelWeaponIndex(ps));
     f = ps->fWeaponPosFrac;
     dt = (float)frametime * 0.0010000000474974513f;
 
@@ -971,8 +974,8 @@ int BG_GetMaxPickupableAmmo(const playerState_t *ps, int weaponIndex)
 
     if (weapDef->iSharedAmmoCapIndex < 0) {
         if (weapDef->bClipOnly)
-            return bg_weapClips[clipIndex]->iClipSize - ps->ammoclip[clipIndex];
-        return bg_weapAmmoTypes[ammoIndex]->iMaxAmmo - ps->ammo[ammoIndex];
+            return BG_GetPlayerClipSize(ps, weaponIndex) - ps->ammoclip[clipIndex];
+        return BG_GetPlayerMaxAmmo(ps, weaponIndex) - ps->ammo[ammoIndex];
     }
 
     ammo = bg_sharedAmmoCaps[weapDef->iSharedAmmoCapIndex]->iSharedAmmoCap;
@@ -1083,6 +1086,7 @@ qboolean BG_TakePlayerWeapon(playerState_t *pPS, int iWeaponIndex)
     weapDef = bg_weaponDefs[iWeaponIndex];
     slot = BG_IsPlayerWeaponInSlot_core(pPS, iWeaponIndex, 1);
     if (slot) {
+        BG_SetSlotAttachments(pPS, slot, 0);
         if (weapDef->bSlotStackable) {
             int replacement;
 
@@ -1182,7 +1186,7 @@ static BM_NOINLINE void __attribute_regparm__(2) PM_BeginWeaponChange(playerStat
 static BM_ALWAYS_INLINE void PM_SetReloadDelay(playerState_t *ps)
 {
     int iWeapon = ps->weapon;
-    WeaponDef *weapDef = bg_weaponDefs[iWeapon];
+    WeaponDef *weapDef = BG_GetPlayerWeaponDef(ps, iWeapon);
     int reloadTime;
 
     if ((unsigned int)(ps->weaponstate - 7) <= 1) {
@@ -1273,7 +1277,7 @@ static void __attribute_regparm__(1) PM_BeginWeaponReload(playerState_t *ps)
 void PM_UpdateAimDownSightLerp(pmove_t *pm, pml_t *pml)
 {
     playerState_t *ps = pm->ps;
-    WeaponDef *weapDef = bg_weaponDefs[BG_GetViewmodelWeaponIndex(ps)];
+    WeaponDef *weapDef = BG_GetPlayerWeaponDef(ps, BG_GetViewmodelWeaponIndex(ps));
     qboolean adsRequested;
     float pos;
 
@@ -1546,7 +1550,7 @@ static qboolean PM_HasWeaponRechamberBit(const playerState_t *ps, int weapon)
 static void PM_UpdateHoldBreath(pmove_t *pm, pml_t *pml)
 {
     playerState_t *ps = pm->ps;
-    WeaponDef *weapDef = bg_weaponDefs[BG_GetViewmodelWeaponIndex(ps)];
+    WeaponDef *weapDef = BG_GetPlayerWeaponDef(ps, BG_GetViewmodelWeaponIndex(ps));
     int holdTime = (int)(player_breath_hold_time->current.value * 1000.0f);
     int gaspTime = (int)(player_breath_gasp_time->current.value * 1000.0f);
     float target;
@@ -2114,7 +2118,10 @@ static qboolean PM_ConsumeFireAmmo(playerState_t *ps, WeaponDef *weapDef)
         fireAnim = ps->ammoclip[clipIndex] ? 2 : 3;
 
     PM_WeaponSetAnim(ps, fireAnim);
-    PM_AddEvent(ps, ps->ammoclip[clipIndex] ? 0x9e : 0xa0);
+    /* The parameter marks a suppressed shot for every client's flash, sound
+     * and minimap. */
+    BG_AddPredictableEventToPlayerstate(ps->ammoclip[clipIndex] ? 0x9e : 0xa0,
+                                        (BG_GetWeaponAttachments(ps, ps->weapon) & ATT_BIT(ATT_SUPPRESSOR)) != 0, ps);
     PM_AddFireSpread(ps, weapDef);
     PM_TryTakeEmptyClipOnlyWeapon(ps, weapDef);
     return 1;
@@ -2189,7 +2196,7 @@ static qboolean PM_TryFireWeapon(pmove_t *pm, qboolean delayedAction, qboolean t
     if (!(pm->cmd.buttons & PM_WEAPON_BUTTON_ATTACK) && !delayedAction)
         return 0;
 
-    weapDef = bg_weaponDefs[ps->weapon];
+    weapDef = BG_GetPlayerWeaponDef(ps, ps->weapon);
     clipIndex = weapDef->iClipIndex;
 
     /* A new shot always waits for recovery, even if another caller reaches
@@ -2233,7 +2240,7 @@ static void PM_FinishFire(playerState_t *ps)
         return;
     }
 
-    weapDef = bg_weaponDefs[ps->weapon];
+    weapDef = BG_GetPlayerWeaponDef(ps, ps->weapon);
     if (weapDef->bBoltAction && PM_HasWeaponRechamberBit(ps, ps->weapon) &&
         ps->ammoclip[weapDef->iClipIndex] > 0) {
         PM_StartRechamber(ps, weapDef);
@@ -2973,7 +2980,7 @@ add_offset:
 void BG_CalculateWeaponAngles(weaponState_t *ws, vec_t *angles)
 {
     playerState_t *ps = ws->ps;
-    WeaponDef *weapDef = bg_weaponDefs[BG_GetViewmodelWeaponIndex(ps)];
+    WeaponDef *weapDef = BG_GetPlayerWeaponDef(ps, BG_GetViewmodelWeaponIndex(ps));
 
     angles[0] = 0.0f;
     angles[1] = 0.0f;
@@ -3148,7 +3155,7 @@ void BG_CalculateViewAngles(viewState_t *vs, vec_t *angles)
     angles[1] = 0.0f;
     angles[2] = GetLeanFraction(ps->leanf) * 16.0f;
 
-    weapDef = bg_weaponDefs[BG_GetViewmodelWeaponIndex(ps)];
+    weapDef = BG_GetPlayerWeaponDef(ps, BG_GetViewmodelWeaponIndex(ps));
 
     BG_AddViewDamageKick(vs, angles, weapDef);
     BG_AddViewIdle(vs, angles, weapDef);

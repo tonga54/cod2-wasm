@@ -3,8 +3,10 @@
 #include "cod2_grenade.h"
 #include "imports.h"
 #include "bytematch.h"
+#include "headers/PC/bgame/bg_attachments.h"
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_ammocounter.h"
+#include "headers/PC/cgame_mp/cg_attachmentsight.h"
 #include "headers/PC/cgame_mp/cg_breathprompt.h"
 #include "headers/PC/cgame_mp/cg_endgame.h"
 #include "headers/PC/cgame_mp/cg_grenadewarning.h"
@@ -200,6 +202,7 @@ void CG_AddLagometerSnapshotInfo(snapshot_t *snap);
 static void CG_DrawDisconnect(void);
 void CG_PriorityCenterPrint(const char *str, float charWidth, int priority);
 qboolean CG_GetWeapReticleZoom(float *pfZoom);
+extern MaterialHandle CL_RegisterMaterialNoMip(const char *name, int imageTrack);
 void CG_DrawFrameOverlay(float innerLeft, float innerRight, float innerTop, float innerBottom, const vec_t *color, MaterialHandle material);
 static unsigned int CG_DrawCrosshairNames(void);
 unsigned int CG_CheckTimedMenus(void);
@@ -442,7 +445,8 @@ qboolean CG_GetWeapReticleZoom(float *pfZoom)
     float zoom;
     float zoomFrac;
 
-    weaponDef = (byte *)BG_GetWeaponDef(BG_GetViewmodelWeaponIndex(&cg->predictedPlayerState));
+    weaponDef = (byte *)BG_GetPlayerWeaponDef(&cg->predictedPlayerState,
+                                              BG_GetViewmodelWeaponIndex(&cg->predictedPlayerState));
     zoom = cg->predictedPlayerState.fWeaponPosFrac;
     *pfZoom = 0.0f;
 
@@ -1089,7 +1093,7 @@ void CG_DrawTurretCrossHair(void)
 static void CG_DrawDamageIndicators(void)
 {
     int i;
-    WeaponDef *weapon = BG_GetWeaponDef(cg->predictedPlayerState.weapon);
+    WeaponDef *weapon = BG_GetPlayerWeaponDef(&cg->predictedPlayerState, cg->predictedPlayerState.weapon);
     if (!cgs->media.damageMaterial ||
         (weapon && weapon->overlayReticle && cg->predictedPlayerState.fWeaponPosFrac == 1.0f &&
          cg_hudDamageIconInScope && !cg_hudDamageIconInScope->current.enabled))
@@ -1165,7 +1169,7 @@ static void CG_DrawGrenadeIndicators(void)
         !cgs->media.grenadeIcon || !cgs->media.grenadePointer)
         return;
     viewWeapon = ps->weapon > 0 && ps->weapon <= BG_GetNumWeapons() ?
-        BG_GetWeaponDef(ps->weapon) : NULL;
+        BG_GetPlayerWeaponDef(ps, ps->weapon) : NULL;
     if (viewWeapon && viewWeapon->overlayReticle && ps->fWeaponPosFrac == 1.0f &&
         !cg_hudGrenadeIconInScope->current.enabled)
         return;
@@ -1562,7 +1566,7 @@ float CG_DrawWeapReticle(void)
 {
     playerState_t *ps = &cg->predictedPlayerState;
     int weapIndex = BG_GetViewmodelWeaponIndex(ps);
-    WeaponDef *weapDef = (WeaponDef *)BG_GetWeaponDef(weapIndex);
+    WeaponDef *weapDef = BG_GetPlayerWeaponDef(ps, weapIndex);
     float zoom = ps->fWeaponPosFrac;
     float zoomFrac;
     float adsFrac;
@@ -1596,8 +1600,6 @@ float CG_DrawWeapReticle(void)
     if (zoomFrac > 1.0f)
         zoomFrac = 1.0f;
 
-    weapIndex = BG_GetViewmodelWeaponIndex(ps);
-    weapDef = (WeaponDef *)BG_GetWeaponDef(weapIndex);
     color[0] = 1.0f;
     color[1] = 1.0f;
     color[2] = 1.0f;
@@ -1607,6 +1609,9 @@ float CG_DrawWeapReticle(void)
 
     weaponInfo = &(*(weaponInfo_t **)imp_cg_weapons)[weapIndex];
     material = weaponInfo->hADSOverlay;
+    /* A 4x Optic on an iron-sighted gun borrows its nation's sniper scope. */
+    if (weapDef->szOverlayMaterial != ((WeaponDef *)BG_GetWeaponDef(weapIndex))->szOverlayMaterial)
+        material = CL_RegisterMaterialNoMip(weapDef->szOverlayMaterial, 7);
     if (material) {
         drawSize[0] = weapDef->overlayWidth;
         drawSize[1] = weapDef->overlayHeight;
@@ -1791,12 +1796,15 @@ unsigned int CG_DrawCrosshair(void)
     if (weapIndex == 0)
         return 0;
 
-    weapDef = (WeaponDef *)BG_GetWeaponDef(weapIndex);
+    weapDef = BG_GetPlayerWeaponDef(ps, weapIndex);
     reticleVisibility = CG_DrawWeapReticle();
 
     /* A scope still shows its overlay while the countdown holds its fire. */
     if (!drawHudMenus || CG_PrematchActive())
         return 0;
+
+    CG_CalcCrosshairPosition(&centerX, &centerY);
+    CG_DrawAttachmentSight(ps, weapIndex, centerX, centerY);
 
     /* Teammates turn the crosshair the color of their labels, the stock green
      * with the stock labels. Enemies leave it white; the red hit marker

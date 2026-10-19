@@ -66,6 +66,7 @@ static void Trace(trace_t *tr,const vec_t *start,const vec_t *mins,const vec_t *
 typedef struct {playerState_t *ps;} viewState_t;
 typedef struct {int unused;} WeaponDef;
 static WeaponDef weapon,*bg_weaponDefs[]={&weapon};
+static WeaponDef *BG_GetPlayerWeaponDef(playerState_t *p,int w){return bg_weaponDefs[w];}
 static int BG_GetViewmodelWeaponIndex(playerState_t *p){return 0;}
 static void BG_AddViewDamageKick(viewState_t *v,vec_t *a,WeaponDef *w){a[2]+=1;}
 static void BG_AddViewIdle(viewState_t *v,vec_t *a,WeaponDef *w){a[0]+=2;}

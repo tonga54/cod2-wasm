@@ -655,8 +655,8 @@ with tempfile.TemporaryDirectory(prefix='cod2-class-pictures-menu-') as director
     for number, variant in enumerate([menu_code] + [mutate(menu_code, old, new) for old, new in menu_mutants]):
         source, binary = Path(directory) / f'menu{number}.c', Path(directory) / f'menu{number}'
         source.write_text(menu_support + variant + menu_checks)
-        subprocess.run(['cc', '-std=gnu99', '-O1', '-g', '-fsanitize=address,undefined', '-fno-sanitize-recover=all',
-                        '-Wno-unused-function', str(source), '-o', str(binary)], check=True)
+        subprocess.run(['cc', '-std=gnu99', '-O1', '-g', '-I', str(root / 'src'), '-fsanitize=address,undefined',
+                        '-fno-sanitize-recover=all', '-Wno-unused-function', str(source), '-o', str(binary)], check=True)
         result = subprocess.run([str(binary)], capture_output=True, text=True)
         assert (result.returncode == 0) == (number == 0), (number, result.stderr[-2000:])
     COUNTS['menu'] = len(menu_mutants)

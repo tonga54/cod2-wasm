@@ -461,7 +461,7 @@ int main(void) {
      * response and closes it; reopened, it shows that tab and class. */
     commands = 0;
     assert(key(0x0d) == 1 && commands == 1);
-    assert(chose("class,mp44_mp,luger_mp,frag_grenade_german_mp,smoke_grenade_german_mp"));
+    assert(chose("class,mp44_mp,luger_mp,frag_grenade_german_mp,smoke_grenade_german_mp,none,none,grip+extmag,none"));
     UI_ClassMenu_Open(&dc, 1);
     assert(s_cac.tab == CAC_TAB_STANDARD && s_cac.classFocus == 0);
     /* Looking at the other tab and backing out leaves the choice as it was. */
@@ -472,11 +472,13 @@ int main(void) {
     assert(s_cac.tab == CAC_TAB_STANDARD && s_cac.classFocus == 0);
     key(0x9b);
     key(0x9b);
-    assert(key(0xbf) == 1 && chose("class,m1garand_mp,colt_mp,frag_grenade_american_mp,smoke_grenade_american_mp"));
+    assert(key(0xbf) == 1 && chose("class,m1garand_mp,colt_mp,frag_grenade_american_mp,smoke_grenade_american_mp,none,none,"
+                                     "quickdraw+extmag,none"));
     UI_ClassMenu_Open(&dc, 1);
     assert(s_cac.tab == CAC_TAB_STANDARD && s_cac.classFocus == 2);
     /* A number chooses that class of the tab at once. */
-    assert(key(0x400 | '4') == 1 && chose("class,kar98k_sniper_mp,luger_mp,frag_grenade_german_mp,smoke_grenade_german_mp"));
+    assert(key(0x400 | '4') == 1 && chose("class,kar98k_sniper_mp,luger_mp,frag_grenade_german_mp,smoke_grenade_german_mp,"
+                                                "none,none,fmj+extmag,none"));
     UI_ClassMenu_Open(&dc, 1);
     key(0x9c);
     assert(key(0x400 | '1') == 1 && chose("class,kar98k_mp,TT30_mp,frag_grenade_russian_mp,smoke_grenade_british_mp"));
@@ -518,7 +520,8 @@ int main(void) {
     assert(key(0xc8) == 1 && s_cac.tab == CAC_TAB_STANDARD && !commands && s_cac.open);
     point(60, rowTop(1) + 10);
     paint(&classMenu);
-    assert(key(0xc8) == 1 && chose("class,thompson_mp,colt_mp,frag_grenade_american_mp,smoke_grenade_american_mp"));
+    assert(key(0xc8) == 1 && chose("class,thompson_mp,colt_mp,frag_grenade_american_mp,smoke_grenade_american_mp,none,none,"
+                                     "steadyaim+extmag,none"));
     cases += 2;
 
     /* Escape closes it without a choice. */

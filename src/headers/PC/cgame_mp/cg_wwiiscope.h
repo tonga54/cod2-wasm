@@ -55,10 +55,10 @@ void CG_WwiiScopeClear(void);
 const CgWwiiScopeGlass *CG_WwiiScopeFindGlass(const char *gunModel);
 /* The scoped rifle's glass when the WWII scope draws this weapon, else NULL. */
 const CgWwiiScopeGlass *CG_WwiiScopeGlassForWeapon(int weapon);
-/* The part of the raise over which a weapon zooms in: the stock fraction,
- * but a WWII scope zooms over at least the last CG_WWIISCOPE_ZOOM_IN_FRAC so
- * the window opens with the zoom. */
-float CG_WwiiScopeZoomInFrac(int weapon);
+/* The part of the raise over which a weapon zooms in: frac, the weapon's own
+ * with its player's attachments, but a WWII scope zooms over at least the
+ * last CG_WWIISCOPE_ZOOM_IN_FRAC so the window opens with the zoom. */
+float CG_WwiiScopeZoomInFrac(int weapon, float frac);
 /* The glass's rim on screen, from the j_gun bone's world axes and origin and
  * the rifle's projection scales: its centre and half-axes along the scope's
  * right and up. Returns 0 when the glass faces away from the eye, reaches

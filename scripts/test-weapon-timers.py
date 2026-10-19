@@ -35,6 +35,8 @@ typedef struct { int bBoltAction,bSemiAuto,bSegmentedReload,iReloadStartAddTime,
 typedef struct { playerState_t *ps;struct {int buttons,weapon;} cmd; } pmove_t;
 typedef struct { int msec; } pml_t;
 static WeaponDef weapon,grenade,*bg_weaponDefs[128],*bg_weapClips[128];
+static WeaponDef *BG_GetPlayerWeaponDef(const playerState_t *ps,int w) { return bg_weaponDefs[w]; }
+static int BG_GetPlayerClipSize(const playerState_t *ps,int w) { return bg_weapClips[bg_weaponDefs[w]->iClipIndex]->iClipSize; }
 static int events;
 static void PM_AddEvent(playerState_t *ps,int event) { events++; }
 '''

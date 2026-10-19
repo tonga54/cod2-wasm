@@ -125,6 +125,16 @@ retail CoD2:
   Pictures of the host owner's can show a class weapon in color in these
   screens, as WWII's do, and its camouflage paints them; the HUD keeps its
   white icons. See [custom classes](docs/CLASSES.md).
+- **Weapon attachments:** a class's primary takes up to three of Call of Duty:
+  WWII's attachments and its pistol one, from each gun's WWII list, one optic
+  at a time: Extended Mag, Rapid Fire, Quickdraw, Grip, Steady Aim, Advanced
+  Rifling, FMJ, High Caliber, Suppressor, Ballistic Calibration and the Reflex,
+  Lens and 4x sights. They change that player's magazine, fire rate, aiming,
+  spread, recoil, sway, zoom, damage range, penetration and head damage, in
+  prediction and on the server alike, and a suppressed gun is quiet, without
+  flash and off the enemy minimap. CoD2 has no attachment models; the sights are
+  drawn reticles and the 4x Optic a sniper scope. See
+  [attachments](docs/CLASSES.md#attachments).
 - **Placed explosives:** CoD WWII's S-Mine 44, set down at your feet after
   the left hand draws its pin, and CoD4's C4, thrown to stick and set off with
   aim from anywhere. Your squad's emblem, a star or an iron cross, pulses over

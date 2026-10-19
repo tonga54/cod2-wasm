@@ -3,6 +3,7 @@
 #include "bytematch.h"
 #include <stdlib.h>
 #include <string.h>
+#include "headers/PC/bgame/bg_attachments.h"
 #include "headers/PC/game_mp/g_points.h"
 extern scr_const_t scr_const;
 
@@ -181,7 +182,8 @@ extern int BG_WeaponAmmo(const playerState_t *ps, int weapon);
 extern void ClientUserinfoChanged(int clientNum);
 extern vec3_t playerMins;
 extern vec3_t playerMaxs;
-extern BuiltinFunctionDef functions[145];
+extern BuiltinFunctionDef functions[146];
+extern int BG_GetWeaponSlotForName(const char *pszSlotName);
 
 extern BuiltinMethodDef methods[];
 
@@ -1598,6 +1600,17 @@ void Scr_PrecacheItem(void)
 
     RegisterItem((int)(item - bg_itemlist), 1);
     return;
+}
+
+/* validWeaponAttachments(weapon, list, slot): whether a class may fit the
+ * attachments, "none" or names joined by '+', to that weapon in "primary"
+ * or "primaryb". */
+void GScr_ValidWeaponAttachments(void)
+{
+    int slot = BG_GetWeaponSlotForName(Scr_GetString(2));
+
+    Scr_AddBool(slot && BG_AttachmentsParse(Scr_GetString(0), Scr_GetString(1),
+                                            slot == WEAPSLOT_PRIMARY ? ATT_PRIMARY_MAX : ATT_SECONDARY_MAX) >= 0);
 }
 
 void Scr_PrecacheShader(void)
@@ -4531,7 +4544,7 @@ void Scr_AddStruct();
 void Scr_GetEnt();
 void Scr_GetEntArray();
 void Scr_ResetTimeout();
-BuiltinFunctionDef functions[145] = {
+BuiltinFunctionDef functions[146] = {
     { "print", (BuiltinFunction)print, 1 },
     { "println", (BuiltinFunction)println, 1 },
     { "iprintln", (BuiltinFunction)iprintln, 0 },
@@ -4608,6 +4621,7 @@ BuiltinFunctionDef functions[145] = {
     { "precachemodel", (BuiltinFunction)Scr_PrecacheModel, 0 },
     { "precacheshellshock", (BuiltinFunction)Scr_PrecacheShellShock, 0 },
     { "precacheitem", (BuiltinFunction)Scr_PrecacheItem, 0 },
+    { "validweaponattachments", (BuiltinFunction)GScr_ValidWeaponAttachments, 0 },
     { "precacheshader", (BuiltinFunction)Scr_PrecacheShader, 0 },
     { "precachestring", (BuiltinFunction)Scr_PrecacheString, 0 },
     { "precacherumble", (BuiltinFunction)Scr_PrecacheRumble, 0 },

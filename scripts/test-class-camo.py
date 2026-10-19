@@ -3,7 +3,8 @@
 gun's tile, F2, a controller's Y or a click opening WWII's Primary or Secondary
 Camouflage, the swatches' keys and clicks, equipping a pattern (saved only when
 it changes), the guns painted in the tiles and the picker's preview (the
-owner's picture of a gun when there is one), and the class a match receives."""
+owner's picture of a gun when there is one), the editor's camouflage lines and
+attachment boxes together, and the class a match receives."""
 from pathlib import Path
 import re
 import subprocess
@@ -382,10 +383,10 @@ int main(void) {
            key(&createMenu, 0x0d));
     assert(s_cac.screen == CAC_SCREEN_EDIT && s_cac.slotFocus == CLASS_SLOT_PRIMARY &&
            s_cac.classes[0].camo[0] == frogskin && saves == 1);
-    assert(!strncmp(saved, "Kar Rusher\tkar98k_mp\tluger_mp\tfrag_grenade_german_mp\tsmoke_grenade_german_mp\tfrogskin\tember\n"
-                           "Night Owl\tspringfield_mp\twebley_mp\tfrag_grenade_american_mp\tsmoke_grenade_german_mp\tnone\tnone\n",
-                    strlen("Kar Rusher\tkar98k_mp\tluger_mp\tfrag_grenade_german_mp\tsmoke_grenade_german_mp\tfrogskin\tember\n"
-                           "Night Owl\tspringfield_mp\twebley_mp\tfrag_grenade_american_mp\tsmoke_grenade_german_mp\tnone\tnone\n")));
+    assert(!strncmp(saved, "Kar Rusher\tkar98k_mp\tluger_mp\tfrag_grenade_german_mp\tsmoke_grenade_german_mp\tfrogskin\tember\t\t\n"
+                           "Night Owl\tspringfield_mp\twebley_mp\tfrag_grenade_american_mp\tsmoke_grenade_german_mp\tnone\tnone\t\t\n",
+                    strlen("Kar Rusher\tkar98k_mp\tluger_mp\tfrag_grenade_german_mp\tsmoke_grenade_german_mp\tfrogskin\tember\t\t\n"
+                           "Night Owl\tspringfield_mp\twebley_mp\tfrag_grenade_american_mp\tsmoke_grenade_german_mp\tnone\tnone\t\t\n")));
     paint(&createMenu);
     assert(text("CAMOUFLAGE: FROGSKIN") && picOf(&painted[0][frogskin]) && picOf(&painted[1][ember]) && !pics(karImage));
     /* The one it wears again saves nothing. */
@@ -393,8 +394,12 @@ int main(void) {
            s_cac.screen == CAC_SCREEN_EDIT);
     cases += 2;
 
-    /* A controller's Y opens Secondary Camouflage on the pistol's Ember:
-     * the silhouette in it, or the icon until the renderer has painted it. */
+    /* Down passes the primary's attachment boxes, where Y opens nothing, on
+     * the way to the pistol. A controller's Y opens Secondary Camouflage on
+     * the pistol's Ember: the silhouette in it, or the icon until the
+     * renderer has painted it. */
+    assert(key(&createMenu, 0x9b) && s_cac.slotFocus == CAC_FOCUS_PRIMARY_ATTACHMENT);
+    assert(key(&createMenu, 0xd2) && s_cac.screen == CAC_SCREEN_EDIT);
     assert(key(&createMenu, 0x9b) && s_cac.slotFocus == CLASS_SLOT_SECONDARY);
     assert(key(&createMenu, 0xd2) && s_cac.screen == CAC_SCREEN_CAMO && s_cac.camoSlot == CLASS_SLOT_SECONDARY &&
            s_cac.camoFocus == ember);
@@ -436,11 +441,65 @@ int main(void) {
     assert(key(&classMenu, 0x9c) && s_cac.tab == CAC_TAB_CUSTOM);
     assert(key(&classMenu, 0x0d) &&
            !strcmp(command, "cmd mr 77 3 class,kar98k_mp,luger_mp,frag_grenade_german_mp,smoke_grenade_german_mp,"
-                            "oakleaf,ember\n"));
+                            "oakleaf,ember,none,none\n"));
     UI_ClassMenu_Open(&dc, 1);
     assert(key(&classMenu, 0x9b) && s_cac.classFocus == 1 && key(&classMenu, 0x0d) &&
            !strcmp(command, "cmd mr 77 3 class,springfield_mp,webley_mp,frag_grenade_american_mp,"
                             "smoke_grenade_german_mp\n"));
+    cases++;
+
+    /* With attachments: under each gun its camouflage line, then its
+     * attachment boxes, none overlapping. Down reaches the primary's first
+     * box and Enter opens Modify Attachment, the gun painted as it wears its
+     * camouflage; equipping saves the line with both, Escape returns to the
+     * box, and a match receives the class with both. */
+    UI_ClassMenu_Open(&dc, 0);
+    s_cac.classFocus = 0;
+    assert(s_cac.store == CAC_STORE_READY && key(&createMenu, 0x0d) && s_cac.screen == CAC_SCREEN_EDIT);
+    s_cac.slotFocus = CLASS_SLOT_PRIMARY;
+    {
+        const CacRect *tiles = Cac_EditTiles();
+
+        for (int slot = 0; slot < CLASS_CAMO_SLOTS; slot++) {
+            const CacRect *box = &tiles[slot == CLASS_SLOT_PRIMARY ? CAC_FOCUS_PRIMARY_ATTACHMENT
+                                                                    : CAC_FOCUS_SECONDARY_ATTACHMENT];
+
+            assert(box->y >= tiles[slot].y + tiles[slot].h + 1.5f + CAC_CAMO_LINE_HEIGHT + 1.0f);
+        }
+        /* Room for the secondary's two lines above its tile. */
+        assert(tiles[CAC_FOCUS_PRIMARY_ATTACHMENT].y + CAC_ATTACHMENT_BOX_HEIGHT + 20.0f <= tiles[CLASS_SLOT_SECONDARY].y);
+    }
+    {
+        const int camo = s_cac.classes[0].camo[CLASS_SLOT_PRIMARY];
+        char line[160];
+
+        assert(camo > WEAPON_CAMO_NONE && !ClassData_AttachmentCount(&s_cac.classes[0], CLASS_SLOT_PRIMARY));
+        assert(key(&createMenu, 0x9b) && s_cac.slotFocus == CAC_FOCUS_PRIMARY_ATTACHMENT);
+        paint(&createMenu);
+        assert(text("+") && prompted(2, "ENTER", "Select", "F1", "Rename", NULL, NULL));
+        assert(key(&createMenu, 0x0d) && s_cac.screen == CAC_SCREEN_ATTACHMENTS && s_cac.attachSlot == CLASS_SLOT_PRIMARY &&
+               s_cac.attachPosition == 0);
+        pictureCalls = 0;
+        paint(&createMenu);
+        assert(text("MODIFY ATTACHMENT") && text("4X OPTIC") && lastPicture.camo == camo &&
+               picOf(&painted[0][camo]) && prompted(1, "ENTER", "Equip", NULL, NULL, NULL, NULL));
+        saves = 0;
+        assert(key(&createMenu, 0x0d) && s_cac.screen == CAC_SCREEN_EDIT && saves == 1 &&
+               s_cac.slotFocus == CAC_FOCUS_PRIMARY_ATTACHMENT &&
+               s_cac.classes[0].attachment[CLASS_SLOT_PRIMARY][0] == ATT_OPTIC4X);
+        snprintf(line, sizeof(line), "Kar Rusher\tkar98k_mp\tluger_mp\tfrag_grenade_german_mp\tsmoke_grenade_german_mp\t%s\t"
+                 "ember\toptic4x\t\n", g_weaponCamos[camo].id);
+        assert(!strncmp(saved, line, strlen(line)));
+        assert(key(&createMenu, 0x0d) && s_cac.screen == CAC_SCREEN_ATTACHMENTS);
+        assert(key(&createMenu, 0x1b) && s_cac.screen == CAC_SCREEN_EDIT && s_cac.slotFocus == CAC_FOCUS_PRIMARY_ATTACHMENT);
+        assert(key(&createMenu, 0x1b) && s_cac.screen == CAC_SCREEN_LIST);
+        UI_ClassMenu_Open(&dc, 1);
+        s_cac.tab = CAC_TAB_CUSTOM;
+        s_cac.classFocus = 0;
+        snprintf(line, sizeof(line), "cmd mr 77 3 class,kar98k_mp,luger_mp,frag_grenade_german_mp,smoke_grenade_german_mp,"
+                 "%s,ember,optic4x,none\n", g_weaponCamos[camo].id);
+        assert(key(&classMenu, 0x0d) && !strcmp(command, line));
+    }
     cases++;
 
     printf("%d\n", cases);
@@ -463,8 +522,8 @@ mutants = [
     ('    if (gun && s_cac.pictures[index]) {', '    if (0) {'),
     ('st[0], st[1], st[2], st[3], UI_WWIIMenu_Color(WWII_COLOR_WHITE), picture);',
      '0.0f, 0.0f, 1.0f, 1.0f, UI_WWIIMenu_Color(WWII_COLOR_WHITE), picture);'),
-    ('    if (s_cac.screen == CAC_SCREEN_WEAPONS || s_cac.screen == CAC_SCREEN_EQUIPMENT || s_cac.screen == CAC_SCREEN_CAMO) {',
-     '    if (s_cac.screen == CAC_SCREEN_WEAPONS || s_cac.screen == CAC_SCREEN_EQUIPMENT) {'),
+    ('s_cac.screen == CAC_SCREEN_EQUIPMENT ||\n               s_cac.screen == CAC_SCREEN_CAMO) {',
+     's_cac.screen == CAC_SCREEN_EQUIPMENT) {'),
     ('        } else if (s_cac.screen == CAC_SCREEN_EDIT && s_cac.hover >= CAC_HOVER_CAMO) {', '        } else if (0) {'),
     ('            s_cac.hover = CAC_HOVER_CAMO + slot;', '            s_cac.hover = slot;'),
     ('        Cac_CamoRows(key == CAC_KEY_UP ? -1 : 1);',
@@ -479,6 +538,10 @@ mutants = [
      'Cac_GunPicture(weapon, WEAPON_CAMO_NONE, &box,'),
     ('Cac_GunPicture(weapon, Cac_SlotCamo(&Cac_Listed()[s_cac.classFocus], slot), &box,',
      'Cac_GunPicture(weapon, Cac_SlotCamo(&s_cac.classes[s_cac.classFocus], slot), &box,'),
+    ('#define CAC_ATTACHMENT_BOX_TOP (1.5f + CAC_CAMO_LINE_HEIGHT + 2.5f)', '#define CAC_ATTACHMENT_BOX_TOP 4.0f'),
+    ('    Cac_GunPicture(weapon, Cac_SlotCamo(loadout, slot), &box, UI_WWIIMenu_Color(WWII_COLOR_WHITE));\n    Cac_Stats(weapon, mask,',
+     '    Cac_Picture(weapon, &box, UI_WWIIMenu_Color(WWII_COLOR_WHITE));\n    Cac_Stats(weapon, mask,'),
+    ('        Cac_ReturnToAttachment(s_cac.attachSlot, s_cac.attachPosition);\n    } else if', '    } else if'),
 ]
 
 

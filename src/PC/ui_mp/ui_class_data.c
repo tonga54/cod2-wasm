@@ -1,5 +1,8 @@
 #include "headers/PC/ui_mp/ui_class_data.h"
+#include "headers/PC/bgame/bg_attachment_rules.h"
 #include "headers/PC/bgame/bg_weapon_camo.h"
+#include <math.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -78,15 +81,21 @@ const ClassWeapon g_classWeapons[] = {
 };
 const int g_classWeaponCount = (int)(sizeof(g_classWeapons) / sizeof(g_classWeapons[0]));
 
+/* The primaries' attachments follow the Prima guide's suggestions for their
+ * WWII counterparts. */
 static const struct {
     const char *name;
     const char *weapon[CLASS_SLOT_COUNT];
+    const char *attachments;
 } s_classDefaults[CLASS_COUNT] = {
-    { "Assault", { "mp44_mp", "luger_mp", "frag_grenade_german_mp", "smoke_grenade_german_mp" } },
-    { "Submachine Gunner", { "thompson_mp", "colt_mp", "frag_grenade_american_mp", "smoke_grenade_american_mp" } },
-    { "Rifleman", { "m1garand_mp", "colt_mp", "frag_grenade_american_mp", "smoke_grenade_american_mp" } },
-    { "Sniper", { "kar98k_sniper_mp", "luger_mp", "frag_grenade_german_mp", "smoke_grenade_german_mp" } },
-    { "Close Quarters", { "shotgun_mp", "webley_mp", "frag_grenade_british_mp", "smoke_grenade_british_mp" } },
+    { "Assault", { "mp44_mp", "luger_mp", "frag_grenade_german_mp", "smoke_grenade_german_mp" }, "grip+extmag" },
+    { "Submachine Gunner", { "thompson_mp", "colt_mp", "frag_grenade_american_mp", "smoke_grenade_american_mp" },
+      "steadyaim+extmag" },
+    { "Rifleman", { "m1garand_mp", "colt_mp", "frag_grenade_american_mp", "smoke_grenade_american_mp" },
+      "quickdraw+extmag" },
+    { "Sniper", { "kar98k_sniper_mp", "luger_mp", "frag_grenade_german_mp", "smoke_grenade_german_mp" }, "fmj+extmag" },
+    { "Close Quarters", { "shotgun_mp", "webley_mp", "frag_grenade_british_mp", "smoke_grenade_british_mp" },
+      "steadyaim+rapidfire" },
 };
 
 int ClassData_Find(const char *weapon)
@@ -111,6 +120,28 @@ int ClassData_SlotWeapons(int slot, int *indexes, int max)
     return count;
 }
 
+/* A weapon slot's attachments from a list, none when it is not valid; 1 when
+ * it was. */
+static int ClassData_ReadAttachments(ClassLoadout *loadout, int slot, const char *list)
+{
+    int ids[ATT_COUNT], count, i;
+
+    for (i = 0; i < ATT_PRIMARY_MAX; i++)
+        loadout->attachment[slot][i] = -1;
+    if (loadout->weapon[slot] < 0)
+        return 0;
+    count = BG_AttachmentsParseList(g_classWeapons[loadout->weapon[slot]].weapon, list, ClassData_AttachmentMax(slot),
+                                    ids);
+    for (i = 0; i < count; i++)
+        loadout->attachment[slot][i] = ids[i];
+    return count >= 0;
+}
+
+static int ClassData_FormatAttachments(const ClassLoadout *loadout, int slot, char *out, int size)
+{
+    return BG_AttachmentsFormatList(loadout->attachment[slot], ClassData_AttachmentCount(loadout, slot), out, size);
+}
+
 void ClassData_Defaults(ClassLoadout *classes)
 {
     int i, slot;
@@ -121,6 +152,8 @@ void ClassData_Defaults(ClassLoadout *classes)
             classes[i].weapon[slot] = ClassData_Find(s_classDefaults[i].weapon[slot]);
         for (slot = 0; slot < CLASS_CAMO_SLOTS; slot++)
             classes[i].camo[slot] = WEAPON_CAMO_NONE;
+        ClassData_ReadAttachments(&classes[i], CLASS_SLOT_PRIMARY, s_classDefaults[i].attachments);
+        ClassData_ReadAttachments(&classes[i], CLASS_SLOT_SECONDARY, NULL);
     }
 }
 
@@ -128,6 +161,73 @@ static int ClassData_Camos(const ClassLoadout *loadout)
 {
     return loadout->camo[0] >= 0 && loadout->camo[0] < WEAPON_CAMO_COUNT && loadout->camo[1] >= 0 &&
            loadout->camo[1] < WEAPON_CAMO_COUNT;
+}
+
+int ClassData_AttachmentMax(int slot)
+{
+    return slot == CLASS_SLOT_PRIMARY ? ATT_PRIMARY_MAX : slot == CLASS_SLOT_SECONDARY ? ATT_SECONDARY_MAX : 0;
+}
+
+int ClassData_AttachmentCount(const ClassLoadout *loadout, int slot)
+{
+    int count = 0;
+
+    while (count < ClassData_AttachmentMax(slot) && loadout->attachment[slot][count] >= 0)
+        count++;
+    return count;
+}
+
+unsigned ClassData_AttachmentMask(const ClassLoadout *loadout, int slot)
+{
+    unsigned mask = 0;
+    int i, count = ClassData_AttachmentCount(loadout, slot);
+
+    for (i = 0; i < count; i++)
+        mask |= ATT_BIT(loadout->attachment[slot][i]);
+    return mask;
+}
+
+void ClassData_SetWeapon(ClassLoadout *loadout, int slot, int weapon)
+{
+    int i;
+
+    if (loadout->weapon[slot] == weapon)
+        return;
+    loadout->weapon[slot] = weapon;
+    if (slot <= CLASS_SLOT_SECONDARY) {
+        for (i = 0; i < ATT_PRIMARY_MAX; i++)
+            loadout->attachment[slot][i] = -1;
+    }
+}
+
+int ClassData_EquipAttachment(ClassLoadout *loadout, int slot, int position, int attachment)
+{
+    int count = ClassData_AttachmentCount(loadout, slot);
+    unsigned others = ClassData_AttachmentMask(loadout, slot);
+
+    if (position < 0 || position >= ClassData_AttachmentMax(slot) || attachment < 0 || attachment >= ATT_COUNT ||
+        loadout->weapon[slot] < 0 ||
+        !(BG_AttachmentsAllowed(g_classWeapons[loadout->weapon[slot]].weapon) & ATT_BIT(attachment)))
+        return 0;
+    if (position >= count)
+        position = count;
+    else
+        others &= ~ATT_BIT(loadout->attachment[slot][position]);
+    if (BG_AttachmentConflict(others, attachment) >= 0)
+        return 0;
+    loadout->attachment[slot][position] = attachment;
+    return 1;
+}
+
+void ClassData_RemoveAttachment(ClassLoadout *loadout, int slot, int position)
+{
+    int count = ClassData_AttachmentCount(loadout, slot), i;
+
+    if (position < 0 || position >= count)
+        return;
+    for (i = position; i + 1 < count; i++)
+        loadout->attachment[slot][i] = loadout->attachment[slot][i + 1];
+    loadout->attachment[slot][count - 1] = -1;
 }
 
 static int ClassData_NameChar(int c)
@@ -154,7 +254,7 @@ int ClassData_Parse(const char *text, ClassLoadout *classes)
 
     ClassData_Defaults(classes);
     for (i = 0; i < CLASS_COUNT; i++) {
-        char fields[1 + CLASS_SLOT_COUNT + CLASS_CAMO_SLOTS][64];
+        char fields[1 + CLASS_SLOT_COUNT + CLASS_CAMO_SLOTS + 2][64];
         const char *end = text ? strchr(text, '\n') : NULL;
         int count = 0;
 
@@ -165,7 +265,8 @@ int ClassData_Parse(const char *text, ClassLoadout *classes)
         }
         if (!end)
             end = text + strlen(text);
-        while (text < end && count < 1 + CLASS_SLOT_COUNT + CLASS_CAMO_SLOTS) {
+        /* An empty last field, as no secondary attachments, still counts. */
+        while (count < 1 + CLASS_SLOT_COUNT + CLASS_CAMO_SLOTS + 2) {
             const char *tab = memchr(text, '\t', (size_t)(end - text));
             size_t length = (size_t)((tab ? tab : end) - text);
 
@@ -178,7 +279,8 @@ int ClassData_Parse(const char *text, ClassLoadout *classes)
             if (!tab)
                 break;
         }
-        if (count != 1 + CLASS_SLOT_COUNT + CLASS_CAMO_SLOTS)
+        if (count != 1 + CLASS_SLOT_COUNT && count != 1 + CLASS_SLOT_COUNT + CLASS_CAMO_SLOTS &&
+            count != 1 + CLASS_SLOT_COUNT + CLASS_CAMO_SLOTS + 2)
             valid = 0;
         if (ClassData_ValidName(fields[0]))
             snprintf(classes[i].name, sizeof(classes[i].name), "%s", fields[0]);
@@ -192,12 +294,18 @@ int ClassData_Parse(const char *text, ClassLoadout *classes)
             else
                 valid = 0;
         }
+        /* Lines from before camouflage carry none, and lines from before
+         * attachments none of those. */
         for (slot = 0; slot < CLASS_CAMO_SLOTS; slot++) {
             int camo = BG_WeaponCamo_Find(fields[1 + CLASS_SLOT_COUNT + slot]);
 
             if (camo >= 0)
                 classes[i].camo[slot] = camo;
-            else
+            else if (count > 1 + CLASS_SLOT_COUNT)
+                valid = 0;
+        }
+        for (slot = CLASS_SLOT_PRIMARY; slot <= CLASS_SLOT_SECONDARY; slot++) {
+            if (!ClassData_ReadAttachments(&classes[i], slot, fields[1 + CLASS_SLOT_COUNT + CLASS_CAMO_SLOTS + slot]))
                 valid = 0;
         }
         text = *end ? end + 1 : end;
@@ -214,14 +322,18 @@ int ClassData_Serialize(const ClassLoadout *classes, char *out, int size)
     out[0] = '\0';
     for (i = 0; i < CLASS_COUNT; i++) {
         const int *weapon = classes[i].weapon;
+        char attachments[2][CLASS_ATTACHMENTS_MAX];
         int written;
 
-        if (weapon[0] < 0 || weapon[1] < 0 || weapon[2] < 0 || weapon[3] < 0 || !ClassData_Camos(&classes[i]))
+        if (weapon[0] < 0 || weapon[1] < 0 || weapon[2] < 0 || weapon[3] < 0 || !ClassData_Camos(&classes[i]) ||
+            ClassData_FormatAttachments(&classes[i], CLASS_SLOT_PRIMARY, attachments[0], CLASS_ATTACHMENTS_MAX) < 0 ||
+            ClassData_FormatAttachments(&classes[i], CLASS_SLOT_SECONDARY, attachments[1], CLASS_ATTACHMENTS_MAX) < 0)
             return -1;
-        written = snprintf(out + length, (size_t)(size - length), "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", classes[i].name,
-                           g_classWeapons[weapon[0]].weapon, g_classWeapons[weapon[1]].weapon,
+        written = snprintf(out + length, (size_t)(size - length), "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+                           classes[i].name, g_classWeapons[weapon[0]].weapon, g_classWeapons[weapon[1]].weapon,
                            g_classWeapons[weapon[2]].weapon, g_classWeapons[weapon[3]].weapon,
-                           g_weaponCamos[classes[i].camo[0]].id, g_weaponCamos[classes[i].camo[1]].id);
+                           g_weaponCamos[classes[i].camo[0]].id, g_weaponCamos[classes[i].camo[1]].id, attachments[0],
+                           attachments[1]);
         if (written < 0 || written >= size - length)
             return -1;
         length += written;
@@ -249,30 +361,119 @@ int ClassData_EditName(char *name, int key)
 int ClassData_Response(const ClassLoadout *loadout, char *out, int size)
 {
     const int *weapon = loadout->weapon;
-    int written;
+    char attachments[2][CLASS_ATTACHMENTS_MAX];
+    int written, slot, extras;
 
     if (weapon[0] < 0 || weapon[1] < 0 || weapon[2] < 0 || weapon[3] < 0 || !ClassData_Camos(loadout))
         return -1;
+    extras = loadout->camo[0] || loadout->camo[1];
+    for (slot = CLASS_SLOT_PRIMARY; slot <= CLASS_SLOT_SECONDARY; slot++) {
+        int length = ClassData_FormatAttachments(loadout, slot, attachments[slot], CLASS_ATTACHMENTS_MAX);
+
+        if (length < 0)
+            return -1;
+        /* The server splits on commas and drops empty tokens. */
+        if (!length)
+            snprintf(attachments[slot], CLASS_ATTACHMENTS_MAX, "none");
+        extras |= length > 0;
+    }
     written = snprintf(out, (size_t)size, "class,%s,%s,%s,%s", g_classWeapons[weapon[0]].weapon,
                        g_classWeapons[weapon[1]].weapon, g_classWeapons[weapon[2]].weapon,
                        g_classWeapons[weapon[3]].weapon);
-    if (written >= 0 && written < size && (loadout->camo[0] || loadout->camo[1])) {
-        int camos = snprintf(out + written, (size_t)(size - written), ",%s,%s", g_weaponCamos[loadout->camo[0]].id,
-                             g_weaponCamos[loadout->camo[1]].id);
+    if (written >= 0 && written < size && extras) {
+        int more = snprintf(out + written, (size_t)(size - written), ",%s,%s,%s,%s", g_weaponCamos[loadout->camo[0]].id,
+                            g_weaponCamos[loadout->camo[1]].id, attachments[0], attachments[1]);
 
-        written = camos < 0 ? -1 : written + camos;
+        written = more < 0 ? -1 : written + more;
     }
     return written < 0 || written >= size ? -1 : written;
+}
+
+enum { CLASS_RAW_INT, CLASS_RAW_MSEC, CLASS_RAW_FLOAT };
+
+/* The weapon file keys behind AttachmentStats, read as the engine's loader
+ * reads them: times in seconds become whole milliseconds. */
+static const struct {
+    const char *key;
+    int type;
+    size_t offset;
+} s_classRawKeys[] = {
+#define CLASS_RAW(key, type, field) { key, type, offsetof(AttachmentStats, field) }
+    CLASS_RAW("clipSize", CLASS_RAW_INT, clipSize),
+    CLASS_RAW("maxAmmo", CLASS_RAW_INT, maxAmmo),
+    CLASS_RAW("startAmmo", CLASS_RAW_INT, startAmmo),
+    CLASS_RAW("fireTime", CLASS_RAW_MSEC, fireTime),
+    CLASS_RAW("rechamberTime", CLASS_RAW_MSEC, rechamberTime),
+    CLASS_RAW("rechamberBoltTime", CLASS_RAW_MSEC, rechamberBoltTime),
+    CLASS_RAW("adsTransInTime", CLASS_RAW_MSEC, adsTransInTime),
+    CLASS_RAW("adsZoomFov", CLASS_RAW_FLOAT, adsZoomFov),
+    CLASS_RAW("adsZoomInFrac", CLASS_RAW_FLOAT, adsZoomInFrac),
+    CLASS_RAW("adsZoomOutFrac", CLASS_RAW_FLOAT, adsZoomOutFrac),
+    CLASS_RAW("adsSpread", CLASS_RAW_FLOAT, adsSpread),
+    CLASS_RAW("adsIdleAmount", CLASS_RAW_FLOAT, adsIdleAmount),
+    CLASS_RAW("adsSwayMaxAngle", CLASS_RAW_FLOAT, adsSway[0]),
+    CLASS_RAW("adsSwayPitchScale", CLASS_RAW_FLOAT, adsSway[1]),
+    CLASS_RAW("adsSwayYawScale", CLASS_RAW_FLOAT, adsSway[2]),
+    CLASS_RAW("adsSwayHorizScale", CLASS_RAW_FLOAT, adsSway[3]),
+    CLASS_RAW("adsSwayVertScale", CLASS_RAW_FLOAT, adsSway[4]),
+    CLASS_RAW("hipSpreadStandMin", CLASS_RAW_FLOAT, hipSpread[0]),
+    CLASS_RAW("hipSpreadDuckedMin", CLASS_RAW_FLOAT, hipSpread[1]),
+    CLASS_RAW("hipSpreadProneMin", CLASS_RAW_FLOAT, hipSpread[2]),
+    CLASS_RAW("hipSpreadMax", CLASS_RAW_FLOAT, hipSpread[3]),
+    CLASS_RAW("hipSpreadDuckedMax", CLASS_RAW_FLOAT, hipSpread[4]),
+    CLASS_RAW("hipSpreadProneMax", CLASS_RAW_FLOAT, hipSpread[5]),
+    CLASS_RAW("adsViewKickPitchMin", CLASS_RAW_FLOAT, adsKick[0]),
+    CLASS_RAW("adsViewKickPitchMax", CLASS_RAW_FLOAT, adsKick[1]),
+    CLASS_RAW("adsViewKickYawMin", CLASS_RAW_FLOAT, adsKick[2]),
+    CLASS_RAW("adsViewKickYawMax", CLASS_RAW_FLOAT, adsKick[3]),
+    CLASS_RAW("adsGunKickPitchMin", CLASS_RAW_FLOAT, adsKick[4]),
+    CLASS_RAW("adsGunKickPitchMax", CLASS_RAW_FLOAT, adsKick[5]),
+    CLASS_RAW("adsGunKickYawMin", CLASS_RAW_FLOAT, adsKick[6]),
+    CLASS_RAW("adsGunKickYawMax", CLASS_RAW_FLOAT, adsKick[7]),
+    CLASS_RAW("maxDamageRange", CLASS_RAW_FLOAT, maxDamageRange),
+    CLASS_RAW("minDamageRange", CLASS_RAW_FLOAT, minDamageRange),
+    CLASS_RAW("locHelmet", CLASS_RAW_FLOAT, headMultiplier[0]),
+    CLASS_RAW("locHead", CLASS_RAW_FLOAT, headMultiplier[1]),
+    CLASS_RAW("armorPiercing", CLASS_RAW_INT, armorPiercing),
+#undef CLASS_RAW
+};
+
+static void ClassData_ReadRaw(AttachmentStats *raw, const char *key, size_t keyLength, const char *text)
+{
+    size_t i;
+
+    for (i = 0; i < sizeof(s_classRawKeys) / sizeof(s_classRawKeys[0]); i++) {
+        char *field = (char *)raw + s_classRawKeys[i].offset;
+
+        if (strlen(s_classRawKeys[i].key) != keyLength || memcmp(s_classRawKeys[i].key, key, keyLength))
+            continue;
+        if (s_classRawKeys[i].type == CLASS_RAW_INT)
+            *(int *)field = atoi(text);
+        else if (s_classRawKeys[i].type == CLASS_RAW_MSEC)
+            *(int *)field = (int)((float)atof(text) * 1000.0f);
+        else
+            *(float *)field = (float)atof(text);
+        return;
+    }
+}
+
+/* The menus only need to know whether a gun has a scope. */
+static const char s_classScope[] = "scope";
+
+static float ClassData_Accuracy(const AttachmentStats *raw)
+{
+    /* Aimed spread decides a shot's fate; a scope adds a fifth. */
+    return (raw->overlay[0] ? 1.2f : 1.0f) / (0.25f + (raw->adsSpread > 0.0f ? raw->adsSpread : 0.0f));
 }
 
 /* The file is "WEAPONFILE\key\value\key\value...". */
 void ClassData_ReadStats(const char *weaponFile, ClassStats *stats)
 {
-    float spread = 0.0f, fireTime = 0.0f;
-    int scoped = 0;
+    float fireTime = 0.0f;
     const char *p = weaponFile;
 
     memset(stats, 0, sizeof(*stats));
+    stats->raw.overlay = "";
     if (!p || strncmp(p, "WEAPONFILE", 10))
         return;
     p += 10;
@@ -295,8 +496,6 @@ void ClassData_ReadStats(const char *weaponFile, ClassStats *stats)
                 stats->value[CLASS_STAT_DAMAGE] = (float)atof(text);
             else if (CLASS_KEY("maxDamageRange"))
                 stats->value[CLASS_STAT_RANGE] = (float)atof(text);
-            else if (CLASS_KEY("adsSpread"))
-                spread = (float)atof(text);
             else if (CLASS_KEY("fireTime"))
                 fireTime = (float)atof(text);
             else if (CLASS_KEY("moveSpeedScale"))
@@ -306,19 +505,100 @@ void ClassData_ReadStats(const char *weaponFile, ClassStats *stats)
             else if (CLASS_KEY("maxAmmo"))
                 stats->ammo = atoi(text);
             else if (CLASS_KEY("adsOverlayShader"))
-                scoped = text[0] != '\0';
+                stats->raw.overlay = text[0] ? s_classScope : "";
             else if (CLASS_KEY("fuseTime"))
                 stats->fuse = (float)atof(text);
 #undef CLASS_KEY
+            ClassData_ReadRaw(&stats->raw, key, keyLength, text);
         }
         if (!end)
             break;
         p = end;
     }
-    /* Aimed spread decides a shot's fate; a scope adds a fifth. */
-    stats->value[CLASS_STAT_ACCURACY] = (scoped ? 1.2f : 1.0f) / (0.25f + (spread > 0.0f ? spread : 0.0f));
+    stats->value[CLASS_STAT_ACCURACY] = ClassData_Accuracy(&stats->raw);
     stats->value[CLASS_STAT_FIRE_RATE] = fireTime > 0.0f ? 1.0f / fireTime : 0.0f;
     stats->valid = stats->value[CLASS_STAT_DAMAGE] > 0.0f;
+}
+
+void ClassData_AttachedStats(const ClassStats *base, const char *weapon, unsigned mask, ClassStats *attached)
+{
+    *attached = *base;
+    BG_ApplyAttachmentStats(weapon, mask, &attached->raw);
+    attached->clip = attached->raw.clipSize;
+    attached->ammo = attached->raw.maxAmmo;
+    attached->value[CLASS_STAT_RANGE] = attached->raw.maxDamageRange;
+    attached->value[CLASS_STAT_ACCURACY] = ClassData_Accuracy(&attached->raw);
+    /* The bars keep the file's seconds; the attachment scales the engine's
+     * milliseconds. */
+    if (base->raw.fireTime > 0 && attached->raw.fireTime > 0)
+        attached->value[CLASS_STAT_FIRE_RATE] =
+            base->value[CLASS_STAT_FIRE_RATE] * (float)base->raw.fireTime / (float)attached->raw.fireTime;
+}
+
+static int ClassData_Percent(float ratio)
+{
+    return (int)floorf((ratio - 1.0f) * 100.0f + 0.5f);
+}
+
+/* Magnification against the default 80-degree view. */
+static float ClassData_Zoom(float fov)
+{
+    return fov > 0.0f ? tanf(40.0f * 0.01745329252f) / tanf(0.5f * fov * 0.01745329252f) : 1.0f;
+}
+
+int ClassData_AttachmentEffects(const AttachmentStats *base, const AttachmentStats *attached, char (*lines)[48],
+                                int *tones, int max)
+{
+    int count = 0;
+
+#define CLASS_EFFECT(better, ...)                                                                                 \
+    do {                                                                                                          \
+        if (count < max) {                                                                                        \
+            tones[count] = (better);                                                                              \
+            snprintf(lines[count++], sizeof(lines[0]), __VA_ARGS__);                                              \
+        }                                                                                                         \
+    } while (0)
+#define CLASS_SIGN(a, b) ((a) > (b) ? 1 : -1)
+    if (attached->clipSize != base->clipSize)
+        CLASS_EFFECT(CLASS_SIGN(attached->clipSize, base->clipSize), "Magazine %d, from %d", attached->clipSize,
+                     base->clipSize);
+    if (attached->maxAmmo != base->maxAmmo)
+        CLASS_EFFECT(CLASS_SIGN(attached->maxAmmo, base->maxAmmo), "Reserve %d, from %d", attached->maxAmmo,
+                     base->maxAmmo);
+    if (attached->fireTime != base->fireTime && attached->fireTime > 0)
+        CLASS_EFFECT(CLASS_SIGN(base->fireTime, attached->fireTime), "Fire rate %+d%%",
+                     ClassData_Percent((float)base->fireTime / (float)attached->fireTime));
+    if (attached->adsTransInTime != base->adsTransInTime)
+        CLASS_EFFECT(CLASS_SIGN(base->adsTransInTime, attached->adsTransInTime), "Aims in %d ms, from %d",
+                     attached->adsTransInTime, base->adsTransInTime);
+    if (attached->adsZoomFov != base->adsZoomFov)
+        CLASS_EFFECT(0, "Zoom %.1fx, from %.1fx", (double)ClassData_Zoom(attached->adsZoomFov),
+                     (double)ClassData_Zoom(base->adsZoomFov));
+    if (attached->adsSpread != base->adsSpread && base->adsSpread > 0.0f)
+        CLASS_EFFECT(CLASS_SIGN(base->adsSpread, attached->adsSpread), "Aimed spread %+d%%",
+                     ClassData_Percent(attached->adsSpread / base->adsSpread));
+    if (attached->hipSpread[0] != base->hipSpread[0] && base->hipSpread[0] > 0.0f)
+        CLASS_EFFECT(CLASS_SIGN(base->hipSpread[0], attached->hipSpread[0]), "Hip-fire spread %+d%%",
+                     ClassData_Percent(attached->hipSpread[0] / base->hipSpread[0]));
+    if (attached->adsKick[1] != base->adsKick[1] && base->adsKick[1] != 0.0f)
+        CLASS_EFFECT(CLASS_SIGN(fabsf(base->adsKick[1]), fabsf(attached->adsKick[1])), "Aimed recoil %+d%%",
+                     ClassData_Percent(attached->adsKick[1] / base->adsKick[1]));
+    if (attached->adsIdleAmount != base->adsIdleAmount && base->adsIdleAmount > 0.0f)
+        CLASS_EFFECT(CLASS_SIGN(base->adsIdleAmount, attached->adsIdleAmount), "Aimed sway %+d%%",
+                     ClassData_Percent(attached->adsIdleAmount / base->adsIdleAmount));
+    if (attached->maxDamageRange != base->maxDamageRange && base->maxDamageRange > 0.0f)
+        CLASS_EFFECT(CLASS_SIGN(attached->maxDamageRange, base->maxDamageRange), "Damage range %+d%%",
+                     ClassData_Percent(attached->maxDamageRange / base->maxDamageRange));
+    if (attached->headMultiplier[1] != base->headMultiplier[1])
+        CLASS_EFFECT(CLASS_SIGN(attached->headMultiplier[1], base->headMultiplier[1]), "Head damage x%g, from x%g",
+                     (double)attached->headMultiplier[1], (double)base->headMultiplier[1]);
+    if (attached->armorPiercing && !base->armorPiercing)
+        CLASS_EFFECT(1, "Keeps more damage through cover");
+    if (attached->suppressed && !base->suppressed)
+        CLASS_EFFECT(1, "Quiet, no flash, off the minimap");
+#undef CLASS_SIGN
+#undef CLASS_EFFECT
+    return count;
 }
 
 int ClassData_Rate(float value, float lowest, float highest)

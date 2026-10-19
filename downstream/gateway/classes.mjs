@@ -10,6 +10,8 @@ export const classRules = JSON.parse(readFileSync(new URL('./classes.json', impo
 const slots = ['primary', 'secondary', 'lethal', 'tactical'];
 // The guns' camouflage; a client built before it sends none.
 const camoSlots = ['primaryCamo', 'secondaryCamo'];
+const guns = [['primary', 'primaryAttachments', 'primary_attachments'],
+  ['secondary', 'secondaryAttachments', 'secondary_attachments']];
 // Every new browser starts as "Player"; their classes would overwrite each other.
 const sharedNames = new Set(['player', 'unknown soldier']);
 
@@ -25,6 +27,14 @@ export function playerKey(name) {
 function validName(name) {
   return typeof name === 'string' && name.trim().length > 0 && name.trim().length <= classRules.nameMaxLength &&
     /^[\x20-\x7e]+$/.test(name) && !/["\\;%^]/.test(name);
+}
+
+// The weapon's own attachments, at most the slot's limit, none twice and one optic.
+export function validAttachments(weapon, list, gun) {
+  const allowed = classRules.weaponAttachments[weapon] || [];
+  return Array.isArray(list) && list.length <= classRules.attachmentLimits[gun] &&
+    new Set(list).size === list.length && list.every(item => typeof item === 'string' && allowed.includes(item)) &&
+    list.filter(item => classRules.optics.includes(item)).length <= 1;
 }
 
 export function normalizeClasses(value) {
@@ -43,12 +53,20 @@ export function normalizeClasses(value) {
       if (!classRules.camos.includes(camo)) throw new ClassError(`Invalid ${slot} for class ${index + 1}.`);
       normalized[slot] = camo;
     }
+    // Clients from before attachments send none.
+    for (const [gun, field] of guns) {
+      const list = item[field] === undefined ? [] : item[field];
+      if (!validAttachments(normalized[gun], list, gun))
+        throw new ClassError(`Invalid ${gun} attachments for class ${index + 1}.`);
+      normalized[field] = [...list];
+    }
     return normalized;
   });
 }
 
 // Rows written before a list changed keep their valid fields; the rest
-// come from the slot's default class.
+// come from the slot's default class. A row's attachments that no longer fit
+// its gun are dropped; rows from before attachments have none.
 function restore(rows) {
   return classRules.defaults.map((fallback, index) => {
     const row = rows.find(candidate => candidate.slot === index + 1);
@@ -56,6 +74,10 @@ function restore(rows) {
     for (const slot of slots) restored[slot] = row && classRules[slot].includes(row[slot]) ? row[slot] : fallback[slot];
     for (const slot of camoSlots)
       restored[slot] = row && classRules.camos.includes(row[slot]) ? row[slot] : fallback[slot];
+    for (const [gun, field] of guns) {
+      const list = !row ? fallback[field] : row[field] ? String(row[field]).split('+') : [];
+      restored[field] = validAttachments(restored[gun], list, gun) ? [...list] : [];
+    }
     return restored;
   });
 }
@@ -75,21 +97,29 @@ export function createClassStore(path) {
       updated_at INTEGER NOT NULL,
       primary_camo TEXT NOT NULL DEFAULT 'none',
       secondary_camo TEXT NOT NULL DEFAULT 'none',
+      primary_attachments TEXT NOT NULL DEFAULT '',
+      secondary_attachments TEXT NOT NULL DEFAULT '',
       PRIMARY KEY (player, slot)
     ) WITHOUT ROWID;`);
-  // A store created before camouflage gains its columns, its rows unpainted.
+  // A store created before camouflage or attachments gains their columns, its
+  // rows unpainted and without attachments.
   const columns = new Set(db.prepare('PRAGMA table_info(classes)').all().map(column => column.name));
   for (const column of ['primary_camo', 'secondary_camo'])
     if (!columns.has(column)) db.exec(`ALTER TABLE classes ADD COLUMN ${column} TEXT NOT NULL DEFAULT 'none'`);
+  for (const [, , column] of guns)
+    if (!columns.has(column)) db.exec(`ALTER TABLE classes ADD COLUMN ${column} TEXT NOT NULL DEFAULT ''`);
   const select = db.prepare(`SELECT slot, name, primary_weapon AS "primary", secondary_weapon AS secondary,
-    lethal, tactical, primary_camo AS primaryCamo, secondary_camo AS secondaryCamo
+    lethal, tactical, primary_camo AS primaryCamo, secondary_camo AS secondaryCamo,
+    primary_attachments AS primaryAttachments, secondary_attachments AS secondaryAttachments
     FROM classes WHERE player = ? ORDER BY slot`);
   const upsert = db.prepare(`INSERT INTO classes
-    (player, slot, name, primary_weapon, secondary_weapon, lethal, tactical, primary_camo, secondary_camo, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (player, slot, name, primary_weapon, secondary_weapon, lethal, tactical, primary_camo, secondary_camo,
+     primary_attachments, secondary_attachments, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT (player, slot) DO UPDATE SET name = excluded.name, primary_weapon = excluded.primary_weapon,
       secondary_weapon = excluded.secondary_weapon, lethal = excluded.lethal, tactical = excluded.tactical,
       primary_camo = excluded.primary_camo, secondary_camo = excluded.secondary_camo,
+      primary_attachments = excluded.primary_attachments, secondary_attachments = excluded.secondary_attachments,
       updated_at = excluded.updated_at`);
   return {
     get(key) {
@@ -100,7 +130,8 @@ export function createClassStore(path) {
       db.exec('BEGIN IMMEDIATE');
       try {
         classes.forEach((item, index) => upsert.run(key, index + 1, item.name, item.primary, item.secondary,
-          item.lethal, item.tactical, item.primaryCamo, item.secondaryCamo, now));
+          item.lethal, item.tactical, item.primaryCamo, item.secondaryCamo, item.primaryAttachments.join('+'),
+          item.secondaryAttachments.join('+'), now));
         db.exec('COMMIT');
       } catch (error) {
         db.exec('ROLLBACK');
@@ -112,5 +143,6 @@ export function createClassStore(path) {
 }
 
 export function defaultClasses() {
-  return classRules.defaults.map(item => ({ ...item }));
+  return classRules.defaults.map(item => ({ ...item, primaryAttachments: [...item.primaryAttachments],
+    secondaryAttachments: [...item.secondaryAttachments] }));
 }

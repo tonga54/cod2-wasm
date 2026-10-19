@@ -1,0 +1,110 @@
+#include "common_types.h"
+#include "imports.h"
+#include "headers/PC/bgame/bg_attachments.h"
+#include "headers/PC/cgame_mp/cg_attachmentsight.h"
+#include "headers/PC/cgame_mp/cg_local.h"
+#include "headers/PC/gfx_d3d/r_hud2d.h"
+#include <math.h>
+
+extern void CalcScreenPlacement(float *x, float *y, float *w, float *h, int horzAlign, int vertAlign);
+
+#define SIGHT_SEGMENTS 24
+/* Virtual units: the reflex dot and its glow, the lens sight's ring and its
+ * centre dot, each fading out over its feather. */
+#define SIGHT_REFLEX_RADIUS 0.9f
+#define SIGHT_REFLEX_GLOW 1.6f
+#define SIGHT_LENS_RING 6.5f
+#define SIGHT_LENS_RING_WIDTH 0.55f
+#define SIGHT_LENS_DOT 0.5f
+#define SIGHT_LENS_FEATHER 0.6f
+/* The reticle shows over the last of the aim-in, as the sight reaches the eye. */
+#define SIGHT_FADE_START 0.6f
+
+static const vec4_t s_sightReflex = { 1.0f, 0.16f, 0.1f, 0.95f };
+static const vec4_t s_sightLens = { 1.0f, 0.78f, 0.32f, 0.9f };
+
+static void CG_SightVertex(HudVertex2D *vertex, float x, float y, const vec_t *color, float alpha)
+{
+    vertex->xy[0] = x;
+    vertex->xy[1] = y;
+    vertex->st[0] = 0.5f;
+    vertex->st[1] = 0.5f;
+    vertex->rgba[0] = color[0];
+    vertex->rgba[1] = color[1];
+    vertex->rgba[2] = color[2];
+    vertex->rgba[3] = color[3] * alpha;
+}
+
+/* Rings of vertices at the radii in pixels, each with its alpha, the first
+ * ring of radius 0 being a single centre vertex; triangles, all wound alike,
+ * join neighbours. */
+static void CG_DrawSightRings(float x, float y, const float *radii, const float *alphas, int rings,
+                              const vec_t *color, float alpha)
+{
+    HudVertex2D verts[4 * SIGHT_SEGMENTS];
+    unsigned short indices[18 * SIGHT_SEGMENTS];
+    int centre = radii[0] <= 0.0f, vertexCount = 0, indexCount = 0, ring, i;
+
+    if (centre)
+        CG_SightVertex(&verts[vertexCount++], x, y, color, alpha * alphas[0]);
+    for (ring = centre; ring < rings; ring++) {
+        for (i = 0; i < SIGHT_SEGMENTS; i++) {
+            float angle = 6.28318531f * (float)i / (float)SIGHT_SEGMENTS;
+
+            CG_SightVertex(&verts[vertexCount++], x + cosf(angle) * radii[ring], y + sinf(angle) * radii[ring], color,
+                           alpha * alphas[ring]);
+        }
+    }
+    for (i = 0; i < SIGHT_SEGMENTS; i++) {
+        int next = (i + 1) % SIGHT_SEGMENTS;
+
+        if (centre) {
+            indices[indexCount++] = 0;
+            indices[indexCount++] = (unsigned short)(1 + next);
+            indices[indexCount++] = (unsigned short)(1 + i);
+        }
+        for (ring = 0; ring + 1 < rings - centre; ring++) {
+            unsigned short a = (unsigned short)(centre + ring * SIGHT_SEGMENTS + i);
+            unsigned short b = (unsigned short)(centre + ring * SIGHT_SEGMENTS + next);
+
+            indices[indexCount++] = a;
+            indices[indexCount++] = b;
+            indices[indexCount++] = (unsigned short)(b + SIGHT_SEGMENTS);
+            indices[indexCount++] = a;
+            indices[indexCount++] = (unsigned short)(b + SIGHT_SEGMENTS);
+            indices[indexCount++] = (unsigned short)(a + SIGHT_SEGMENTS);
+        }
+    }
+    R_AddCmdDrawTriangles2D(verts, vertexCount, indices, indexCount, cgs->media.whiteMaterial);
+}
+
+void CG_DrawAttachmentSight(const playerState_t *ps, int weapon, float x, float y)
+{
+    unsigned mask = BG_GetWeaponAttachments(ps, weapon);
+    float w = 1.0f, scale = 1.0f, alpha;
+
+    if (!(mask & (ATT_BIT(ATT_REFLEX) | ATT_BIT(ATT_LENS))) || ps->fWeaponPosFrac <= SIGHT_FADE_START)
+        return;
+    alpha = (ps->fWeaponPosFrac - SIGHT_FADE_START) / (1.0f - SIGHT_FADE_START);
+    alpha = alpha * alpha * (3.0f - 2.0f * alpha);
+    CalcScreenPlacement(&x, &y, &w, &scale, 2, 2);
+    if (mask & ATT_BIT(ATT_REFLEX)) {
+        const float radii[3] = { 0.0f, SIGHT_REFLEX_RADIUS * scale, (SIGHT_REFLEX_RADIUS + SIGHT_REFLEX_GLOW) * scale };
+        const float alphas[3] = { 1.0f, 1.0f, 0.0f };
+
+        CG_DrawSightRings(x, y, radii, alphas, 3, s_sightReflex, alpha);
+    } else {
+        const float ring[4] = {
+            (SIGHT_LENS_RING - 0.5f * SIGHT_LENS_RING_WIDTH - SIGHT_LENS_FEATHER) * scale,
+            (SIGHT_LENS_RING - 0.5f * SIGHT_LENS_RING_WIDTH) * scale,
+            (SIGHT_LENS_RING + 0.5f * SIGHT_LENS_RING_WIDTH) * scale,
+            (SIGHT_LENS_RING + 0.5f * SIGHT_LENS_RING_WIDTH + SIGHT_LENS_FEATHER) * scale,
+        };
+        const float ringAlphas[4] = { 0.0f, 1.0f, 1.0f, 0.0f };
+        const float dot[3] = { 0.0f, SIGHT_LENS_DOT * scale, (SIGHT_LENS_DOT + SIGHT_LENS_FEATHER) * scale };
+        const float dotAlphas[3] = { 1.0f, 1.0f, 0.0f };
+
+        CG_DrawSightRings(x, y, ring, ringAlphas, 4, s_sightLens, alpha);
+        CG_DrawSightRings(x, y, dot, dotAlphas, 3, s_sightLens, alpha);
+    }
+}

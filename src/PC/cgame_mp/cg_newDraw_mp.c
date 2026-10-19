@@ -2,6 +2,7 @@
 #include "cod2_grenade.h"
 #include "imports.h"
 #include "bytematch.h"
+#include "headers/PC/bgame/bg_attachments.h"
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_ammocounter.h"
 #include "headers/PC/cgame_mp/cg_mantleprompt.h"
@@ -808,7 +809,7 @@ void CG_DrawHoldBreathHint(const rectDef_t *rect, struct Font_s *font, float fon
         return;
     }
 
-    weaponDef = (WeaponDef *)BG_GetWeaponDef(BG_GetViewmodelWeaponIndex(ps));
+    weaponDef = BG_GetPlayerWeaponDef(ps, BG_GetViewmodelWeaponIndex(ps));
     if (!weaponDef->overlayReticle || weaponDef->weapClass == 9) {
         return;
     }
@@ -870,7 +871,6 @@ Bool CG_CheckPlayerForLowAmmo(void)
 {
     playerState_t *ps;
     int weaponIndex;
-    int ammoIndex;
     int currentAmmo;
     int maxAmmo;
 
@@ -885,13 +885,12 @@ Bool CG_CheckPlayerForLowAmmo(void)
         return 0;
     }
 
-    ammoIndex = BG_AmmoForWeapon(weaponIndex);
     currentAmmo = BG_GetTotalAmmoReserve(ps, weaponIndex);
     if (currentAmmo >= 1000) {
         currentAmmo = 999;
     }
 
-    maxAmmo = BG_GetAmmoTypeMax(ammoIndex);
+    maxAmmo = BG_GetPlayerMaxAmmo(ps, weaponIndex);
     if (maxAmmo < 0) {
         return 0;
     }
@@ -933,7 +932,7 @@ Bool CG_CheckPlayerForLowClip(void)
         currentClip = 999;
     }
 
-    clipSize = BG_GetAmmoClipSize(clipIndex);
+    clipSize = BG_GetPlayerClipSize(ps, weaponIndex);
     if (clipSize <= 0) {
         return 0;
     }

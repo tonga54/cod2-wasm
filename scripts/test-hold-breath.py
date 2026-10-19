@@ -48,6 +48,7 @@ typedef struct {int overlayReticle,weapClass;} WeaponDef;
 typedef struct {struct {float value;} current;} dvar_t;
 static WeaponDef scoped={1,0},plain={0,0},excluded={1,9};
 static WeaponDef *bg_weaponDefs[]={&plain,&scoped,&excluded};
+static WeaponDef *BG_GetPlayerWeaponDef(playerState_t *ps,int w){return bg_weaponDefs[w];}
 static int BG_GetViewmodelWeaponIndex(playerState_t *ps){return ps->weapon;}
 '''
 for name, value in defaults.items():

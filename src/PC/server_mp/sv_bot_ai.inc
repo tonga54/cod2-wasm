@@ -2198,7 +2198,7 @@ static void SV_BotRunAI(int clientNum, playerState_t *ps)
                 weapon->iAmmoIndex < 128 && ps->ammo[weapon->iAmmoIndex] <= 0) {
                 int slot;
                 // Switch to an owned loaded weapon instead of inventing ammo.
-                for (slot = 0; slot < 8; ++slot) {
+                for (slot = 1; slot <= 2; ++slot) {
                     int index = (unsigned char)ps->weaponslots[slot];
                     WeaponDef *other;
                     if (!index || index == ps->weapon) continue;

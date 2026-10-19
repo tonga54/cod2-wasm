@@ -130,25 +130,26 @@ onTeam()
 	return isDefined(self.pers["team"]) && (self.pers["team"] == "allies" || self.pers["team"] == "axis");
 }
 
-// "class,primary,secondary,lethal,tactical,primaryCamo,secondaryCamo" from the
-// class menu, or without the camouflage from a client built before it; a bare
+// "class,primary,secondary,lethal,tactical,primaryCamo,secondaryCamo,primary
+// attachments,secondary attachments" from the class menu, attachments "none" or
+// names joined by '+'. Clients from before attachments end after the
+// camouflage, and clients from before camouflage after the tactical. A bare
 // weapon name, as bots send, goes to the original callback unchanged.
 menuClass(response)
 {
 	tokens = strtok(response, ",");
-	if((tokens.size != 5 && tokens.size != 7) || tokens[0] != "class")
+	if((tokens.size != 5 && tokens.size != 7 && tokens.size != 9) || tokens[0] != "class")
 	{
 		self [[level.browser_class_weapon]](response);
 		return;
 	}
-	if(tokens.size == 5)
-	{
-		tokens[5] = "none";
-		tokens[6] = "none";
-	}
+	for(i = tokens.size; i < 9; i++)
+		tokens[i] = "none";
 	if(!listed(level.browser_class_primary, tokens[1]) || !listed(level.browser_class_secondary, tokens[2]) ||
 	   !listed(level.browser_class_lethal, tokens[3]) || !listed(level.browser_class_tactical, tokens[4]) ||
-	   !listed(level.browser_class_camos, tokens[5]) || !listed(level.browser_class_camos, tokens[6]))
+	   !listed(level.browser_class_camos, tokens[5]) || !listed(level.browser_class_camos, tokens[6]) ||
+	   !validWeaponAttachments(tokens[1], tokens[7], "primary") ||
+	   !validWeaponAttachments(tokens[2], tokens[8], "primaryb"))
 	{
 		self openMenu(level.browser_class_menu);
 		return;
@@ -165,7 +166,7 @@ menuClass(response)
 			return;
 	}
 	loadout = [];
-	for(i = 0; i < 6; i++)
+	for(i = 0; i < 8; i++)
 		loadout[i] = tokens[i + 1];
 	self.pers["browser_class"] = loadout;
 	before = self getWeaponSlotWeapon("primary");
@@ -214,9 +215,10 @@ onPlayerSpawned()
 	}
 }
 
-// After the gametype's own loadout: the class's weapons in its slots, with
-// the original grenade count for its primary and one smoke grenade, and
-// their camouflage for every client to paint.
+// After the gametype's own loadout: the class's weapons in its slots with
+// their attachments, the original grenade count for its primary and one
+// smoke grenade, and their camouflage for every client to paint. Attachments
+// come before the ammunition, which fills an extended magazine and reserve.
 applyClass()
 {
 	if(!isDefined(self.pers["browser_class"]) || !isDefined(self.pers["weapon"]))
@@ -231,6 +233,7 @@ applyClass()
 
 	self takeAllWeapons();
 	self setWeaponSlotWeapon("primaryb", loadout[1]);
+	self setWeaponSlotAttachments("primaryb", loadout[7]);
 	self giveMaxAmmo(loadout[1]);
 	if(getCvarInt("scr_allow_smokegrenades"))
 	{
@@ -249,6 +252,7 @@ applyClass()
 	}
 	self giveWeapon("binoculars_mp");
 	self giveWeapon(loadout[0]);
+	self setWeaponSlotAttachments("primary", loadout[6]);
 	self giveMaxAmmo(loadout[0]);
 	self setSpawnWeapon(loadout[0]);
 	self setWeaponCamos(loadout[0] + " " + loadout[4] + " " + loadout[1] + " " + loadout[5]);

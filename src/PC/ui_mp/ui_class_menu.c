@@ -43,10 +43,13 @@ extern void Web_ClassesSave(const char *player, const char *lines, int generatio
 #define CAC_KEY_TAB 0x09
 #define CAC_KEY_ENTER 0x0d
 #define CAC_KEY_ESCAPE 0x1b
+/* A controller's X arrives as Backspace. */
+#define CAC_KEY_BACKSPACE 0x7f
 #define CAC_KEY_UP 0x9a
 #define CAC_KEY_DOWN 0x9b
 #define CAC_KEY_LEFT 0x9c
 #define CAC_KEY_RIGHT 0x9d
+#define CAC_KEY_DEL 0xa2
 #define CAC_KEY_F1 0xa7
 #define CAC_KEY_F2 0xa8
 #define CAC_KEY_KP_ENTER 0xbf
@@ -166,7 +169,28 @@ extern void Web_ClassesSave(const char *player, const char *lines, int generatio
 #define CAC_SELECT_PROMPT_RIGHT 54.1f
 #define CAC_SELECT_PROMPT_LOWER 20.9f
 
-enum { CAC_SCREEN_LIST, CAC_SCREEN_EDIT, CAC_SCREEN_WEAPONS, CAC_SCREEN_EQUIPMENT, CAC_SCREEN_CAMO };
+/* The attachment boxes under each gun's camouflage line, and WWII's grid of
+ * three attachment tiles a row. */
+#define CAC_ATTACHMENT_BOX_TOP (1.5f + CAC_CAMO_LINE_HEIGHT + 2.5f)
+#define CAC_ATTACHMENT_BOX_HEIGHT 20.0f
+#define CAC_ATTACHMENT_BOX_GAP 4.0f
+#define CAC_ATTACHMENT_COLUMNS 3
+#define CAC_ATTACHMENT_TILE_WIDTH 62.0f
+#define CAC_ATTACHMENT_TILE_HEIGHT 32.0f
+#define CAC_ATTACHMENT_TILE_GAP 3.0f
+#define CAC_EFFECT_LINES 6
+
+enum {
+    CAC_SCREEN_LIST, CAC_SCREEN_EDIT, CAC_SCREEN_WEAPONS, CAC_SCREEN_EQUIPMENT, CAC_SCREEN_CAMO,
+    CAC_SCREEN_ATTACHMENTS
+};
+/* The editor's focus: the four slots, then the primary's attachment boxes,
+ * then the secondary's. */
+enum {
+    CAC_FOCUS_PRIMARY_ATTACHMENT = CLASS_SLOT_COUNT,
+    CAC_FOCUS_SECONDARY_ATTACHMENT = CAC_FOCUS_PRIMARY_ATTACHMENT + ATT_PRIMARY_MAX,
+    CAC_FOCUS_COUNT = CAC_FOCUS_SECONDARY_ATTACHMENT + ATT_SECONDARY_MAX
+};
 enum { CAC_STORE_LOADING, CAC_STORE_READY, CAC_STORE_NO_NAME, CAC_STORE_OFFLINE };
 /* Select Class's tabs: the player's classes, then the game's own. */
 enum { CAC_TAB_CUSTOM, CAC_TAB_STANDARD, CAC_TAB_COUNT };
@@ -198,6 +222,11 @@ static struct {
     /* The gun whose camouflage is being chosen, and the focused one. */
     int camoSlot;
     int camoFocus;
+    /* The gun and attachment position being modified, and the grid's focus
+     * among the gun's attachments. */
+    int attachSlot;
+    int attachPosition;
+    int attachFocus;
     int hover;
     int cursorX, cursorY;
     int renaming;
@@ -247,6 +276,12 @@ static const vec4_t s_cacSelectTabEdge = { 1.0f, 1.0f, 1.0f, 0.55f };
 static const vec4_t s_cacSelectRow = { 1.0f, 1.0f, 1.0f, 0.05f };
 static const vec4_t s_cacSelectRowEdge = { 0.80f, 0.72f, 0.47f, 0.85f };
 static const vec4_t s_cacSelectTile = { 1.0f, 1.0f, 1.0f, 0.07f };
+/* WWII's green and red for a stat an attachment raises or lowers, and its
+ * yellow for what keeps an attachment off. */
+static const vec4_t s_cacBetter = { 0.45f, 0.76f, 0.38f, 1.0f };
+static const vec4_t s_cacWorse = { 0.82f, 0.33f, 0.27f, 1.0f };
+static const vec4_t s_cacWarning = { 0.91f, 0.76f, 0.27f, 1.0f };
+static const vec4_t s_cacDisabled = { 0.70f, 0.70f, 0.68f, 0.35f };
 
 static int Cac_Ready(void)
 {
@@ -638,6 +673,35 @@ static int Cac_SlotCandidates(int slot, int *indexes)
     return ClassData_SlotWeapons(slot, indexes, 64);
 }
 
+/* The attachments the class's gun in the slot takes, in table order. */
+static int Cac_AttachmentCandidates(const ClassLoadout *loadout, int slot, int *attachments)
+{
+    unsigned allowed = loadout->weapon[slot] >= 0 ? BG_AttachmentsAllowed(g_classWeapons[loadout->weapon[slot]].weapon) : 0;
+    int count = 0, i;
+
+    for (i = 0; i < ATT_COUNT; i++) {
+        if (allowed & ATT_BIT(i))
+            attachments[count++] = i;
+    }
+    return count;
+}
+
+/* Whether an editor focus is an attachment box, and which. */
+static int Cac_FocusAttachment(int focus, int *slot, int *position)
+{
+    if (focus >= CAC_FOCUS_SECONDARY_ATTACHMENT && focus < CAC_FOCUS_COUNT) {
+        *slot = CLASS_SLOT_SECONDARY;
+        *position = focus - CAC_FOCUS_SECONDARY_ATTACHMENT;
+        return 1;
+    }
+    if (focus >= CAC_FOCUS_PRIMARY_ATTACHMENT && focus < CAC_FOCUS_SECONDARY_ATTACHMENT) {
+        *slot = CLASS_SLOT_PRIMARY;
+        *position = focus - CAC_FOCUS_PRIMARY_ATTACHMENT;
+        return 1;
+    }
+    return 0;
+}
+
 /* The class's weapon as an index among its slot's candidates. */
 static int Cac_CandidateOf(int slot, int weapon)
 {
@@ -658,6 +722,27 @@ static void Cac_OpenPicker(int slot)
     s_cac.pickFocus = Cac_CandidateOf(slot, loadout->weapon[slot]);
     s_cac.pickScroll = s_cac.pickFocus - CAC_PICK_VISIBLE / 2;
     s_cac.screen = slot <= CLASS_SLOT_SECONDARY ? CAC_SCREEN_WEAPONS : CAC_SCREEN_EQUIPMENT;
+    s_cac.hover = -1;
+}
+
+/* The grid opens on the attachment in the box, or the first. */
+static void Cac_OpenAttachments(int slot, int position)
+{
+    const ClassLoadout *loadout = &s_cac.classes[s_cac.classFocus];
+    int attachments[ATT_COUNT], count = Cac_AttachmentCandidates(loadout, slot, attachments), i;
+
+    if (!count)
+        return;
+    if (position > ClassData_AttachmentCount(loadout, slot))
+        position = ClassData_AttachmentCount(loadout, slot);
+    s_cac.attachSlot = slot;
+    s_cac.attachPosition = position;
+    s_cac.attachFocus = 0;
+    for (i = 0; i < count; i++) {
+        if (position < ClassData_AttachmentCount(loadout, slot) && attachments[i] == loadout->attachment[slot][position])
+            s_cac.attachFocus = i;
+    }
+    s_cac.screen = CAC_SCREEN_ATTACHMENTS;
     s_cac.hover = -1;
 }
 
@@ -701,7 +786,7 @@ static void Cac_CamoRows(int rows)
 /* The class as the browser_class menu's response, wherever it was chosen. */
 static int Cac_Respond(const ClassLoadout *loadout)
 {
-    char response[192];
+    char response[256];
     int menuIndex = -1, i;
 
     if (ClassData_Response(loadout, response, sizeof(response)) < 0)
@@ -730,9 +815,20 @@ static void Cac_Choose(displayContextDef_t *dc)
     Menus_CloseByName(dc, "browser_class");
 }
 
+/* The editor, focused on an attachment box of the gun. */
+static void Cac_ReturnToAttachment(int slot, int position)
+{
+    s_cac.screen = CAC_SCREEN_EDIT;
+    s_cac.slotFocus =
+        (slot == CLASS_SLOT_PRIMARY ? CAC_FOCUS_PRIMARY_ATTACHMENT : CAC_FOCUS_SECONDARY_ATTACHMENT) + position;
+}
+
 static void Cac_Back(displayContextDef_t *dc)
 {
-    if (s_cac.screen == CAC_SCREEN_WEAPONS || s_cac.screen == CAC_SCREEN_EQUIPMENT || s_cac.screen == CAC_SCREEN_CAMO) {
+    if (s_cac.screen == CAC_SCREEN_ATTACHMENTS) {
+        Cac_ReturnToAttachment(s_cac.attachSlot, s_cac.attachPosition);
+    } else if (s_cac.screen == CAC_SCREEN_WEAPONS || s_cac.screen == CAC_SCREEN_EQUIPMENT ||
+               s_cac.screen == CAC_SCREEN_CAMO) {
         s_cac.screen = CAC_SCREEN_EDIT;
     } else if (s_cac.screen == CAC_SCREEN_EDIT && s_cac.fromPause) {
         s_cac.fromPause = 0;
@@ -761,11 +857,51 @@ static void Cac_Equip(int candidate)
     if (candidate < 0 || candidate >= count)
         return;
     if (loadout->weapon[s_cac.pickSlot] != indexes[candidate]) {
-        loadout->weapon[s_cac.pickSlot] = indexes[candidate];
+        ClassData_SetWeapon(loadout, s_cac.pickSlot, indexes[candidate]);
         Cac_Store();
     }
     s_cac.screen = CAC_SCREEN_EDIT;
     s_cac.slotFocus = s_cac.pickSlot;
+    s_cac.hover = -1;
+}
+
+/* What keeps the focused attachment off the gun at the position: the
+ * attachment itself in another box, another optic, or -1. */
+static int Cac_AttachmentBlocker(const ClassLoadout *loadout, int attachment)
+{
+    unsigned others = ClassData_AttachmentMask(loadout, s_cac.attachSlot);
+
+    if (s_cac.attachPosition < ClassData_AttachmentCount(loadout, s_cac.attachSlot))
+        others &= ~ATT_BIT(loadout->attachment[s_cac.attachSlot][s_cac.attachPosition]);
+    return BG_AttachmentConflict(others, attachment);
+}
+
+static void Cac_EquipAttachment(int candidate)
+{
+    ClassLoadout *loadout = &s_cac.classes[s_cac.classFocus];
+    int attachments[ATT_COUNT], count = Cac_AttachmentCandidates(loadout, s_cac.attachSlot, attachments);
+    int slot = s_cac.attachSlot, position = s_cac.attachPosition;
+
+    if (candidate < 0 || candidate >= count || Cac_AttachmentBlocker(loadout, attachments[candidate]) >= 0)
+        return;
+    if (position >= ClassData_AttachmentCount(loadout, slot) || loadout->attachment[slot][position] != attachments[candidate]) {
+        ClassData_EquipAttachment(loadout, slot, position, attachments[candidate]);
+        Cac_Store();
+    }
+    Cac_ReturnToAttachment(slot, position < ClassData_AttachmentCount(loadout, slot) ? position
+                                                                                     : ClassData_AttachmentCount(loadout, slot) - 1);
+    s_cac.hover = -1;
+}
+
+static void Cac_RemoveAttachment(void)
+{
+    ClassLoadout *loadout = &s_cac.classes[s_cac.classFocus];
+
+    if (s_cac.attachPosition >= ClassData_AttachmentCount(loadout, s_cac.attachSlot))
+        return;
+    ClassData_RemoveAttachment(loadout, s_cac.attachSlot, s_cac.attachPosition);
+    Cac_Store();
+    Cac_ReturnToAttachment(s_cac.attachSlot, s_cac.attachPosition);
     s_cac.hover = -1;
 }
 
@@ -789,20 +925,49 @@ static void Cac_FinishRename(int save)
     s_cac.renaming = 0;
 }
 
+/* The editor's focus in Tab order: each gun, then its attachment boxes, then
+ * the grenades. */
+static const int s_cacEditOrder[CAC_FOCUS_COUNT] = {
+    CLASS_SLOT_PRIMARY,
+    CAC_FOCUS_PRIMARY_ATTACHMENT,
+    CAC_FOCUS_PRIMARY_ATTACHMENT + 1,
+    CAC_FOCUS_PRIMARY_ATTACHMENT + 2,
+    CLASS_SLOT_SECONDARY,
+    CAC_FOCUS_SECONDARY_ATTACHMENT,
+    CLASS_SLOT_LETHAL,
+    CLASS_SLOT_TACTICAL,
+};
+/* Up, down, left and right of each editor focus, as the tiles lie: the guns'
+ * column with their boxes under them, the grenades' column at its right. */
+static const int s_cacEditNeighbours[CAC_FOCUS_COUNT][4] = {
+    { CAC_FOCUS_SECONDARY_ATTACHMENT, CAC_FOCUS_PRIMARY_ATTACHMENT, CLASS_SLOT_LETHAL, CLASS_SLOT_LETHAL },
+    { CAC_FOCUS_PRIMARY_ATTACHMENT, CAC_FOCUS_SECONDARY_ATTACHMENT, CLASS_SLOT_TACTICAL, CLASS_SLOT_TACTICAL },
+    { CLASS_SLOT_TACTICAL, CLASS_SLOT_TACTICAL, CLASS_SLOT_PRIMARY, CLASS_SLOT_PRIMARY },
+    { CLASS_SLOT_LETHAL, CLASS_SLOT_LETHAL, CLASS_SLOT_SECONDARY, CLASS_SLOT_SECONDARY },
+    { CLASS_SLOT_PRIMARY, CLASS_SLOT_SECONDARY, CLASS_SLOT_LETHAL, CAC_FOCUS_PRIMARY_ATTACHMENT + 1 },
+    { CLASS_SLOT_PRIMARY, CLASS_SLOT_SECONDARY, CAC_FOCUS_PRIMARY_ATTACHMENT, CAC_FOCUS_PRIMARY_ATTACHMENT + 2 },
+    { CLASS_SLOT_PRIMARY, CLASS_SLOT_SECONDARY, CAC_FOCUS_PRIMARY_ATTACHMENT + 1, CLASS_SLOT_TACTICAL },
+    { CLASS_SLOT_SECONDARY, CLASS_SLOT_PRIMARY, CLASS_SLOT_TACTICAL, CLASS_SLOT_TACTICAL },
+};
+
 static void Cac_Move(int delta)
 {
-    int indexes[64], count;
+    const ClassLoadout *loadout = &s_cac.classes[s_cac.classFocus];
+    int indexes[64], count, i;
 
     switch (s_cac.screen) {
     case CAC_SCREEN_LIST:
         s_cac.classFocus = (s_cac.classFocus + delta + CLASS_COUNT) % CLASS_COUNT;
         break;
     case CAC_SCREEN_EDIT:
-        s_cac.slotFocus = (s_cac.slotFocus + delta + CLASS_SLOT_COUNT) % CLASS_SLOT_COUNT;
+        for (i = 0; i < CAC_FOCUS_COUNT && s_cacEditOrder[i] != s_cac.slotFocus; i++)
+            ;
+        s_cac.slotFocus = s_cacEditOrder[(i + delta + CAC_FOCUS_COUNT) % CAC_FOCUS_COUNT];
         break;
-    case CAC_SCREEN_WEAPONS:
-        count = Cac_SlotCandidates(s_cac.pickSlot, indexes);
-        s_cac.pickFocus = (s_cac.pickFocus + delta + count) % count;
+    case CAC_SCREEN_ATTACHMENTS:
+        count = Cac_AttachmentCandidates(loadout, s_cac.attachSlot, indexes);
+        if (count)
+            s_cac.attachFocus = (s_cac.attachFocus + delta + count) % count;
         break;
     case CAC_SCREEN_CAMO:
         s_cac.camoFocus = (s_cac.camoFocus + delta + WEAPON_CAMO_COUNT) % WEAPON_CAMO_COUNT;
@@ -817,6 +982,7 @@ static void Cac_Move(int delta)
 static void Cac_Navigate(int key)
 {
     int vertical = key == CAC_KEY_UP || key == CAC_KEY_DOWN || key == CAC_KEY_WHEEL_UP || key == CAC_KEY_WHEEL_DOWN;
+    int backward = key == CAC_KEY_UP || key == CAC_KEY_LEFT || key == CAC_KEY_WHEEL_UP;
 
     if (!vertical && s_cac.choose && s_cac.screen == CAC_SCREEN_LIST) {
         /* Select Class's tabs lie side by side; Tab goes to the other one. */
@@ -825,14 +991,26 @@ static void Cac_Navigate(int key)
         else
             s_cac.tab = key == CAC_KEY_RIGHT ? CAC_TAB_STANDARD : CAC_TAB_CUSTOM;
     } else if (key != CAC_KEY_TAB && s_cac.screen == CAC_SCREEN_EDIT) {
-        /* The editor's two columns of two tiles: primary over secondary, lethal over tactical. */
-        int column = s_cac.slotFocus >= CLASS_SLOT_LETHAL, row = s_cac.slotFocus & 1;
+        int direction = vertical ? (backward ? 0 : 1) : (backward ? 2 : 3);
 
-        if (vertical)
-            row ^= 1;
-        else
-            column ^= 1;
-        s_cac.slotFocus = column * 2 + row;
+        if (s_cac.slotFocus >= 0 && s_cac.slotFocus < CAC_FOCUS_COUNT)
+            s_cac.slotFocus = s_cacEditNeighbours[s_cac.slotFocus][direction];
+    } else if (vertical && key != CAC_KEY_WHEEL_UP && key != CAC_KEY_WHEEL_DOWN &&
+               s_cac.screen == CAC_SCREEN_ATTACHMENTS) {
+        /* A row of the grid up or down, wrapping within the column. */
+        const ClassLoadout *loadout = &s_cac.classes[s_cac.classFocus];
+        int attachments[ATT_COUNT], count = Cac_AttachmentCandidates(loadout, s_cac.attachSlot, attachments);
+        int rows = (count + CAC_ATTACHMENT_COLUMNS - 1) / CAC_ATTACHMENT_COLUMNS, step;
+
+        for (step = 0; step < rows && count; step++) {
+            s_cac.attachFocus += backward ? -CAC_ATTACHMENT_COLUMNS : CAC_ATTACHMENT_COLUMNS;
+            if (s_cac.attachFocus < 0)
+                s_cac.attachFocus += rows * CAC_ATTACHMENT_COLUMNS;
+            else if (s_cac.attachFocus >= rows * CAC_ATTACHMENT_COLUMNS)
+                s_cac.attachFocus -= rows * CAC_ATTACHMENT_COLUMNS;
+            if (s_cac.attachFocus < count)
+                break;
+        }
     } else if (vertical && s_cac.screen == CAC_SCREEN_EQUIPMENT) {
         Cac_OpenPicker(s_cac.pickSlot == CLASS_SLOT_LETHAL ? CLASS_SLOT_TACTICAL : CLASS_SLOT_LETHAL);
     } else if (s_cac.screen == CAC_SCREEN_CAMO && (key == CAC_KEY_UP || key == CAC_KEY_DOWN)) {
@@ -851,8 +1029,17 @@ static void Cac_Activate(displayContextDef_t *dc)
         else
             s_cac.screen = CAC_SCREEN_EDIT;
         break;
-    case CAC_SCREEN_EDIT:
-        Cac_OpenPicker(s_cac.slotFocus);
+    case CAC_SCREEN_EDIT: {
+        int slot, position;
+
+        if (Cac_FocusAttachment(s_cac.slotFocus, &slot, &position))
+            Cac_OpenAttachments(slot, position);
+        else
+            Cac_OpenPicker(s_cac.slotFocus);
+        break;
+    }
+    case CAC_SCREEN_ATTACHMENTS:
+        Cac_EquipAttachment(s_cac.attachFocus);
         break;
     case CAC_SCREEN_CAMO:
         Cac_EquipCamo(s_cac.camoFocus);
@@ -882,6 +1069,9 @@ static void Cac_FocusHover(void)
     case CAC_SCREEN_EQUIPMENT:
         s_cac.pickSlot = s_cac.hover / CAC_EQUIP_COLUMNS ? CLASS_SLOT_LETHAL : CLASS_SLOT_TACTICAL;
         s_cac.pickFocus = s_cac.hover % CAC_EQUIP_COLUMNS;
+        break;
+    case CAC_SCREEN_ATTACHMENTS:
+        s_cac.attachFocus = s_cac.hover;
         break;
     default:
         s_cac.pickFocus = s_cac.hover;
@@ -958,6 +1148,11 @@ int UI_ClassMenu_KeyEvent(displayContextDef_t *dc, menuDef_t *menu, int key, int
         if (s_cac.screen == CAC_SCREEN_EDIT && s_cac.slotFocus <= CLASS_SLOT_SECONDARY)
             Cac_OpenCamo(s_cac.slotFocus);
         break;
+    case CAC_KEY_BACKSPACE:
+    case CAC_KEY_DEL:
+        if (s_cac.screen == CAC_SCREEN_ATTACHMENTS)
+            Cac_RemoveAttachment();
+        break;
     case CAC_KEY_UP:
     case CAC_KEY_DOWN:
     case CAC_KEY_LEFT:
@@ -1021,34 +1216,106 @@ static int Cac_SlotCamo(const ClassLoadout *loadout, int slot)
     return slot < CLASS_CAMO_SLOTS ? loadout->camo[slot] : WEAPON_CAMO_NONE;
 }
 
-static void Cac_Stats(int weapon)
+/* A bar's filled fraction: the rating before rounding. */
+static float Cac_BarFraction(float value, float lowest, float highest)
 {
-    const ClassStats *stats = weapon >= 0 && weapon < (int)(sizeof(s_cac.stats) / sizeof(s_cac.stats[0]))
-                                  ? &s_cac.stats[weapon]
-                                  : NULL;
+    float rating = highest > lowest ? 1.0f + 9.0f * (value - lowest) / (highest - lowest) : 5.0f;
+
+    return (rating < 1.0f ? 1.0f : rating > 10.0f ? 10.0f : rating) / 10.0f;
+}
+
+static const vec_t *Cac_ChangeColor(float before, float after)
+{
+    return after > before ? s_cacBetter : after < before ? s_cacWorse : UI_WWIIMenu_Color(WWII_COLOR_WHITE);
+}
+
+/* As WWII's bars: the gun with the base attachments in white, what the
+ * preview set adds in green and what it takes away in red, a number in the
+ * color of its change. */
+static void Cac_Stats(int weapon, unsigned base, unsigned preview)
+{
+    const ClassStats *file = weapon >= 0 && weapon < (int)(sizeof(s_cac.stats) / sizeof(s_cac.stats[0]))
+                                 ? &s_cac.stats[weapon]
+                                 : NULL;
     const float x = -(CAC_SIDE_RIGHT + CAC_STAT_BAR);
+    ClassStats before, after;
     char text[32];
     int stat;
 
-    if (!stats || !stats->valid)
+    if (!file || !file->valid)
         return;
+    ClassData_AttachedStats(file, g_classWeapons[weapon].weapon, base, &before);
+    ClassData_AttachedStats(file, g_classWeapons[weapon].weapon, preview, &after);
     for (stat = 0; stat < CLASS_STAT_COUNT; stat++) {
         float top = CAC_STAT_TOP + (float)stat * CAC_STAT_ROW;
-        int rating = ClassData_Rate(stats->value[stat], s_cac.lowest[stat], s_cac.highest[stat]);
+        float from = Cac_BarFraction(before.value[stat], s_cac.lowest[stat], s_cac.highest[stat]);
+        float to = Cac_BarFraction(after.value[stat], s_cac.lowest[stat], s_cac.highest[stat]);
+        int rating = ClassData_Rate(after.value[stat], s_cac.lowest[stat], s_cac.highest[stat]);
+        int was = ClassData_Rate(before.value[stat], s_cac.lowest[stat], s_cac.highest[stat]);
         CacRect bar = Cac_Rect(x, top + 2.0f, CAC_STAT_BAR, 1.2f, CAC_ALIGN_RIGHT);
 
         snprintf(text, sizeof(text), "%d", rating);
         Cac_Text(text, 1, x - 3.0f - UI_WWIIMenu_Width(text, 1, 7.0f, 0.0f), top + 1.5f, CAC_ALIGN_RIGHT, 7.0f, 0.0f,
-                 UI_WWIIMenu_Color(WWII_COLOR_WHITE));
+                 Cac_ChangeColor((float)was, (float)rating));
         Cac_Caps(s_cacStats[stat], 0, x, top - 1.0f, CAC_ALIGN_RIGHT, 4.2f, 0.12f, UI_WWIIMenu_Color(WWII_COLOR_GOLD));
         Cac_Fill(&bar, s_cacBar);
-        bar.w = CAC_STAT_BAR * (float)rating / 10.0f;
+        bar.w = CAC_STAT_BAR * (from < to ? from : to);
         Cac_Fill(&bar, s_cacNote);
+        if (from != to) {
+            bar.x += bar.w;
+            bar.w = CAC_STAT_BAR * (from < to ? to - from : from - to);
+            Cac_Fill(&bar, Cac_ChangeColor(from, to));
+        }
     }
-    snprintf(text, sizeof(text), "%d/%d", stats->clip, stats->ammo);
     Cac_Caps("Capacity", 0, x, CAC_STAT_TOP + 5.0f * CAC_STAT_ROW + 2.0f, CAC_ALIGN_RIGHT, 4.2f, 0.12f, s_cacNote);
+    snprintf(text, sizeof(text), "%d/%d", after.clip, after.ammo);
     Cac_Text(text, 1, x, CAC_STAT_TOP + 5.0f * CAC_STAT_ROW + 12.0f, CAC_ALIGN_RIGHT, 7.0f, 0.0f,
+             Cac_ChangeColor((float)before.clip, (float)after.clip));
+}
+
+/* An attachment's name in capitals, on one line or two, centred in a box. */
+static void Cac_AttachmentName(const char *name, const CacRect *box, float cap, const vec_t *color)
+{
+    char upper[64], line[64];
+    const char *space;
+    float width = box->w - 6.0f, x = box->x + 3.0f, middle = box->y + 0.5f * box->h + 0.5f * cap;
+
+    Cac_Upper(name, upper, sizeof(upper));
+    space = strrchr(upper, ' ');
+    if (UI_WWIIMenu_Width(upper, 0, cap, 0.06f) <= width || !space) {
+        Cac_Text(upper, 0, x, middle, box->horz, cap, 0.06f, color);
+        return;
+    }
+    /* The last word goes down, as "Full Metal / Jacket". */
+    snprintf(line, sizeof(line), "%.*s", (int)(space - upper), upper);
+    Cac_Text(line, 0, x, middle - 1.05f * cap, box->horz, cap, 0.06f, color);
+    Cac_Text(space + 1, 0, x, middle + 1.05f * cap, box->horz, cap, 0.06f, color);
+}
+
+/* What the attachment does to the gun beside its others: its name, the
+ * description and a line for each change in its tone. The next baseline. */
+static float Cac_AttachmentDetail(int weapon, unsigned others, int attachment, float x, float baseline, int horz,
+                                  float width)
+{
+    char lines[CAC_EFFECT_LINES][48];
+    int tones[CAC_EFFECT_LINES], count = 0, i;
+    ClassStats from, to;
+
+    Cac_Caps(g_attachments[attachment].displayName, 1, x, baseline, horz, 10.0f, 0.06f,
              UI_WWIIMenu_Color(WWII_COLOR_WHITE));
+    baseline = Cac_Wrapped(g_attachments[attachment].description, x, baseline + 14.0f, horz, width, 4.4f, 3,
+                           s_cacNote);
+    if (weapon >= 0 && weapon < (int)(sizeof(s_cac.stats) / sizeof(s_cac.stats[0])) && s_cac.stats[weapon].valid) {
+        ClassData_AttachedStats(&s_cac.stats[weapon], g_classWeapons[weapon].weapon, others, &from);
+        ClassData_AttachedStats(&s_cac.stats[weapon], g_classWeapons[weapon].weapon, others | ATT_BIT(attachment),
+                                &to);
+        count = ClassData_AttachmentEffects(&from.raw, &to.raw, lines, tones, CAC_EFFECT_LINES);
+    }
+    baseline += 3.0f;
+    for (i = 0; i < count; i++, baseline += 4.4f * 2.1f)
+        Cac_Text(lines[i], 1, x, baseline, horz, 4.4f, 0.0f,
+                 tones[i] > 0 ? s_cacBetter : tones[i] < 0 ? s_cacWorse : UI_WWIIMenu_Color(WWII_COLOR_WHITE));
+    return baseline;
 }
 
 /* Name, kind and origin, and the retail description; the baseline after them. */
@@ -1071,6 +1338,31 @@ static float Cac_Detail(int weapon, float x, float baseline, int horz, float wid
     return baseline + 24.0f;
 }
 
+/* The gun's name and how many attachments it carries. */
+static void Cac_GunNote(const ClassLoadout *loadout, int slot, char *out, int size)
+{
+    int count = ClassData_AttachmentCount(loadout, slot);
+
+    if (count)
+        snprintf(out, (size_t)size, "%s +%d", Cac_WeaponName(loadout->weapon[slot]), count);
+    else
+        snprintf(out, (size_t)size, "%s", Cac_WeaponName(loadout->weapon[slot]));
+}
+
+/* The gun's attachments by name, along the foot of its tile. */
+static void Cac_AttachmentList(const ClassLoadout *loadout, int slot, const CacRect *tile)
+{
+    char text[128];
+    int count = ClassData_AttachmentCount(loadout, slot), length = 0, i;
+
+    text[0] = '\0';
+    for (i = 0; i < count && length < (int)sizeof(text); i++)
+        length += snprintf(text + length, sizeof(text) - (size_t)length, "%s%s", i ? ", " : "",
+                           g_attachments[loadout->attachment[slot][i]].displayName);
+    if (count)
+        Cac_Caps(text, 0, tile->x + 4.0f, tile->y + tile->h - 2.5f, tile->horz, 3.2f, 0.08f, s_cacNote);
+}
+
 static void Cac_PaintList(displayContextDef_t *dc)
 {
     const ClassLoadout *focused;
@@ -1091,8 +1383,9 @@ static void Cac_PaintList(displayContextDef_t *dc)
             Cac_Frame(&row, UI_WWIIMenu_Color(WWII_COLOR_GOLD));
         Cac_Text(loadout->name, 1, CAC_LEFT + 6.0f, top + 12.5f, CAC_ALIGN_LEFT, CAC_ROW_NAME_CAP, 0.04f,
                  UI_WWIIMenu_Color(isFocus ? WWII_COLOR_GOLD : WWII_COLOR_WHITE));
-        snprintf(note, sizeof(note), "%s, %s", Cac_WeaponName(loadout->weapon[CLASS_SLOT_PRIMARY]),
-                 Cac_WeaponName(loadout->weapon[CLASS_SLOT_SECONDARY]));
+        Cac_GunNote(loadout, CLASS_SLOT_PRIMARY, note, sizeof(note));
+        snprintf(note + strlen(note), sizeof(note) - strlen(note), ", ");
+        Cac_GunNote(loadout, CLASS_SLOT_SECONDARY, note + strlen(note), (int)(sizeof(note) - strlen(note)));
         Cac_Text(note, 0, CAC_LEFT + 6.0f, top + 22.5f, CAC_ALIGN_LEFT, CAC_ROW_NOTE_CAP, 0.0f, s_cacNote);
     }
     Cac_StatusNote(top + 10.0f);
@@ -1115,35 +1408,65 @@ static void Cac_PaintList(displayContextDef_t *dc)
                                 CAC_ALIGN_RIGHT);
 
         Cac_Tile(&tile, slot, focused->weapon[slot], Cac_SlotCamo(focused, slot), 0);
+        if (slot == CLASS_SLOT_PRIMARY)
+            Cac_AttachmentList(focused, slot, &tile);
     }
 }
 
 static const CacRect *Cac_EditTiles(void)
 {
-    static CacRect tiles[CLASS_SLOT_COUNT];
+    static CacRect tiles[CAC_FOCUS_COUNT];
+    const float boxWidth = (170.0f - (float)(ATT_PRIMARY_MAX - 1) * CAC_ATTACHMENT_BOX_GAP) / (float)ATT_PRIMARY_MAX;
+    int i;
 
-    /* As WWII's two columns of tiles, each under its two lines: the guns,
-     * then the grenades. */
+    /* As WWII's two columns of tiles, each under its two lines: the guns
+     * over their camouflage lines and attachment boxes, then the grenades. */
     tiles[CLASS_SLOT_PRIMARY] = Cac_Rect(CAC_LEFT, 125.0f, 170.0f, 96.0f, CAC_ALIGN_LEFT);
-    tiles[CLASS_SLOT_SECONDARY] = Cac_Rect(CAC_LEFT, 253.0f, 110.0f, 66.0f, CAC_ALIGN_LEFT);
+    tiles[CLASS_SLOT_SECONDARY] = Cac_Rect(CAC_LEFT, 281.0f, 110.0f, 66.0f, CAC_ALIGN_LEFT);
     tiles[CLASS_SLOT_LETHAL] = Cac_Rect(CAC_LEFT + 188.0f, 125.0f, 60.0f, 60.0f, CAC_ALIGN_LEFT);
     tiles[CLASS_SLOT_TACTICAL] = Cac_Rect(CAC_LEFT + 188.0f, 217.0f, 60.0f, 60.0f, CAC_ALIGN_LEFT);
+    for (i = 0; i < ATT_PRIMARY_MAX; i++)
+        tiles[CAC_FOCUS_PRIMARY_ATTACHMENT + i] =
+            Cac_Rect(CAC_LEFT + (float)i * (boxWidth + CAC_ATTACHMENT_BOX_GAP), 125.0f + 96.0f + CAC_ATTACHMENT_BOX_TOP,
+                     boxWidth, CAC_ATTACHMENT_BOX_HEIGHT, CAC_ALIGN_LEFT);
+    tiles[CAC_FOCUS_SECONDARY_ATTACHMENT] =
+        Cac_Rect(CAC_LEFT, 281.0f + 66.0f + CAC_ATTACHMENT_BOX_TOP, 110.0f, CAC_ATTACHMENT_BOX_HEIGHT, CAC_ALIGN_LEFT);
     return tiles;
+}
+
+/* An attachment box: the attachment's name, or a plus on the next free one. */
+static void Cac_AttachmentBox(const CacRect *box, const ClassLoadout *loadout, int slot, int position, int focused)
+{
+    int count = ClassData_AttachmentCount(loadout, slot);
+
+    Cac_Fill(box, focused ? s_cacRowFocus : s_cacTile);
+    Cac_Frame(box, focused ? UI_WWIIMenu_Color(WWII_COLOR_GOLD) : s_cacEdge);
+    if (position < count)
+        Cac_AttachmentName(g_attachments[loadout->attachment[slot][position]].displayName, box, 3.4f,
+                           UI_WWIIMenu_Color(focused ? WWII_COLOR_GOLD : WWII_COLOR_WHITE));
+    else if (position == count)
+        Cac_Text("+", 1, box->x + 0.5f * box->w - 2.0f, box->y + 0.5f * box->h + 3.5f, box->horz, 7.0f, 0.0f,
+                 focused ? UI_WWIIMenu_Color(WWII_COLOR_GOLD) : s_cacNote);
 }
 
 static void Cac_PaintEdit(displayContextDef_t *dc)
 {
     const ClassLoadout *loadout = &s_cac.classes[s_cac.classFocus];
     const CacRect *tiles = Cac_EditTiles();
+    const float x = -(CAC_SIDE_RIGHT + CAC_SIDE_WIDTH);
     char title[64];
-    int slot;
+    int focus, slot, position;
 
     snprintf(title, sizeof(title), "Modify %s", loadout->name);
     Cac_Title(title, NULL);
-    for (slot = 0; slot < CLASS_SLOT_COUNT; slot++) {
-        if (Cac_Hover(dc, &tiles[slot]))
-            s_cac.hover = slot;
-        Cac_Tile(&tiles[slot], slot, loadout->weapon[slot], Cac_SlotCamo(loadout, slot), slot == s_cac.slotFocus);
+    for (focus = 0; focus < CAC_FOCUS_COUNT; focus++) {
+        if (Cac_Hover(dc, &tiles[focus]))
+            s_cac.hover = focus;
+        if (Cac_FocusAttachment(focus, &slot, &position))
+            Cac_AttachmentBox(&tiles[focus], loadout, slot, position, focus == s_cac.slotFocus);
+        else
+            Cac_Tile(&tiles[focus], focus, loadout->weapon[focus], Cac_SlotCamo(loadout, focus),
+                     focus == s_cac.slotFocus);
     }
     /* Under each gun, its camouflage: a click, F2 or Y opens the picker. */
     for (slot = 0; slot < CLASS_CAMO_SLOTS; slot++) {
@@ -1162,10 +1485,92 @@ static void Cac_PaintEdit(displayContextDef_t *dc)
         Cac_Caps(text, hover, swatch.x + swatch.w + 3.0f, line.y + 0.5f * (line.h + CAC_CAMO_LINE_CAP), CAC_ALIGN_LEFT,
                  CAC_CAMO_LINE_CAP, 0.1f, hover ? UI_WWIIMenu_Color(WWII_COLOR_GOLD) : s_cacNote);
     }
-    Cac_StatusNote(366.0f);
-    Cac_Detail(loadout->weapon[s_cac.slotFocus], -(CAC_SIDE_RIGHT + CAC_SIDE_WIDTH), 135.0f, CAC_ALIGN_RIGHT,
-               CAC_SIDE_WIDTH);
-    Cac_Stats(loadout->weapon[s_cac.slotFocus]);
+    Cac_StatusNote(404.0f);
+    if (!Cac_FocusAttachment(s_cac.slotFocus, &slot, &position)) {
+        slot = s_cac.slotFocus;
+        Cac_Detail(loadout->weapon[slot], x, 135.0f, CAC_ALIGN_RIGHT, CAC_SIDE_WIDTH);
+        Cac_Stats(loadout->weapon[slot], 0, slot <= CLASS_SLOT_SECONDARY ? ClassData_AttachmentMask(loadout, slot) : 0);
+        return;
+    }
+    if (position < ClassData_AttachmentCount(loadout, slot)) {
+        int attachment = loadout->attachment[slot][position];
+
+        Cac_AttachmentDetail(loadout->weapon[slot], ClassData_AttachmentMask(loadout, slot) & ~ATT_BIT(attachment),
+                             attachment, x, 135.0f, CAC_ALIGN_RIGHT, CAC_SIDE_WIDTH);
+    } else {
+        char note[96];
+        int attachments[ATT_COUNT];
+
+        Cac_Caps("Empty", 1, x, 135.0f, CAC_ALIGN_RIGHT, 10.0f, 0.06f, UI_WWIIMenu_Color(WWII_COLOR_WHITE));
+        snprintf(note, sizeof(note), "The %s takes %d of its %d attachments.", Cac_WeaponName(loadout->weapon[slot]),
+                 ClassData_AttachmentMax(slot), Cac_AttachmentCandidates(loadout, slot, attachments));
+        Cac_Wrapped(note, x, 149.0f, CAC_ALIGN_RIGHT, CAC_SIDE_WIDTH, 4.4f, 3, s_cacNote);
+    }
+    Cac_Stats(loadout->weapon[slot], 0, ClassData_AttachmentMask(loadout, slot));
+}
+
+static void Cac_PaintAttachments(displayContextDef_t *dc)
+{
+    const ClassLoadout *loadout = &s_cac.classes[s_cac.classFocus];
+    int slot = s_cac.attachSlot, weapon = loadout->weapon[slot];
+    int attachments[ATT_COUNT], count = Cac_AttachmentCandidates(loadout, slot, attachments), i;
+    unsigned mask = ClassData_AttachmentMask(loadout, slot), others = mask;
+    int current = s_cac.attachPosition < ClassData_AttachmentCount(loadout, slot)
+                      ? loadout->attachment[slot][s_cac.attachPosition]
+                      : -1;
+    int focused, blocker;
+    float baseline;
+    CacRect box;
+
+    Cac_Title("Modify Attachment", NULL);
+    if (!count)
+        return;
+    if (current >= 0)
+        others &= ~ATT_BIT(current);
+    if (s_cac.attachFocus < 0 || s_cac.attachFocus >= count)
+        s_cac.attachFocus = 0;
+    for (i = 0; i < count; i++) {
+        CacRect tile = Cac_Rect(CAC_LEFT + (float)(i % CAC_ATTACHMENT_COLUMNS) *
+                                               (CAC_ATTACHMENT_TILE_WIDTH + CAC_ATTACHMENT_TILE_GAP),
+                                CAC_ROW_TOP + (float)(i / CAC_ATTACHMENT_COLUMNS) *
+                                                  (CAC_ATTACHMENT_TILE_HEIGHT + CAC_ATTACHMENT_TILE_GAP),
+                                CAC_ATTACHMENT_TILE_WIDTH, CAC_ATTACHMENT_TILE_HEIGHT, CAC_ALIGN_LEFT);
+        int isFocus = i == s_cac.attachFocus, here = attachments[i] == current;
+        int blocked = BG_AttachmentConflict(others, attachments[i]) >= 0;
+
+        if (Cac_Hover(dc, &tile))
+            s_cac.hover = i;
+        Cac_Fill(&tile, isFocus ? s_cacRowFocus : s_cacTile);
+        Cac_Frame(&tile, isFocus ? UI_WWIIMenu_Color(WWII_COLOR_GOLD) : here ? s_cacNote : s_cacEdge);
+        Cac_AttachmentName(g_attachments[attachments[i]].displayName, &tile, 3.8f,
+                           blocked ? s_cacDisabled
+                           : here  ? UI_WWIIMenu_Color(WWII_COLOR_GOLD)
+                                   : UI_WWIIMenu_Color(isFocus ? WWII_COLOR_WHITE : WWII_COLOR_IDLE));
+        /* The others on the gun keep a mark, as WWII's tiles do. */
+        if (mask & ATT_BIT(attachments[i])) {
+            CacRect mark = Cac_Rect(tile.x, tile.y, 1.5f, tile.h, CAC_ALIGN_LEFT);
+
+            Cac_Fill(&mark, UI_WWIIMenu_Color(WWII_COLOR_GOLD));
+        }
+    }
+    focused = attachments[s_cac.attachFocus];
+    blocker = BG_AttachmentConflict(others, focused);
+    baseline = Cac_AttachmentDetail(weapon, others, focused, CAC_DETAIL_LEFT, 135.0f, CAC_ALIGN_LEFT,
+                                    CAC_DETAIL_WIDTH);
+    if (blocker >= 0) {
+        char note[96];
+
+        if (blocker == focused)
+            snprintf(note, sizeof(note), "Already on the %s.", Cac_WeaponName(weapon));
+        else
+            snprintf(note, sizeof(note), "One optic at a time: remove the %s first.",
+                     g_attachments[blocker].displayName);
+        Cac_Wrapped(note, CAC_DETAIL_LEFT, baseline + 4.0f, CAC_ALIGN_LEFT, CAC_DETAIL_WIDTH, 4.4f, 2, s_cacWarning);
+    }
+    box = Cac_Rect(-150.0f, 200.0f, 300.0f, 160.0f, CAC_ALIGN_CENTER);
+    box.x += 60.0f;
+    Cac_GunPicture(weapon, Cac_SlotCamo(loadout, slot), &box, UI_WWIIMenu_Color(WWII_COLOR_WHITE));
+    Cac_Stats(weapon, mask, blocker >= 0 ? mask : others | ATT_BIT(focused));
 }
 
 static void Cac_PaintWeapons(displayContextDef_t *dc)
@@ -1210,7 +1615,14 @@ static void Cac_PaintWeapons(displayContextDef_t *dc)
     box.x += 60.0f;
     Cac_GunPicture(indexes[s_cac.pickFocus], Cac_SlotCamo(loadout, s_cac.pickSlot), &box,
                    UI_WWIIMenu_Color(WWII_COLOR_WHITE));
-    Cac_Stats(indexes[s_cac.pickFocus]);
+    /* The equipped gun keeps its attachments; another starts without. */
+    {
+        unsigned mask = indexes[s_cac.pickFocus] == loadout->weapon[s_cac.pickSlot]
+                            ? ClassData_AttachmentMask(loadout, s_cac.pickSlot)
+                            : 0;
+
+        Cac_Stats(indexes[s_cac.pickFocus], mask, mask);
+    }
 }
 
 static CacRect Cac_CamoSwatchRect(int camo)
@@ -1462,6 +1874,7 @@ void UI_ClassMenu_Paint(displayContextDef_t *dc, menuDef_t *menu)
 {
     int kind = Cac_MenuKind(menu);
     static const char *const keys[] = { "ENTER", "F1", "F2" };
+    static const char *const attachmentKeys[] = { "ENTER", "BACKSPACE" };
     const char *labels[3] = { NULL, NULL, NULL };
 
     if (!kind)
@@ -1511,6 +1924,17 @@ void UI_ClassMenu_Paint(displayContextDef_t *dc, menuDef_t *menu)
         Cac_PaintEquipment(dc);
         labels[0] = "Equip";
         labels[1] = NULL;
+        break;
+    case CAC_SCREEN_ATTACHMENTS:
+        Cac_PaintAttachments(dc);
+        labels[0] = "Equip";
+        labels[1] = s_cac.attachPosition < ClassData_AttachmentCount(&s_cac.classes[s_cac.classFocus], s_cac.attachSlot)
+                        ? "Remove"
+                        : NULL;
+        if (!s_cac.renaming) {
+            UI_WWIIMenu_Prompts(attachmentKeys, labels, labels[1] ? 2 : 1, "ESC", "Back");
+            return;
+        }
         break;
     default:
         if (s_cac.choose) {

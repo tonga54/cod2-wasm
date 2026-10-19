@@ -1,6 +1,7 @@
 #include "cod2_feature_config.h"
 #include "common_types.h"
 #include "imports.h"
+#include "headers/PC/bgame/bg_attachments.h"
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_wwiiscope.h"
 #include <math.h>
@@ -261,7 +262,7 @@ float CG_GetViewFov(void)
 
     {
         weapIndex = BG_GetViewmodelWeaponIndex((void *)&cg->predictedPlayerState);
-        weapDef = (char *)BG_GetWeaponDef(weapIndex);
+        weapDef = (char *)BG_GetPlayerWeaponDef(&cg->predictedPlayerState, weapIndex);
 
         if (cg->predictedPlayerState.pm_type == 5) {
             fov_x = 90.0f;
@@ -282,7 +283,7 @@ float CG_GetViewFov(void)
                     float normalizedLerp;
 
                     if (cg->playerEntity.bPositionToADS != 0) {
-                        transTime = CG_WwiiScopeZoomInFrac(weapIndex);
+                        transTime = CG_WwiiScopeZoomInFrac(weapIndex, ((WeaponDef *)weapDef)->fAdsZoomInFrac);
                     } else {
                         transTime = ((WeaponDef *)weapDef)->fAdsZoomOutFrac;
                     }

@@ -225,13 +225,11 @@ void CG_WwiiScopeClear(void)
     s_lightsOnly = 0;
 }
 
-float CG_WwiiScopeZoomInFrac(int weapon)
+float CG_WwiiScopeZoomInFrac(int weapon, float frac)
 {
-    const WeaponDef *weapDef = BG_GetWeaponDef(weapon);
-
-    if (CG_WwiiScopeGlassForWeapon(weapon) && weapDef->fAdsZoomInFrac < CG_WWIISCOPE_ZOOM_IN_FRAC)
+    if (CG_WwiiScopeGlassForWeapon(weapon) && frac < CG_WWIISCOPE_ZOOM_IN_FRAC)
         return CG_WWIISCOPE_ZOOM_IN_FRAC;
-    return weapDef->fAdsZoomInFrac;
+    return frac;
 }
 
 /* As CG_GetViewFov zooms the world: over the last frac of the raise, smoothed. */
@@ -249,7 +247,7 @@ static float CG_WwiiScopeZoom(const playerState_t *ps, int weapon)
     const WeaponDef *weapDef = BG_GetWeaponDef(weapon);
 
     return CG_WwiiScopeZoomFraction(ps->fWeaponPosFrac, cg->playerEntity.bPositionToADS ?
-                                    CG_WwiiScopeZoomInFrac(weapon) : weapDef->fAdsZoomOutFrac);
+                                    CG_WwiiScopeZoomInFrac(weapon, weapDef->fAdsZoomInFrac) : weapDef->fAdsZoomOutFrac);
 }
 
 /* The move, in units forward, left and up, that puts the glass of the resting
@@ -641,11 +639,10 @@ const CgWwiiScopeGlass *CG_WwiiScopeGlassForWeapon(int weapon)
     return NULL;
 }
 
-float CG_WwiiScopeZoomInFrac(int weapon)
+float CG_WwiiScopeZoomInFrac(int weapon, float frac)
 {
-    extern WeaponDef *BG_GetWeaponDef(int iWeapon);
-
-    return BG_GetWeaponDef(weapon)->fAdsZoomInFrac;
+    (void)weapon;
+    return frac;
 }
 
 void CG_WwiiScopeAdjustViewWeapon(const playerState_t *ps, int weapon, vec_t *angles)
