@@ -680,7 +680,9 @@ static void CG_CalcViewValues(void)
         float bobMax = (float)bg_bobMax->current.integer;
 
         viewState.ps = ps;
-        viewState.damageTime = cg->v_dmg_time;
+        /* When the hit landed, as the server's aim and the gun take it:
+         * v_dmg_time is when the damage blend ends, 500 ms later. */
+        viewState.damageTime = cg->damageTime;
         viewState.time = cg->time;
         viewState.v_dmg_pitch = cg->v_dmg_pitch;
         viewState.v_dmg_roll = cg->v_dmg_roll;

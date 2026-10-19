@@ -3786,3 +3786,38 @@ Validation:
   `scripts/test-suppressed-shots.py` (14 mutants).
 - In the browser, three shots of a suppressed Luger built five filters each
   and a Kar98k's shot none.
+
+## Shots fired after a hit go where the screen points — 2026-10-19
+
+Report: aiming with some sniper rifles and other guns, the shot landed well
+below the sight.
+
+At rest nothing was off. A QA client logged the camera at each shot and the
+server's impact, on Carentan: every class gun's iron sights, the four scoped
+rifles' WWII scopes, the 4x Optic's overlay, standing, crouched and prone,
+single shots and a Thompson burst all put the shot within its spread of the
+screen's centre, where the server fires, and the sights on that centre.
+
+The fault was the damage kick. A hit tilts the view for half a second
+(`BG_AddViewDamageKick`), and the server fires along the tilted view, timed
+from `client->damageTime`, the hit's frame less 20 ms. The client drew the
+screen from `cg->v_dmg_time` instead, which `CG_DamageFeedback` sets to the
+damage blend's end, 500 ms after the hit. The kick's curve, x(2 − |x|) of the
+time since the hit in tenths of a second, then started from −5. Hit in the
+back for a kick of 9, the camera tilted 135° at once, 72° at 100 ms, was level
+again at 300 ms, then −9° at 400 ms and +9° at 600 ms, while the server's aim
+peaked at 8.8° at 86 ms and was level by 500 ms. Hit from the front, the
+camera went up as far, and anything fired meanwhile landed far below the
+sight. `CG_CalcViewValues` now takes `cg->damageTime`, the hit's snapshot
+time, which the gun's kick on both sides already used.
+
+Validation:
+
+- `scripts/test-damage-view-kick.py` (new) compiles the production
+  `BG_CalculateViewAngles` with the client's and the server's view blocks and
+  replays hits at the hip, in iron sights and through a scope: the camera
+  follows the server's aim 20 ms after it and never kicks past it. The
+  previous line and three other mutants fail.
+- In the browser, a second player's Luger hit the player in the back. Before,
+  the camera logged the 135° above; after, 0.5° at 3 ms, 8.9° at 103 ms and
+  level at 504 ms, against the server's 8.8° at 86 ms and level at 515 ms.
