@@ -66,7 +66,8 @@ private IWDs and credentials never enter GitHub Actions or releases.
 `scripts/update-pi.py` checks every five minutes through a user systemd timer.
 It requires a clean `main` checkout, a fast-forward source update, and the
 owner's original IWDs, and the optional [hit sound](#owner-hit-sound),
-[menu music](#owner-menu-music) and [sound pack](#owner-sound-pack), in
+[menu music](#owner-menu-music), [sound pack](#owner-sound-pack) and
+[class pictures](#owner-class-pictures), in
 `~/cod2-original/main` (private, outside Git). It
 validates package checksums, ARM64 image identities and the clean source/build
 revision, regenerates private assets in staging, and checks their exact public
@@ -125,7 +126,8 @@ Two statuses keep the Pi on its installed build until someone acts:
   A missing or different [owner hit sound](#owner-hit-sound),
   [menu music](#owner-menu-music) or [sound pack](#owner-sound-pack) causes
   the same status, because the published audio archive includes the build
-  machine's.
+  machine's; so do missing or different [class pictures](#owner-class-pictures),
+  which the renderer archive includes.
 - `At least 1.5 GiB free space is needed for a staged update`: every run
   downloads only `manifest.json` and waits. Check `df -h /` and
   `docker system df`. Build cache from manual Pi builds can be removed with
@@ -241,6 +243,53 @@ to 97.8 MB of the 134.2 MB (128 MiB) hunk. In 60-second TDM rounds with ten bots
 on both maps the console reported no sound alias or load errors, 39 and 30 of
 the owner's files played, and the fire aliases heard alternated between their
 variants.
+
+### Owner class pictures
+
+An optional `owner_class_pictures/` folder beside the original IWDs holds
+pictures for the class screens: Create a Class, its editor and lists, and the
+class choice in a match. A picture shows its weapon in its own colors, as
+CoD WWII's menus show equipment, in place of the white silhouette of the HUD
+icon (or a primary's retail menu image). The HUD, the kill feed and the ammo
+counter keep their white icons. Like the sounds, the pictures belong to the
+owner, are never committed, and every host that prepares the published build
+needs a byte-identical copy (`data/main/owner_class_pictures/` and
+`~/cod2-original/main/owner_class_pictures/`). Changing a picture changes the
+asset version.
+
+Each file is named after a class weapon in `downstream/gateway/classes.json`,
+in any case: `frag_grenade_american_mp.png`, `TT30_mp.png`. It must be an 8-bit
+RGBA PNG without interlacing, each side a power of two up to 1024 texels, with
+something visible (alpha above 16). The screens crop it to its visible texels
+and fit it to each tile, so the margins around the object do not matter.
+Folders, other names and other files are refused; names starting with a dot,
+such as `.DS_Store`, are skipped. Weapons without a picture keep the stock
+image.
+
+The generator stores each picture in `cod2_browser_renderer.iwd` as
+`images/browser_class/<weapon>.iwi`, lower case: A8R8G8B8 texels with every mip
+down to 1 × 1, each mip's colors averaged by their alpha so transparent texels
+do not darken the edges. The client draws it through a copy of `$raw` with
+linear filtering between the mips, so a picture stays smooth from the 25-unit
+equipment tiles to the 130-unit preview. `check-private-assets.py` verifies
+that the packaged pictures are exactly what the generator makes of the owner's
+files, and that there are none without them.
+
+A picture is read the first time a screen draws it and kept until the
+renderer restarts; with its mips a 1024 × 256 picture takes 1.3 MB of texture
+memory.
+
+On October 18, 2026 the owner's folder held a picture for each of the 33 class
+weapons. For the grenades, the MK 2 and the smoke canister were cut out of
+CoD WWII's Modify Equipment screen, for the American frag and all four smoke
+grenades (every smoke grenade is the same canister in this game), and the
+Mills bomb, RGD-33 and Stielhandgranate were rendered from this game's own
+world models. The 21 primaries (1024 × 256, 512 × 256 for the MP40) and the
+four pistols (512 × 512) were rendered from their world models the same way:
+muzzle to the left as the retail menu images have it, turned 15 degrees and
+seen 12 degrees from above, under the grenades' lights. Together they added
+8.19 MB to the renderer archive (270.96 to 279.15 MB), and about 20 seconds
+to the generator on the build machine.
 
 ## Version checks
 

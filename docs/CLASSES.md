@@ -5,7 +5,7 @@ match, on either team. A class sets the primary weapon, the secondary pistol,
 the lethal grenade (frag) and the tactical grenade (smoke): CoD2's two offhand
 slots. The screens follow the Create a Class flow of the Call of Duty: WWII
 capture the owner supplied, drawn with CoD2's own images and the Barlow fonts
-the menus already use.
+the menus already use, or with [pictures the owner keeps](#pictures).
 
 ## Using classes
 
@@ -131,11 +131,37 @@ From the WWII capture, the screens take the layout and flow:
 - rating bars at the bottom right;
 - pill-shaped key prompts.
 
-They do not use WWII logos, artwork, fonts, character or weapon renders. Nor do
-they add things this game lacks: divisions, basic training, attachments, weapon
-levels, unlocks, locks, the store or its currency. The pictures are CoD2's
-weapon menu images for primaries and silhouettes of its HUD icons for pistols
-and grenades.
+The repository holds no WWII logos, artwork, fonts, character or weapon
+renders. Nor do the screens add things this game lacks: divisions, basic
+training, attachments, weapon levels, unlocks, locks, the store or its currency.
+The pictures are CoD2's weapon menu images for primaries and silhouettes of its
+HUD icons for pistols and grenades, unless the owner keeps their own.
+
+## Pictures
+
+The owner may keep a PNG for any class weapon in `data/main/owner_class_pictures/`,
+named after the weapon (`frag_grenade_american_mp.png`); the format and
+packaging are in [docs/UPDATES.md](UPDATES.md#owner-class-pictures). Every class
+screen then draws that weapon in the picture's own colors: the list's loadout,
+the editor's tiles, the equipment rows and preview, and the weapon list. Each
+picture is cropped to its visible texels and fit to the box. Weapons without
+one keep the stock image, tinted as before. Nothing outside the class screens
+changes: the HUD's offhand icons, the kill feed and the ammo counter stay
+white.
+
+The development host's pictures cover all 33 class weapons:
+
+| Weapons | Picture |
+| --- | --- |
+| American frag (M2) | CoD WWII's MK 2, cut out of the owner's capture |
+| All four smoke grenades | CoD WWII's smoke canister, cut out of the owner's capture; in CoD2 every smoke grenade is the American canister |
+| British frag (MK1), RGD-33, Stielhandgranate | Rendered from CoD2's world model of each, lit like the captures |
+| The 21 primaries and four pistols | Rendered from their world models the same way, muzzle to the left as the retail menu images have it |
+
+The owner's other captures (the Signal Flare, Mk V gas grenade, No. 69,
+throwing knife, satchel charge, No. 74 ST and S-Mine 44) show equipment this
+game does not have. Their cut-outs wait in `data/wwii_equipment_pictures/`,
+on canvases the generator accepts, for the day a class weapon matches one.
 
 ## Limits
 
@@ -158,6 +184,12 @@ and grenades.
   defaults, the name rules and renaming, the menu response and the ratings, and
   rejects 14 mutations. It also checks that `classes.json`, the C table and the
   GSC lists agree.
+- `python3 scripts/test-owner-class-pictures.py` covers the pictures: the PNGs
+  the generator accepts and refuses, the IWis it writes against a reference of
+  every mip, the folder's names, and the checker. Under ASan/UBSan it loads the
+  generator's files through the engine's loader against a recording backend,
+  and runs the menus' choice between a picture, a retail image and a silhouette.
+  It rejects 30 Python, 17 loader and 7 menu mutations.
 - `node scripts/test-web-classes.cjs` runs the linked browser bridge. It covers
   the requests it sends and what it does with each answer: stored lines, 400 and
   503 refusals, a 200 without classes, an outage, oversized replies, ordered

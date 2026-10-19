@@ -111,7 +111,9 @@ retail CoD2:
   frag and a smoke grenade. They replace the weapon menu after the team choice
   and in **Esc → 1. Choose Class**, on either team. The gateway stores them in
   SQLite; there are no accounts, so a gametag's classes belong to whoever uses
-  it. See [custom classes](docs/CLASSES.md).
+  it. Pictures of the host owner's can show a class weapon in color in these
+  screens, as WWII's do; the HUD keeps its white icons. See
+  [custom classes](docs/CLASSES.md).
 - **Sprint:** Shift + W increases movement speed, lowers and swings the weapon,
   and uses the running body animation. It also stands up from crouch/prone when
   headroom permits. Sprint currently has no stamina limit.
@@ -227,6 +229,10 @@ retail CoD2:
   original IWDs replaces the sounds of the original aliases it lists, keeping
   each alias's channel, distances and timing; see
   [docs/UPDATES.md](docs/UPDATES.md#owner-sound-pack).
+- **Owner class pictures:** an optional folder of the host owner's PNGs beside
+  the original IWDs, one per class weapon, replaces the white HUD silhouettes
+  and retail images of the class screens; see
+  [docs/UPDATES.md](docs/UPDATES.md#owner-class-pictures).
 - **Fall damage and blood feedback:** falls above 256 game units progressively
   deal damage, reaching a lethal fall at 480 units. The thresholds are controlled
   by `bg_fallDamageMinHeight` and `bg_fallDamageMaxHeight`. Damage scales from
@@ -380,7 +386,8 @@ location.
 
 The prepared two-map subset is approximately **329.6 MB**, including 442 original
 sound files (the development host's owner sounds add 215 more) and every
-faction's weapons for custom classes. Browsers download it once per site/cache version and keep it in
+faction's weapons for custom classes; the development host's 33 class
+pictures add 8.2 MB. Browsers download it once per site/cache version and keep it in
 IndexedDB. Size/SHA-256 checks verify each archive. Original owner IWDs stay
 untouched in `data/main/`; the prepared copies stay in `data/browser/`. Original
 assets are excluded from Git and image layers. Generated WASM binaries are ignored by Git and shipped

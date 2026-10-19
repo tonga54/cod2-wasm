@@ -124,6 +124,9 @@ static struct {
     int imageGeneration;
     MaterialHandle images[64];
     float aspects[64];
+    float st[64][4];
+    /* Drawn in their own colors. */
+    int pictures[64];
 } s_cac;
 
 static const char *const s_cacGroups[] = {
@@ -278,9 +281,10 @@ static float Cac_Wrapped(const char *text, float x, float baseline, int horz, fl
     return baseline;
 }
 
-/* A weapon's picture and its width over height: the retail menu image for a
- * primary, else the HUD icon's silhouette, cropped to its pixels. */
-static MaterialHandle Cac_Image(int index, float *aspect)
+/* A weapon's picture, its texture coordinates and its width over height: the
+ * owner's picture of the weapon when there is one, else the retail menu image
+ * for a primary, else the HUD icon's silhouette, cropped to its pixels. */
+static MaterialHandle Cac_Image(int index, float *aspect, const float **st)
 {
     if (s_cac.imageGeneration != R_GetHudImageGeneration()) {
         s_cac.imageGeneration = R_GetHudImageGeneration();
@@ -289,8 +293,24 @@ static MaterialHandle Cac_Image(int index, float *aspect)
     if (index < 0 || index >= g_classWeaponCount || index >= (int)(sizeof(s_cac.images) / sizeof(s_cac.images[0])))
         return NULL;
     if (!s_cac.images[index]) {
-        MaterialHandle image = CL_RegisterMaterialNoMip(g_classWeapons[index].image, 3);
+        char name[64];
+        MaterialHandle image;
+        int i;
 
+        snprintf(name, sizeof(name), "browser_class/%s", g_classWeapons[index].weapon);
+        for (i = 0; name[i]; i++)
+            name[i] = (char)(name[i] >= 'A' && name[i] <= 'Z' ? name[i] + 32 : name[i]);
+        image = R_GetHudPictureMaterial(name, s_cac.st[index], &s_cac.aspects[index]);
+        s_cac.pictures[index] = image != NULL;
+        if (image) {
+            s_cac.images[index] = image;
+            *aspect = s_cac.aspects[index];
+            *st = s_cac.st[index];
+            return image;
+        }
+        s_cac.st[index][0] = s_cac.st[index][1] = 0.0f;
+        s_cac.st[index][2] = s_cac.st[index][3] = 1.0f;
+        image = CL_RegisterMaterialNoMip(g_classWeapons[index].image, 3);
         s_cac.aspects[index] = CAC_RETAIL_IMAGE_ASPECT;
         if (g_classWeapons[index].slot != CLASS_SLOT_PRIMARY && image) {
             float cropped = 0.0f;
@@ -306,14 +326,17 @@ static MaterialHandle Cac_Image(int index, float *aspect)
         s_cac.images[index] = image;
     }
     *aspect = s_cac.aspects[index];
+    *st = s_cac.st[index];
     return s_cac.images[index];
 }
 
-/* The picture as large as it fits in the box, centered. */
+/* The picture as large as it fits in the box, centered; an owner's picture
+ * keeps its colors, a silhouette takes color. */
 static void Cac_Picture(int index, const CacRect *box, const vec_t *color)
 {
     float aspect = 1.0f, w, h;
-    MaterialHandle image = Cac_Image(index, &aspect);
+    const float *st = NULL;
+    MaterialHandle image = Cac_Image(index, &aspect, &st);
 
     if (!image || aspect <= 0.0f)
         return;
@@ -323,8 +346,9 @@ static void Cac_Picture(int index, const CacRect *box, const vec_t *color)
         h = box->h;
         w = h * aspect;
     }
-    CL_DrawStretchPic(box->x + 0.5f * (box->w - w), box->y + 0.5f * (box->h - h), w, h, box->horz, CAC_ALIGN_TOP, 0.0f,
-                      0.0f, 1.0f, 1.0f, color, image);
+    CL_DrawStretchPic(box->x + 0.5f * (box->w - w), box->y + 0.5f * (box->h - h), w, h, box->horz, CAC_ALIGN_TOP,
+                      st[0], st[1], st[2], st[3], s_cac.pictures[index] ? UI_WWIIMenu_Color(WWII_COLOR_WHITE) : color,
+                      image);
 }
 
 static void Cac_ReadStats(void)

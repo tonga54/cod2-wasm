@@ -12,6 +12,7 @@ import io
 from weapon_balance import apply_weapon_balance, load_profile
 from browser_bot_menu import apply_bot_menu
 from browser_class_menus import CLASS_MENU_LINE, class_menus
+from browser_class_pictures import OWNER_PICTURES_DIR, PICTURE_FOLDER, load_owner_pictures, verify_owner_pictures
 from browser_settings_menu import apply_settings_menu
 from browser_objective_assets import objective_asset_roots
 from browser_spawn_safety import apply_spawn_safety
@@ -46,7 +47,7 @@ try:
                 entries[name] = data
                 if name in (HIT_SOUND_TABLE, "sound/" + HIT_SOUND_FILE, MENU_MUSIC_TABLE, "sound/" + MENU_MUSIC_FILE):
                     continue
-                if name.startswith(("sound/" + OWNER_SOUNDS_FOLDER, OWNER_SOUNDS_TABLE[:-4])):
+                if name.startswith(("sound/" + OWNER_SOUNDS_FOLDER, OWNER_SOUNDS_TABLE[:-4], PICTURE_FOLDER)):
                     continue
                 if name in class_menus():
                     assert data == class_menus()[name], name
@@ -128,6 +129,9 @@ try:
         assert "weapons/mp/" + weapon.lower() in entries, "Missing class weapon: " + weapon
     for name in class_menus():
         assert name in entries, "Missing class menu: " + name
+    owner_pictures = load_owner_pictures(root / "data/main" / OWNER_PICTURES_DIR, classes["primary"] +
+                                         classes["secondary"] + classes["lethal"] + classes["tactical"])
+    verify_owner_pictures(entries, owner_pictures)
     aliases = {}
     for name, data in entries.items():
         if name.startswith("soundaliases/") and name.endswith(".csv"):
@@ -197,7 +201,8 @@ try:
     hit_sound = "the owner's" if owner_hit_sound.is_file() else "the retail"
     menu_music = "the owner's" if owner_menu_music.is_file() else "the retail"
     pack = f"the owner's sounds for {len(owner_sounds['aliases'])} aliases" if owner_sounds else "no owner sound pack"
-    print(f"PASS: {len(entries)} private entries, {total} bytes, retail bytes/reviewed overrides, Toujane/Carentan/Dawnville, five retail modes, all three BSPs and factions, {hit_sound} hit sound, {menu_music} menu music, {pack}")
+    pictures = f"the owner's {len(owner_pictures)} class pictures" if owner_pictures else "no owner class pictures"
+    print(f"PASS: {len(entries)} private entries, {total} bytes, retail bytes/reviewed overrides, Toujane/Carentan/Dawnville, five retail modes, all three BSPs and factions, {hit_sound} hit sound, {menu_music} menu music, {pack}, {pictures}")
 finally:
     for archive in originals:
         archive.close()

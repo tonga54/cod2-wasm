@@ -47,6 +47,19 @@ MaterialHandle R_GetHudSilhouetteMaterial(MaterialHandle icon, float *aspect);
 /* A white copy of the whole icon whose opacity follows its brightness, for a
  * faint one-color emblem. Built under the same conditions as a silhouette. */
 MaterialHandle R_GetHudEmblemMaterial(MaterialHandle icon);
+
+/* Pictures in their own colors that the menus draw; each name is read once. */
+#define R_HUD_PICTURE_COUNT 64
+#define R_HUD_PICTURE_MAX_SIZE 1024
+/* An A8R8G8B8 IWi with no picmip, sides of powers of two up to
+ * R_HUD_PICTURE_MAX_SIZE and every mip down to 1 x 1, smallest first: 1 with
+ * its size, else 0. */
+int R_GetPictureSize(const byte *file, int fileLen, int *width, int *height);
+/* images/<name>.iwi as R_GetPictureSize reads it, drawn through a copy of $raw
+ * with its mips. st gets the texture coordinates of its visible texels, as
+ * {s1, t1, s2, t2}, and aspect their width over their height. Returns NULL,
+ * with aspect 0, when there is no such picture or nothing in it is visible. */
+MaterialHandle R_GetHudPictureMaterial(const char *name, float *st, float *aspect);
 /* The top mip of a DXT3 or DXT5 IWi file as white BGRA texels with its alpha. */
 int R_DecodeIconAlpha(const byte *file, int fileLen, byte *bgra, int maxSize, int *width, int *height);
 /* Images a gray copy is built from: DXT1, DXT3 or DXT5 IWis of at most this

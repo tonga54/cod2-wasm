@@ -11,6 +11,7 @@ from browser_sound_assets import (HIT_SOUND_OWNER_FILE, MENU_MUSIC_OWNER_FILE, O
                                   collect_sound_assets, load_owner_sounds)
 from browser_bot_menu import apply_bot_menu
 from browser_class_menus import add_class_menu, class_menus
+from browser_class_pictures import OWNER_PICTURES_DIR, load_owner_pictures
 from browser_settings_menu import apply_settings_menu
 from browser_objective_assets import objective_asset_roots
 from browser_spawn_safety import apply_spawn_safety
@@ -324,6 +325,12 @@ try:
                 candidates += ("materials/" + token[:-4],)
             pending.extend(candidate for candidate in candidates
                            if candidate in asset_index and candidate not in renderer)
+    classes = json.loads((root / "downstream/gateway/classes.json").read_text())
+    pictures = load_owner_pictures(root / "data/main" / OWNER_PICTURES_DIR, classes["primary"] + classes["secondary"]
+                                   + classes["lethal"] + classes["tactical"])
+    if pictures:
+        renderer.update(pictures)
+        print(f"Class pictures: the owner's {len(pictures)} pictures replace those weapons' class menu icons")
     renderer.update(class_menus())
     archives["cod2_browser_renderer.iwd"] = renderer
     hit_sound = root / "data/main" / HIT_SOUND_OWNER_FILE
