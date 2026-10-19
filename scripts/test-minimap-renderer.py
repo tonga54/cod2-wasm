@@ -46,7 +46,7 @@ support = r'''
 #include <string.h>
 typedef unsigned char byte; typedef float vec_t; typedef vec_t vec3_t[3];
 typedef struct GfxImageFileHeader { char tag[3]; byte version, format, flags; short dimensions[3]; int fileSizeForPicmip[4]; } GfxImageFileHeader;
-typedef unsigned int D3DCOLOR; typedef unsigned short r_index_t;
+typedef unsigned int D3DCOLOR; typedef unsigned short r_index_t; typedef int D3DFORMAT; typedef unsigned long DWORD;
 #define D3DFMT_A8R8G8B8 21
 typedef struct { unsigned short id, byteCount; } GfxCmdHeader;
 typedef union { unsigned int packed; byte array[4]; } GfxColor;
@@ -101,6 +101,13 @@ static void Image_Generate2D(GfxImage *image, byte *pixels, int width, int heigh
     if (!failGenerate) image->texture.map = (void *)(intptr_t)++textureIds;
 }
 static void Image_Release(GfxImage *image) { assert(image->texture.map); released++; image->texture.map = NULL; }
+/* Owner pictures have their own test (test-owner-class-pictures.py); none load here. */
+static void Image_Setup(GfxImage *image, int width, int height, int depth, int flags, DWORD usage, D3DFORMAT format) {
+    (void)image; (void)width; (void)height; (void)depth; (void)flags; (void)usage; (void)format; assert(0);
+}
+static void Image_UploadData(GfxImage *image, D3DFORMAT format, int face, int level, const byte *src) {
+    (void)image; (void)format; (void)face; (void)level; (void)src; assert(0);
+}
 static void RB_UnbindImage(const GfxImage *image) { unbound++; lastUnbound = image; }
 static void ClearBounds(vec3_t mins, vec3_t maxs) {
     for (int i = 0; i < 3; i++) { mins[i] = 131072.0f; maxs[i] = -131072.0f; }
@@ -524,9 +531,9 @@ mutants = [
     mutate('        R_ReleaseImage(&s_silhouettes[slot].image);\n', ''),
     mutate('    s_silhouetteCount = 0;\n', ''),
     mutate('<= HUD_SILHOUETTE_ALPHA_MIN)', '< HUD_SILHOUETTE_ALPHA_MIN)'),
-    mutate('    minX = minX > 0 ? minX - 1 : 0;\n', ''),
-    mutate('    maxY = maxY < height - 1 ? maxY + 1 : maxY;\n', ''),
-    mutate('maxX = maxX < width - 1 ? maxX + 1 : maxX;', 'maxX = maxX + 1;'),
+    mutate('bounds[0] = minX > 0 ? minX - 1 : 0;', 'bounds[0] = minX;'),
+    mutate('bounds[3] = maxY < height - 1 ? maxY + 1 : maxY;', 'bounds[3] = maxY;'),
+    mutate('bounds[2] = maxX < width - 1 ? maxX + 1 : maxX;', 'bounds[2] = maxX + 1;'),
     mutate('memmove(bgra + y * *cropWidth * 4,', 'memmove(bgra + y * width * 4,'),
     mutate('    if (!decoded || (!entry->emblem && !R_CropToAlpha(s_silhouettePixels, width, height, &width, &height)))',
            '    if (!decoded)'),

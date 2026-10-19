@@ -2,8 +2,8 @@
 """Run Create a Class's camouflage against a recording UI: the line under each
 gun's tile, F2, a controller's Y or a click opening WWII's Primary or Secondary
 Camouflage, the swatches' keys and clicks, equipping a pattern (saved only when
-it changes), the guns painted in the tiles and the picker's preview, and the
-class a match receives."""
+it changes), the guns painted in the tiles and the picker's preview (the
+owner's picture of a gun when there is one), and the class a match receives."""
 from pathlib import Path
 import re
 import subprocess
@@ -38,6 +38,7 @@ typedef struct displayContextDef_t { int realTime; int cursorx, cursory; } displ
 typedef struct sharedUiInfo_t { struct { MaterialHandle whiteMaterial; } assets; } sharedUiInfo_t;
 int R_GetHudImageGeneration(void);
 MaterialHandle R_GetHudSilhouetteMaterial(MaterialHandle icon, float *aspect);
+MaterialHandle R_GetHudPictureMaterial(const char *name, float *st, float *aspect);
 MaterialHandle R_GetWeaponCamoMaterial(int camo);
 MaterialHandle R_GetWeaponCamoPicture(MaterialHandle picture, int silhouette, int camo, int style, float *aspect);
 ''' + headers + r'''
@@ -83,8 +84,21 @@ void UI_WWIIMenu_Prompts(const char *const *keys, const char *const *labels, int
 void UI_WWIIMenu_PaintWash(void) {}
 static Material white = { "white" };
 sharedUiInfo_t sharedUiInfo = { { &white } };
-int R_GetHudImageGeneration(void) { return 0; }
+static int imageGeneration;
+int R_GetHudImageGeneration(void) { return imageGeneration; }
 MaterialHandle R_GetHudSilhouetteMaterial(MaterialHandle icon, float *aspect) { (void)icon; *aspect = 0.0f; return NULL; }
+/* The owner's picture of the Kar98k, once there is one: its visible texels
+ * three quarters across and half down, three times as wide as tall. */
+static Material ownerKar = { "browser_class/kar98k_mp" };
+static int ownerPictures;
+MaterialHandle R_GetHudPictureMaterial(const char *name, float *st, float *aspect) {
+    *aspect = 0.0f;
+    if (!ownerPictures || strcmp(name, ownerKar.name))
+        return NULL;
+    st[0] = 0.0f; st[1] = 0.0f; st[2] = 0.75f; st[3] = 0.5f;
+    *aspect = 3.0f;
+    return &ownerKar;
+}
 /* Each camouflage's swatch; the gun's own finish has none. */
 static Material swatches[WEAPON_CAMO_COUNT];
 MaterialHandle R_GetWeaponCamoMaterial(int camo) {
@@ -330,6 +344,22 @@ int main(void) {
     }
     cases++;
 
+    /* With the owner's picture of the Kar98k, the camouflage paints that
+     * picture instead, drawn through its visible texels at its shape. */
+    ownerPictures = 1;
+    imageGeneration++;
+    paint(&createMenu);
+    {
+        const Drawn *preview = picOf(&painted[0][frogskin]);
+        assert(preview && lastPicture.source == &ownerKar && !lastPicture.silhouette &&
+               lastPicture.style == WEAPON_CAMO_WOOD);
+        assert(near(preview->s2, 0.75f) && near(preview->t2, 0.5f) && near(preview->w / preview->h, 3.0f));
+        assert(!pics(karImage) && !pics(&ownerKar));
+    }
+    ownerPictures = 0;
+    imageGeneration++;
+    cases++;
+
     /* Left and right go through the eleven and around; up and down by
      * rows, around, past the places the last row lacks. */
     assert(key(&createMenu, 0x9a) && s_cac.camoFocus == 9 && key(&createMenu, 0x9b) && s_cac.camoFocus == 1);
@@ -430,6 +460,9 @@ mutants = [
     ('    return slot < CLASS_CAMO_SLOTS ? loadout->camo[slot] : WEAPON_CAMO_NONE;', '    return WEAPON_CAMO_NONE;'),
     ('    s_cac.camoFocus = s_cac.classes[s_cac.classFocus].camo[slot];', '    s_cac.camoFocus = 0;'),
     ('        silhouette = g_classWeapons[index].slot != CLASS_SLOT_PRIMARY;', '        silhouette = 0;'),
+    ('    if (gun && s_cac.pictures[index]) {', '    if (0) {'),
+    ('st[0], st[1], st[2], st[3], UI_WWIIMenu_Color(WWII_COLOR_WHITE), picture);',
+     '0.0f, 0.0f, 1.0f, 1.0f, UI_WWIIMenu_Color(WWII_COLOR_WHITE), picture);'),
     ('    if (s_cac.screen == CAC_SCREEN_WEAPONS || s_cac.screen == CAC_SCREEN_EQUIPMENT || s_cac.screen == CAC_SCREEN_CAMO) {',
      '    if (s_cac.screen == CAC_SCREEN_WEAPONS || s_cac.screen == CAC_SCREEN_EQUIPMENT) {'),
     ('        } else if (s_cac.screen == CAC_SCREEN_EDIT && s_cac.hover >= CAC_HOVER_CAMO) {', '        } else if (0) {'),
@@ -490,7 +523,8 @@ with tempfile.TemporaryDirectory(prefix='cod2-class-camo-') as directory:
 
 print(f'PASS: Create a Class paints each gun\'s camouflage under its tile and in the list\'s panel; F2, a controller\'s Y '
       f'or a click opens Primary or Secondary Camouflage on the gun\'s own, a grid of the eleven swatches with the '
-      f'focused one\'s note and the gun painted in it; keys and clicks move and equip, saving only a change; grenades '
+      f'focused one\'s note and the gun, or the owner\'s picture of it, painted in it; keys and clicks move and equip, '
+      f'saving only a change; grenades '
       f'take none; Select Class shows the player\'s guns painted and Standard Issue as issued, and a match receives '
       f'the class with its camouflage, an unpainted one as five fields; {cases} cases, '
       f'{len(mutants)} failing mutants')

@@ -123,8 +123,9 @@ git clone https://github.com/theodorecharles/wasm-game-framework.git ../wasm-gam
 
 # Put your original CoD2 1.3 English IWD files in data/main/ first, and the
 # optional hitmarker.wav (docs/UPDATES.md#owner-hit-sound), menumusic.mp3
-# (docs/UPDATES.md#owner-menu-music) and owner_sounds/
-# (docs/UPDATES.md#owner-sound-pack) beside them.
+# (docs/UPDATES.md#owner-menu-music), owner_sounds/
+# (docs/UPDATES.md#owner-sound-pack) and owner_class_pictures/
+# (docs/UPDATES.md#owner-class-pictures) beside them.
 python3 scripts/prepare-browser-bootstrap.py
 python3 scripts/check-private-assets.py
 

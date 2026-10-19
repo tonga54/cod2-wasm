@@ -6,6 +6,9 @@
 
 extern r_global_permanent_t rgp;
 extern void Image_Generate2D(GfxImage *image, byte *pixels, int width, int height, int imageFormat);
+extern void Image_Setup(GfxImage *image, int width, int height, int depth, int imageFlags, DWORD usage,
+                        D3DFORMAT imageFormat);
+extern void Image_UploadData(GfxImage *image, D3DFORMAT format, int face, int mipLevel, const byte *src);
 extern void Image_Release(GfxImage *image);
 extern void RB_UnbindImage(const GfxImage *image);
 extern void ClearBounds(vec3_t mins, vec3_t maxs);
@@ -16,7 +19,12 @@ extern int Com_sprintf(char *dest, int size, const char *fmt, ...);
 
 /* Linear filtering, no mipmaps, clamped in U and V (see RB_SetSampler). */
 #define HUD_IMAGE_SAMPLER_STATE 0x32
+/* Linear filtering between linear mipmaps, clamped in U and V. */
+#define HUD_PICTURE_SAMPLER_STATE 0x3a
 #define IWI_VERSION 5
+#define IWI_FORMAT_ARGB32 0x01
+/* The image keeps its size whatever the picmip; its mips are in the file. */
+#define IWI_FLAG_NOPICMIP 0x01
 #define IWI_FORMAT_DXT1 0x0b
 #define IWI_FORMAT_DXT3 0x0c
 #define IWI_FORMAT_DXT5 0x0d
@@ -72,6 +80,21 @@ static HudSilhouette s_silhouettes[R_HUD_SILHOUETTE_COUNT];
 static int s_silhouetteCount;
 static int s_hudImageGeneration;
 static byte s_silhouettePixels[R_HUD_SILHOUETTE_MAX_SIZE * R_HUD_SILHOUETTE_MAX_SIZE * 4];
+
+typedef struct HudPicture {
+    /* "*" + the image's name. */
+    char name[72];
+    /* NULL when there is no such picture, so the file is not read again. */
+    MaterialHandle material;
+    float st[4];
+    float aspect;
+    GfxImage image;
+    MaterialTextureDef texture;
+    Material copy;
+} HudPicture;
+
+static HudPicture s_pictures[R_HUD_PICTURE_COUNT];
+static int s_pictureCount;
 
 static void R_ReleaseImage(GfxImage *image)
 {
@@ -352,9 +375,9 @@ MaterialHandle R_CreateHudGrayMaterial(int slot, MaterialHandle source, const by
     return gray;
 }
 
-/* Trims the transparent margin but one texel and packs the remaining rows at
- * the start of bgra. Returns 0 when nothing is visible. */
-static int R_CropToAlpha(byte *bgra, int width, int height, int *cropWidth, int *cropHeight)
+/* The texels above HUD_SILHOUETTE_ALPHA_MIN and one more around them, as
+ * bounds[] = { minX, minY, maxX, maxY }. Returns 0 when nothing is visible. */
+static int R_AlphaBounds(const byte *bgra, int width, int height, int *bounds)
 {
     int minX = width, minY = height, maxX = -1, maxY = -1;
     int x, y;
@@ -376,14 +399,26 @@ static int R_CropToAlpha(byte *bgra, int width, int height, int *cropWidth, int 
     if (maxX < 0)
         return 0;
 
-    minX = minX > 0 ? minX - 1 : 0;
-    minY = minY > 0 ? minY - 1 : 0;
-    maxX = maxX < width - 1 ? maxX + 1 : maxX;
-    maxY = maxY < height - 1 ? maxY + 1 : maxY;
-    *cropWidth = maxX - minX + 1;
-    *cropHeight = maxY - minY + 1;
+    bounds[0] = minX > 0 ? minX - 1 : 0;
+    bounds[1] = minY > 0 ? minY - 1 : 0;
+    bounds[2] = maxX < width - 1 ? maxX + 1 : maxX;
+    bounds[3] = maxY < height - 1 ? maxY + 1 : maxY;
+    return 1;
+}
+
+/* Trims the transparent margin but one texel and packs the remaining rows at
+ * the start of bgra. Returns 0 when nothing is visible. */
+static int R_CropToAlpha(byte *bgra, int width, int height, int *cropWidth, int *cropHeight)
+{
+    int bounds[4];
+    int y;
+
+    if (!R_AlphaBounds(bgra, width, height, bounds))
+        return 0;
+    *cropWidth = bounds[2] - bounds[0] + 1;
+    *cropHeight = bounds[3] - bounds[1] + 1;
     for (y = 0; y < *cropHeight; y++)
-        memmove(bgra + y * *cropWidth * 4, bgra + ((minY + y) * width + minX) * 4, *cropWidth * 4);
+        memmove(bgra + y * *cropWidth * 4, bgra + ((bounds[1] + y) * width + bounds[0]) * 4, *cropWidth * 4);
     return 1;
 }
 
@@ -465,6 +500,113 @@ MaterialHandle R_GetHudEmblemMaterial(MaterialHandle icon)
     return R_GetHudIconCopy(icon, 1, &aspect);
 }
 
+static int R_MipSize(int size, int level)
+{
+    return size >> level > 0 ? size >> level : 1;
+}
+
+/* Mips down to 1 x 1, as D3D makes them for a texture of powers of two. */
+static int R_PictureLevels(int width, int height)
+{
+    int levels = 1;
+
+    while (R_MipSize(width, levels - 1) > 1 || R_MipSize(height, levels - 1) > 1)
+        levels++;
+    return levels;
+}
+
+int R_GetPictureSize(const byte *file, int fileLen, int *width, int *height)
+{
+    const GfxImageFileHeader *header = (const GfxImageFileHeader *)file;
+    int w, h, level, levels, size;
+
+    if (!file || fileLen < (int)sizeof(*header) || memcmp(header->tag, "IWi", 3))
+        return 0;
+    if (header->version != IWI_VERSION || header->format != IWI_FORMAT_ARGB32 || header->flags != IWI_FLAG_NOPICMIP ||
+        header->dimensions[2] != 1)
+        return 0;
+    w = header->dimensions[0];
+    h = header->dimensions[1];
+    if (w < 1 || h < 1 || w > R_HUD_PICTURE_MAX_SIZE || h > R_HUD_PICTURE_MAX_SIZE || (w & (w - 1)) || (h & (h - 1)))
+        return 0;
+    levels = R_PictureLevels(w, h);
+    size = (int)sizeof(*header);
+    for (level = 0; level < levels; level++)
+        size += R_MipSize(w, level) * R_MipSize(h, level) * 4;
+    if (fileLen != size)
+        return 0;
+    *width = w;
+    *height = h;
+    return 1;
+}
+
+static MaterialHandle R_BuildHudPicture(HudPicture *entry, const Material *raw)
+{
+    char path[96];
+    void *file;
+    const byte *mip;
+    MaterialHandle material = NULL;
+    int fileLen, width, height, level, bounds[4];
+
+    if (Com_sprintf(path, sizeof(path), "images/%s.iwi", entry->name + 1) < 0)
+        return NULL;
+    fileLen = FS_ReadFile(path, &file);
+    if (fileLen < 0)
+        return NULL;
+    /* Mips are stored smallest first, so the top mip ends the file. */
+    if (R_GetPictureSize((const byte *)file, fileLen, &width, &height) &&
+        R_AlphaBounds((const byte *)file + fileLen - width * height * 4, width, height, bounds)) {
+        entry->image.name = entry->name;
+        Image_Setup(&entry->image, width, height, 1, IWI_FLAG_NOPICMIP, 0, D3DFMT_A8R8G8B8);
+        if (entry->image.texture.map) {
+            mip = (const byte *)file + sizeof(GfxImageFileHeader);
+            for (level = R_PictureLevels(width, height) - 1; level >= 0; level--) {
+                Image_UploadData(&entry->image, D3DFMT_A8R8G8B8, 0, level, mip);
+                mip += R_MipSize(width, level) * R_MipSize(height, level) * 4;
+            }
+            entry->st[0] = (float)bounds[0] / (float)width;
+            entry->st[1] = (float)bounds[1] / (float)height;
+            entry->st[2] = (float)(bounds[2] + 1) / (float)width;
+            entry->st[3] = (float)(bounds[3] + 1) / (float)height;
+            entry->aspect = (float)(bounds[2] - bounds[0] + 1) / (float)(bounds[3] - bounds[1] + 1);
+            material = R_CopyRawMaterial(raw, &entry->copy, &entry->texture, &entry->image, entry->name);
+            entry->texture.samplerState = HUD_PICTURE_SAMPLER_STATE;
+        }
+    }
+    FS_FreeFile(file);
+    return material;
+}
+
+MaterialHandle R_GetHudPictureMaterial(const char *name, float *st, float *aspect)
+{
+    const Material *raw = R_HudRawMaterial();
+    HudPicture *entry;
+    int i;
+
+    *aspect = 0.0f;
+    if (!name || !raw || strlen(name) + 1 >= sizeof(entry->name))
+        return NULL;
+    for (i = 0; i < s_pictureCount; i++) {
+        if (!strcmp(s_pictures[i].name + 1, name))
+            break;
+    }
+    if (i == s_pictureCount) {
+        if (s_pictureCount == R_HUD_PICTURE_COUNT)
+            return NULL;
+        entry = &s_pictures[s_pictureCount++];
+        memset(entry, 0, sizeof(*entry));
+        entry->name[0] = '*';
+        strcpy(entry->name + 1, name);
+        entry->material = R_BuildHudPicture(entry, raw);
+    }
+    entry = &s_pictures[i];
+    if (!entry->material)
+        return NULL;
+    memcpy(st, entry->st, sizeof(entry->st));
+    *aspect = entry->aspect;
+    return entry->material;
+}
+
 void R_ShutdownHudImages(void)
 {
     int slot;
@@ -475,6 +617,10 @@ void R_ShutdownHudImages(void)
         R_ReleaseImage(&s_silhouettes[slot].image);
     memset(s_silhouettes, 0, sizeof(s_silhouettes));
     s_silhouetteCount = 0;
+    for (slot = 0; slot < s_pictureCount; slot++)
+        R_ReleaseImage(&s_pictures[slot].image);
+    memset(s_pictures, 0, sizeof(s_pictures));
+    s_pictureCount = 0;
     s_hudImageGeneration++;
 }
 
