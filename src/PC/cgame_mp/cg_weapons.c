@@ -98,6 +98,7 @@ static EffectTemplate *CG_EnhanceMuzzleFlash(const EffectTemplate *original)
 }
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_wwiiscope.h"
+#include "headers/PC/cgame_mp/cg_attachmodels.h"
 
 extern const dvar_t *cg_weaponCycleDelay;
 extern const dvar_t *loc_warnings;
@@ -139,6 +140,7 @@ extern void Com_Printf(const char *fmt, ...);
 extern int CL_RegisterMaterial(const char *name, int flags);
 extern int CL_RegisterMaterialNoMip(const char *name, int flags);
 extern struct XModel *CL_RegisterModel(const char *name);
+extern int Com_sprintf(char *dest, int size, const char *fmt, ...);
 extern int FX_RegisterEffect(const char *name);
 extern void *Com_FindSoundAlias(const char *name);
 extern const char *SEH_StringEd_GetString(const char *str);
@@ -304,6 +306,9 @@ int CG_WeaponDObjHandle(int weaponNum)
 {
     return weaponNum + 0x400;
 }
+
+/* The visible attachments each weapon's first-person gun was last built with. */
+static unsigned s_viewModelAttachments[128];
 
 static inline __attribute__((always_inline)) qboolean CG_HasAssetName(const char *name)
 {
@@ -901,6 +906,9 @@ void CG_RegisterWeapon(int weaponNum)
         Com_ClientDObjCreate(dobjModels, 2, pAnimTree, CG_WeaponDObjHandle(weaponNum));
         weapInfo->viewModelDObj = Com_GetClientDObj(CG_WeaponDObjHandle(weaponNum), 0);
         I_strncpyz(weapInfo->handModel, weapDef->szHandXModel, sizeof(weapInfo->handModel));
+        CG_ViewModelAttachmentsForget(weaponNum);
+        if (weaponNum < (int)(sizeof(s_viewModelAttachments) / sizeof(s_viewModelAttachments[0])))
+            s_viewModelAttachments[weaponNum] = 0;
 
         XAnimClearTreeGoalWeights(pAnimTree, 0, 0);
         XAnimSetGoalWeight(pAnimTree, 0, 1.0f, 0.0f, weapInfo->viewModelAnimRates[0], 0, 0, 1);
@@ -1074,6 +1082,44 @@ void CG_RegisterItems(void)
     }
 }
 
+/* The first-person gun again on its animation tree: the hands, the gun and the visible
+ * attachments in mask. handModel is a full path. */
+static void CG_BuildViewModelDObj(int weaponIdx, const char *handModel, unsigned mask)
+{
+    weaponInfo_t *weapInfo = &(*(weaponInfo_t **)imp_cg_weapons)[weaponIdx];
+    WeaponDef *weapDef = (WeaponDef *)BG_GetWeaponDef(weaponIdx);
+    struct XAnimTree_s *pAnimTree = DObjGetTree(weapInfo->viewModelDObj);
+    DObjModel_s dobjModels[CG_VIEW_DOBJ_MODELS];
+    int dobjHandle = CG_WeaponDObjHandle(weaponIdx);
+    int count = 2;
+    char modelFile[64];
+
+    Com_SafeClientDObjFree(dobjHandle);
+
+    dobjModels[0].boneName = 0;
+    dobjModels[0].ignoreCollision = 0;
+    dobjModels[1].boneName = "tag_weapon";
+    dobjModels[1].ignoreCollision = 0;
+    dobjModels[0].model = CL_RegisterModel(handModel);
+
+    sprintf(modelFile, "%s%s", "xmodel/", weapDef->szGunXModel);
+    dobjModels[1].model = CL_RegisterModel(modelFile);
+
+    if (XModelBad(dobjModels[0].model) || XModelBad(dobjModels[1].model)) {
+        CG_Weapons_SetToDefault(weaponIdx, dobjModels);
+        mask = 0;
+    } else {
+        count = CG_ViewModelAttachmentModels(weaponIdx, weapDef->szGunXModel, mask, dobjModels, count);
+    }
+
+    Com_ClientDObjCreate(dobjModels, count, pAnimTree, dobjHandle);
+    weapInfo->viewModelDObj = Com_GetClientDObj(dobjHandle, 0);
+    I_strncpyz(weapInfo->handModel, handModel, 0x40);
+    DObjUpdateClientInfo(weapInfo->viewModelDObj, 0.05f);
+    if (weaponIdx < (int)(sizeof(s_viewModelAttachments) / sizeof(s_viewModelAttachments[0])))
+        s_viewModelAttachments[weaponIdx] = mask;
+}
+
 void CG_UpdateHandViewmodels(const char *handModel)
 {
     int weaponIdx;
@@ -1081,10 +1127,6 @@ void CG_UpdateHandViewmodels(const char *handModel)
     for (weaponIdx = 1; weaponIdx <= BG_GetNumWeapons(); weaponIdx++) {
         weaponInfo_t *weapInfo;
         WeaponDef *weapDef;
-        struct XAnimTree_s *pAnimTree;
-        DObjModel_s dobjModels[2];
-        int dobjHandle;
-        char modelFile[64];
 
         weapInfo = &(*(weaponInfo_t **)imp_cg_weapons)[weaponIdx];
         if (!strcmp(weapInfo->handModel, handModel))
@@ -1100,27 +1142,30 @@ void CG_UpdateHandViewmodels(const char *handModel)
         if (!weapDef->szGunXModel[0])
             continue;
 
-        pAnimTree = DObjGetTree(weapInfo->viewModelDObj);
-        dobjHandle = weaponIdx + 0x400;
-        Com_SafeClientDObjFree(dobjHandle);
-
-        dobjModels[0].boneName = 0;
-        dobjModels[0].ignoreCollision = 0;
-        dobjModels[1].boneName = "tag_weapon";
-        dobjModels[1].ignoreCollision = 0;
-        dobjModels[0].model = CL_RegisterModel(handModel);
-
-        sprintf(modelFile, "%s%s", "xmodel/", weapDef->szGunXModel);
-        dobjModels[1].model = CL_RegisterModel(modelFile);
-
-        if (XModelBad(dobjModels[0].model) || XModelBad(dobjModels[1].model))
-            CG_Weapons_SetToDefault(weaponIdx, dobjModels);
-
-        Com_ClientDObjCreate(dobjModels, 2, pAnimTree, dobjHandle);
-        weapInfo->viewModelDObj = Com_GetClientDObj(dobjHandle, 0);
-        I_strncpyz(weapInfo->handModel, handModel, 0x40);
-        DObjUpdateClientInfo(weapInfo->viewModelDObj, 0.05f);
+        CG_BuildViewModelDObj(weaponIdx, handModel,
+                              weaponIdx < (int)(sizeof(s_viewModelAttachments) / sizeof(s_viewModelAttachments[0]))
+                                  ? s_viewModelAttachments[weaponIdx]
+                                  : 0);
     }
+}
+
+/* Rebuild a first-person gun when the visible attachments it should carry change. */
+static void CG_UpdateViewModelAttachments(int weaponIdx, unsigned mask)
+{
+    weaponInfo_t *weapInfo;
+    char handModel[0x40];
+
+    mask = CG_VisibleAttachments(mask);
+    if (weaponIdx <= 0 || weaponIdx >= (int)(sizeof(s_viewModelAttachments) / sizeof(s_viewModelAttachments[0])) ||
+        mask == s_viewModelAttachments[weaponIdx])
+        return;
+    weapInfo = &(*(weaponInfo_t **)imp_cg_weapons)[weaponIdx];
+    if (!weapInfo->viewModelDObj || !((WeaponDef *)BG_GetWeaponDef(weaponIdx))->szGunXModel[0])
+        return;
+    I_strncpyz(handModel, weapInfo->handModel, sizeof(handModel));
+    if (!strchr(handModel, '/'))
+        Com_sprintf(handModel, sizeof(handModel), "xmodel/%s", weapInfo->handModel);
+    CG_BuildViewModelDObj(weaponIdx, handModel, mask);
 }
 
 void CG_SpawnTracer(vec_t *pstart, vec_t *pend)
@@ -1286,6 +1331,7 @@ void CG_AddPlayerWeapon(GfxEntity *parent, playerState_t *ps, centity_t *cent, q
     weapInfo = &(*(weaponInfo_t **)imp_cg_weapons)[weaponNum];
 
     if (bViewModel) {
+        CG_UpdateViewModelAttachments(weaponNum, BG_GetWeaponAttachments(playerState, weaponNum));
         if (bDrawGun) {
             GfxEntity gun;
             GfxModel model;
