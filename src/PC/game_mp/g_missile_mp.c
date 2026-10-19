@@ -610,10 +610,10 @@ static void G_ListMines(void)
 }
 
 /* The nearest of the player's own mines lying still within reach and in
- * sight, which they carry and have room for; NULL otherwise. */
+ * sight, whatever their kit holds (a mine outlives its owner's life, and the
+ * next one starts with a full kit); NULL otherwise. */
 static gentity_t *G_FindOwnMine(gentity_t *player)
 {
-    const playerState_t *ps = &player->client->ps;
     float nearest = GMISSILE_PICKUP_REACH * GMISSILE_PICKUP_REACH;
     gentity_t *found = NULL;
     vec3_t eye;
@@ -635,9 +635,7 @@ static gentity_t *G_FindOwnMine(gentity_t *player)
             (mine->spawnflags & GMISSILE_PLACED_TRIGGERED))
             continue;
         weapDef = BG_GetWeaponDef(mine->s.weapon);
-        if (weapDef->proximityRadius <= 0.0f || weapDef->hasDetonator ||
-            !((ps->weapons[mine->s.weapon >> 5] >> (mine->s.weapon & 0x1f)) & 1) ||
-            ps->ammoclip[weapDef->iClipIndex] >= weapDef->iClipSize)
+        if (weapDef->proximityRadius <= 0.0f || weapDef->hasDetonator)
             continue;
         VectorSubtract(mine->r.currentOrigin, player->r.currentOrigin, delta);
         distance = delta[0] * delta[0] + delta[1] * delta[1];
@@ -657,7 +655,8 @@ static int s_minePickupStart[64];
 static int s_minePickupEntity[64];
 
 /* Each server frame, after the cursor hints: where nothing else is offered,
- * a mine of the player's within reach offers itself and a held Use takes it. */
+ * a mine of the player's within reach offers itself and a held Use takes it,
+ * back into the kit when they carry the mine with room for one more. */
 void G_UpdateMinePickup(gentity_t *player)
 {
     playerState_t *ps = &player->client->ps;
@@ -676,7 +675,9 @@ void G_UpdateMinePickup(gentity_t *player)
         s_minePickupEntity[clientNum] = mine->s.number;
     } else if (LEVEL_TIME - s_minePickupStart[clientNum] >= GMISSILE_PICKUP_MSEC) {
         weapDef = BG_GetWeaponDef(mine->s.weapon);
-        ps->ammoclip[weapDef->iClipIndex]++;
+        if (((ps->weapons[mine->s.weapon >> 5] >> (mine->s.weapon & 0x1f)) & 1) &&
+            ps->ammoclip[weapDef->iClipIndex] < weapDef->iClipSize)
+            ps->ammoclip[weapDef->iClipIndex]++;
         G_PlacedSound(mine, weapDef->szPickupSound);
         G_FreeEntity(mine);
         s_minePickupStart[clientNum] = 0;

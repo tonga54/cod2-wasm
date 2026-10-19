@@ -611,6 +611,7 @@ python3 scripts/test-weapon-balance.py
 # Custom classes through the dedicated server (Docker, prepared assets, no network)
 python3 scripts/test-browser-classes-runtime.py --assets data/browser/main
 python3 scripts/test-browser-classes-runtime.py --assets data/browser/main --gametype sd
+python3 scripts/test-placed-explosives-runtime.py --assets data/browser/main
 
 # Optional GPU fixture from the linked production shaders (after build-web.sh)
 node scripts/prepare-web-lighting-qa.cjs

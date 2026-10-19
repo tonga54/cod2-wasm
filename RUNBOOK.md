@@ -3679,3 +3679,42 @@ Validation:
 - The local debugging console's dvar completion crashed the client once
   while typing `/timescale 0.3`; that console is never deployed and was not
   changed.
+
+## Taking back an S-Mine after a respawn — 2026-10-19
+
+Holding F over one's own S-Mine did nothing once its owner had died and
+respawned. A mine outlives its owner's life (it goes only when they leave or
+change sides), and every spawn hands out both mines again. The server offered
+the pickup only with room in the kit (`G_FindOwnMine`, `g_missile_mp.c`), so
+the mine left from the last life showed no prompt and ignored the hold until
+the player set a new one down. Setting a mine down and taking it back within
+one life, which the S-Mine's QA and the merge's browser pass covered, worked.
+
+Its owner now takes back any of their resting mines within reach and in
+sight, whatever the kit holds. The mine returns to the kit when they carry the
+S-Mine and have room for it: a full kit stays at two, and a kit without the
+S-Mine (a class changed since) gains nothing. The prompt, the half-second hold,
+the reach, other hints' precedence and C4 are unchanged.
+
+Validation:
+
+- `scripts/test-placed-explosives-runtime.py` (new) plays a test client through
+  the dedicated server with the private archives and no network: 9 checks. On
+  the server built before this change it passed 8; after a respawn with both
+  mines and one down, the held Use left the mine on the ground. With the
+  change all 9 passed, three times on Toujane and once each on Carentan and
+  Dawnville.
+- `scripts/test-placed-explosives.py`: the full kit and the kit without the
+  mine, formerly two of the twelve refusals, take the mine back without going
+  past the clip (still 61 server cases). 42 mutants fail, including removing
+  the room or the carried check from the refund. On the previous code the
+  full kit case fails at the hint.
+- An exploratory pass of the same harness on the previous server also covered
+  walking off and back, holding Use while walking up, crouched, prone,
+  standing over the mine, 48 units off looking away, and a tap against a
+  hold: only the respawn failed. A teammate in between was checked on the new
+  server. With a dropped weapon nearby, the stock weapon hint still comes
+  first, as other hints do: holding F swaps for that weapon, and the mine is
+  offered again only once no weapon is.
+- `scripts/test-weapon-prompt.py`, `test-owner-sound-pack.py`,
+  `test-grenade-lifecycle.py` and `test-grenade-indicators.py` pass unchanged.

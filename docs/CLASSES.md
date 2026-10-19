@@ -323,8 +323,10 @@ archives are prepared (`scripts/browser_explosives.py`,
   a held pose and setting down added. The mine arms after 1.2 s; an enemy's
   feet within 40 units click it and it goes off 0.15 s later. Its owner takes
   it back by holding Use (F, or X on a controller) for half a second within
-  52 units of it, with it in sight and room in their kit: "Press and hold F to
-  pickup S-Mine 44" shows under the crosshair.
+  52 units of it, with it in sight: "Press and hold F to pickup S-Mine 44"
+  shows under the crosshair. A mine outlives its owner's life and is taken
+  back the same way after a respawn; it returns to the kit when there is room
+  for it, so a full kit stays at two.
 - **C4**, CoD4's charge with CoD2's sticky bomb. G takes out the detonator,
   fire throws a charge that sticks where it lands, and aim sets off every
   charge the player placed, wherever they are.
@@ -566,6 +568,11 @@ on canvases the generator accepts, for the day a class weapon matches one.
   at an S&D spawn, then a class chosen before the match. That class applies
   whole, with its Extended Mag and without the team's pistol and frags, and
   removing the in-place step fails it.
+- `python3 scripts/test-placed-explosives-runtime.py --assets PREPARED_MAIN`
+  plays a test client with the S-Mine through the dedicated server, with no
+  network. It makes 9 checks: G sets one down, a held Use takes it back and a
+  tap leaves it, both go down and come back, and a mine left from a life that
+  ended is taken back with the full kit the next life starts with.
 - In the browser, against an isolated stack:
   - Every screen was created, edited and renamed. The edits persisted across a
     reload, and the class list, the editor and back all worked with the mouse.

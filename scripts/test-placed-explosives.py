@@ -317,19 +317,29 @@ int main(void){
  owner->client->buttons=0x20;calls=0;
  while(m->r.inuse&&calls<20){level.time+=50;owner->client->ps.cursorHint=0;G_UpdateMinePickup(owner);calls++;}
  assert(calls==11&&owner->client->ps.ammoclip[5]==1);cases++;
- /* Nobody else, nor out of reach, too far above or below, full, without the
-  * mine in their kit, once it has clicked, still falling, out of sight,
-  * dead, where another hint is offered, or a charge. */
- for(int c=0;c<12;c++){
+ /* A full kit, as after a respawn with the mine still down, or a kit without
+  * the mine takes it back too, without going past the clip. */
+ for(int c=0;c<2;c++){
+  reset();owner=player(0,2);owner->client->ps.weapons[0]=c?1<<CHARGE:1<<MINE;owner->client->ps.ammoclip[5]=c?0:2;
+  owner->client->buttons=USE;m=place(owner,MINE);rest(m,20,0);
+  level.time+=50;owner->client->ps.cursorHint=0;G_UpdateMinePickup(owner);
+  assert(owner->client->ps.cursorHint==PLACED_PICKUP_HINT&&owner->client->ps.cursorHintString==MINE&&m->r.inuse);
+  calls=0;
+  while(m->r.inuse&&calls<20){level.time+=50;owner->client->ps.cursorHint=0;G_UpdateMinePickup(owner);calls++;}
+  assert(calls==10&&!m->r.inuse&&owner->client->ps.ammoclip[5]==(c?0:2)&&sounds==1);cases++;
+ }
+ /* Nobody else, nor out of reach, too far above or below, once it has
+  * clicked, still falling, out of sight, dead, where another hint is
+  * offered, or a charge. */
+ for(int c=0;c<10;c++){
   reset();owner=player(0,2);mate=player(1,2);enemy=player(2,1);
   for(int k=0;k<3;k++){g_entities[k].client->ps.weapons[0]=1<<MINE|1<<CHARGE;g_entities[k].client->buttons=USE;}
   gentity_t *who=c==0?mate:c==1?enemy:owner;
-  m=place(owner,c==11?CHARGE:MINE);rest(m,20,0);
-  if(c==2)at(owner,-40,0,0);if(c==3)at(owner,0,0,-50);if(c==4)owner->client->ps.ammoclip[5]=2;
-  if(c==5)owner->client->ps.weapons[0]=1<<CHARGE;if(c==6)m->spawnflags|=2;if(c==7)m->s.pos.trType=5;
-  if(c==8)blockSight=1;if(c==9)owner->health=0;
-  for(int k=0;k<24;k++){level.time+=50;who->client->ps.cursorHint=c==10?7:0;G_UpdateMinePickup(who);
-   assert(who->client->ps.cursorHint==(c==10?7:0));}
+  m=place(owner,c==9?CHARGE:MINE);rest(m,20,0);
+  if(c==2)at(owner,-40,0,0);if(c==3)at(owner,0,0,-50);if(c==4)m->spawnflags|=2;if(c==5)m->s.pos.trType=5;
+  if(c==6)blockSight=1;if(c==7)owner->health=0;
+  for(int k=0;k<24;k++){level.time+=50;who->client->ps.cursorHint=c==8?7:0;G_UpdateMinePickup(who);
+   assert(who->client->ps.cursorHint==(c==8?7:0));}
   assert(m->r.inuse);cases++;
  }
  /* Of two in reach, the nearer goes first. */
@@ -355,7 +365,7 @@ int main(void){
  /* Free-for-all: only to its owner. */
  reset();owner=player(0,0);enemy=player(1,0);m=place(owner,MINE);rest(m,0,0);
  assert(G_PlacedExplosiveSentTo(&m->s,within,0)&&!G_PlacedExplosiveSentTo(&m->s,within,1));cases++;
- printf("PASS: %d server cases: a mine arms 1.2 s after it lies still, clicks under an enemy's feet within 40 units and 24 below to 48 above and goes off 150 ms later for its owner, never for teammates, its owner, the dead, spectators or the disconnected; anyone in free-for-all; C4 sticks flat to walls, floors, ceilings and slopes, bounces off players, and goes off only by its owner's detonator, anywhere, in flight too; two of each kind per owner; both go with an owner who leaves or changes sides; neither is thrown back; the S-Mine is set down upright a step ahead of its owner's feet, short of walls, down steps, falling over drops and steep slopes; only its owner takes it back, holding Use half a second within reach, in sight, with room for it, where no other hint is offered, the nearer first; a resting one is sent to its owner and teammates within 1600 units wherever it lies, never to enemies, spectators or others in free-for-all\n",cases);
+ printf("PASS: %d server cases: a mine arms 1.2 s after it lies still, clicks under an enemy's feet within 40 units and 24 below to 48 above and goes off 150 ms later for its owner, never for teammates, its owner, the dead, spectators or the disconnected; anyone in free-for-all; C4 sticks flat to walls, floors, ceilings and slopes, bounces off players, and goes off only by its owner's detonator, anywhere, in flight too; two of each kind per owner; both go with an owner who leaves or changes sides; neither is thrown back; the S-Mine is set down upright a step ahead of its owner's feet, short of walls, down steps, falling over drops and steep slopes; only its owner takes it back, holding Use half a second within reach, in sight, where no other hint is offered, the nearer first, with a full kit or none too, refunded only into room in a kit that carries it; a resting one is sent to its owner and teammates within 1600 units wherever it lies, never to enemies, spectators or others in free-for-all\n",cases);
  return 0;
 }
 '''
@@ -643,7 +653,8 @@ mutants = [
     ('server', '    mine = ps->cursorHint ? NULL : G_FindOwnMine(player);', '    mine = G_FindOwnMine(player);'),
     ('server', '            COD2_GEntityFromHandle(mine->parent) != player || mine->s.pos.trType != 0 ||', '            mine->s.pos.trType != 0 ||'),
     ('server', '    } else if (LEVEL_TIME - s_minePickupStart[clientNum] >= GMISSILE_PICKUP_MSEC) {', '    } else {'),
-    ('server', '            ps->ammoclip[weapDef->iClipIndex] >= weapDef->iClipSize)', '            0)'),
+    ('server', ' &&\n            ps->ammoclip[weapDef->iClipIndex] < weapDef->iClipSize)', ')'),
+    ('server', 'if (((ps->weapons[mine->s.weapon >> 5] >> (mine->s.weapon & 0x1f)) & 1) &&', 'if (1 &&'),
     ('server', '    if (!trace.startsolid && trace.fraction < 1.0f && trace.normal[2] > 0.7f) {', '    if (!trace.startsolid && trace.fraction < 1.0f) {'),
     ('server', '        spot[2] += GMISSILE_MINE_REST;', ''),
     ('server', '    angles[1] = yaw;', '    angles[1] = 0.0f;'),
