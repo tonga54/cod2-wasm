@@ -1,13 +1,15 @@
 #include "common_types.h"
 #include <emscripten.h>
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 /* The first full-screen 3D view of a frame renders into an offscreen target
  * (multisampled when r_aaSamples > 1). Before the first 2D draw it is composed
- * into the canvas: CoD2's DX9 glow (r_glow*), WWII-style camera motion blur
- * (r_motionBlur), a CoD4-style depth of field on the viewmodel and the near
- * world while aiming, contrast adaptive sharpening and a light film grade.
+ * into the canvas: CoD2's DX9 glow (r_glow*), WWII-style motion blur of the
+ * camera and of the viewmodel's own movement (r_motionBlur), a CoD4-style
+ * depth of field on the viewmodel and the near world while aiming, contrast
+ * adaptive sharpening and a light film grade.
  * The HUD and any later view draw straight into the canvas. A canvas taller
  * than r_sceneHeight lines renders that 3D view at r_sceneHeight and scales
  * it up as it composes, so the HUD gets the canvas's resolution for the
@@ -55,6 +57,20 @@ enum {
     SCENE_FX_MOTION_PROJECTION = SCENE_FX_MOTION_MOVE + 3,
     /* How much of the whole view blurs behind a screen-filling menu. */
     SCENE_FX_BACKDROP = SCENE_FX_MOTION_PROJECTION + 2,
+    /* How much of its color the view behind such a menu loses. */
+    SCENE_FX_BACKDROP_GRAY,
+    /* The longest half smear of the viewmodel's own motion in scene pixels;
+     * 0 draws none. */
+    SCENE_FX_VM_MOTION,
+    /* The viewmodel's triangles, the mesh texture rows where its indices and
+     * tiles start, and the rows to upload. */
+    SCENE_FX_VM_TRIANGLES,
+    SCENE_FX_VM_INDEX_ROW,
+    SCENE_FX_VM_TILE_ROW,
+    SCENE_FX_VM_ROWS,
+    /* The tile size in scene pixels, and the tiles across. */
+    SCENE_FX_VM_TILE,
+    SCENE_FX_VM_TILES_X,
     SCENE_FX_PARAM_COUNT
 };
 
@@ -72,6 +88,20 @@ enum {
 #define SCENE_FX_MOTION_MIN_TURN 0.0002f
 #define SCENE_FX_MOTION_MIN_MOVE 0.05f
 
+/* The viewmodel surfaces skinned in one frame. */
+#define SCENE_FX_VM_MAX_SURFACES 64
+#define SCENE_FX_VM_MAX_VERTICES 16384
+#define SCENE_FX_VM_MAX_TRIANGLES 32768
+#define SCENE_FX_VM_MAX_TILES 8192
+/* The mesh texture the viewmodel's motion is drawn from: rows of 1024 RGBA
+ * float texels. A vertex takes two (its clip position, then its smear), an
+ * index a quarter and a tile one. These rows hold the most of each. */
+#define SCENE_FX_VM_MESH_WIDTH 1024
+#define SCENE_FX_VM_MESH_ROWS 64
+/* A surface whose vertices moved further on average than this, in normalized
+ * device coordinates, between two frames was swapped for another pose. */
+#define SCENE_FX_VM_MAX_JUMP 1.0f
+
 static float s_adsFrac;
 static float s_vmStart = 6.0f;
 static float s_vmEnd = 15.0f;
@@ -83,15 +113,52 @@ static int s_frameUsed;
 static float s_aimFrac;
 static float s_cameraView[16];
 static float s_cameraProjection[2];
+static float s_cameraLens[16];
 static int s_cameraPending;
 static float s_lastView[16];
 static double s_lastViewTime;
 static int s_lastViewValid;
+/* Whether this view follows the last one without a cut, and how long after. */
+static int s_viewContinuous;
+static double s_viewGap;
 static float s_motionScale;
 static float s_motionRotation[9];
 static float s_motionMove[3];
 static float s_motionProjection[2];
 static float s_backdropFrac;
+static float s_backdropGray;
+static float s_grayFrac;
+
+typedef struct {
+    const void *key;
+    const unsigned short *indices;
+    int first;
+    int count;
+    int triangles;
+} WebSceneFxVmSurface;
+
+/* This frame's viewmodel surfaces, their vertices in the world, and the
+ * screen positions of the last frame's, each taken from the frame's view. */
+static WebSceneFxVmSurface s_vmSurfaces[SCENE_FX_VM_MAX_SURFACES];
+static int s_vmSurfaceCount;
+static int s_vmVertexCount;
+static int s_vmTriangleCount;
+static int s_vmOverflow;
+static int s_vmOverflowWarned;
+static float s_vmWorld[SCENE_FX_VM_MAX_VERTICES * 3];
+static WebSceneFxVmSurface s_vmLastSurfaces[SCENE_FX_VM_MAX_SURFACES];
+static int s_vmLastSurfaceCount;
+static float s_vmScreens[2][SCENE_FX_VM_MAX_VERTICES * 2];
+static int s_vmLastScreen;
+static float s_vmTiles[SCENE_FX_VM_MAX_TILES * 2];
+static float s_vmMesh[SCENE_FX_VM_MESH_ROWS * SCENE_FX_VM_MESH_WIDTH * 4];
+static float s_vmMotion;
+static int s_vmTriangles;
+static int s_vmIndexRow;
+static int s_vmTileRow;
+static int s_vmRows;
+static int s_vmTile;
+static int s_vmTilesX;
 
 EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth, int screenHeight), {
     if (typeof GLctx === "undefined" || !GLctx || !GLctx.blitFramebuffer) return 0;
@@ -102,7 +169,8 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             gl: gl, failed: false, width: 0, height: 0, requested: -1, samples: 0,
             t: null, programs: null, vao: null,
             maxSamples: gl.getParameter(gl.MAX_SAMPLES) | 0,
-            discard: [gl.COLOR_ATTACHMENT0, gl.DEPTH_STENCIL_ATTACHMENT]
+            discard: [gl.COLOR_ATTACHMENT0, gl.DEPTH_STENCIL_ATTACHMENT],
+            still: new Float32Array([128 / 255, 128 / 255, 0, 0]), far: new Float32Array([1])
         };
         fx.build = function() {
             var header = "#version 300 es\nprecision mediump float;\nin highp vec2 v_uv;\nout vec4 o;\n";
@@ -113,17 +181,18 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             gl.compileShader(vs);
             var previous = gl.getParameter(gl.CURRENT_PROGRAM);
             var programs = {}, ok = true;
-            var link = function(name, body, samplers, uniforms) {
+            var link = function(name, body, samplers, uniforms, vertex) {
                 var fs = gl.createShader(gl.FRAGMENT_SHADER);
                 gl.shaderSource(fs, header + body);
                 gl.compileShader(fs);
                 var program = gl.createProgram();
-                gl.attachShader(program, vs);
+                vertex = vertex || vs;
+                gl.attachShader(program, vertex);
                 gl.attachShader(program, fs);
                 gl.linkProgram(program);
                 if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
                     console.warn("[scene-fx] " + name + " failed: " + gl.getProgramInfoLog(program) +
-                        " " + gl.getShaderInfoLog(vs) + " " + gl.getShaderInfoLog(fs));
+                        " " + gl.getShaderInfoLog(vertex) + " " + gl.getShaderInfoLog(fs));
                     ok = false;
                     return;
                 }
@@ -194,6 +263,35 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "  highp float z = u_near.x / max(u_dof.x - d, 0.000001);\n" +
                 "  float c = clamp((u_near.y - z) * u_near.z, 0.0, 1.0);\n" +
                 "  return c * c * u_near.w;\n}\n";
+            /* A viewmodel pixel's half smear in pixels, its distance in units,
+             * with the world 1000 units behind it, and the filter's weights
+             * for a sample d pixels away. */
+            var viewmodelMotion = "highp vec2 vmSmear(ivec2 q) {\n" +
+                "  return (texelFetch(u_vmVelocity, q, 0).rg * 255.0 - 128.0) * (u_vm.x / 127.0);\n}\n" +
+                "highp float vmDistance(highp float d) {\n" +
+                "  return d < 0.2 ? u_dof.y / max(u_dof.x - d * 5.0, 0.00001) : 1000.0;\n}\n" +
+                "float cone(highp float d, highp float len) { return clamp(1.0 - d / max(len, 0.0001), 0.0, 1.0); }\n" +
+                "float cylinder(highp float d, highp float len) {\n" +
+                "  return 1.0 - smoothstep(0.95 * len, 1.05 * len + 0.0001, d);\n}\n";
+            /* Each viewmodel vertex is read from the mesh texture by its index,
+             * which is itself read by gl_VertexID, so this pass binds no vertex
+             * or index buffer for the GL emulation to lose track of. The smear
+             * is stored as a fraction of the frame's longest in RG8. */
+            var viewmodelVertex = gl.createShader(gl.VERTEX_SHADER);
+            gl.shaderSource(viewmodelVertex, "#version 300 es\nuniform highp sampler2D u_mesh;\nuniform highp vec2 u_vm;\n" +
+                "out highp vec2 v_uv;\nout highp vec2 v_smear;\nvoid main() {\n" +
+                "  int t = int(u_vm.x) * 1024 + (gl_VertexID >> 2);\n" +
+                "  highp vec4 q = texelFetch(u_mesh, ivec2(t & 1023, t >> 10), 0);\n" +
+                "  int c = gl_VertexID & 3;\n" +
+                "  int v = int(c == 0 ? q.x : (c == 1 ? q.y : (c == 2 ? q.z : q.w)));\n" +
+                "  ivec2 p = ivec2((v & 511) << 1, v >> 9);\n" +
+                "  v_uv = vec2(0.0);\n" +
+                "  v_smear = texelFetch(u_mesh, p + ivec2(1, 0), 0).xy * u_vm.y;\n" +
+                "  gl_Position = texelFetch(u_mesh, p, 0);\n}\n");
+            gl.compileShader(viewmodelVertex);
+            link("viewmodel", "in highp vec2 v_smear;\n" +
+                "void main() {\n  o = vec4(clamp(v_smear * (127.0 / 255.0) + 128.0 / 255.0, 0.0, 1.0), 0.0, 1.0);\n}\n",
+                ["u_mesh"], ["u_vm"], viewmodelVertex);
             link("dof", "uniform sampler2D u_src;\nuniform highp sampler2D u_depth;\n" +
                 "uniform highp vec2 u_texel;\nuniform highp vec4 u_dof;\n" + coc +
                 "float cocAt(ivec2 p, ivec2 m) { return vmBlur(texelFetch(u_depth, min(p, m), 0).r); }\n" +
@@ -209,7 +307,8 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "uniform highp vec4 u_px;\nuniform vec4 u_glow;\nuniform highp vec4 u_dof;\nuniform vec4 u_dof2;\nuniform vec4 u_film;\n" +
                 "uniform highp vec4 u_near;\nuniform vec2 u_tier;\n" +
                 "uniform highp vec4 u_motion;\nuniform highp mat3 u_motionRotation;\nuniform highp vec3 u_motionMove;\n" +
-                coc + nearWorld +
+                "uniform highp sampler2D u_vmVelocity;\nuniform highp sampler2D u_vmMesh;\nuniform highp vec4 u_vm;\n" +
+                coc + nearWorld + viewmodelMotion +
                 "void main() {\n" +
                 "  vec3 c = texture(u_scene, v_uv).rgb;\n" +
                 "  vec3 col = c;\n" +
@@ -245,6 +344,48 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "      }\n" +
                 "      col = sum / weight;\n" +
                 "      smeared = true;\n" +
+                "    }\n" +
+                "  }\n" +
+                /* The viewmodel smears along its own motion. Each pixel near it
+                 * gathers along the largest viewmodel smear within a tile, as in
+                 * McGuire et al.'s reconstruction filter: a sample's smear spreads
+                 * over this pixel when it reaches it from in front, this pixel's
+                 * own smear shows what is behind it, and two moving samples blend.
+                 * The viewmodel is always in front of the world. */
+                "  if (u_vm.x > 0.0) {\n" +
+                "    ivec2 px = ivec2(gl_FragCoord.xy);\n" +
+                "    int k = int(u_vm.y);\n" +
+                "    highp int tile = int(u_vm.z) * 1024 + (px.y / k) * int(u_vm.w) + px.x / k;\n" +
+                "    highp vec2 reach = texelFetch(u_vmMesh, ivec2(tile & 1023, tile >> 10), 0).xy;\n" +
+                "    highp float span = length(reach);\n" +
+                "    if (span >= 0.5) {\n" +
+                "      highp float dX = texelFetch(u_depth, px, 0).r;\n" +
+                "      highp float lenX = dX < 0.2 ? length(vmSmear(px)) : 0.0;\n" +
+                "      highp float zX = vmDistance(dX);\n" +
+                "      highp float self = 1.0 / max(lenX, 0.5);\n" +
+                "      highp vec3 sum = col * self;\n" +
+                "      highp float weight = self;\n" +
+                "      int taps = int(clamp(ceil(span * 0.5), 3.0, 12.0));\n" +
+                "      float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));\n" +
+                "      ivec2 last = textureSize(u_scene, 0) - 1;\n" +
+                "      for (int i = 0; i < 12; ++i) {\n" +
+                "        if (i >= taps) break;\n" +
+                "        highp vec2 offset = reach * ((float(i) + jitter) / float(taps) * 2.0 - 1.0);\n" +
+                "        ivec2 q = clamp(ivec2(gl_FragCoord.xy + offset), ivec2(0), last);\n" +
+                "        highp float dY = texelFetch(u_depth, q, 0).r;\n" +
+                "        if (dX >= 0.2 && dY >= 0.2) continue;\n" +
+                "        highp float lenY = dY < 0.2 ? length(vmSmear(q)) : 0.0;\n" +
+                "        highp float zY = vmDistance(dY), d = length(offset);\n" +
+                "        float a = clamp(1.0 + zX - zY, 0.0, 1.0) * cone(d, lenY) +\n" +
+                "          clamp(1.0 + zY - zX, 0.0, 1.0) * cone(d, lenX) + 2.0 * cylinder(d, lenY) * cylinder(d, lenX);\n" +
+                "        if (a <= 0.0) continue;\n" +
+                "        sum += texelFetch(u_scene, q, 0).rgb * a;\n" +
+                "        weight += a;\n" +
+                "      }\n" +
+                "      if (weight > self + 0.001) {\n" +
+                "        col = sum / weight;\n" +
+                "        smeared = true;\n" +
+                "      }\n" +
                 "    }\n" +
                 "  }\n" +
                 "  if (u_film.x > 0.0 && !smeared) {\n" +
@@ -288,10 +429,12 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "    col = clamp(col * mix(vec3(0.975, 0.99, 1.03), vec3(1.025, 1.005, 0.965), smoothstep(0.05, 0.75, l)), 0.0, 1.0);\n" +
                 "    col += u_film.z * col * (1.0 - col) * (col - 0.35) * 1.5384615;\n" +
                 "  }\n" +
+                "  if (u_px.w > 0.0)\n" +
+                "    col = mix(col, vec3(dot(col, vec3(0.2126, 0.7152, 0.0722))), u_px.w);\n" +
                 "  o = vec4(col, 1.0);\n}\n",
-                ["u_scene", "u_bloom", "u_depth", "u_dofMed", "u_dofLarge"],
+                ["u_scene", "u_bloom", "u_depth", "u_dofMed", "u_dofLarge", "u_vmVelocity", "u_vmMesh"],
                 ["u_px", "u_glow", "u_dof", "u_dof2", "u_film", "u_near", "u_tier",
-                 "u_motion", "u_motionRotation", "u_motionMove"]);
+                 "u_motion", "u_motionRotation", "u_motionMove", "u_vm"]);
             /* A scene smaller than the canvas, filtered up to it with Catmull-Rom
              * in five bilinear taps (the corner taps weigh under 0.5%), as the
              * page scales the canvas again with its own bilinear filter. */
@@ -435,6 +578,41 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             gl.viewport(0, 0, w, h);
             gl.drawArrays(gl.TRIANGLES, 0, 3);
         };
+        /* The viewmodel's smear target, made the first time it moves: each
+         * viewmodel pixel's smear with its own depth buffer, and the 64 rows
+         * of the mesh it is drawn from. The scene's target owns them. */
+        fx.viewmodel = function() {
+            var t = fx.t;
+            if (t.vm) return t.vm.ok;
+            var vm = t.vm = { ok: false };
+            var texture = function(format, tw, th) {
+                var id = gl.createTexture();
+                t.textures.push(id);
+                fx.texture(0, id);
+                gl.texStorage2D(gl.TEXTURE_2D, 1, format, tw, th);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+                return id;
+            };
+            vm.smear = texture(gl.RGBA8, fx.width, fx.height);
+            vm.mesh = texture(gl.RGBA32F, 1024, 64);
+            fx.texture(0, null);
+            vm.depth = gl.createRenderbuffer();
+            t.renderbuffers.push(vm.depth);
+            gl.bindRenderbuffer(gl.RENDERBUFFER, vm.depth);
+            gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, fx.width, fx.height);
+            gl.bindRenderbuffer(gl.RENDERBUFFER, null);
+            vm.fbo = gl.createFramebuffer();
+            t.framebuffers.push(vm.fbo);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, vm.fbo);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, vm.smear, 0);
+            gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, vm.depth);
+            vm.ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+            if (!vm.ok) console.warn("[scene-fx] viewmodel motion target unavailable; the viewmodel does not blur");
+            return vm.ok;
+        };
         /* Normalized Gaussian over texels 0..2 * pairs, folded into bilinear taps:
          * [center weight, pair weights...] and [pair offsets...]. */
         fx.kernel = function(sigma, pairs) {
@@ -451,12 +629,13 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             }
             return { weights: weights, offsets: offsets };
         };
-        fx.compose = function(o) {
+        fx.compose = function(o, mesh) {
             var t = fx.t, P = fx.programs, H = HEAPF32;
             var scaled = fx.unscale();
             if (!t || !P) return;
             var w = fx.width, h = fx.height, qw = t.qw, qh = t.qh, ew = t.ew, eh = t.eh;
             var glow0 = H[o], glow1 = H[o + 1], ads = H[o + 6], motion = H[o + 18], backdrop = H[o + 33];
+            var gray = H[o + 34], smear = H[o + 35];
             var glow = glow0 > 0 || glow1 > 0, blurBehind = backdrop > 0.004, dof = ads > 0.004 || blurBehind;
             var lines = h / 480;
             var program = gl.getParameter(gl.CURRENT_PROGRAM);
@@ -469,11 +648,12 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 enabled.push(gl.isEnabled(caps[c]));
                 gl.disable(caps[c]);
             }
+            var vm = smear > 0 && mesh > 0 && fx.viewmodel() ? t.vm : null;
             if (t.ms) {
                 gl.bindFramebuffer(gl.READ_FRAMEBUFFER, t.ms);
                 gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, t.scene);
                 gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h,
-                    dof || motion > 0 ? (gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT) : gl.COLOR_BUFFER_BIT, gl.NEAREST);
+                    dof || motion > 0 || vm ? (gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT) : gl.COLOR_BUFFER_BIT, gl.NEAREST);
                 gl.invalidateFramebuffer(gl.READ_FRAMEBUFFER, fx.discard);
             }
             /* Reading the write masks back would stall on the GPU process. Every
@@ -481,6 +661,25 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
              * without depth testing, so only the color mask is forced here. */
             gl.colorMask(true, true, true, true);
             gl.bindVertexArray(fx.vao);
+            if (vm) {
+                /* The viewmodel's triangles draw their smear with their own
+                 * depth test, so the nearest part's smear wins where parts
+                 * overlap. The depth mask stays on: the next D3D9 draw or clear
+                 * sets it again. */
+                fx.texture(0, vm.mesh);
+                gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 1024, H[o + 39], gl.RGBA, gl.FLOAT, H, mesh);
+                gl.useProgram(P.viewmodel.program);
+                gl.uniform2f(P.viewmodel.u_vm, H[o + 37], 1 / smear);
+                gl.bindFramebuffer(gl.FRAMEBUFFER, vm.fbo);
+                gl.viewport(0, 0, w, h);
+                gl.depthMask(true);
+                gl.clearBufferfv(gl.COLOR, 0, fx.still);
+                gl.clearBufferfv(gl.DEPTH, 0, fx.far);
+                gl.enable(gl.DEPTH_TEST);
+                gl.depthFunc(gl.LESS);
+                gl.drawArrays(gl.TRIANGLES, 0, 3 * H[o + 36]);
+                gl.disable(gl.DEPTH_TEST);
+            }
             if (glow) {
                 var cutoff = H[o + 2], knee = Math.max(cutoff - 0.3, 0);
                 gl.useProgram(P.bright.program);
@@ -532,7 +731,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             }
             var C = P.compose;
             gl.useProgram(C.program);
-            gl.uniform4f(C.u_px, 1 / w, 1 / h, w / h, 0);
+            gl.uniform4f(C.u_px, 1 / w, 1 / h, w / h, gray > 0 ? gray : 0);
             gl.uniform4f(C.u_glow, glow ? 1 : 0, 0, 0, 0);
             gl.uniform4f(C.u_dof, 0.9995002746582031, H[o + 9], vmEnd, invRange);
             gl.uniform4f(C.u_dof2, ads > 0.004 ? ads : 0, 0.07, 0.17, blurBehind ? backdrop : 0);
@@ -546,7 +745,8 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 gl.uniformMatrix3fv(C.u_motionRotation, false, H, o + 19, 9);
                 gl.uniform3f(C.u_motionMove, H[o + 28], H[o + 29], H[o + 30]);
             }
-            var sources = [t.color, t.e[1], t.depth, t.q[0], t.q[1]];
+            gl.uniform4f(C.u_vm, vm ? smear : 0, H[o + 40], H[o + 38], H[o + 41]);
+            var sources = [t.color, t.e[1], t.depth, t.q[0], t.q[1], vm ? vm.smear : null, vm ? vm.mesh : null];
             for (var s = 0; s < sources.length; ++s) fx.texture(s, sources[s]);
             if (scaled) {
                 fx.pass(C, t.outFbo, w, h);
@@ -583,9 +783,9 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
     return 1;
 });
 
-EM_JS(void, WebSceneFx_Compose, (const float *params), {
+EM_JS(void, WebSceneFx_Compose, (const float *params, const float *mesh), {
     var fx = Module.cod2SceneFx;
-    if (fx && fx.t) fx.compose(params >>> 2);
+    if (fx && fx.t) fx.compose(params >>> 2, mesh >>> 2);
     else if (fx) fx.unscale();
 });
 
@@ -646,12 +846,24 @@ void WebSceneFx_SetBackdrop(float backdropFrac)
     s_backdropFrac = WebSceneFx_Clamp(backdropFrac, 0.0f, 1.0f);
 }
 
+void WebSceneFx_SetBackdropGray(float gray)
+{
+    s_backdropGray = WebSceneFx_Clamp(gray, 0.0f, 1.0f);
+}
+
+/* The WWII countdown before a match takes the view's color away. */
+void WebSceneFx_SetGray(float grayFrac)
+{
+    s_grayFrac = WebSceneFx_Clamp(grayFrac, 0.0f, 1.0f);
+}
+
 /* The D3D view and projection matrices of the view about to begin. */
 void WebSceneFx_SetCamera(const float *viewMatrix, const float *projectionMatrix)
 {
     if (!viewMatrix || !projectionMatrix)
         return;
     memcpy(s_cameraView, viewMatrix, sizeof(s_cameraView));
+    memcpy(s_cameraLens, projectionMatrix, sizeof(s_cameraLens));
     s_cameraProjection[0] = projectionMatrix[0];
     s_cameraProjection[1] = projectionMatrix[5];
     s_cameraPending = 1;
@@ -680,6 +892,7 @@ static void WebSceneFx_TrackCamera(void)
     int valid, i, j, k;
 
     s_motionScale = 0.0f;
+    s_viewContinuous = 0;
     if (!s_cameraPending) {
         s_lastViewValid = 0;
         return;
@@ -688,8 +901,7 @@ static void WebSceneFx_TrackCamera(void)
     valid = WebSceneFx_CameraValid();
     now = emscripten_get_now();
     gap = now - s_lastViewTime;
-    if (valid && s_lastViewValid && gap >= 1.0 && gap <= SCENE_FX_MOTION_MAX_GAP &&
-        WebSceneFx_Enabled(r_motionBlur) && s_aimFrac < 1.0f) {
+    if (valid && s_lastViewValid && gap >= 1.0 && gap <= SCENE_FX_MOTION_MAX_GAP) {
         for (j = 0; j < 3; ++j)
             for (k = 0; k < 3; ++k) {
                 float sum = 0.0f;
@@ -708,18 +920,269 @@ static void WebSceneFx_TrackCamera(void)
                             (rotation[6] - rotation[2]) * (rotation[6] - rotation[2]) +
                             (rotation[1] - rotation[3]) * (rotation[1] - rotation[3]));
         moved = sqrtf(move[0] * move[0] + move[1] * move[1] + move[2] * move[2]);
-        if (trace > 1.0f + 2.0f * cosf(SCENE_FX_MOTION_MAX_TURN) && moved < SCENE_FX_MOTION_MAX_MOVE &&
-            (turn > SCENE_FX_MOTION_MIN_TURN || moved > SCENE_FX_MOTION_MIN_MOVE)) {
-            s_motionScale = (float)(SCENE_FX_MOTION_EXPOSURE / gap) * (1.0f - s_aimFrac);
-            memcpy(s_motionRotation, rotation, sizeof(s_motionRotation));
-            memcpy(s_motionMove, move, sizeof(s_motionMove));
-            s_motionProjection[0] = s_cameraProjection[0];
-            s_motionProjection[1] = s_cameraProjection[1];
+        if (trace > 1.0f + 2.0f * cosf(SCENE_FX_MOTION_MAX_TURN) && moved < SCENE_FX_MOTION_MAX_MOVE) {
+            s_viewContinuous = 1;
+            s_viewGap = gap;
+            if (WebSceneFx_Enabled(r_motionBlur) && s_aimFrac < 1.0f &&
+                (turn > SCENE_FX_MOTION_MIN_TURN || moved > SCENE_FX_MOTION_MIN_MOVE)) {
+                s_motionScale = (float)(SCENE_FX_MOTION_EXPOSURE / gap) * (1.0f - s_aimFrac);
+                memcpy(s_motionRotation, rotation, sizeof(s_motionRotation));
+                memcpy(s_motionMove, move, sizeof(s_motionMove));
+                s_motionProjection[0] = s_cameraProjection[0];
+                s_motionProjection[1] = s_cameraProjection[1];
+            }
         }
     }
     memcpy(s_lastView, view, sizeof(s_lastView));
     s_lastViewTime = now;
     s_lastViewValid = valid;
+}
+
+/* The renderer skins the viewmodel again every frame. */
+void WebSceneFx_BeginFrame(void)
+{
+    s_vmSurfaceCount = 0;
+    s_vmVertexCount = 0;
+    s_vmTriangleCount = 0;
+    s_vmOverflow = 0;
+}
+
+/* A viewmodel surface the renderer has just skinned: vertexCount positions
+ * stride bytes apart, taken into the world by transform (three axis rows, then
+ * the origin), drawn as triangleCount triangles of indices. key names the
+ * surface from one frame to the next. */
+void WebSceneFx_AddViewmodelSurface(const void *key, const float *positions, int stride, int vertexCount,
+                                    const unsigned short *indices, int triangleCount, const float *transform)
+{
+    WebSceneFxVmSurface *surface;
+    float *world;
+    int i, j;
+
+    if (!key || !positions || !indices || !transform || vertexCount <= 0 || triangleCount <= 0 ||
+        stride < 3 * (int)sizeof(float) || stride % (int)sizeof(float))
+        return;
+    if (s_vmSurfaceCount >= SCENE_FX_VM_MAX_SURFACES || vertexCount > SCENE_FX_VM_MAX_VERTICES - s_vmVertexCount ||
+        triangleCount > SCENE_FX_VM_MAX_TRIANGLES - s_vmTriangleCount) {
+        if (!s_vmOverflowWarned)
+            printf("[scene-fx] the viewmodel has over %d surfaces, %d vertices or %d triangles; it does not blur\n",
+                   SCENE_FX_VM_MAX_SURFACES, SCENE_FX_VM_MAX_VERTICES, SCENE_FX_VM_MAX_TRIANGLES);
+        s_vmOverflowWarned = 1;
+        s_vmOverflow = 1;
+        return;
+    }
+    surface = &s_vmSurfaces[s_vmSurfaceCount++];
+    surface->key = key;
+    surface->indices = indices;
+    surface->first = s_vmVertexCount;
+    surface->count = vertexCount;
+    surface->triangles = triangleCount;
+    world = s_vmWorld + s_vmVertexCount * 3;
+    for (i = 0; i < vertexCount; ++i) {
+        const float *p = (const float *)((const char *)positions + (size_t)i * (size_t)stride);
+        for (j = 0; j < 3; ++j)
+            world[i * 3 + j] = p[0] * transform[j] + p[1] * transform[3 + j] + p[2] * transform[6 + j] + transform[9 + j];
+    }
+    s_vmVertexCount += vertexCount;
+    s_vmTriangleCount += triangleCount;
+}
+
+/* The last frame's copy of this surface: the same key, met as many times
+ * before it, with as many vertices. */
+static const WebSceneFxVmSurface *WebSceneFx_LastViewmodelSurface(int index)
+{
+    const WebSceneFxVmSurface *surface = &s_vmSurfaces[index];
+    int occurrence = 0, i;
+
+    for (i = 0; i < index; ++i)
+        occurrence += s_vmSurfaces[i].key == surface->key;
+    for (i = 0; i < s_vmLastSurfaceCount; ++i) {
+        if (s_vmLastSurfaces[i].key != surface->key || occurrence--)
+            continue;
+        return s_vmLastSurfaces[i].count == surface->count ? &s_vmLastSurfaces[i] : NULL;
+    }
+    return NULL;
+}
+
+/* Raise the tiles under a triangle spanning lo to hi in normalized device
+ * coordinates to its fastest vertex's smear. A triangle off the screen
+ * raises none. */
+static int WebSceneFx_MarkViewmodelTiles(const float *lo, const float *hi, const float *smear, int width, int height,
+                                         int tile, int tilesX, int tilesY)
+{
+    float x0 = (lo[0] + 1.0f) * 0.5f * (float)width, x1 = (hi[0] + 1.0f) * 0.5f * (float)width;
+    float y0 = (lo[1] + 1.0f) * 0.5f * (float)height, y1 = (hi[1] + 1.0f) * 0.5f * (float)height;
+    float speed = smear[0] * smear[0] + smear[1] * smear[1];
+    int tx, ty, tx0, tx1, ty0, ty1;
+
+    if (x1 < 0.0f || y1 < 0.0f || x0 >= (float)width || y0 >= (float)height)
+        return 0;
+    tx0 = x0 > 0.0f ? (int)(x0 / (float)tile) : 0;
+    ty0 = y0 > 0.0f ? (int)(y0 / (float)tile) : 0;
+    tx1 = x1 < (float)width ? (int)(x1 / (float)tile) : tilesX - 1;
+    ty1 = y1 < (float)height ? (int)(y1 / (float)tile) : tilesY - 1;
+    for (ty = ty0; ty <= ty1; ++ty)
+        for (tx = tx0; tx <= tx1; ++tx) {
+            float *max = s_vmTiles + (ty * tilesX + tx) * 2;
+            if (speed > max[0] * max[0] + max[1] * max[1]) {
+                max[0] = smear[0];
+                max[1] = smear[1];
+            }
+        }
+    return 1;
+}
+
+/* This view's camera, with the depth hack's near clip, puts each viewmodel
+ * vertex on the screen, and the vertex smears along the way it moved there
+ * since the last frame: the viewmodel's own motion, which the camera's does
+ * not change. Its half smear spans 5 ms of that motion either side, like the
+ * camera's blur. The mesh holds each vertex's GL clip position and smear, the
+ * triangles with every corner in front of the eye, and for each tile of the
+ * screen the largest smear within one tile of it. A tile is as wide as the
+ * longest half smear, so that covers every smear that reaches the tile. */
+static void WebSceneFx_TrackViewmodel(int width, int height, float nearClip)
+{
+    const float *view = s_cameraView;
+    float *screen = s_vmScreens[s_vmLastScreen ^ 1];
+    const float *last = s_vmScreens[s_vmLastScreen];
+    float lens[16], m[16], *index;
+    float cap, scale, motion = 0.0f;
+    int blur, tile, tilesX, tilesY, vertexRows, tileRow, s, t, i, j, k, n = 0;
+
+    s_vmMotion = 0.0f;
+    s_vmTriangles = s_vmIndexRow = s_vmTileRow = s_vmRows = s_vmTile = s_vmTilesX = 0;
+    if (!s_lastViewValid || s_vmOverflow) {
+        s_vmLastSurfaceCount = 0;
+        return;
+    }
+    memcpy(lens, s_cameraLens, sizeof(lens));
+    lens[14] = -nearClip;
+    for (i = 0; i < 4; ++i)
+        for (j = 0; j < 4; ++j) {
+            float sum = 0.0f;
+            for (k = 0; k < 4; ++k)
+                sum += view[i * 4 + k] * lens[k * 4 + j];
+            m[i * 4 + j] = sum;
+        }
+    cap = 0.03f * (float)height;
+    tile = (int)ceilf(cap);
+    tilesX = (width + tile - 1) / tile;
+    tilesY = (height + tile - 1) / tile;
+    blur = tilesX * tilesY <= SCENE_FX_VM_MAX_TILES && s_viewContinuous && WebSceneFx_Enabled(r_motionBlur);
+    scale = blur ? (float)(SCENE_FX_MOTION_EXPOSURE / s_viewGap) * 0.25f : 0.0f;
+    for (s = 0; s < s_vmSurfaceCount; ++s) {
+        const WebSceneFxVmSurface *surface = &s_vmSurfaces[s];
+        const WebSceneFxVmSurface *before = blur ? WebSceneFx_LastViewmodelSurface(s) : NULL;
+        float jump = 0.0f;
+
+        for (i = surface->first; i < surface->first + surface->count; ++i) {
+            const float *p = s_vmWorld + i * 3;
+            float clip[4], *vertex = s_vmMesh + i * 8;
+            for (j = 0; j < 4; ++j)
+                clip[j] = p[0] * m[j] + p[1] * m[4 + j] + p[2] * m[8 + j] + m[12 + j];
+            screen[i * 2] = screen[i * 2 + 1] = NAN;
+            if (clip[3] > 0.001f && isfinite(clip[0]) && isfinite(clip[1]) && isfinite(clip[2]) && isfinite(clip[3])) {
+                screen[i * 2] = clip[0] / clip[3];
+                screen[i * 2 + 1] = clip[1] / clip[3];
+            }
+            vertex[0] = clip[0];
+            vertex[1] = clip[1];
+            vertex[2] = 2.0f * clip[2] - clip[3];
+            vertex[3] = clip[3];
+            if (before) {
+                const float *was = last + (before->first + i - surface->first) * 2;
+                if (isfinite(screen[i * 2]) && isfinite(was[0]))
+                    jump += fabsf(screen[i * 2] - was[0]) + fabsf(screen[i * 2 + 1] - was[1]);
+            }
+        }
+        if (jump > SCENE_FX_VM_MAX_JUMP * (float)surface->count)
+            before = NULL;
+        for (i = surface->first; i < surface->first + surface->count; ++i) {
+            float *smear = s_vmMesh + i * 8 + 4;
+            smear[0] = smear[1] = smear[2] = smear[3] = 0.0f;
+            if (before) {
+                const float *was = last + (before->first + i - surface->first) * 2;
+                if (isfinite(screen[i * 2]) && isfinite(was[0])) {
+                    float length;
+                    smear[0] = (screen[i * 2] - was[0]) * (float)width * scale;
+                    smear[1] = (screen[i * 2 + 1] - was[1]) * (float)height * scale;
+                    length = sqrtf(smear[0] * smear[0] + smear[1] * smear[1]);
+                    if (length > cap) {
+                        smear[0] *= cap / length;
+                        smear[1] *= cap / length;
+                    }
+                }
+            }
+        }
+    }
+    if (blur) {
+        vertexRows = (s_vmVertexCount * 2 + SCENE_FX_VM_MESH_WIDTH - 1) / SCENE_FX_VM_MESH_WIDTH;
+        index = s_vmMesh + vertexRows * SCENE_FX_VM_MESH_WIDTH * 4;
+        memset(s_vmTiles, 0, sizeof(float) * 2 * (size_t)(tilesX * tilesY));
+        for (s = 0; s < s_vmSurfaceCount; ++s) {
+            const WebSceneFxVmSurface *surface = &s_vmSurfaces[s];
+            for (t = 0; t < surface->triangles; ++t) {
+                float lo[2] = {INFINITY, INFINITY}, hi[2] = {-INFINITY, -INFINITY};
+                float fastest = 0.25f;
+                int corners[3], quickest = -1, c;
+                for (c = 0; c < 3; ++c) {
+                    int local = surface->indices[t * 3 + c];
+                    const float *at, *smear;
+                    if (local >= surface->count)
+                        break;
+                    corners[c] = surface->first + local;
+                    at = screen + corners[c] * 2;
+                    if (!isfinite(at[0]))
+                        break;
+                    smear = s_vmMesh + corners[c] * 8 + 4;
+                    if (smear[0] * smear[0] + smear[1] * smear[1] >= fastest) {
+                        fastest = smear[0] * smear[0] + smear[1] * smear[1];
+                        quickest = corners[c];
+                    }
+                    for (j = 0; j < 2; ++j) {
+                        lo[j] = fminf(lo[j], at[j]);
+                        hi[j] = fmaxf(hi[j], at[j]);
+                    }
+                }
+                if (c < 3)
+                    continue;
+                index[n++] = (float)corners[0];
+                index[n++] = (float)corners[1];
+                index[n++] = (float)corners[2];
+                if (quickest >= 0 &&
+                    WebSceneFx_MarkViewmodelTiles(lo, hi, s_vmMesh + quickest * 8 + 4, width, height, tile, tilesX, tilesY))
+                    motion = fmaxf(motion, sqrtf(fastest));
+            }
+        }
+        tileRow = vertexRows + (n + SCENE_FX_VM_MESH_WIDTH * 4 - 1) / (SCENE_FX_VM_MESH_WIDTH * 4);
+        for (j = 0; j < tilesY && motion > 0.0f; ++j)
+            for (i = 0; i < tilesX; ++i) {
+                float *out = s_vmMesh + (tileRow * SCENE_FX_VM_MESH_WIDTH + j * tilesX + i) * 4;
+                float best = -1.0f;
+                int x, y;
+                for (y = j > 0 ? j - 1 : 0; y <= j + 1 && y < tilesY; ++y)
+                    for (x = i > 0 ? i - 1 : 0; x <= i + 1 && x < tilesX; ++x) {
+                        const float *max = s_vmTiles + (y * tilesX + x) * 2;
+                        if (max[0] * max[0] + max[1] * max[1] > best) {
+                            best = max[0] * max[0] + max[1] * max[1];
+                            out[0] = max[0];
+                            out[1] = max[1];
+                        }
+                    }
+                out[2] = out[3] = 0.0f;
+            }
+        if (motion > 0.0f) {
+            s_vmMotion = motion;
+            s_vmTriangles = n / 3;
+            s_vmIndexRow = vertexRows;
+            s_vmTileRow = tileRow;
+            s_vmRows = tileRow + (tilesX * tilesY + SCENE_FX_VM_MESH_WIDTH - 1) / SCENE_FX_VM_MESH_WIDTH;
+            s_vmTile = tile;
+            s_vmTilesX = tilesX;
+        }
+    }
+    s_vmLastScreen ^= 1;
+    memcpy(s_vmLastSurfaces, s_vmSurfaces, sizeof(s_vmSurfaces[0]) * (size_t)s_vmSurfaceCount);
+    s_vmLastSurfaceCount = s_vmSurfaceCount;
 }
 
 static void WebSceneFx_FillParams(float *params)
@@ -758,6 +1221,20 @@ static void WebSceneFx_FillParams(float *params)
     params[SCENE_FX_MOTION_PROJECTION] = s_motionProjection[0];
     params[SCENE_FX_MOTION_PROJECTION + 1] = s_motionProjection[1];
     params[SCENE_FX_BACKDROP] = s_backdropFrac;
+    params[SCENE_FX_BACKDROP_GRAY] = s_backdropGray;
+    /* Gray as a menu's backdrop is, and with the captures' lifted highlights,
+     * which the film grade's contrast curve gives at 1.2. */
+    if (s_grayFrac > params[SCENE_FX_BACKDROP_GRAY])
+        params[SCENE_FX_BACKDROP_GRAY] = s_grayFrac;
+    if (film)
+        params[SCENE_FX_CONTRAST] += 0.85f * s_grayFrac;
+    params[SCENE_FX_VM_MOTION] = s_vmMotion;
+    params[SCENE_FX_VM_TRIANGLES] = (float)s_vmTriangles;
+    params[SCENE_FX_VM_INDEX_ROW] = (float)s_vmIndexRow;
+    params[SCENE_FX_VM_TILE_ROW] = (float)s_vmTileRow;
+    params[SCENE_FX_VM_ROWS] = (float)s_vmRows;
+    params[SCENE_FX_VM_TILE] = (float)s_vmTile;
+    params[SCENE_FX_VM_TILES_X] = (float)s_vmTilesX;
 }
 
 void WebSceneFx_EndView(void)
@@ -768,7 +1245,7 @@ void WebSceneFx_EndView(void)
         return;
     s_active = 0;
     WebSceneFx_FillParams(params);
-    WebSceneFx_Compose(params);
+    WebSceneFx_Compose(params, s_vmMesh);
 }
 
 void WebSceneFx_BeginView(int x, int y, int width, int height, int screenWidth, int screenHeight,
@@ -778,22 +1255,26 @@ void WebSceneFx_BeginView(int x, int y, int width, int height, int screenWidth, 
     int sceneWidth;
     int sceneHeight;
     int scaled;
+    float nearClip;
 
     WebSceneFx_EndView();
     if (s_frameUsed || x || y || width != screenWidth || height != screenHeight || width <= 0 || height <= 0)
         return;
     s_frameUsed = 1;
+    WebSceneFx_SceneSize(width, height, &sceneWidth, &sceneHeight);
+    nearClip = isfinite(depthHackNearClip) && depthHackNearClip > 0.0f ? depthHackNearClip : 0.1f;
     WebSceneFx_TrackCamera();
+    WebSceneFx_TrackViewmodel(sceneWidth, sceneHeight, nearClip);
     /* r_fullbright clears the frame buffer before it begins the view. */
     if (WebSceneFx_Enabled(r_fullbright))
         return;
     samples = WebSceneFx_Samples();
-    WebSceneFx_SceneSize(width, height, &sceneWidth, &sceneHeight);
     scaled = sceneWidth != width || sceneHeight != height;
-    if (!scaled && !WebSceneFx_GlowEnabled() && !WebSceneFx_Enabled(r_filmTweakEnable) && samples <= 1 &&
-        !(WebSceneFx_Enabled(r_dof_enable) && s_adsFrac > 0.0f) && s_motionScale <= 0.0f && s_backdropFrac <= 0.0f)
+    if (!scaled && s_grayFrac <= 0.0f && s_vmMotion <= 0.0f && !WebSceneFx_GlowEnabled() && !WebSceneFx_Enabled(r_filmTweakEnable) && samples <= 1 &&
+        !(WebSceneFx_Enabled(r_dof_enable) && s_adsFrac > 0.0f) && s_motionScale <= 0.0f && s_backdropFrac <= 0.0f &&
+        s_backdropGray <= 0.0f)
         return;
-    s_nearClip = isfinite(depthHackNearClip) && depthHackNearClip > 0.0f ? depthHackNearClip : 0.1f;
+    s_nearClip = nearClip;
     s_worldNearClip = isfinite(worldNearClip) && worldNearClip > 0.0f ? worldNearClip : SCENE_FX_DEFAULT_WORLD_NEAR_CLIP;
     s_active = WebSceneFx_Bind(sceneWidth, sceneHeight, samples, width, height);
 }

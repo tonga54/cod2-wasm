@@ -470,6 +470,10 @@ static void R_BeginFrame_impl(void)
 
 void R_BeginFrame(void)
 {
+#ifdef __EMSCRIPTEN__
+    extern void WebSceneFx_BeginFrame(void);
+    WebSceneFx_BeginFrame();
+#endif
     R_BeginFrame_impl();
 }
 

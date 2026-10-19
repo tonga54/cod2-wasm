@@ -505,8 +505,8 @@ void R_RegisterDvars(void)
 
     r_glowBloomDesaturation = ri.Dvar_RegisterFloat("r_glowBloomDesaturation", 0.75f, 0.0f, 1.0f, 0x2000);
 #ifdef __EMSCRIPTEN__
-    /* The browser composes r_glow, camera motion blur, aim depth of field and
-     * the film grade in one pass after the 3D scene
+    /* The browser composes r_glow, camera and viewmodel motion blur, aim depth
+     * of field and the film grade after the 3D scene
      * (downstream/wasm/web_scene_fx.c). */
     r_dof_enable = ri.Dvar_RegisterBool("r_dof_enable", 1, 0x2001);
 
