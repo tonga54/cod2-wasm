@@ -10,6 +10,8 @@ import tempfile
 import types
 import zipfile
 
+from browser_explosives import ALIASES as EXPLOSIVE_ALIASES
+
 root = Path(__file__).resolve().parent.parent
 module_path = root / 'scripts/browser_sound_assets.py'
 module_source = module_path.read_text()
@@ -31,6 +33,9 @@ TAIL_ROW = row(name='mp_hit_alert_tail', file='misc/tail.wav', vol_min='1', vol_
 FIRE_ROW = row(name='weap_test_fire', file='weapons/test_fire.wav', vol_min='0.9', vol_max='1', pitch_min='1',
                pitch_max='1', dist_min='10', dist_max='1000', channel='weapon', loadspec='all_mp')
 OTHER_MAP_ROW = row(name='weap_test_fire', file='weapons/other_map.wav', channel='weapon', loadspec='mp_other')
+# Every archive carries the retail rows the explosives' aliases start from.
+GRENADE_ROWS = [row(name=source, file=f'weapons/{source}.wav', channel='auto', loadspec='all_mp')
+                for source in sorted(set(EXPLOSIVE_ALIASES.values()))]
 
 
 def csv_text(rows):
@@ -219,6 +224,9 @@ with tempfile.TemporaryDirectory(prefix='cod2-hit-sound-') as directory:
     with zipfile.ZipFile(archive_path, 'w') as archive:
         archive.writestr('soundaliases/test_mp.csv', csv_text(
             [HEADER, ['# retail comment'], [], STOCK_ROW, TAIL_ROW, FIRE_ROW, OTHER_MAP_ROW]))
+        archive.writestr('soundaliases/test_grenades.csv', csv_text([HEADER, *GRENADE_ROWS]))
+        for values in GRENADE_ROWS:
+            archive.writestr('sound/' + values[2], FIRE_WAV)
         archive.writestr('sound/misc/mp_hit_indication_3c.wav', STOCK_WAV)
         archive.writestr('sound/misc/tail.wav', TAIL_WAV)
         archive.writestr('sound/weapons/test_fire.wav', FIRE_WAV)

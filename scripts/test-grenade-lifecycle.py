@@ -33,19 +33,21 @@ typedef int qboolean;typedef unsigned char byte;typedef float vec_t;typedef floa
 typedef struct {int trType,trTime,trDuration;vec3_t trBase,trDelta;} trajectory_t;
 typedef struct {float fraction;int startsolid,entityNum,surfaceFlags,partName;vec3_t normal;}trace_t;
 typedef struct {int pm_flags,pm_type,weaponstate,weapon,weaponTime,weaponDelay,offHandIndex,grenadeTimeLeft,
- eFlags,weapAnim,cursorHint,cursorHintString,cursorHintEntIndex,commandTime,weaponRestrictKickTime,stats[6],ammoclip[128],eventSequence,events[4],eventParms[4];vec3_t origin;float viewHeightCurrent;}playerState_t;
+ eFlags,weapAnim,cursorHint,cursorHintString,cursorHintEntIndex,commandTime,weaponRestrictKickTime,stats[6],ammoclip[128],eventSequence,events[4],eventParms[4];vec3_t origin,viewangles;float viewHeightCurrent;}playerState_t;
 typedef struct {int serverTime,buttons,weapon;}usercmd_t;
 typedef struct {playerState_t *ps;usercmd_t cmd;}pmove_t;typedef struct {int msec;}pml_t;
-typedef struct {playerState_t ps;struct {int connected;usercmd_t oldcmd;}sess;}gclient_t;
+typedef struct {playerState_t ps;struct {int connected;usercmd_t oldcmd;struct {int team;}cs;int sessionState;}sess;}gclient_t;
 typedef struct gentity_s {
  struct {int number,eType,eFlags,weapon,otherEntityNum,groundEntityNum,surfType,time,time2,eventParm,scale;vec3_t origin2;trajectory_t pos,apos;}s;
  struct {int ownerNum,inuse,svFlags,contents;vec3_t currentOrigin,currentAngles;}r;
  gclient_t *client;int useCount,handler,flags,health,parent,nextthink,classname,damage,clipmask,freeAfterEvent;struct {float time;}grenade;
+ int team,count,spawnflags,maxHealth;
 }gentity_t;
 typedef gentity_t gentity_s;
 typedef struct {int weapType,offhandClass,bCookOffHold,bSemiAuto,iFuseTime,damage,iExplosionRadius,iExplosionOuterDamage,iExplosionInnerDamage,
  iProjectileSpeed,weapClass,projExplosion,iClipIndex,iFireTime,iFireDelay,quickRaiseTime,iHoldFireTime;
- float parallelBounce[32],perpendicularBounce[32],fAdsAimPitch,destabilizeDistance,destabilizationTimeReductionRatio,destabilizationBaseTime;const char *szProjExplosionEffect;}WeaponDef;
+ float parallelBounce[32],perpendicularBounce[32],fAdsAimPitch,destabilizeDistance,destabilizationTimeReductionRatio,destabilizationBaseTime;const char *szProjExplosionEffect;
+ int hasDetonator,stickiness,iProximityArmTime,iProximityDelay,iMaxAmmo;float proximityRadius;const char *szBounceSound,*szArmSound,*szTriggerSound,*szDetonateSound;}WeaponDef;
 static gentity_t g_entities[1024];static gclient_t clients[3];
 static struct {int time,previousTime,num_entities;}level;
 static struct {int grenade;}scr_const;
@@ -111,16 +113,22 @@ static void PM_SetProneMovementOverride(playerState_t *ps){}
 static void PM_ResetWeaponState(playerState_t *ps){ps->weaponstate=0;ps->pm_flags&=~0x810;}
 static void BG_AnimScriptEvent(playerState_t *ps,int a,int b,int c){}
 static gentity_t *fire_grenade(gentity_t *,vec_t *,vec_t *,int,int);
+typedef int SoundAlias;static SoundAlias G_SoundAliasIndex(const char *n){return 1;}
+static int OnSameTeam(gentity_t *a,gentity_t *b){return a->client&&b->client&&a->client->sess.cs.team&&a->client->sess.cs.team==b->client->sess.cs.team;}
+static int s_placedSequence;
 '''
 
 defines = '\n'.join(s for s in weapons.splitlines() if s.startswith('#define WEAPON_') or s.startswith('#define PM_WEAPON_'))
+defines += '\n' + '\n'.join(s for s in missiles.splitlines() if s.startswith('#define GMISSILE_'))
 header = (root / 'src/headers/cod2_grenade.h').read_text()
 body = ''.join(function(missiles, n) for n in (
     'VectorCopy', 'VectorSubtract', 'VectorAdd', 'VectorScale', 'VectorClear',
     'VectorLength', 'DotProduct', 'VectorMA', 'SnapFloat', 'SnapVector', 'LerpPosition',
     'G_ResetHeldGrenades', 'G_GetHeldGrenade', 'G_HoldGrenade', 'G_CanPickUpGrenade',
     'G_FindNearbyGrenade', 'G_UpdateGrenadeHint', 'G_GrenadeCookOff', 'G_BeginGrenadeInput',
-    'G_EndGrenadeInput', 'G_ExplodeMissile', 'fire_grenade', 'G_BounceMissile', 'G_RunMissile'))
+    'G_EndGrenadeInput', 'G_PlacedTeam', 'G_PlacedSound', 'G_PlacedOwner', 'G_SetDownMine', 'G_PlaceExplosive',
+    'G_StickMissile',
+    'G_RunPlacedExplosive', 'G_DetonateExplosives', 'G_ExplodeMissile', 'fire_grenade', 'G_BounceMissile', 'G_RunMissile'))
 # Production functions are external; give the extracted grenade factory the same linkage.
 support = support.replace('static gentity_t *fire_grenade(', 'gentity_t *fire_grenade(')
 body += ''.join(function(weapons, n) for n in (

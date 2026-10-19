@@ -40,7 +40,18 @@ assert [gun for gun, _, _ in guns] == rules['primary'] + rules['secondary']
 assert all(style == 'BODY' for gun, _, style in guns if gun in rules['secondary']), 'pistols are painted whole'
 for item in rules['defaults']:
     assert (item['primaryCamo'], item['secondaryCamo']) == ('none', 'none'), item['name']
-# Every image the screens draw is a retail menu image or HUD icon.
+# The S-Mine's and C4's icons and strings are the generated ones
+# (browser_explosives.py); every other image is a retail menu image or HUD icon.
+import sys
+sys.path.insert(0, str(root / 'scripts'))
+import browser_explosives
+explosives = re.findall(r'\{ "(mine_mp|c4_mp)", CLASS_SLOT_LETHAL, CLASS_GROUP_[A-Z]+, CLASS_NATION_NONE,\s+"([A-Z0-9_]+)",\s+"([A-Z0-9_]+)",\s+"([a-z0-9_]+)" \}',
+                        source.read_text())
+assert [(weapon, image) for weapon, _, _, image in explosives] == [('mine_mp', browser_explosives.MINE_ICON),
+                                                                 ('c4_mp', browser_explosives.C4_ICON)], explosives
+for _, name, description, _ in explosives:
+    for reference in (name, description):
+        assert reference.startswith('BROWSER_') and f'REFERENCE           {reference[8:]}\r\n'.encode() in browser_explosives.STRING_TEXT, reference
 for image in re.findall(r'"(weapon_[a-z0-9_]+|gfx/icons/hud@[a-z0-9_]+\.tga|hud_[a-z0-9_]+)"', source.read_text()):
     assert re.fullmatch(r'weapon_[a-z0-9]+|gfx/icons/hud@[a-z0-9_]+\.tga|hud_us_smokegrenade', image), image
 
@@ -59,7 +70,7 @@ int main(void)
     int indexes[64];
     assert(ClassData_SlotWeapons(CLASS_SLOT_PRIMARY, indexes, 64) == 21);
     assert(ClassData_SlotWeapons(CLASS_SLOT_SECONDARY, indexes, 64) == 4 && slotOf("luger_mp") == CLASS_SLOT_SECONDARY);
-    assert(ClassData_SlotWeapons(CLASS_SLOT_LETHAL, indexes, 64) == 4);
+    assert(ClassData_SlotWeapons(CLASS_SLOT_LETHAL, indexes, 64) == 6 && slotOf("c4_mp") == CLASS_SLOT_LETHAL);
     assert(ClassData_SlotWeapons(CLASS_SLOT_TACTICAL, indexes, 64) == 4);
     assert(ClassData_SlotWeapons(CLASS_SLOT_PRIMARY, indexes, 3) == 3);
     assert(ClassData_Find("tt30_mp") < 0 && ClassData_Find(NULL) < 0 && ClassData_Find("TT30_mp") >= 0);
@@ -194,9 +205,9 @@ int main(void)
     assert(ClassData_Rate(35.0f, 35.0f, 90.0f) == 1 && ClassData_Rate(90.0f, 35.0f, 90.0f) == 10);
     assert(ClassData_Rate(62.5f, 35.0f, 90.0f) == 6 && ClassData_Rate(500.0f, 35.0f, 90.0f) == 10);
     assert(ClassData_Rate(-5.0f, 35.0f, 90.0f) == 1 && ClassData_Rate(7.0f, 7.0f, 7.0f) == 5);
-    puts("PASS: 33 weapons in four slots, two camouflages per class, storage lines round-trip with per-field defaults, "
-         "host name rules, bounded rename, the comma response with camouflage only when painted and stats from "
-         "weapon files");
+    puts("PASS: 35 weapons in four slots, two camouflages per class, storage lines round-trip with per-field "
+         "defaults, host name rules, bounded rename, the comma response with camouflage only when painted and "
+         "stats from weapon files");
     return 0;
 }
 '''

@@ -15,11 +15,16 @@ try {
   assert.equal(classRules.defaults.length, 5);
   assert.deepEqual(normalizeClasses(defaultClasses()), defaultClasses());
   assert.equal(new Set([...classRules.primary, ...classRules.secondary, ...classRules.lethal,
-    ...classRules.tactical]).size, 21 + 4 + 4 + 4);
+    ...classRules.tactical]).size, 21 + 4 + 6 + 4);
   // Ten camouflages and the guns' own finish, which every default keeps.
   assert.equal(new Set(classRules.camos).size, 11);
   assert.equal(classRules.camos[0], 'none');
   for (const item of classRules.defaults) assert.deepEqual([item.primaryCamo, item.secondaryCamo], ['none', 'none']);
+  // The S-Mine and C4 are lethal items beside the frags.
+  for (const lethal of ['mine_mp', 'c4_mp']) {
+    const placed = defaultClasses().map((item, index) => index === 3 ? { ...item, lethal } : item);
+    assert.deepEqual(normalizeClasses(placed)[3], { ...defaultClasses()[3], lethal });
+  }
 
   // A gametag owns its classes, without color codes, case or spaces around it.
   assert.equal(playerKey('^1Chapu^754 '), 'chapu54');
@@ -45,9 +50,9 @@ try {
       { name: 'back\\slash' }, { name: 'per%cent' }, { name: '^1red' }, { name: 'ñandú' }, { name: 7 },
       { primary: 'colt_mp' }, { primary: 'mg42_bipod_stand_mp' }, { primary: 'kar98k_mp;quit' },
       { secondary: 'kar98k_mp' }, { secondary: 'tt30_mp' }, { lethal: 'smoke_grenade_german_mp' },
-      { tactical: 'frag_grenade_german_mp' }, { tactical: undefined }, { primaryCamo: 'tiger' },
-      { primaryCamo: 'Frogskin' }, { secondaryCamo: '' }, { secondaryCamo: 7 }, { primaryCamo: null },
-      { secondaryCamo: 'none;quit' }
+      { tactical: 'frag_grenade_german_mp' }, { tactical: 'mine_mp' }, { tactical: 'c4_mp' }, { lethal: 'MINE_MP' },
+      { tactical: undefined }, { primaryCamo: 'tiger' }, { primaryCamo: 'Frogskin' }, { secondaryCamo: '' },
+      { secondaryCamo: 7 }, { primaryCamo: null }, { secondaryCamo: 'none;quit' }
     ].map(change => defaultClasses().map((item, index) => index === 2 ? { ...item, ...change } : item))
   ];
   for (const value of invalid) assert.throws(() => normalizeClasses(value), /class|classes/, JSON.stringify(value));

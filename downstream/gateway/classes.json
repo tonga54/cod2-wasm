@@ -10,7 +10,8 @@
   ],
   "secondary": ["colt_mp", "webley_mp", "TT30_mp", "luger_mp"],
   "lethal": [
-    "frag_grenade_american_mp", "frag_grenade_british_mp", "frag_grenade_russian_mp", "frag_grenade_german_mp"
+    "frag_grenade_american_mp", "frag_grenade_british_mp", "frag_grenade_russian_mp", "frag_grenade_german_mp",
+    "mine_mp", "c4_mp"
   ],
   "tactical": [
     "smoke_grenade_american_mp", "smoke_grenade_british_mp", "smoke_grenade_russian_mp", "smoke_grenade_german_mp"

@@ -3602,3 +3602,80 @@ Validation:
 
 Raw evidence and harnesses are in ignored `out/kc-qa/` (`timing.mjs`,
 `analyse.py`, `kt1` before, `kt2` after, `eg-clock`).
+
+## S-Mine 44, C4 and squad emblems — 2026-10-18
+
+Two lethal items join the class lists, both generated from the owner's files
+when the private archives are prepared (`scripts/browser_explosives.py`,
+`scripts/browser_smine.py`): CoD4's C4, a charge that sticks where it is
+thrown and goes off with aim from anywhere, and Call of Duty: WWII's S-Mine 44.
+
+The S-Mine follows the WWII captures the owner supplied:
+
+- Model: a green canister 4 inches across with a yellow band, stencils and
+  three detonator plugs on the lid, and its igniter (nut, rusty tube, green
+  collar and stem, three prongs). Its 256-texel texture is painted by the
+  generator; the material is the Mk 2 grenade's (`phong_replace` with the
+  identity normal map) pointed at it.
+- Hands: the viewmodel keeps the Mk 2 grenade's skeleton and hand. Its
+  pull-pin animation is the Mk 2's frames 0–14 with the left shoulder moved
+  by the offset that brings its fingers to the S-Mine's pin, which rides the
+  Mk 2's pin bone; the next seven frames stand the mine upright beside the
+  view while the left hand drops the pin out of sight. A new 11-frame plant
+  sinks that hold toward the feet. With `holdFireTime` 0.85 s, `fireDelay`
+  0.3 s and `fireTime` 0.45 s, a tap of G with a rifle takes about two
+  seconds, as in the captures.
+- Placement: the server sets it down upright 20 units ahead of the feet,
+  facing the player's yaw, 4 units short of a wall, on ground up to 64 units
+  below the feet whose normal is steeper than 0.7; otherwise it falls from the
+  hand. It is linked at once: a missile at rest never moves, so the missile
+  code would never have linked it and clients would not have received it.
+- Pickup: its owner holds Use (`+activate` or `+usereload`) for 500 ms within
+  52 units across and 40 up or down, with it in sight, while carrying the mine
+  with room for one more. Other hints take precedence. The cursor hint 254
+  carries the weapon in `cursorHintString`; the client draws "Press and hold
+  F to pickup S-Mine 44" in the weapon prompt's lettering. The server lists the
+  level's mines once a frame for every player's search.
+- Squad emblem: over a mine or charge at rest, for its owner and teammates,
+  through walls up to 1600 units, fading over the last quarter. The cgame
+  rasterizes the Allies' star and the Axis' iron cross, each in a ring with a
+  dark gap and edge, into `*hud_squad_emblems`. It is a 16-unit disc 17 units
+  above the explosive, kept between 22 and 96 virtual units, and pulses from
+  0.3 to 0.95 opacity every 1.8 s.
+- Snapshots: an explosive at rest used to reach a client only while its
+  clusters were in that client's PVS, so a teammate behind a building never
+  received it and saw no emblem. Both of the snapshot's visibility tests
+  (`sv_snapshot_mp.c`) now ask `G_PlacedExplosiveSentTo` (`g_missile_mp.c`)
+  before the PVS: it sends the explosive to its owner and their teammates
+  within 1600 units of their eyes, wherever it lies. Enemies, spectators and
+  everyone else in free-for-all still receive it only through the PVS.
+
+Validation:
+
+- `scripts/test-placed-explosives.py` runs the production placement, arming,
+  pickup, sticking, detonator, snapshot, emblem and loader code with
+  sanitizers: 61 server cases (six placements, the half-second hold, letting
+  go, twelve refusals, the nearer of two mines, who is sent an explosive at
+  rest), both snapshot visibility tests asking before the PVS, and the HUD's
+  visibility, size, lift, pulse, fade, team cell and emblem shapes. 41
+  mutants fail.
+- `scripts/test-weapon-prompt.py` draws the pickup prompt through the real
+  cursor hint: "Press and hold", the key and "to pickup S-Mine 44" on the
+  weapon prompt's baseline, never for the dead, in third person or for an
+  unknown weapon (14 more mutants).
+- `scripts/test-owner-sound-pack.py` plays an explosive's alias from its
+  retail source's rows and replaces it with an owner sound (3 more mutants);
+  the hit sound, menu music and owner pack fixtures carry those source rows.
+- `scripts/test-browser-smine.py` checks the generator on made-up inputs: the
+  xanim writer and keyed reading, the derived pull-pin and plant, the
+  material layout, the model's foot, winding and normals, and the paint.
+- In a local two-browser Toujane TDM room, on a debugging build with the
+  player console, the QA run captured: the placing sequence, the pickup prompt
+  and the pickup, a teammate seeing the emblem through buildings from 616
+  units, C4's star for the Allies and its iron cross for the Axis, and an
+  enemy beside the mine or the charge seeing neither emblem. Evidence and the
+  harness are in ignored `out/mine-qa/` (`smine.mjs`, `shots/smine`). The
+  release build (`COD2_DEV_CONSOLE=0`) passed `scripts/test-static.sh`.
+- The local debugging console's dvar completion crashed the client once
+  while typing `/timescale 0.3`; that console is never deployed and was not
+  changed.

@@ -113,10 +113,10 @@ retail CoD2:
   rules and collision-based navigation.
 - **Custom classes:** **Create a Class** in the main menu keeps five named
   classes for your gametag, each with a primary from any faction, a pistol, a
-  frag and a smoke grenade. Either gun can wear one of ten camouflage
-  patterns, chosen from a WWII-style swatch grid (F2 or a controller's Y on a
-  gun's tile); the first-person gun and each player's gun in hand are painted
-  with it. Joining a match opens **Select Class** first, laid
+  lethal item (a frag, the S-Mine 44 or C4) and a smoke grenade. Either gun can
+  wear one of ten camouflage patterns, chosen from a WWII-style swatch grid (F2
+  or a controller's Y on a gun's tile); the first-person gun and each player's
+  gun in hand are painted with it. Joining a match opens **Select Class** first, laid
   out as CoD WWII's Select Division: **Custom** lists your classes, **Standard
   Issue** the game's five defaults, and choosing one puts you on the team the
   mode's auto-assign picks. The pause menu's **Class** tab (Escape) lists both
@@ -125,6 +125,11 @@ retail CoD2:
   Pictures of the host owner's can show a class weapon in color in these
   screens, as WWII's do, and its camouflage paints them; the HUD keeps its
   white icons. See [custom classes](docs/CLASSES.md).
+- **Placed explosives:** CoD WWII's S-Mine 44, set down at your feet after
+  the left hand draws its pin, and CoD4's C4, thrown to stick and set off with
+  aim from anywhere. Your squad's emblem, a star or an iron cross, pulses over
+  them for you and your teammates. Hold Use over your own S-Mine to take it
+  back. See [placed explosives](docs/CLASSES.md#placed-explosives).
 - **WWII countdown before a match:** players who spawn before a match begins
   wait through one 15-second countdown, free to look around and aim but not to
   move, fire, throw, reload or use. It starts when the first person spawns or
@@ -362,6 +367,8 @@ sheet metal offer less protection than thick masonry or rock. See
 | Melee / interact / reload | V / F / R |
 | Frag / smoke | G / 4 |
 | Cook or return a frag | Hold G, then release to throw |
+| Set down / take back an S-Mine | G / hold F over it |
+| C4: take out, throw, set off | G, fire, aim |
 | Toggle crouch / go prone | C / Ctrl |
 | Stand up or jump | Space |
 | Public / team chat | T / Y |
@@ -431,8 +438,8 @@ published to the LAN. Private files are mounted read-only. Set `COD2_WEB_PORT`
 to change the public port or `COD2_WEB_DATA_DIR` to use another private-data
 location.
 
-The prepared two-map subset is approximately **329.6 MB**, including 442 original
-sound files (the development host's owner sounds add 215 more) and every
+The prepared two-map subset is approximately **332.9 MB**, including 442 original
+sound files (the development host's owner sounds add 237 more) and every
 faction's weapons for custom classes; the development host's 33 class
 pictures add 8.2 MB. Browsers download it once per site/cache version and keep it in
 IndexedDB. Size/SHA-256 checks verify each archive. Original owner IWDs stay

@@ -26,7 +26,10 @@ def function(source, name):
     return source[match.start():end] + '\n'
 
 
-distance = function(draw_source, 'CG_GrenadeThreatDistance')
+grenade_header = (root / 'src/headers/cod2_grenade.h').read_text()
+placed = grenade_header[grenade_header.index('static inline qboolean BG_IsPlacedExplosive'):
+                        grenade_header.index('static inline qboolean BG_GrenadeCanCook')]
+distance = placed + function(draw_source, 'CG_GrenadeThreatDistance')
 draw = function(draw_source, 'CG_DrawGrenadeIndicators')
 splash = function(combat_source, 'G_RadiusDamage')
 rows = []
@@ -54,6 +57,9 @@ support = f'#define FRAGS {len(rows)}\n' + r'''
 #define SMOKE (FRAGS+1)
 #define PLAIN (FRAGS+2)
 #define SCOPED (FRAGS+3)
+/* A land mine and a charge: frags in their class, placed, never thrown live. */
+#define MINE (FRAGS+4)
+#define CHARGE (FRAGS+5)
 typedef int qboolean,MaterialHandle;
 typedef float vec_t,vec3_t[3],vec4_t[4];
 typedef struct {int number,eType,eFlags,time,weapon;} entityState_t;
@@ -64,13 +70,13 @@ typedef struct {int numEntities;entityState_t entities[256];} snapshot_t;
 typedef struct {snapshot_t *snap,*nextSnap;playerState_t predictedPlayerState;
  int time,renderingThirdPerson;vec3_t refdefViewAngles;} cg_t;
 typedef struct {struct {int grenadeIcon,grenadePointer;} media;} cgs_t;
-typedef struct {int weapType,offhandClass,iExplosionRadius,overlayReticle;} WeaponDef;
+typedef struct {int weapType,offhandClass,iExplosionRadius,overlayReticle,hasDetonator;float proximityRadius;} WeaponDef;
 typedef struct {struct {float value,vector[4];int enabled;} current;} dvar_t;
 static cg_t state,*cg=&state;static cgs_t media,*cgs=&media;
 static centity_t entities[1024],*cg_entities=entities;static snapshot_t snap,nextSnap;
-static WeaponDef defs[SCOPED+1];static int nullWeapon,hidden;
-static int BG_GetNumWeapons(void){return SCOPED;}
-static WeaponDef *BG_GetWeaponDef(int index){assert(index>=1&&index<=SCOPED);return index==nullWeapon?NULL:&defs[index];}
+static WeaponDef defs[CHARGE+1];static int nullWeapon,hidden;
+static int BG_GetNumWeapons(void){return CHARGE;}
+static WeaponDef *BG_GetWeaponDef(int index){assert(index>=1&&index<=CHARGE);return index==nullWeapon?NULL:&defs[index];}
 static int CG_AreHudMenusHidden(void){return hidden;}
 static float vectoyaw(const vec_t *v){return atan2f(v[1],v[0])*57.295779513f;}
 static dvar_t range,height,scope,offset,iconW,iconH,pointerW,pointerH,pivot,freq,pulseMax,pulseMin;
@@ -122,6 +128,7 @@ static void reset(void){
  media.media.grenadeIcon=1;media.media.grenadePointer=2;hidden=nullWeapon=0;
  for(int i=1;i<=FRAGS;i++)defs[i]=(WeaponDef){WEAPTYPE_GRENADE,1,retail[i-1][0],0};
  defs[SMOKE]=(WeaponDef){WEAPTYPE_GRENADE,2,256,0};defs[PLAIN]=(WeaponDef){0,1,256,0};defs[SCOPED]=defs[1];defs[SCOPED].overlayReticle=1;
+ defs[MINE]=defs[1];defs[MINE].proximityRadius=40;defs[CHARGE]=defs[1];defs[CHARGE].hasDetonator=1;
  range.current.value=height.current.value=256;scope.current.enabled=1;offset.current.value=50;
  iconW.current.value=iconH.current.value=pointerW.current.value=25;pointerH.current.value=12;
  pivot.current.vector[0]=12;pivot.current.vector[1]=27;freq.current.value=1.7f;
@@ -172,7 +179,7 @@ int main(void){
   else if(reason==2)cent->nextValid=0;
   else if(reason==3)nextSnap.numEntities=0;
   else if(reason==4)cent->nextState.weapon=0;
-  else if(reason==5)cent->nextState.weapon=SCOPED+1;
+  else if(reason==5)cent->nextState.weapon=CHARGE+1;
   else if(reason==6)cent->nextState.weapon=SMOKE;
   else if(reason==7)cent->nextState.weapon=PLAIN;
   else if(reason==8)nullWeapon=1;
@@ -181,6 +188,8 @@ int main(void){
   else defs[1].iExplosionRadius=20;
   drawCount(0);
  }
+ /* A mine or charge lying near the player never warns: it would give it away. */
+ for(int placed=MINE;placed<=CHARGE;placed++){reset();grenade(64,placed,30,0,0);drawCount(0);}
  for(int gate=0;gate<9;gate++){
   reset();grenade(64,1,30,0,0);
   if(gate==0)cg->predictedPlayerState.pm_type=4;
@@ -242,6 +251,7 @@ variants = [
     ('horizontal-only range', distance.replace(' + dz * dz', ''), draw),
     ('persistent explosion warning', distance.replace('(state->eFlags & 0x20)', '0'), draw),
     ('smoke warning', distance.replace('weapon->offhandClass != OFFHAND_CLASS_FRAG_GRENADE', '0'), draw),
+    ('placed explosive warning', distance.replace(' ||\n        BG_IsPlacedExplosive(weapon))', ')'), draw),
     ('reversed pointer', distance, draw.replace('7, 7, -angle,', '7, 7, angle,')),
     ('unbounded warnings', distance, draw.replace('MAX_WARNINGS = 4', 'MAX_WARNINGS = 6')),
     ('perspective-sized warnings', distance, draw.replace('float iconW = width, iconH = height;', 'float iconW = width * .75f, iconH = height * .75f;')),

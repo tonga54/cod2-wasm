@@ -1,9 +1,12 @@
 #include "common_types.h"
 #include "imports.h"
 
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include "cod2_grenade.h"
 extern int stricmp(const char *s1, const char *s2);
+extern char *Info_ValueForKey(const char *s, const char *key);
 
 extern void BG_InitWeaponString(int index, const char *name);
 extern int FS_FOpenFileByMode(const char *filename, fileHandle_t *f, int mode);
@@ -334,6 +337,34 @@ static qboolean BG_ParseWeaponDefSpecificFieldType(byte *pStruct, const char *pV
     }
 }
 
+/* Placed explosives: CoD4's hasDetonator, stickiness and detonateSound, and a
+ * mine's proximity keys, in seconds as fuseTime is; and the view model's own
+ * offset. Retail files have none. */
+static void BG_ParsePlacedExplosiveKeys(WeaponDef *weapDef, const char *info)
+{
+    static const char *const stickinessNames[] = { "none", "all", "ground" };
+    const char *value;
+    int i;
+
+    weapDef->hasDetonator = atoi(Info_ValueForKey(info, "hasDetonator")) != 0;
+    weapDef->stickiness = WEAPSTICKINESS_NONE;
+    value = Info_ValueForKey(info, "stickiness");
+    for (i = 0; i < 3; i++) {
+        if (!stricmp(value, stickinessNames[i]))
+            weapDef->stickiness = i;
+    }
+    weapDef->proximityRadius = (float)atof(Info_ValueForKey(info, "proximityRadius"));
+    weapDef->iProximityArmTime = (int)(atof(Info_ValueForKey(info, "proximityArmTime")) * 1000.0 + 0.5);
+    weapDef->iProximityDelay = (int)(atof(Info_ValueForKey(info, "proximityDelay")) * 1000.0 + 0.5);
+    SetConfigString_core(&weapDef->szDetonateSound, Info_ValueForKey(info, "detonateSound"));
+    SetConfigString_core(&weapDef->szBounceSound, Info_ValueForKey(info, "bounceSound"));
+    SetConfigString_core(&weapDef->szArmSound, Info_ValueForKey(info, "armSound"));
+    SetConfigString_core(&weapDef->szTriggerSound, Info_ValueForKey(info, "triggerSound"));
+    weapDef->vGunOfs[0] = (float)atof(Info_ValueForKey(info, "gunOfsF"));
+    weapDef->vGunOfs[1] = (float)atof(Info_ValueForKey(info, "gunOfsR"));
+    weapDef->vGunOfs[2] = (float)atof(Info_ValueForKey(info, "gunOfsU"));
+}
+
 WeaponDef *BG_LoadWeaponDefInternal(const char *folder, const char *name)
 {
     WeaponDef *weapDef;
@@ -438,6 +469,8 @@ WeaponDef *BG_LoadWeaponDefInternal(const char *folder, const char *name)
 
     I_strlwr(weapDef->szAmmoName);
     I_strlwr(weapDef->szClipName);
+
+    BG_ParsePlacedExplosiveKeys(weapDef, szBuffer);
 
     return weapDef;
 }

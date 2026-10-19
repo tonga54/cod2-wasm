@@ -58,6 +58,11 @@ target_compile_definitions(cod2_client_objects PRIVATE
   COD2_FEATURE_SPLITSCREEN=0
   GL_GLEXT_PROTOTYPES=1
   SDL_DISABLE_IMMINTRIN_H=1)
+# The player console stays disabled; only a local debugging build opens it.
+option(COD2_DEV_CONSOLE "Open the player console (local debugging only, never deployed)" OFF)
+if(COD2_DEV_CONSOLE)
+  target_compile_definitions(cod2_client_objects PRIVATE COD2_DEV_CONSOLE=1)
+endif()
 target_include_directories(cod2_client_objects PRIVATE
   "${COD2_ROOT}"
   "${COD2_SRC}"

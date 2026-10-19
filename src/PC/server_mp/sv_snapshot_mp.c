@@ -102,6 +102,7 @@ extern int GetFollowPlayerState(int clientNum, byte *ps);
 extern int G_GetClientArchiveTime(int clientNum);
 extern void G_SetClientArchiveTime(int clientNum, int archiveTime);
 extern float G_GetFogOpaqueDistSqrd(void);
+extern int G_PlacedExplosiveSentTo(const entityState_t *es, const vec_t *eye, int clientNum);
 extern int BoxDistSqrdExceeds(byte *absmin, byte *absmax, byte *org, float distSqrd);
 extern int CM_PointLeafnum(byte *p);
 extern int CM_LeafCluster(int leafnum);
@@ -1357,6 +1358,9 @@ static int SV_EntityIsVisibleToClientLocal(byte *entBytes, const vec3_t org, con
     if (shared->svFlags & 0x18) {
         return 1;
     }
+    if (G_PlacedExplosiveSentTo(es, org, clientNum)) {
+        return 1;
+    }
 
     svEnt = (svEntity_t *)SV_SvEntityForGentity(entBytes);
     if (svEnt->numClusters <= 0) {
@@ -1410,6 +1414,9 @@ static int SV_CachedEntityIsVisibleLocal(archivedEntity_t *archEnt, const vec3_t
         return 0;
     }
     if (shared->svFlags & 0x18) {
+        return 1;
+    }
+    if (G_PlacedExplosiveSentTo(es, org, clientNum)) {
         return 1;
     }
 

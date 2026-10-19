@@ -93,6 +93,8 @@ python3 "${repo_root}/scripts/test-remote-player-controllers.py"
 python3 "${repo_root}/scripts/test-chat.py"
 python3 "${repo_root}/scripts/test-chat-delivery.py"
 python3 "${repo_root}/scripts/test-grenade-lifecycle.py"
+python3 "${repo_root}/scripts/test-placed-explosives.py"
+python3 "${repo_root}/scripts/test-browser-smine.py"
 python3 "${repo_root}/scripts/test-grenade-indicators.py"
 python3 "${repo_root}/scripts/test-grenade-warning.py"
 python3 "${repo_root}/scripts/test-breath-prompt.py"
@@ -171,6 +173,7 @@ node "${repo_root}/scripts/test-web-qport.cjs"
 node "${repo_root}/scripts/test-web-audio.cjs"
 node "${repo_root}/scripts/test-update-notifier.cjs"
 python3 "${repo_root}/scripts/test-client-update-menu.py"
+python3 "${repo_root}/scripts/test-dev-console.py"
 python3 "${repo_root}/scripts/test-update-local.py"
 node "${framework_dir}/scripts/check-game-package.js" "${site_dir}"
 node - "${site_dir}" <<'NODE'
@@ -195,6 +198,7 @@ const build = JSON.parse(fs.readFileSync(path.join(site, 'build-info.json')));
 assert.match(build.revision, /^[a-f0-9]{40}$/);
 assert.match(build.buildId, /^[a-f0-9]{64}$/);
 assert.equal(typeof build.dirty, 'boolean');
+assert.equal(build.devConsole, false, 'a player console build is for local debugging only');
 assert.equal(config.identity, false);
 assert.equal(config.variants['cod2-mp'].title, 'Call of Duty 2 Multiplayer');
 assert.equal(config.variants['cod2-mp'].shortTitle, 'Call of Duty 2 Multiplayer');

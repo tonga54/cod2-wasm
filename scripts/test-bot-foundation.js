@@ -71,10 +71,12 @@ const tracked = childProcess.execFileSync('git', ['-C', root, 'ls-files'], { enc
   .trim().split('\n').filter(Boolean);
 const firstPartyScripts = new Set([
   'downstream/server/browser_bots.gsc',
+  'downstream/server/browser_classes.gsc',
+  'downstream/server/browser_prematch.gsc',
   'downstream/server/browser_spawn_safety.gsc'
 ]);
 assert.deepEqual(tracked.filter(file => /\.(?:gsc|wp)$/i.test(file) &&
   !firstPartyScripts.has(file)), [],
-  'only first-party lifecycle and spawn-safety scripts may be tracked; no imported scripts or waypoint graphs');
+  'only first-party lifecycle, class, prematch and spawn-safety scripts may be tracked; no imported scripts or waypoint graphs');
 
 console.log('Call of Duty 2 clean-room bot foundation contract passed');

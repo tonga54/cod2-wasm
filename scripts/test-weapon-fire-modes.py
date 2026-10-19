@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import zipfile
 from weapon_balance import apply_weapon_balance, load_profile, weapon_fields
+from browser_explosives import WEAPONS as EXPLOSIVE_WEAPONS
 
 root = Path(__file__).resolve().parent.parent
 source = (root / 'src/PC/bgame/bg_weapons.c').read_text()
@@ -40,7 +41,10 @@ fields = {
     'hipSpreadFireAdd': 'fHipSpreadFireAdd',
 }
 with zipfile.ZipFile(root / 'data/browser/main/cod2_browser_renderer.iwd') as archive:
-    for name in sorted(n for n in archive.namelist() if n.startswith('weapons/mp/')):
+    # The land mine and C4 have no original; check-private-assets.py compares
+    # them with their generator, browser_explosives.py.
+    generated = {'weapons/mp/' + weapon for weapon in EXPLOSIVE_WEAPONS}
+    for name in sorted(n for n in archive.namelist() if n.startswith('weapons/mp/') and n not in generated):
         data = archive.read(name)
         retail_source, retail = original[name]
         assert data == apply_weapon_balance(name, retail, profile), name
@@ -91,15 +95,16 @@ typedef struct {
      iReloadStartTime,iReloadStartAddTime,iReloadEndTime,iReloadAmmoAdd,
      iReloadStartAdd,bSegmentedReload,bNoPartialReload,iAmmoIndex,iClipIndex,
      weapType,offhandClass,bCookOffHold,bClipOnly,bADSFire,iHoldFireTime,iFuseTime,
-     adsGunKickReducedKickBullets,hipGunKickReducedKickBullets;
- float fHipSpreadFireAdd,fOOPosAnimLength[2];
+     adsGunKickReducedKickBullets,hipGunKickReducedKickBullets,hasDetonator;
+ float fHipSpreadFireAdd,fOOPosAnimLength[2],proximityRadius;
 } WeaponDef;
 typedef struct {int buttons,weapon,serverTime; signed char forwardmove,rightmove;} usercmd_t;
 typedef struct {playerState_t *ps;usercmd_t cmd,oldcmd;} pmove_t;
 typedef struct {int msec;float frametime;} pml_t;
 static WeaponDef *bg_weaponDefs[128], *bg_weapClips[128];
-static int bg_iNumWeapons=1, now, shots, shotTimes[256], rechambers, boltEvents;
+static int bg_iNumWeapons=1, now, shots, shotTimes[256], rechambers, boltEvents, events[256], eventCount;
 static void PM_AddEvent(playerState_t *ps,int e) {
+    events[eventCount++&255]=e;
     if(e==0x9e||e==0xa0) {assert(shots<256);shotTimes[shots++]=now;}
     if(e==0xa1)rechambers++;
     if(e==0xa2)boltEvents++;
@@ -127,7 +132,7 @@ names = ('PM_WeaponSetAnim', 'PM_WeaponClearAnim', 'PM_WeaponSetIdle',
          'PM_UpdateWeaponTimers', 'PM_StartRechamber', 'PM_FinishRechamber',
          'PM_AddFireSpread', 'PM_TryTakeEmptyClipOnlyWeapon', 'PM_ConsumeFireAmmo',
          'PM_StartFireTimers', 'PM_TryStartGrenadeFire', 'PM_TryFireWeapon',
-         'PM_FinishFire', 'PM_RunReloadState', 'PM_ResetWeaponState', 'PM_Weapon')
+         'PM_FinishFire', 'PM_RunReloadState', 'PM_ResetWeaponState', 'PM_TryDetonate', 'PM_Weapon')
 grenade_header = '#define OFFHAND_CLASS_FRAG_GRENADE 1\n' + (root/'src/headers/cod2_grenade.h').read_text()
 body = ''.join(function(n) for n in names)
 checks = r'''
@@ -275,7 +280,22 @@ int main(void) {
    cases++;
   }
  }
- printf("PASS: %d guns, %d configurations including %d rapid-click schedules; unbuffered semi-auto presses, original cadence and ammo conservation\n",
+ /* A charge thrown from the hand after a fire delay leaves it once a click;
+  * with none left the clip-only detonator stays in hand and aim sets them off. */
+ {
+  WeaponDef c={.weapType=WEAPTYPE_GRENADE,.bClipOnly=1,.iClipSize=2,.iFireTime=300,.iFireDelay=100,
+   .iHoldFireTime=350,.hasDetonator=1};
+  playerState_t ps;pmove_t pm;reset(&pm,&ps,&c,0,2);ps.ammo[1]=0;
+  for(int t=0;t<128;t+=16)tick(&pm,16,1);
+  for(int t=0;t<1504;t+=16)tick(&pm,16,0);
+  assert(shots==1&&ps.ammoclip[1]==1&&ps.weaponstate==WEAPON_READY);
+  for(int t=0;t<128;t+=16)tick(&pm,16,1);
+  for(int t=0;t<1504;t+=16)tick(&pm,16,0);
+  assert(shots==2&&ps.ammoclip[1]==0&&ps.weapon==1&&ps.weaponstate==WEAPON_READY);
+  eventCount=0;tick(&pm,16,PM_WEAPON_BUTTON_ADS);
+  assert(eventCount==1&&events[0]==EV_DETONATE);
+ }
+ printf("PASS: %d guns, %d configurations including %d rapid-click schedules; unbuffered semi-auto presses, original cadence and ammo conservation; a thrown charge leaves the hand once a click and the empty detonator stays to set them off\n",
         (int)(sizeof(guns)/sizeof(guns[0])),cases,cases*12);
 }
 '''
@@ -289,7 +309,10 @@ with tempfile.TemporaryDirectory(prefix='cod2-fire-modes-') as directory:
                 body.replace('weapDef->bSemiAuto', '0'),
                 body.replace('if (ps->weaponstate == WEAPON_READY)\n                PM_TryFireWeapon(pm, 0, triggerPressed);', ''),
                 buffered,
-                body.replace('if (!delayedAction && (ps->weaponTime || ps->weaponDelay))', 'if (0)')]
+                body.replace('if (!delayedAction && (ps->weaponTime || ps->weaponDelay))', 'if (0)'),
+                body.replace('one fire delay later. */\n    if (ps->weaponstate != WEAPON_FIRING || !delayedAction)\n',
+                             'one fire delay later. */\n    if (1)\n'),
+                body.replace('if (!weapDef->bClipOnly || weapDef->hasDetonator)', 'if (!weapDef->bClipOnly)')]
     assert all(v != body for v in variants[1:])
     for index, variant in enumerate(variants):
         (d / 'test.c').write_text(defines + '\n' + support + grenade_header + variant + checks)
@@ -300,4 +323,4 @@ with tempfile.TemporaryDirectory(prefix='cod2-fire-modes-') as directory:
         if index == 0:
             print(result.stdout.strip())
 (root / 'out/weapon-fire-modes-audit.json').write_text(json.dumps({'weapons': report}, indent=2) + '\n')
-print(f'PASS: all {len(report)} packaged definitions audited; missing semi-auto, extra READY-frame, buffered-press and missing recovery-guard mutants fail')
+print(f'PASS: all {len(report)} packaged definitions audited; missing semi-auto, extra READY-frame, buffered-press, missing recovery-guard, repeated delayed-throw and taken-detonator mutants fail')

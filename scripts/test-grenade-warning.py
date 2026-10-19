@@ -42,7 +42,10 @@ assert names[slots['R_HUD_IMAGE_GRENADE_POINTER']] == '*hud_grenade_pointer'
 
 warning = source[source.index("/* The ring's middle radius"):]
 threat_type = header[header.index('typedef struct CG_GrenadeThreat'):header.index('} CG_GrenadeThreat;') + 19]
-distance = function(draw_source, 'CG_GrenadeThreatDistance')
+grenade_header = (root / 'src/headers/cod2_grenade.h').read_text()
+placed = grenade_header[grenade_header.index('static inline qboolean BG_IsPlacedExplosive'):
+                        grenade_header.index('static inline qboolean BG_GrenadeCanCook')]
+distance = placed + function(draw_source, 'CG_GrenadeThreatDistance')
 stock = function(draw_source, 'CG_DrawGrenadeIndicators')
 
 support = r'''
@@ -67,7 +70,7 @@ typedef struct { snapshot_t *snap, *nextSnap; playerState_t predictedPlayerState
                  vec3_t refdefViewAngles; struct { int width, height; } refdef; } cg_t;
 typedef struct { struct { MaterialHandle grenadeIcon, grenadePointer; } media; } cgs_t;
 typedef struct { int weapType, offhandClass, iExplosionRadius, iExplosionInnerDamage, iExplosionOuterDamage,
-                 overlayReticle; } WeaponDef;
+                 overlayReticle, hasDetonator; float proximityRadius; } WeaponDef;
 typedef struct { struct { float value, vector[4]; int enabled; } current; } dvar_t;
 ''' + threat_type + r'''
 static cg_t cgState, *cg = &cgState;

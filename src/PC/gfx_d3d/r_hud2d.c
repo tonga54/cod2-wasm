@@ -62,6 +62,7 @@ static const char *const s_hudImageNames[R_HUD_IMAGE_COUNT] = {
     "*hud_scope_lens1",
     "*hud_scope_lens2",
     "*hud_scope_lens3",
+    "*hud_squad_emblems",
 };
 
 static GfxImage s_hudImages[R_HUD_IMAGE_COUNT];

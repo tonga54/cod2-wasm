@@ -8,6 +8,7 @@
 #include "headers/PC/cgame_mp/cg_breathprompt.h"
 #include "headers/PC/cgame_mp/cg_endgame.h"
 #include "headers/PC/cgame_mp/cg_grenadewarning.h"
+#include "headers/PC/cgame_mp/cg_explosives.h"
 #include "headers/PC/cgame_mp/cg_hitmarker.h"
 #include "headers/PC/cgame_mp/cg_minimap.h"
 #include "headers/PC/cgame_mp/cg_scorepopup.h"
@@ -1124,8 +1125,10 @@ static qboolean CG_GrenadeThreatDistance(const centity_t *cent, float *distanceS
         state->time > cg->time || state->weapon <= 0 || state->weapon > BG_GetNumWeapons())
         return 0;
     weapon = BG_GetWeaponDef(state->weapon);
+    /* A mine or charge in place is no thrown frag: its warning would give it away. */
     if (!weapon || weapon->weapType != WEAPTYPE_GRENADE ||
-        weapon->offhandClass != OFFHAND_CLASS_FRAG_GRENADE || weapon->iExplosionRadius <= 0)
+        weapon->offhandClass != OFFHAND_CLASS_FRAG_GRENADE || weapon->iExplosionRadius <= 0 ||
+        BG_IsPlacedExplosive(weapon))
         return 0;
 
     *range = (float)weapon->iExplosionRadius;
@@ -1402,6 +1405,7 @@ void CG_DrawActive(void)
 
     CL_SetUserCmdAimValues(angles);
 
+    CG_UpdateDetonatorSelect();
     CL_SetUserCmdValue(cg->weaponSelect, cg->equippedOffHand, sensitivity);
 
     CL_RenderScene(&cg->refdef);
@@ -2071,6 +2075,7 @@ unsigned int CG_Draw2D(void)
             if (pm_type <= 1) {
                 CG_DrawFriendlyNames();
                 CG_DrawEnemyNames();
+                CG_DrawExplosiveIcons();
                 CG_DrawDamageIndicators();
                 CG_DrawGrenadeIndicators();
                 CG_DrawBreathPrompt();

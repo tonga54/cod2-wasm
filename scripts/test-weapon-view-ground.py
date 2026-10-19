@@ -55,6 +55,9 @@ static dvar_t *cg_drawGun=&draw,*zeroPtr=&zero;
 static void *imp_cg_gun_x=&zeroPtr,*imp_cg_gun_y=&zeroPtr,*imp_cg_gun_z=&zeroPtr;
 static float CG_DvarValue(void *p) {return (*(dvar_t **)p)->current.value;}
 static int BG_GetViewmodelWeaponIndex(playerState_t *ps) {return ps->weapon;}
+typedef struct {vec3_t vGunOfs;} WeaponDef;
+static WeaponDef viewDefs[3]={[2]={{1,3.5f,-8.5f}}};
+static void *BG_GetWeaponDef(int weapon) {assert(weapon>0&&weapon<3);return &viewDefs[weapon];}
 static int CG_GetWeapReticleZoom(float *zoom) {*zoom=0;return 0;}
 static int BG_IsAimDownSightWeapon(int weapon) {return 1;}
 static void BG_CalculateWeaponPosition_Sway(playerState_t *ps,vec_t *a,vec_t *b,vec_t *c,float scale,int time) {}
@@ -111,6 +114,14 @@ int main(void) {
     cg->shellshock.hasSavedScreen=1;
     for(int t=0;t<5000;t+=16){int before=draws;cg->time+=16;CG_AddViewWeapon(&ps);assert(draws==before+1);}
     cg->shellshock.hasSavedScreen=0;int before=draws;CG_AddViewWeapon(&ps);assert(draws==before+1);
+    /* A weapon file's own offset moves it forward, right and up of the view. */
+    ps.weapon=2;ps.fWeaponPosFrac=0;cg->vGunOffset[0]=cg->vGunOffset[1]=cg->vGunSpeed[0]=cg->vGunSpeed[1]=0;
+    CG_AddViewWeapon(&ps);
+    for(int a=0;a<3;a++) {
+        float expected=cg->refdef.vieworg[a]+cg->refdef.viewaxis[0][a]-3.5f*cg->refdef.viewaxis[1][a]-
+            8.5f*cg->refdef.viewaxis[2][a];
+        assert(fabsf(lastHand.origin[a]-expected)<1e-3f);
+    }
     return 0;
 }
 '''
@@ -172,7 +183,8 @@ with tempfile.TemporaryDirectory(prefix='cod2-weapon-regression-') as directory:
         viewbody.replace('cg->vGunSpeed[i] = ws.vGunSpeed[i];',''),
         viewbody.replace('ws.time = cg->time;','ws.time = cg->time - playerState->commandTime;'),
         viewbody.replace('    weaponIndex = BG_GetViewmodelWeaponIndex(playerState);',
-                         '    if (cg->shellshock.hasSavedScreen) return;\n    weaponIndex = BG_GetViewmodelWeaponIndex(playerState);')]),
+                         '    if (cg->shellshock.hasSavedScreen) return;\n    weaponIndex = BG_GetViewmodelWeaponIndex(playerState);'),
+        viewbody.replace('finalAxis[1], -viewDef->vGunOfs[1]', 'finalAxis[1], viewDef->vGunOfs[1]')]),
         ('ground',mathbody+itemtypes,itembody,itemchecks,[
         itembody.replace('ent->r.inuse && tr.fraction','ent->active && tr.fraction')])]
     for name,support,body,checks,mutants in suites:
@@ -181,4 +193,4 @@ with tempfile.TemporaryDirectory(prefix='cod2-weapon-regression-') as directory:
             subprocess.run(['cc', '-I', str(root / 'src/headers'),'-std=c99','-O1','-g','-fsanitize=address,undefined',str(path),'-lm','-o',str(tmp/name)],check=True)
             result=subprocess.run([str(tmp/name)],capture_output=True,text=True)
             assert (result.returncode==0)==(index==0),(name,index,result.stderr)
-print('PASS: 333 world-space scope directions, 11,000 recoil frames, shellshock weapon visibility, 168 slope/yaw landings, freed entities and 5 failing regression mutants')
+print('PASS: 333 world-space scope directions, 11,000 recoil frames, shellshock weapon visibility, a weapon file\'s own view offset, 168 slope/yaw landings, freed entities and 6 failing regression mutants')

@@ -24,14 +24,14 @@
           "key": "localized-english-cod2-browser",
           "name": "localized_english_cod2_browser.iwd",
           "path": "main/localized_english_cod2_browser.iwd",
-          "size": 38007,
+          "size": 38452,
           "magic": [
             80,
             75,
             3,
             4
           ],
-          "sha256": "b91ea6c1b1d95f299d9c7a8104122a8974590085107aa684f3521c044ad2c91a"
+          "sha256": "c3c251f38cd36d1225c3f2c7f92d65d23f43cace204e41f126a7a62b656994db"
         },
         {
           "key": "cod2-browser-renderer",
@@ -50,14 +50,14 @@
           "key": "cod2-browser-audio",
           "name": "cod2_browser_audio.iwd",
           "path": "main/cod2_browser_audio.iwd",
-          "size": 58566604,
+          "size": 61461802,
           "magic": [
             80,
             75,
             3,
             4
           ],
-          "sha256": "0beebf3ac71bec0d09227a9704922930ca5345f10df53cbeee30746f24d4c24b"
+          "sha256": "bae0c9b7d906585a2f45141a079dc21181e45eb4107e1c20ff8f482b62a8636d"
         }
       ]
     }

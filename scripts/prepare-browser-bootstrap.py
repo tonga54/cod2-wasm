@@ -12,6 +12,7 @@ from browser_sound_assets import (HIT_SOUND_OWNER_FILE, MENU_MUSIC_OWNER_FILE, O
 from browser_bot_menu import apply_bot_menu
 from browser_class_menus import add_class_menu, class_menus
 from browser_class_pictures import OWNER_PICTURES_DIR, load_owner_pictures
+from browser_explosives import DEPENDENCIES as EXPLOSIVE_DEPENDENCIES, STRINGS as EXPLOSIVE_STRINGS, explosive_assets
 from browser_settings_menu import apply_settings_menu
 from browser_objective_assets import objective_asset_roots
 from browser_spawn_safety import apply_spawn_safety
@@ -157,6 +158,8 @@ try:
         "SVT40_mp", "PPS42_mp", "ppsh_mp", "mosin_nagant_sniper_mp",
     )
     pending.extend("weapons/mp/" + weapon for weapon in weapons)
+    # The land mine and C4 are generated below from these originals.
+    pending.extend(EXPLOSIVE_DEPENDENCIES)
     renderer = {}
     while pending:
         name = pending.pop().lower()
@@ -332,6 +335,9 @@ try:
         renderer.update(pictures)
         print(f"Class pictures: the owner's {len(pictures)} pictures replace those weapons' class menu icons")
     renderer.update(class_menus())
+    explosives = explosive_assets(lambda name: originals[asset_index[name][0]].read(asset_index[name][1]))
+    archives["localized_english_cod2_browser.iwd"][EXPLOSIVE_STRINGS] = explosives.pop(EXPLOSIVE_STRINGS)
+    renderer.update(explosives)
     archives["cod2_browser_renderer.iwd"] = renderer
     hit_sound = root / "data/main" / HIT_SOUND_OWNER_FILE
     menu_music = root / "data/main" / MENU_MUSIC_OWNER_FILE

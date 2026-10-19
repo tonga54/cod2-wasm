@@ -38,7 +38,8 @@ typedef struct HudVertex2D {
  * slots from this one. */
 #define R_HUD_IMAGE_SCOPE_LENS 20
 #define R_HUD_IMAGE_SCOPE_LENS_COUNT 4
-#define R_HUD_IMAGE_COUNT 24
+#define R_HUD_IMAGE_SQUAD_EMBLEMS 24
+#define R_HUD_IMAGE_COUNT 25
 
 /* Icons whose white silhouette or emblem has been built; each is read once. */
 #define R_HUD_SILHOUETTE_COUNT 64

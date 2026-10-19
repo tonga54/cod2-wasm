@@ -13,6 +13,7 @@ source = (root / 'src/PC/cgame_mp/cg_weaponprompt_mp.c').read_text()
 newdraw = (root / 'src/PC/cgame_mp/cg_newDraw_mp.c').read_text()
 weapons = (root / 'src/PC/bgame/bg_weapons.c').read_text()
 main = (root / 'src/PC/cgame_mp/cg_main_mp.c').read_text()
+grenade = (root / 'src/headers/cod2_grenade.h').read_text()
 
 
 def function(text, name):
@@ -32,6 +33,7 @@ assert newdraw.count('#include "headers/PC/cgame_mp/cg_weaponprompt.h"\n') == 1
 assert newdraw.count('CG_DrawWeaponPrompt(') == 1
 assert main.count('#include "headers/PC/cgame_mp/cg_weaponprompt.h"\n') == 1
 assert main.count('    CG_AmmoCounterInit();\n    CG_WeaponPromptInit();\n') == 1
+assert grenade.count('#define PLACED_PICKUP_HINT 254\n') == 1
 
 prompt = source[source.index('/* Virtual units from the stock hint'):]
 cursorhint = function(newdraw, 'CG_DrawCursorhint')
@@ -58,6 +60,7 @@ typedef struct { int pm_flags; int weapon; char weaponslots[8]; int stats[6]; in
 typedef struct { playerState_t ps; } snapshot_t;
 #define PMF_GRENADE_THROWBACK 0x04000000
 #define GRENADE_THROWBACK_HINT 255
+#define PLACED_PICKUP_HINT 254
 static struct { int time; snapshot_t *snap, *nextSnap; int renderingThirdPerson; int cursorHintIcon, cursorHintTime,
                 cursorHintFade, cursorHintString; playerState_t predictedPlayerState; } cgState;
 static struct { struct { MaterialHandle hintMaterials[256]; } media; } cgsState;
@@ -156,7 +159,7 @@ static int GetKeyBindingLocalizedString(const char *command, char *keys) {
 static const char *UI_SafeTranslateString(const char *ref) {
     static const char *const names[][2] = { { "WEAPON_LUGER", "Luger" }, { "WEAPON_KAR98K", "Kar98k" },
                                             { "WEAPON_STEN", "Sten" }, { "WEAPON_ITEM", "Binoculars" },
-                                            { "WEAPON_WEBLEY", "Webley" } };
+                                            { "WEAPON_WEBLEY", "Webley" }, { "WEAPON_SMINE", "S-Mine 44" } };
     for (unsigned i = 0; i < sizeof(names) / sizeof(names[0]); i++)
         if (!strcmp(ref, names[i][0])) return names[i][1];
     return ref;
@@ -164,10 +167,11 @@ static const char *UI_SafeTranslateString(const char *ref) {
 static const char *UI_ReplaceConversionString(const char *s, const char *binding) { return va("%s[%s]", s, binding); }
 static const char *CG_GetUseString(void) { return "USE STRING"; }
 /* 1 Luger, 2 Kar98k, 3 Sten, 4 a frag grenade, 5 an item, 6 Webley, 7 a gun
- * that needs a slot but has none, 8 a mounted MG42. */
-static WeaponDef defs[9];
-static WeaponDef *bg_weaponDefs[9];
-static WeaponDef *BG_GetWeaponDef(int weapon) { assert(weapon >= 0 && weapon < 9); return &defs[weapon]; }
+ * that needs a slot but has none, 8 a mounted MG42, 9 the S-Mine. */
+static WeaponDef defs[10];
+static WeaponDef *bg_weaponDefs[10];
+static WeaponDef *BG_GetWeaponDef(int weapon) { assert(weapon >= 0 && weapon < 10); return &defs[weapon]; }
+static int BG_GetNumWeapons(void) { return 9; }
 /* The rifle, SMG and Luger can be made silhouettes; the rest keep stock icons. */
 static MaterialHandle R_GetHudSilhouetteMaterial(MaterialHandle icon, float *aspect) {
     if (!strcmp(icon, "hud_sten")) { *aspect = 4.0f; return "sil:hud_sten"; }
@@ -209,6 +213,16 @@ static int line(const char *key, const char *value, FontHandle keyFont, float x,
     return text(0, key, keyFont, left, y, gold, alpha) &&
            text(1, value, UI_GetFontHandle(0, 0.24f), left + keyWidth + 4, y, white, alpha);
 }
+/* "Press and hold" in near white, the key in gold and "to pickup S-Mine 44",
+ * centred together on x. */
+static int mineLine(const char *key, float x, float y) {
+    const char *lead = "Press and hold", *rest = "to pickup S-Mine 44";
+    float leadWidth = width(lead, 0), keyWidth = width(key, 1);
+    float left = x - 0.5f * (leadWidth + 4 + keyWidth + 4 + width(rest, 0));
+    return text(0, lead, UI_GetFontHandle(0, 0.24f), left, y, white, 1) &&
+           text(1, key, &boldFont, left + leadWidth + 4, y, gold, 1) &&
+           text(2, rest, UI_GetFontHandle(0, 0.24f), left + leadWidth + 4 + keyWidth + 4, y, white, 1);
+}
 static int count(int kind) {
     int n = 0;
     for (int i = 0; i < drawCount; i++) n += drawn[i].kind == kind;
@@ -249,7 +263,7 @@ static void weapon(int index, const char *name, int weapClass, int weapSlot, int
     cgs->media.hintMaterials[index + 4] = hudIcon;
 }
 int main(void) {
-    for (int i = 0; i < 9; i++) bg_weaponDefs[i] = &defs[i];
+    for (int i = 0; i < 10; i++) bg_weaponDefs[i] = &defs[i];
     defs[0].szDisplayName = "WEAPON_NONE";
     weapon(1, "WEAPON_LUGER", 4, 2, 0, 0, "hud_luger");
     weapon(2, "WEAPON_KAR98K", 0, 1, 0, 1, "hud_kar98k");
@@ -259,6 +273,7 @@ int main(void) {
     weapon(6, "WEAPON_WEBLEY", 4, 2, 0, 0, "hud_webley");
     weapon(7, "WEAPON_ODD", 0, 0, 0, 0, "hud_odd");
     weapon(8, "WEAPON_MG42", 7, 0, 0, 1, "hud_mg42");
+    weapon(9, "WEAPON_SMINE", 5, 0, 1, 0, "hud_smine");
     cgs->media.hintMaterials[0] = "hud_none"; cgs->media.hintMaterials[3] = "hud_health";
     cg->snap = cg->nextSnap = &snapState;
     cg->time = 5000;
@@ -347,6 +362,37 @@ int main(void) {
     }
     horz = 2; vert = 2; style = 6;
 
+    /* Over the player's own S-Mine the server's hint names it: "Press and
+     * hold", the use key and "to pickup S-Mine 44" share the prompt's
+     * baseline, centred, at full strength and without the stock hint's icon,
+     * fade or state. */
+    snapState.ps.stats[0] = 100;
+    bindCalls = configs = 0;
+    cg->cursorHintIcon = 7;
+    aim(PLACED_PICKUP_HINT, 9);
+    draw();
+    assert(drawCount == 3 && mineLine("F", 0, 74) && bindCalls == 1 && !configs && cg->cursorHintIcon == 0);
+    strcpy(boundKeys, "F or E");
+    draw();
+    assert(drawCount == 3 && mineLine("F or E", 0, 74));
+    strcpy(boundKeys, "F");
+    /* Not for the dead, in third person or for a weapon the client lacks. */
+    snapState.ps.stats[0] = 0;
+    cg->cursorHintIcon = 7;
+    draw();
+    assert(drawCount == 0 && cg->cursorHintIcon == 0);
+    snapState.ps.stats[0] = 100;
+    cg->renderingThirdPerson = 1;
+    draw();
+    assert(drawCount == 0);
+    cg->renderingThirdPerson = 0;
+    for (int string = 0; string <= 10; string += 10) {
+        aim(PLACED_PICKUP_HINT, string);
+        draw();
+        assert(drawCount == 0);
+    }
+    snapState.ps.stats[0] = 0;
+
     /* Mounted guns, other hints and a prompt switched off keep the stock hint. */
     aim(8 + 4, 5);
     draw();
@@ -419,6 +465,15 @@ mutants = [
      'CG_WeaponPromptDrawIcon(rect, icon, weapDef->bWideListIcon, 1.0f);'),
     ('return cg_hudWeaponPrompt && cg_hudWeaponPrompt->current.enabled;', 'return cg_hudWeaponPrompt != 0;'),
     ('    s_weaponPromptKeyFont = CL_RegisterFont("$boldfont", 0);\n', ''),
+    ('CG_WeaponPromptDrawLine(rect, textStyle, "Press and hold", key,', 'CG_WeaponPromptDrawLine(rect, textStyle, NULL, key,'),
+    ('"to pickup %s"', '"to pick up %s"'),
+    ('UI_SafeTranslateString(BG_GetWeaponDef(weapon)->szDisplayName)', 'BG_GetWeaponDef(weapon)->szDisplayName'),
+    ('+ WEAPON_PROMPT_KEY_GAP : 0.0f;', ': 0.0f;'),
+    ('(float)UI_TextWidth(text, 0, font, WEAPON_PROMPT_SCALE) + leadWidth);',
+     '(float)UI_TextWidth(text, 0, font, WEAPON_PROMPT_SCALE));'),
+    ('        x += leadWidth;\n', ''),
+    ('CG_WeaponPromptColor(color, s_weaponPromptText, alpha);\n        UI_DrawText(lead,',
+     'CG_WeaponPromptColor(color, s_weaponPromptKey, alpha);\n        UI_DrawText(lead,'),
 ]
 hook_mutants = [
     ('            if (CG_WeaponPromptActive()) {', '            if (0) {'),
@@ -426,6 +481,16 @@ hook_mutants = [
      'CG_DrawWeaponPrompt(rect, textStyle, weapIdx, hintIcon, fadeColor);\n'),
     ('CG_DrawWeaponPrompt(rect, textStyle, weapIdx, hintIcon, fadeColor);',
      'CG_DrawWeaponPrompt(rect, textStyle, weapIdx, cgs->media.hintMaterials[0], fadeColor);'),
+    ('    if (snap && snap->ps.cursorHint == PLACED_PICKUP_HINT) {', '    if (0) {'),
+    ('    if (snap && snap->ps.cursorHint == PLACED_PICKUP_HINT) {\n        cg->cursorHintIcon = 0;\n',
+     '    if (snap && snap->ps.cursorHint == PLACED_PICKUP_HINT) {\n'),
+    ('!cg->renderingThirdPerson && snap->ps.stats[0] > 0 && snap->ps.cursorHintString > 0 &&',
+     'snap->ps.stats[0] > 0 && snap->ps.cursorHintString > 0 &&'),
+    ('snap->ps.stats[0] > 0 && snap->ps.cursorHintString > 0 &&', 'snap->ps.cursorHintString > 0 &&'),
+    ('snap->ps.cursorHintString > 0 &&\n', 'snap->ps.cursorHintString >= 0 &&\n'),
+    ('snap->ps.cursorHintString <= BG_GetNumWeapons())', '1)'),
+    ('CG_DrawMinePickupPrompt(rect, textStyle, snap->ps.cursorHintString, 1.0f);\n        return;\n',
+     'CG_DrawMinePickupPrompt(rect, textStyle, snap->ps.cursorHintString, 1.0f);\n'),
 ]
 
 variants = [(prompt, cursorhint)]
@@ -449,5 +514,7 @@ print('PASS: while cg_hudWeaponPrompt is on, the stock cursor hint hands weapons
       'prompt, which chooses swap, pick up or icon only as the stock hint does over 756 loadouts; the use key in gold '
       'and "Press to swap for" / "Press to pick up" with the weapon\'s name share a baseline centred on the hint\'s '
       'rect, with the silhouette (or stock icon) centred below in its proportions over a shadow, all in the hint\'s '
-      'fade, alignment and text style; mounted guns, other hints and the prompt switched off keep the stock hint; '
+      'fade, alignment and text style; over the player\'s own S-Mine "Press and hold", the key and "to pickup '
+      'S-Mine 44" share that baseline, never for the dead, in third person or an unknown weapon; mounted guns, other '
+      'hints and the prompt switched off keep the stock hint; '
       f'{len(variants) - 1} failing regression mutants')

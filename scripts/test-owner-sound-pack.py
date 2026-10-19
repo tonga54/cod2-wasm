@@ -9,6 +9,8 @@ import tempfile
 import types
 import zipfile
 
+from browser_explosives import ALIASES as EXPLOSIVE_ALIASES
+
 root = Path(__file__).resolve().parent.parent
 module_path = root / 'scripts/browser_sound_assets.py'
 module_source = module_path.read_text()
@@ -38,6 +40,10 @@ KEPT = row(name='weap_test_kept', file='weapons/test_fire_a.wav', vol_min='1', v
 OTHER_MAP = row(name='weap_test_other', file='weapons/other_map.wav', channel='weapon', loadspec='mp_other')
 UNUSED = row(name='weap_test_unused', file='weapons/unused.wav', channel='weapon', loadspec='all_mp')
 HIT = row(name='MP_hit_alert', file='misc/hit.wav', vol_min='1', vol_max='1', channel='auto2d', loadspec='all_mp')
+# The retail rows the explosives' aliases start from, in a table of their own.
+GRENADE = {source: row(name=source, file=f'weapons/{source}.wav', vol_min='0.8', vol_max='0.9', channel='auto',
+                       loadspec='all_mp', dist_max='1250')
+           for source in sorted(set(EXPLOSIVE_ALIASES.values()))}
 
 
 def csv_text(rows):
@@ -63,7 +69,8 @@ RETAIL = {'sound/weapons/test_fire_a.wav': wav(tone(400), 44100),
           'sound/weapons/test_reload.wav': wav(tone(900), 44100),
           'sound/weapons/other_map.wav': wav(tone(100)),
           'sound/weapons/unused.wav': wav(tone(100)),
-          'sound/misc/hit.wav': wav(tone(200))}
+          'sound/misc/hit.wav': wav(tone(200)),
+          **{f'sound/weapons/{source}.wav': wav(tone(150 + number)) for number, source in enumerate(GRENADE)}}
 OWNER = {'w/fire_1.wav': wav(tone(4800)),
          'w/fire_2.wav': wav(tone(4810, 9)),
          'w/fire_3.wav': wav(tone(2400, 5, 2), 48000, 2),
@@ -300,6 +307,31 @@ def checks(m, archive_path, folder):
         raises(ValueError, lambda: m.collect_sound_assets(root, index, originals, renderer, maps,
                                                           menu_music=b'ID3', owner_sounds=with_music),
                'hit sound or menu music')
+
+        # An explosive's alias plays its retail source's rows under its own name, in its own table, once
+        # something names it; the pack replaces it as any other alias.
+        mine = dict(renderer, **{'weapons/mp/mine_mp': b'WEAPONFILE\\armSound\\weap_mine_arm'})
+        source = EXPLOSIVE_ALIASES['weap_mine_arm']
+        source_sound = f'sound/weapons/{source}.wav'
+        derived = ['weap_mine_arm' if column == 'name' else value for column, value in zip(LOWER, GRENADE[source])]
+        armed = m.collect_sound_assets(root, index, originals, mine, maps)
+        table_header, rows = m.alias_table(armed[m.ALIAS_TABLE].decode())
+        assert table_header == LOWER and rows == [derived]
+        assert armed[source_sound] == RETAIL[source_sound]
+        assert {name: data for name, data in armed.items() if name not in {m.ALIAS_TABLE, source_sound}} == stock
+        mine_pack = pack_with(LISTING + 'weap_mine_arm,w/reload.wav\n')
+        replaced = m.collect_sound_assets(root, index, originals, mine, maps, owner_sounds=mine_pack)
+        assert m.ALIAS_TABLE not in replaced and source_sound not in replaced
+        table_header, rows = m.alias_table(replaced[m.OWNER_SOUNDS_TABLE].decode())
+        assert table_header == LOWER and rows == [owner_row(derived, 'w/reload.wav')]
+        # The checker knows the explosive rows only from the originals it is given.
+        m.verify_owner_sounds(replaced, dict(original_rows, weap_mine_arm=[(LOWER, dict(zip(LOWER, derived)))]),
+                              mine_pack)
+        raises(AssertionError, lambda: m.verify_owner_sounds(replaced, original_rows, mine_pack))
+        # No package without the rows they start from.
+        bare = {name: entry for name, entry in index.items() if name != 'soundaliases/test_grenades.csv'}
+        raises(ValueError, lambda: m.collect_sound_assets(root, bare, originals, renderer, maps),
+               'source aliases')
     finally:
         original.close()
 
@@ -310,6 +342,7 @@ with tempfile.TemporaryDirectory(prefix='cod2-owner-sounds-') as directory:
     with zipfile.ZipFile(archive_path, 'w') as archive:
         archive.writestr('soundaliases/test_mp.csv', csv_text(
             [HEADER, ['# retail comment'], [], FIRE_A, FIRE_B, LAYER, RELOAD, KEPT, OTHER_MAP, UNUSED, HIT]))
+        archive.writestr('soundaliases/test_grenades.csv', csv_text([HEADER, *GRENADE.values()]))
         for name, data in RETAIL.items():
             archive.writestr(name, data)
 
@@ -371,6 +404,9 @@ with tempfile.TemporaryDirectory(prefix='cod2-owner-sounds-') as directory:
         ("    assert sounds == {'sound/' + OWNER_SOUNDS_FOLDER + name: owner['files'][name] for name in used}, \\",
          "    assert set(sounds) <= {'sound/' + OWNER_SOUNDS_FOLDER + name for name in used}, \\"),
         ("not in owner['aliases']\n                       for row in other_rows), 'Original rows kept", "is not None\n                       for row in other_rows), 'Original rows kept"),
+        ("        aliases.setdefault(fields['name'].lower(), []).append((ALIAS_TABLE, row, fields))\n", ""),
+        ("    tables[ALIAS_TABLE] = (header, [])\n", "    tables[ALIAS_TABLE] = (header, rows)\n"),
+        ("    if len(headers) != 1:\n", "    if len(headers) > 1:\n"),
     ]
     for old, new in mutants:
         assert module_source.count(old) == 1, old
@@ -383,7 +419,8 @@ with tempfile.TemporaryDirectory(prefix='cod2-owner-sounds-') as directory:
 print(f'PASS: without the owner pack the retail rows stay; with it each listed alias plays only the owner\'s files, '
       f'one row a file cycling the alias\'s own rows and columns, several rows numbered for the engine\'s '
       f'duplicate check, its secondary alias still followed, unplayed '
-      f'retail files dropped and the rest of the archive unchanged; {len(accepted)} accepted and {len(rejected)} '
+      f'retail files dropped and the rest of the archive unchanged; an explosive\'s alias plays its retail source\'s '
+      f'rows under its own name and the pack replaces it; {len(accepted)} accepted and {len(rejected)} '
       f'rejected WAVs and {len(BAD_LISTINGS) + 1} rejected lists, the accepted WAVs read alike by the engine '
       f'parser under ASan/UBSan; the checker rejects {COUNTS["packages"]} altered packages; all {len(mutants)} '
       f'mutants fail')

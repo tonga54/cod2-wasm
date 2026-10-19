@@ -40,7 +40,7 @@ extern const dvar_t *player_dmgtimer_minScale;
 extern const dvar_t *player_dmgtimer_stumbleTime;
 extern const dvar_t *player_dmgtimer_flinchTime;
 /* migrated from the ILP32 data blob to typed C (x64 port Stage 2). */
-char *eventnames[199] = {
+char *eventnames[200] = {
     "EV_NONE",
     "EV_FOOTSTEP_RUN_DEFAULT",
     "EV_FOOTSTEP_RUN_BARK",
@@ -240,6 +240,7 @@ char *eventnames[199] = {
     "EV_EARTHQUAKE",
     "EV_GRENADE_SUICIDE",
     "EV_OBITUARY",
+    "EV_DETONATE",
 };
 
 extern const int singleClientEvents[7];

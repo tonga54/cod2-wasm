@@ -14,6 +14,7 @@
 #include "headers/PC/cgame_mp/cg_mantleprompt.h"
 #include "headers/PC/cgame_mp/cg_grenadewarning.h"
 #include "headers/PC/cgame_mp/cg_prematch.h"
+#include "headers/PC/cgame_mp/cg_explosives.h"
 #include "headers/PC/cgame_mp/cg_scoretable.h"
 #include "headers/PC/cgame_mp/cg_wwiiscope.h"
 #include <float.h>
@@ -1236,6 +1237,7 @@ void CG_Init(int serverMessageNum, int serverCommandSequence, int clientNum)
     CG_PrematchInit();
     CG_HitMarkerInit();
     CG_WwiiScopeInit();
+    CG_ExplosivesInit();
     CG_LoadingString("sounds");
     CG_RegisterSounds();
     CG_LoadingString("clients");

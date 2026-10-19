@@ -6394,6 +6394,20 @@ struct WeaponDef {
     float locationDamageMultipliers[19];
     char *fireRumble;
     char *meleeImpactRumble;
+    /* Placed explosives, from optional weapon file keys with CoD4's names
+     * where it has them (bg_weapons_load_obj.c). */
+    int hasDetonator;
+    int stickiness;
+    float proximityRadius;
+    int iProximityArmTime;
+    int iProximityDelay;
+    char *szDetonateSound;
+    char *szBounceSound;
+    char *szArmSound;
+    char *szTriggerSound;
+    /* The weapon's own cg_gun_x/y/z, forward, right and up, from optional
+     * gunOfsF/R/U keys. */
+    vec3_t vGunOfs;
 };
 
 struct WindowAttributes {

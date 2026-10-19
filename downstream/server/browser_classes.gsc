@@ -76,7 +76,16 @@ lethalWeapons()
 	weapons[1] = "frag_grenade_british_mp";
 	weapons[2] = "frag_grenade_russian_mp";
 	weapons[3] = "frag_grenade_german_mp";
+	weapons[4] = "mine_mp";
+	weapons[5] = "c4_mp";
 	return weapons;
+}
+
+// The land mine and C4 come two to a life; C4 is taken out with G instead of
+// thrown from the hand.
+placedExplosive(weapon)
+{
+	return weapon == "mine_mp" || weapon == "c4_mp";
 }
 
 tacticalWeapons()
@@ -231,8 +240,12 @@ applyClass()
 	if(getCvarInt("scr_allow_fraggrenades"))
 	{
 		self giveWeapon(loadout[2]);
-		self setWeaponClipAmmo(loadout[2], maps\mp\gametypes\_weapons::getWeaponBasedGrenadeCount(loadout[0]));
-		self switchToOffhand(loadout[2]);
+		if(placedExplosive(loadout[2]))
+			self setWeaponClipAmmo(loadout[2], 2);
+		else
+			self setWeaponClipAmmo(loadout[2], maps\mp\gametypes\_weapons::getWeaponBasedGrenadeCount(loadout[0]));
+		if(loadout[2] != "c4_mp")
+			self switchToOffhand(loadout[2]);
 	}
 	self giveWeapon("binoculars_mp");
 	self giveWeapon(loadout[0]);

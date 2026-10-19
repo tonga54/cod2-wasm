@@ -317,7 +317,14 @@ void Key_SetCatcher(int catcher)
 {
     clientActive_t **pp = (clientActive_t **)imp_cl;
     clientActive_t *ptr = *pp;
+#ifdef COD2_DEV_CONSOLE
+    if (ptr->keyCatchers & 1)
+        ptr->keyCatchers = catcher | 1;
+    else
+        ptr->keyCatchers = catcher;
+#else
     ptr->keyCatchers = catcher & ~1;
+#endif
     ptr = *pp;
     if (!(ptr->keyCatchers & 8))
         ptr->displayHUDWithKeycatchUI = 0;
