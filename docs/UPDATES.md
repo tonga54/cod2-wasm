@@ -312,6 +312,13 @@ guns with the attachment models, with 59 layers, and 12 icons were cut out of
 CoD WWII's Modify Attachment captures, with High Caliber's rendered as a
 cartridge: 106 pictures, 9.73 MB in the renderer archive.
 
+Later still, with the attachments built after CoD WWII's (see
+[docs/CLASSES.md](CLASSES.md#on-the-gun)), the guns and their layers were
+rendered again, and the seven bolt-action rifles and the M1 Garand took an
+`__extmag` layer each for their box magazine: 114 pictures, 12.48 MB in a
+285.63 MB renderer archive. Hosts need the new folder before they take that
+build.
+
 ## Version checks
 
 `/build-info.json` identifies the source revision, dirty status and build-content

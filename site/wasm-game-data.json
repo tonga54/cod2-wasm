@@ -1,10 +1,10 @@
 {
   "namespace": "cod2-browser",
-  "version": "bootstrap-2da9873fbbd954df",
+  "version": "bootstrap-ff3730a864d1a7fe",
   "variants": {
     "cod2-mp": {
       "namespace": "cod2-lan-tdm",
-      "version": "bootstrap-2da9873fbbd954df",
+      "version": "bootstrap-ff3730a864d1a7fe",
       "phase": "lan-maps-dependencies-unverified",
       "files": [
         {
@@ -37,14 +37,14 @@
           "key": "cod2-browser-renderer",
           "name": "cod2_browser_renderer.iwd",
           "path": "main/cod2_browser_renderer.iwd",
-          "size": 282694546,
+          "size": 285631988,
           "magic": [
             80,
             75,
             3,
             4
           ],
-          "sha256": "57fd701d0073efc4198b3f489ba43e137635f029a900abfe9d0e659927f69123"
+          "sha256": "c70f626b11cbff826e944db723d05fdc37ecefd573e7de99ed874f9488620463"
         },
         {
           "key": "cod2-browser-audio",

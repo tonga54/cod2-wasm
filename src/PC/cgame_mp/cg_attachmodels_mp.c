@@ -10,7 +10,8 @@ extern int FS_ReadFile(const char *qpath, void **buffer);
 
 /* What each visible attachment's model rides, as browser_attachment_models.py builds them:
  * xmodel/<gun model>__<attachment>, and for the Extended Mag the gun without its magazine,
- * xmodel/<gun model>__nomag. */
+ * xmodel/<gun model>__nomag; a rifle loaded through the top has instead a box magazine on its
+ * receiver, xmodel/<gun model>__extbox. */
 static const struct {
     int attachment;
     const char *bone;
@@ -23,12 +24,13 @@ static const struct {
 };
 #define CG_ATTACH_RIDES ((int)(sizeof(s_cgAttachRides) / sizeof(s_cgAttachRides[0])))
 #define CG_ATTACH_NOMAG CG_ATTACH_RIDES
+#define CG_ATTACH_EXTBOX (CG_ATTACH_RIDES + 1)
 #define CG_ATTACH_WEAPONS 128
 
 /* Each weapon's models, looked up once: a model missing from the archives loads as a fresh
  * default each time it is registered. */
-static struct XModel *s_cgAttachModels[CG_ATTACH_WEAPONS][CG_ATTACH_RIDES + 1];
-static unsigned char s_cgAttachLooked[CG_ATTACH_WEAPONS][CG_ATTACH_RIDES + 1];
+static struct XModel *s_cgAttachModels[CG_ATTACH_WEAPONS][CG_ATTACH_RIDES + 2];
+static unsigned char s_cgAttachLooked[CG_ATTACH_WEAPONS][CG_ATTACH_RIDES + 2];
 
 static struct XModel *CG_AttachModel(int weapon, int ride, const char *gunModel, const char *suffix)
 {
@@ -69,10 +71,19 @@ int CG_ViewModelAttachmentModels(int weapon, const char *gunModel, unsigned mask
 
         for (ride = 0; s_cgAttachRides[ride].attachment != ATT_EXTMAG; ride++)
             ;
-        if (nomag && CG_AttachModel(weapon, ride, gunModel, g_attachments[ATT_EXTMAG].name))
+        if (nomag && CG_AttachModel(weapon, ride, gunModel, g_attachments[ATT_EXTMAG].name)) {
             models[1].model = nomag;
-        else
+        } else {
+            struct XModel *box = CG_AttachModel(weapon, CG_ATTACH_EXTBOX, gunModel, "extbox");
+
+            if (box && count < CG_VIEW_DOBJ_MODELS) {
+                models[count].model = box;
+                models[count].boneName = "j_gun";
+                models[count].ignoreCollision = 1;
+                count++;
+            }
             mask &= ~ATT_BIT(ATT_EXTMAG);
+        }
     }
     for (i = 0; i < CG_ATTACH_RIDES && count < CG_VIEW_DOBJ_MODELS; i++) {
         int attachment = s_cgAttachRides[i].attachment;

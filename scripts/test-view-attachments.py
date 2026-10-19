@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """The first-person gun wears the class's visible attachments: cg_attachmodels_mp.c finds each one's model once,
-puts it on the bone it rides and swaps the gun for the one without its magazine under a longer magazine, and
-cg_weapons.c rebuilds the gun's models whenever the attachments it should show change."""
+puts it on the bone it rides and swaps the gun for the one without its magazine under a longer magazine, or puts
+a rifle's box magazine on its receiver, and cg_weapons.c rebuilds the gun's models whenever the attachments it
+should show change."""
 from pathlib import Path
 import re
 import subprocess
@@ -30,7 +31,8 @@ checks = r'''
 static const char *present[] = {
     "xmodel/viewmodel_thompson__suppressor", "xmodel/viewmodel_thompson__reflex", "xmodel/viewmodel_thompson__extmag",
     "xmodel/viewmodel_thompson__nomag", "xmodel/viewmodel_colt__extmag", "xmodel/viewmodel_mp44__lens",
-    "xmodel/viewmodel_mp44__optic4x",
+    "xmodel/viewmodel_mp44__optic4x", "xmodel/viewmodel_kar98k__extbox", "xmodel/viewmodel_kar98k__optic4x",
+    "xmodel/viewmodel_thompson__extbox",
 };
 static const char *broken = "xmodel/viewmodel_mp44__lens";
 static char readNames[64][96];
@@ -100,9 +102,20 @@ int main(void) {
     cases++;
 
     /* The longer magazine needs the gun without its own: without it, the gun keeps its magazine and the longer one
-     * is not looked for. */
+     * is not looked for, nor shown; a box magazine is, and with none the Extended Mag shows nothing. */
     assert(build(6, "viewmodel_colt", ATT_BIT(ATT_EXTMAG), 2) == 2 && models[1].model == &gun && !models[2].model);
     assert(read("xmodel/viewmodel_colt__nomag") == 1 && read("xmodel/viewmodel_colt__extmag") == 0);
+    assert(read("xmodel/viewmodel_colt__extbox") == 1);
+    cases++;
+
+    /* A rifle loaded through the top keeps its gun and its stripper clip, its box magazine on the receiver before the
+     * sights; a gun with the longer magazine never looks for one. */
+    assert(build(8, "viewmodel_kar98k", ATT_BIT(ATT_EXTMAG) | ATT_BIT(ATT_OPTIC4X), 2) == 4 && models[1].model == &gun);
+    on(2, "xmodel/viewmodel_kar98k__extbox", "j_gun");
+    on(3, "xmodel/viewmodel_kar98k__optic4x", "j_gun");
+    assert(read("xmodel/viewmodel_kar98k__extmag") == 0 && read("xmodel/viewmodel_thompson__extbox") == 0);
+    assert(build(8, "viewmodel_kar98k", ATT_BIT(ATT_EXTMAG), CG_VIEW_DOBJ_MODELS) == CG_VIEW_DOBJ_MODELS);
+    assert(read("xmodel/viewmodel_kar98k__extbox") == 1);
     cases++;
 
     /* A broken model is left off; the others still go on. */
@@ -138,7 +151,9 @@ mutants = [
     ('            models[1].model = nomag;\n', '            (void)nomag;\n'),
     ('            if (model && !XModelBad(model))', '            if (model)'),
     ('i < CG_ATTACH_RIDES && count < CG_VIEW_DOBJ_MODELS;', 'i < CG_ATTACH_RIDES;'),
-    ('        models[count].ignoreCollision = 1;', '        models[count].ignoreCollision = 0;'),
+    ('        models[count].boneName = s_cgAttachRides[i].bone;\n        models[count].ignoreCollision = 1;',
+     '        models[count].boneName = s_cgAttachRides[i].bone;\n        models[count].ignoreCollision = 0;'),
+    ('                models[count].ignoreCollision = 1;', '                models[count].ignoreCollision = 0;'),
     ('    memset(s_cgAttachLooked[weapon], 0, sizeof(s_cgAttachLooked[weapon]));\n', ''),
     ('    if (weapon <= 0 || weapon >= CG_ATTACH_WEAPONS || !gunModel || !gunModel[0])\n        return NULL;',
      '    if (!gunModel)\n        return NULL;'),
@@ -146,6 +161,10 @@ mutants = [
      '        if (CG_AttachModel(weapon, ride, gunModel, g_attachments[ATT_EXTMAG].name))'),
     ('    { ATT_SUPPRESSOR, "tag_flash" },', '    { ATT_SUPPRESSOR, "j_gun" },'),
     ('"xmodel/%s__%s"', '"xmodel/%s_%s"'),
+    ('            if (box && count < CG_VIEW_DOBJ_MODELS) {', '            if (box) {'),
+    ('                models[count].boneName = "j_gun";', '                models[count].boneName = "j_clip";'),
+    ('            models[1].model = nomag;\n        } else {', '            models[1].model = nomag;\n        }\n        {'),
+    ('#define CG_ATTACH_EXTBOX (CG_ATTACH_RIDES + 1)', '#define CG_ATTACH_EXTBOX CG_ATTACH_NOMAG'),
 ]
 
 with tempfile.TemporaryDirectory(prefix='cod2-view-attachments-') as directory:
@@ -204,6 +223,7 @@ assert register.index('I_strncpyz(weapInfo->handModel, weapDef->szHandXModel, si
                       '        CG_ViewModelAttachmentsForget(weaponNum);\n') > 0
 assert '            s_viewModelAttachments[weaponNum] = 0;\n' in register
 print(f'PASS: {cases} cases: the can, the sights and the longer magazine on their bones, the gun without its magazine '
-      f'under the longer one, each model looked up once and a missing or broken one left off, the view DObj\'s room '
+      f'under the longer one, a rifle\'s box magazine on its receiver with its gun kept, each model looked up once and '
+      f'a missing or broken one left off, the view DObj\'s room '
       f'kept; {len(mutants)} mutants fail; the view weapon is rebuilt when its visible attachments change, keeps them '
       f'through new hands and drops them when registered again')

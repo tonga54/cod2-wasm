@@ -44,8 +44,10 @@ LIGHTS = [
 AMBIENT = np.array([0.13, 0.12, 0.11])
 # Specular and gloss of the generated finishes, which the game draws without a specular map.
 FINISH_SHINE = {'blued': (0.45, 0.55), 'parkerized': (0.22, 0.3), 'worn': (0.5, 0.55), 'brass': (0.85, 0.7),
-                'glass': (1.0, 0.95), 'black': (0.05, 0.2)}
+                'glass': (1.0, 0.95), 'black': (0.05, 0.2), 'rust': (0.16, 0.25)}
 LAYERS = ('suppressor', 'reflex', 'lens', 'optic4x')
+# How much a sight's glass covers what lies behind it in a picture.
+GLASS_OPACITY = 0.45
 # Parts the reload animations bring in from out of view, parked away from the gun when it rests.
 LOOSE = {'enfield_mp': ('joint1',), 'enfield_scope_mp': ('joint1',), 'mosin_nagant_mp': ('j_clip',),
          'mosin_nagant_sniper_mp': ('j_clip',), 'kar98k_sniper_mp': ('j_round',),
@@ -202,24 +204,46 @@ def mesh_part(mesh):
             'alphatest': False}
 
 
-def magazine_parts(assets, gun):
+def model_parts(assets, parts, pose=None):
+    """An attachment's meshes and retail surfaces for the rasterizer, in j_gun's space when pose places them;
+    a picture-only glass keeps its opacity."""
+    out = []
+    for part in parts:
+        if isinstance(part, B.Surface):
+            textures, alphatest = material_textures(assets, part.material)
+            vertices = part.vertices
+            out.append({'pos': np.array([v[5] for v in vertices], np.float64), 'nrm': np.array([v[0] for v in vertices]),
+                        'tan': np.array([v[3] for v in vertices]), 'bin': np.array([v[4] for v in vertices]),
+                        'uv': np.array([v[2] for v in vertices], np.float64),
+                        'tris': np.array(part.triangles, np.int64).reshape(-1, 3), 'tex': textures,
+                        'alphatest': alphatest})
+        else:
+            out.append(mesh_part(part))
+            if part.picture_only:
+                out[-1]['opacity'] = GLASS_OPACITY
+    return [placed(part, pose) for part in out] if pose else out
+
+
+def magazine_parts(assets, gun, pistol):
     """The longer magazine in j_gun's space, in the gun's own textures."""
-    clip = gun.bones['j_clip']
-    parts = []
-    for index, vertices, triangles in B.extended_magazine(gun):
-        textures, alphatest = material_textures(assets, gun.materials[index])
-        part = {'pos': np.array([v[5] for v in vertices], np.float64), 'nrm': np.array([v[0] for v in vertices]),
-                'tan': np.array([v[3] for v in vertices]), 'bin': np.array([v[4] for v in vertices]),
-                'uv': np.array([v[2] for v in vertices], np.float64),
-                'tris': np.array(triangles, np.int64).reshape(-1, 3), 'tex': textures, 'alphatest': alphatest}
-        parts.append(placed(part, clip))
-    return parts
+    return model_parts(assets, B.extended_magazine(gun, pistol), gun.bones['j_clip'])
 
 
-def layer_parts(gun, layer, pistol):
+def layer_parts(assets, gun, layer, pistol):
     if layer == 'suppressor':
-        return [placed(mesh_part(m), gun.bones['tag_flash']) for m in B.suppressor(gun, pistol)]
-    return [mesh_part(m) for m in {'reflex': B.reflex, 'lens': B.lens, 'optic4x': B.optic4x}[layer](gun)]
+        return model_parts(assets, B.suppressor(gun, pistol), gun.bones['tag_flash'])
+    if layer == 'optic4x':
+        return model_parts(assets, B.optic4x(gun, assets.read))
+    return model_parts(assets, {'reflex': B.reflex, 'lens': B.lens}[layer](gun))
+
+
+def over(image, layer, opacity):
+    """A glass layer of opacity over an RGBA image, premultiplied."""
+    a = layer[..., 3:4] * opacity
+    base_a = image[..., 3:4]
+    out_a = a + base_a * (1 - a)
+    rgb = (layer[..., :3] * a + image[..., :3] * base_a * (1 - a)) / np.maximum(out_a, 1e-6)
+    return np.dstack([np.where(out_a > 0, rgb, 0), out_a[..., 0]])
 
 
 def rotation(yaw, pitch):
@@ -402,27 +426,35 @@ def render_gun(assets, weapon, takes, out, pistol):
     gun = B.Gun(assets.read, weapon)
     loose = LOOSE.get(weapon, ())
     base = [gun_part(assets, gun, s, m, loose) for s, m in zip(gun.surfaces, gun.materials)]
-    layers = {layer: layer_parts(gun, layer, pistol) for layer in LAYERS if layer in takes and
-              not (layer == 'optic4x' and weapon in B.SNIPERS)}
-    magazine = magazine_parts(assets, gun) if 'extmag' in takes and weapon in B.MAGAZINES else []
-    framing = np.concatenate([p['pos'][np.unique(p['tris'])] for group in [base, magazine] + list(layers.values())
-                              for p in group if len(p['tris'])])
+    layers = {layer: layer_parts(assets, gun, layer, pistol) for layer in LAYERS if layer in takes and
+              not (layer == 'optic4x' and weapon not in B.OPTIC_SOURCES)}
+    magazine = magazine_parts(assets, gun, pistol) if 'extmag' in takes and weapon in B.MAGAZINES else []
+    box = model_parts(assets, B.box_magazine(gun)) if 'extmag' in takes and weapon in B.BOX_MAGAZINES else []
+    framing = np.concatenate([p['pos'][np.unique(p['tris'])] for group in [base, magazine, box] +
+                              list(layers.values()) for p in group if len(p['tris'])])
     width, height = (512, 256) if pistol else (1024, 256)
     camera = Camera(framing, width, height)
     ss = SUPERSAMPLE
     gun_buffers = rasterize(base, camera, ss)
     save(downsample(shade(base, gun_buffers, gun_buffers['id'] >= 0), ss), out / f'{weapon.lower()}.png')
     written = [weapon.lower()]
-    if magazine:
-        surfaces, materials = B.without_magazine(gun)
-        variant = [gun_part(assets, gun, s, m, loose) for s, m in zip(surfaces, materials)] + magazine
+    if magazine or box:
+        surfaces, materials = B.without_magazine(gun) if magazine else (gun.surfaces, gun.materials)
+        variant = [gun_part(assets, gun, s, m, loose) for s, m in zip(surfaces, materials)] + magazine + box
         buffers = rasterize(variant, camera, ss)
         save(downsample(shade(variant, buffers, buffers['id'] >= 0), ss), out / f'{weapon.lower()}__extmag.png')
         written.append('extmag')
     for layer, parts in layers.items():
-        buffers = rasterize(parts, camera, ss)
+        solid = [p for p in parts if 'opacity' not in p]
+        glass = [p for p in parts if 'opacity' in p]
+        buffers = rasterize(solid, camera, ss)
         visible = (buffers['id'] >= 0) & (buffers['z'] < gun_buffers['z'])
-        save(downsample(shade(parts, buffers, visible), ss), out / f'{weapon.lower()}__{layer}.png')
+        image = shade(solid, buffers, visible)
+        if glass:
+            lens_buffers = rasterize(glass, camera, ss)
+            front = (lens_buffers['id'] >= 0) & (lens_buffers['z'] < np.minimum(buffers['z'], gun_buffers['z']))
+            image = over(image, shade(glass, lens_buffers, front), GLASS_OPACITY)
+        save(downsample(image, ss), out / f'{weapon.lower()}__{layer}.png')
         written.append(layer)
     return written
 
@@ -451,11 +483,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('--data', type=Path, default=ROOT / 'data/main')
     parser.add_argument('--only', nargs='*', default=None)
+    parser.add_argument('--out', type=Path, default=None, help='another folder, to look before replacing them')
     args = parser.parse_args()
     np.seterr(all='ignore')
     assets = Assets(args.data)
     classes = json.loads((ROOT / 'downstream/gateway/classes.json').read_text())
-    out = args.data / 'owner_class_pictures'
+    out = args.out or args.data / 'owner_class_pictures'
     out.mkdir(parents=True, exist_ok=True)
     for weapon in classes['primary'] + classes['secondary']:
         if args.only and weapon not in args.only:

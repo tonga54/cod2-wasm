@@ -25,13 +25,25 @@ RIDES = {'suppressor': 'tag_flash', 'reflex': 'j_gun', 'lens': 'j_gun', 'optic4x
 VISIBLE = tuple(RIDES)
 NOMAG = 'nomag'
 TEXTURE_SIZE = 128
-FINISHES = ('blued', 'parkerized', 'worn', 'brass', 'glass', 'black')
+FINISHES = ('blued', 'parkerized', 'worn', 'brass', 'glass', 'black', 'rust')
 MATERIAL = 'mtl_browser_att_'
 IMAGE = 'browser_att_'
 # The guns whose j_clip is a magazine an Extended Mag lengthens; the others' is a stripper clip or
-# an en-bloc clip, or a revolver's, and WWII's longer magazine needs a model of its own.
+# an en-bloc clip, a drum or a revolver's.
 MAGAZINES = ('thompson_mp', 'greasegun_mp', 'sten_mp', 'PPS42_mp', 'mp40_mp', 'm1carbine_mp', 'SVT40_mp',
              'g43_mp', 'bar_mp', 'bren_mp', 'mp44_mp', 'colt_mp', 'TT30_mp', 'luger_mp')
+# The ones whose longer magazine is two clamped together, as WWII's SMGs'; the rifles' is one longer.
+DUAL_MAGAZINES = ('thompson_mp', 'greasegun_mp', 'mp40_mp', 'PPS42_mp', 'mp44_mp')
+# The rifles loaded through the top, whose Extended Mag is a detachable box magazine under the receiver, as
+# WWII's Kar98k's, ahead of the trigger guard: from back to front along x, its top hidden in the stock, its
+# bottom and width, in j_gun's space as their side views measure them. The Lee-Enfield's wraps its own.
+BOX_MAGAZINES = {
+    'kar98k_mp': (-6.2, -3.8, -1.1, -3.6, 0.7), 'kar98k_sniper_mp': (-6.2, -3.8, -1.1, -3.6, 0.7),
+    'springfield_mp': (-4.8, -2.4, -0.55, -3.1, 0.7), 'm1garand_mp': (-4.8, -2.3, -1.65, -4.4, 0.74),
+    'mosin_nagant_mp': (-2.9, -0.8, -2.0, -4.5, 0.7), 'mosin_nagant_sniper_mp': (-2.9, -0.8, -2.0, -4.5, 0.7),
+    'enfield_mp': (-3.25, -1.15, -1.35, -4.5, 0.95), 'enfield_scope_mp': (-3.25, -1.15, -1.35, -4.5, 0.95),
+}
+EXTBOX = 'extbox'
 # How far ahead of the eye each gun's optic sits on the line of sight, by its receiver.
 OPTIC_AHEAD = {
     'thompson_mp': 8.0, 'greasegun_mp': 9.5, 'sten_mp': 8.5, 'PPS42_mp': 9.0, 'ppsh_mp': 8.0,
@@ -39,8 +51,14 @@ OPTIC_AHEAD = {
     'bar_mp': 9.0, 'bren_mp': 10.0, 'mp44_mp': 8.0, 'shotgun_mp': 7.0, 'enfield_mp': 7.5,
     'mosin_nagant_mp': 6.5, 'kar98k_mp': 7.5,
 }
-# A WWII can: SMGs' 8.5 long, pistols' 5.5; radius by the barrel it slips over.
-CAN = {'smg': (8.5, 0.62, 0.85), 'pistol': (5.5, 0.5, 0.68)}
+# A suppressor's can: how far it reaches past the muzzle and its radius.
+CAN = {'smg': (6.5, 1.0), 'pistol': (4.8, 0.62)}
+# How far back from the muzzle a bare SMG barrel takes the sleeve.
+SLEEVE_REACH = 12.0
+# How much lower the second of two clamped magazines sits, of the magazine's length, and how far ahead, of its
+# depth.
+DUAL_DROP = 0.12
+DUAL_AHEAD = 0.4
 MAG_LONGER = 1.5
 MAG_KEEP = 0.45
 MAG_FATTER = 1.04
@@ -193,13 +211,13 @@ class Gun:
     def bone_index(self, name):
         return self.names.index(name)
 
-    def points(self, bone=None):
-        """Vertex positions in j_gun's space, of one bone's vertices or all."""
+    def points(self, bone=None, without=None):
+        """Vertex positions in j_gun's space, of one bone's vertices, of all but one bone's, or all."""
         out = []
         for surface in self.surfaces:
             for vertex in surface['vertices']:
                 name = self.names[vertex['bone']]
-                if bone is not None and name != bone:
+                if bone is not None and name != bone or name == without:
                     continue
                 q, t = self.bones.get(name, (S.IDENTITY_QUAT, (0.0, 0.0, 0.0)))
                 out.append(S._add(S._qrot(q, vertex['pos']), t))
@@ -209,10 +227,12 @@ class Gun:
 # ---------------------------------------------------------------- building meshes
 
 class Mesh:
-    """Vertices (position, normal, uv) and triangles, written as one rigid surface."""
+    """Vertices (position, normal, uv) and triangles, written as one rigid surface. A picture-only mesh, such as
+    a sight's glass the eye must see through in a match, shows in the class pictures alone."""
 
-    def __init__(self, finish):
+    def __init__(self, finish, picture_only=False):
         self.finish = finish
+        self.picture_only = picture_only
         self.positions, self.normals, self.uvs, self.triangles = [], [], [], []
 
     def vertex(self, position, normal, uv):
@@ -231,7 +251,7 @@ class Mesh:
 
     def moved(self, rotation, offset):
         """A copy turned by the quaternion rotation and moved by offset."""
-        out = Mesh(self.finish)
+        out = Mesh(self.finish, self.picture_only)
         out.positions = [S._add(S._qrot(rotation, p), offset) for p in self.positions]
         out.normals = [S._qrot(rotation, n) for n in self.normals]
         out.uvs = list(self.uvs)
@@ -249,6 +269,43 @@ class Mesh:
             out.append((canonical(normal), b'\xff\xff\xff\xff', canonical(uv), canonical(binormal),
                         canonical(tangent), canonical(position)))
         return out
+
+
+class Surface:
+    """Triangles a retail model draws, in their own material, moved into the attachment's space: rigid vertices
+    as write_rigid_surfaces takes them, normal, colour, uv, binormal, tangent and position."""
+
+    def __init__(self, material, vertices, triangles):
+        self.material = material
+        self.vertices = vertices
+        self.triangles = triangles
+
+    def moved(self, rotation, offset):
+        def turn(vector):
+            return canonical(S._qrot(rotation, vector))
+        return Surface(self.material, [(turn(n), c, uv, turn(b), turn(t), canonical(S._add(S._qrot(rotation, p), offset)))
+                                       for n, c, uv, b, t, p in self.vertices], list(self.triangles))
+
+
+def retail_surface(gun, index, keep=None, into=None):
+    """One of the gun's surfaces in j_gun's space, or into the space of the pose into gives, of the triangles keep
+    takes (a function of their three positions there), with the vertices they use."""
+    surface = gun.surfaces[index]
+    inverse = S._invert(into) if into else None
+    vertices = []
+    for vertex in surface['vertices']:
+        q, t = gun.bones.get(gun.names[vertex['bone']], (S.IDENTITY_QUAT, (0.0, 0.0, 0.0)))
+        if inverse:
+            q, t = S._compose(inverse, (q, t))
+        vertices.append((canonical(S._qrot(q, vertex['normal'])), vertex['colour'], vertex['uv'],
+                         canonical(S._qrot(q, vertex['binormal'])), canonical(S._qrot(q, vertex['tangent'])),
+                         canonical(S._add(S._qrot(q, vertex['pos']), t))))
+    triangles = surface['triangles']
+    kept = [triangles[i:i + 3] for i in range(0, len(triangles), 3)
+            if keep is None or keep(*(vertices[v][5] for v in triangles[i:i + 3]))]
+    used = sorted({v for tri in kept for v in tri})
+    remap = {old: new for new, old in enumerate(used)}
+    return Surface(gun.materials[index], [vertices[v] for v in used], [remap[v] for tri in kept for v in tri])
 
 
 def canonical(values):
@@ -321,9 +378,9 @@ def barrel_radius(gun):
     return min(max(_percentile(radial, 0.9) if radial else 0.4, 0.25), 0.7)
 
 
-def receiver_top(gun, x, reach=1.5, half_width=0.6):
-    """The gun's top near x along its centre line."""
-    tops = [p[2] for p in gun.points() if abs(p[0] - x) < reach and abs(p[1]) < half_width]
+def receiver_top(gun, x, reach=1.5, half_width=0.6, y=0.0, points=None):
+    """The gun's top near x, along its centre line or the line y beside it."""
+    tops = [p[2] for p in (points or gun.points()) if abs(p[0] - x) < reach and abs(p[1] - y) < half_width]
     return _percentile(tops, 0.9) if tops else 0.0
 
 
@@ -356,21 +413,85 @@ def _quat_from_axes(x, y, z):
     return tuple(v / length for v in q)
 
 
+def _flash_space(gun, point):
+    q, t = S._invert(gun.bones['tag_flash'])
+    return S._add(S._qrot(q, point), t)
+
+
+def free_barrel(gun, radius, reach=8.0, step=0.1):
+    """How far back from the muzzle the barrel runs bare: nothing within 2.5 of its axis stands out of it."""
+    local = [_flash_space(gun, p) for p in gun.points()]
+    local = [(p[0], math.hypot(p[1], p[2])) for p in local if -reach - step <= p[0] <= 0.05]
+    run = 0.0
+    while run < reach:
+        if any(-(run + step) <= x < -run and radius + 0.12 < r < 2.5 for x, r in local):
+            break
+        run += step
+    return run
+
+
+def sight_clearance(gun, back, front, margin=0.12):
+    """The least room between the bore and the line of sight from back to front along it, less a margin."""
+    eye = _flash_space(gun, gun.eye)
+    tip = _flash_space(gun, S._add(gun.eye, gun.ahead))
+    ahead = S._sub(tip, eye)
+    room = []
+    for x in (back, (back + front) / 2, front):
+        t = (x - eye[0]) / ahead[0] if abs(ahead[0]) > 1e-6 else 0.0
+        room.append(math.hypot(eye[1] + ahead[1] * t, eye[2] + ahead[2] * t))
+    return min(room) - margin
+
+
+def _perforations(mesh, radius, start, end, rows=8, pitch=0.42, size=0.15):
+    """Rows of dark holes around a sleeve of radius, from start to end along x."""
+    x = start
+    while x + size <= end:
+        for row in range(rows):
+            angle = 2.0 * math.pi * (row + 0.5 * (int((x - start) / pitch) % 2)) / rows
+            c, s = math.cos(angle), math.sin(angle)
+            half = math.atan(size / 2 / radius)
+            corners = []
+            for dx, da in ((0.0, -half), (size, -half), (size, half), (0.0, half)):
+                cc, ss = math.cos(angle + da), math.sin(angle + da)
+                corners.append(mesh.vertex((x + dx, radius * 1.004 * cc, radius * 1.004 * ss), (0.0, c, s),
+                                           (dx / size, da / half * 0.5 + 0.5)))
+            mesh.triangle(corners[0], corners[1], corners[2])
+            mesh.triangle(corners[0], corners[2], corners[3])
+        x += pitch
+    return mesh
+
+
 def suppressor(gun, pistol):
-    """A knurled rear collar slipped over the muzzle, the long tube, a chamfered cap and a dark bore."""
-    length, smallest, largest = CAN['pistol' if pistol else 'smg']
-    r = min(max(barrel_radius(gun) + 0.22, smallest), largest)
-    back, collar = -1.3, r * 1.08
-    body = lathe(Mesh('blued'), [(back, 0.0), (back, collar * 0.86), (back + 0.08, collar), (back + 1.1, collar),
-                                 (back + 1.18, r), (length - 0.35, r), (length - 0.1, r * 0.93),
-                                 (length, r * 0.78), (length, r * 0.42)], segments=28)
-    rings = Mesh('worn')
-    x = back + 0.18
-    while x < back + 1.0:
-        lathe(rings, [(x, collar * 1.004), (x + 0.04, collar * 1.03), (x + 0.08, collar * 1.004)], segments=28)
-        x += 0.16
-    bore = lathe(Mesh('black'), [(length, r * 0.42), (length - 0.4, r * 0.38), (length - 0.4, 0.0)], segments=20)
-    return [body, rings, bore]
+    """WWII's suppressor in tag_flash's space: a fat can past the muzzle with a band at each end, and on an SMG
+    whose barrel runs bare a rusted, perforated sleeve over it back to the receiver. It never rises into the
+    line of sight: where that runs low over the bore the can hangs below it, the bore near its top."""
+    length, radius = CAN['pistol' if pistol else 'smg']
+    barrel = barrel_radius(gun)
+    free = free_barrel(gun, barrel, reach=SLEEVE_REACH)
+    back = min(free, 0.6 if pistol else 1.2)
+    sleeved = not pistol and free > back + 1.0
+    sleeve_back = -free if sleeved else -back
+    hole = min(barrel * 0.6, radius * 0.4)
+    drop = min(max(radius - sight_clearance(gun, sleeve_back, length), 0.0), radius - hole - 0.08)
+    eye = _flash_space(gun, gun.eye)
+    up = S._normalise((0.0, eye[1], eye[2]))
+    axis = S._scale(up, -drop)
+    parts = []
+    if sleeved:
+        sleeve = radius * 0.9
+        parts.append(lathe(Mesh('rust'), [(sleeve_back, 0.0), (sleeve_back, sleeve * 0.96),
+                                          (sleeve_back + 0.1, sleeve), (-back + 0.05, sleeve)], segments=32))
+        parts.append(_perforations(Mesh('black'), sleeve, sleeve_back + 0.5, -back - 0.4, rows=10, pitch=0.5,
+                                   size=0.12))
+    body = lathe(Mesh('blued'), [(-back, 0.0), (-back, radius * 0.94), (-back + 0.12, radius),
+                                 (length - 0.35, radius), (length - 0.12, radius * 0.95), (length, radius * 0.8),
+                                 (length, 0.0)], segments=36)
+    bands = Mesh('worn')
+    for x in (-back + 0.1, length - 0.7):
+        lathe(bands, [(x, radius), (x, radius * 1.035), (x + 0.16, radius * 1.035), (x + 0.16, radius)],
+              segments=36)
+    bore = lathe(Mesh('black'), [(length + 0.004, hole), (length + 0.004, 0.0)], segments=20)
+    return [part.moved(S.IDENTITY_QUAT, axis) for part in parts + [body, bands]] + [bore]
 
 
 def _on_sight_line(gun, meshes, ahead_by):
@@ -380,62 +501,109 @@ def _on_sight_line(gun, meshes, ahead_by):
     return [mesh.moved(rotation, centre) for mesh in meshes], centre
 
 
+def _glass(radius, at, finish='glass'):
+    """A sight's glass for the pictures, facing both ways at at along the line of sight."""
+    return [lathe(Mesh(finish, picture_only=True), [(at, radius), (at, 0.0)], segments=32),
+            lathe(Mesh(finish, picture_only=True), [(at - 0.01, 0.0), (at - 0.01, radius)], segments=32)]
+
+
 def reflex(gun):
+    """WWII's reflex sight: a round window in a thick frame, upright on a post and a clamped base over the
+    receiver, centred on the line of sight; its glass shows in the pictures, the reticle in a match."""
     ahead = OPTIC_AHEAD.get(gun.weapon, 7.5)
-    ring_outer, ring_inner, depth = 1.15, 0.98, 0.3
-    ring = lathe(Mesh('blued'), [(-depth, ring_inner), (-depth, ring_outer), (depth, ring_outer),
-                                 (depth, ring_inner), (-depth, ring_inner)], segments=36)
-    lip = lathe(Mesh('worn'), [(depth, ring_outer * 0.995), (depth + 0.05, ring_outer * 0.97),
-                               (depth + 0.05, ring_inner * 1.03), (depth, ring_inner * 1.005)], segments=36)
-    meshes, centre = _on_sight_line(gun, [ring, lip], ahead)
+    outer, inner, depth = 0.8, 0.64, 0.26
+    frame = lathe(Mesh('blued'), [(-depth, inner), (-depth, outer), (depth, outer), (depth, inner), (-depth, inner)],
+                  segments=40)
+    lip = lathe(Mesh('worn'), [(depth, outer * 0.995), (depth + 0.04, outer * 0.96), (depth + 0.04, inner * 1.04),
+                               (depth, inner * 1.005)], segments=40)
+    meshes, centre = _on_sight_line(gun, [frame, lip] + _glass(inner, 0.0), ahead)
     top = receiver_top(gun, centre[0])
-    post = box(Mesh('blued'), (centre[0] - 0.26, centre[1] - 0.24, top + 0.3),
-               (centre[0] + 0.26, centre[1] + 0.24, centre[2] - ring_outer + 0.05))
-    base = box(Mesh('parkerized'), (centre[0] - 1.5, centre[1] - 0.55, top - 0.05),
-               (centre[0] + 1.0, centre[1] + 0.55, top + 0.38))
-    return meshes + [post, base]
+    post = box(Mesh('blued'), (centre[0] - 0.2, centre[1] - 0.2, top + 0.25),
+               (centre[0] + 0.2, centre[1] + 0.2, centre[2] - outer + 0.05))
+    base = box(Mesh('parkerized'), (centre[0] - 0.8, centre[1] - 0.42, top - 0.05),
+               (centre[0] + 0.6, centre[1] + 0.42, top + 0.28))
+    screw = box(Mesh('worn'), (centre[0] - 0.15, centre[1] - 0.52, top), (centre[0] + 0.15, centre[1] - 0.42, top + 0.22))
+    return meshes + [post, base, screw]
 
 
 def lens(gun):
-    """A lens sight's housing: a short thin-walled ring on the line of sight with a brass objective
-    ring, open so the eye sees through it to the reticle the game draws, on a low mount."""
+    """WWII's lens sight: a short tube with a brass objective ring on a low mount, centred on the line of sight;
+    its lens shows in the pictures, the reticle in a match."""
     ahead = OPTIC_AHEAD.get(gun.weapon, 7.5)
-    inner, outer, back, front = 0.66, 0.78, -0.45, 0.3
-    housing = lathe(Mesh('blued'), [(back, inner), (back, outer), (front, outer), (front, inner), (back, inner)],
-                    segments=36)
-    rim = lathe(Mesh('brass'), [(front, inner * 0.99), (front, outer * 1.04), (front + 0.16, outer * 1.04),
-                                (front + 0.16, inner * 0.99), (front, inner * 0.99)], segments=36)
-    meshes, centre = _on_sight_line(gun, [housing, rim], ahead)
+    inner, outer, back, front = 0.42, 0.5, -0.45, 0.35
+    tube = lathe(Mesh('blued'), [(back, inner), (back, outer * 1.05), (back + 0.08, outer * 1.05),
+                                 (back + 0.11, outer), (front, outer), (front, inner), (back, inner)], segments=36)
+    rim = lathe(Mesh('brass'), [(front, inner * 0.98), (front, outer * 1.12), (front + 0.14, outer * 1.12),
+                                (front + 0.17, outer * 1.04), (front + 0.17, inner * 0.98), (front, inner * 0.98)],
+                segments=36)
+    meshes, centre = _on_sight_line(gun, [tube, rim] + _glass(inner, front + 0.08), ahead)
     top = receiver_top(gun, centre[0], reach=1.0)
-    mount = box(Mesh('parkerized'), (centre[0] - 0.55, centre[1] - 0.26, top - 0.05),
-                (centre[0] + 0.4, centre[1] + 0.26, centre[2] - outer + 0.05))
+    mount = box(Mesh('parkerized'), (centre[0] - 0.4, centre[1] - 0.22, top - 0.05),
+                (centre[0] + 0.3, centre[1] + 0.22, centre[2] - outer + 0.05))
     return meshes + [mount]
 
 
-def optic4x(gun, length=8.0):
-    ahead = OPTIC_AHEAD.get(gun.weapon, 7.5) + 3.0
-    h = length / 2
-    tube = lathe(Mesh('blued'), [(-h, 0.40), (-h, 0.56), (-h + 1.4, 0.56), (-h + 2.0, 0.40), (h - 2.4, 0.40),
-                                 (h - 1.6, 0.66), (h, 0.66), (h, 0.52)], segments=32)
-    front = lathe(Mesh('glass'), [(h - 0.08, 0.52), (h - 0.08, 0.0)], segments=24)
-    back = lathe(Mesh('glass'), [(-h + 0.06, 0.40), (-h + 0.06, 0.0)], segments=24)
-    turret = box(Mesh('blued'), (-0.28, -0.28, 0.36), (0.28, 0.28, 0.78))
-    side = box(Mesh('blued'), (-0.24, -0.72, -0.24), (0.24, -0.36, 0.24))
-    meshes, centre = _on_sight_line(gun, [tube, front, back, turret, side], ahead)
-    for along in (-h + 2.4, h - 2.9):
-        ring_meshes, at = _on_sight_line(
-            gun, [lathe(Mesh('parkerized'), [(-0.22, 0.44), (-0.22, 0.52), (0.22, 0.52), (0.22, 0.44)], segments=24)],
-            ahead + along)
-        top = receiver_top(gun, at[0], reach=0.6)
-        meshes += ring_meshes + [box(Mesh('parkerized'), (at[0] - 0.2, at[1] - 0.2, top - 0.05),
-                                     (at[0] + 0.2, at[1] + 0.2, at[2] - 0.46))]
-    return meshes
+# The 4x Optic each gun wears: a CoD2 scope, its nation's where one comes apart from its rifle's model; the
+# Kar98k and the Lee-Enfield take their own sniper rifle's as it sits on that rifle.
+OPTIC_SOURCES = {
+    'kar98k_mp': 'kar98k_sniper_mp', 'g43_mp': 'kar98k_sniper_mp', 'mp44_mp': 'kar98k_sniper_mp',
+    'enfield_mp': 'enfield_scope_mp', 'bren_mp': 'enfield_scope_mp',
+    'm1garand_mp': 'springfield_mp', 'm1carbine_mp': 'springfield_mp', 'bar_mp': 'springfield_mp',
+    'mosin_nagant_mp': 'springfield_mp', 'SVT40_mp': 'springfield_mp',
+}
+OPTIC_IN_PLACE = ('kar98k_mp', 'enfield_mp')
+# Above this much room between a 4x Optic's mount and the gun under it, a bracket fills it.
+MOUNT_GAP = 0.25
 
 
-def extended_magazine(gun):
-    """The gun's magazine surfaces in j_clip's space, the part beyond MAG_KEEP of its length from the
-    magazine well stretched so the whole is MAG_LONGER as long, a little fatter so the original hides
-    inside: (surface index, vertices, triangles) in the gun's own material."""
+def scope_parts(read, source):
+    """A scoped rifle's scope in its j_gun space, with the rifle: its surfaces in a scope material, or the
+    Springfield's triangles over its receiver and behind its front sight."""
+    rifle = Gun(read, source)
+    parts = [retail_surface(rifle, index) for index, material in enumerate(rifle.materials) if 'scope' in material]
+    if not parts:
+        for index, surface in enumerate(rifle.surfaces):
+            if surface['marker'] == rifle.bone_index('j_gun'):
+                part = retail_surface(rifle, index, keep=lambda a, b, c: min(a[2], b[2], c[2]) > 2.2 and
+                                      max(a[0], b[0], c[0]) < 5.0)
+                if part.triangles:
+                    parts.append(part)
+    return rifle, parts
+
+
+def optic4x(gun, read):
+    """The gun's 4x Optic in j_gun's space: its scope from OPTIC_SOURCES, along the gun's line of sight over its
+    receiver, OPTIC_AHEAD and 3 more ahead of the eye, its mount on the highest of the gun beneath the middle
+    of the scope but no higher than the iron sights' line: what stands taller, as the Bren's magazine and its
+    cover, the scope clears beside it. Aiming through it turns to the scope's overlay, so the scope need not
+    meet the eye."""
+    rifle, parts = scope_parts(read, OPTIC_SOURCES[gun.weapon])
+    if gun.weapon in OPTIC_IN_PLACE:
+        return parts
+    source = S._invert((_sight_frame(rifle), rifle.eye))
+    local = [S._add(S._qrot(source[0], v[5]), source[1]) for part in parts for v in part.vertices]
+    back, front = min(p[0] for p in local), max(p[0] for p in local)
+    middle = (back + front) / 2
+    at = S._add(gun.eye, S._scale(gun.ahead, OPTIC_AHEAD.get(gun.weapon, 7.5) + 3.0))
+    points = gun.points(without='j_clip')
+    half = (front - back) * 0.3
+    tops = [receiver_top(gun, at[0] + k * half, reach=0.6, y=at[1], points=points) for k in (-1.0, -0.5, 0.0, 0.5, 1.0)]
+    top = min(max(tops), at[2] - 0.2)
+    frame = _sight_frame(gun)
+    lowest = at[2] + min(S._qrot(frame, (p[0] - middle, p[1], p[2]))[2] for p in local)
+    up = S._qrot(frame, (0.0, 0.0, 1.0))
+    origin = S._add(S._add(at, S._qrot(frame, (-middle, 0.0, 0.0))), S._scale(up, (top - lowest) / up[2]))
+    place = S._compose((frame, origin), source)
+    out = [part.moved(*place) for part in parts]
+    if top - tops[2] > MOUNT_GAP:
+        out.append(box(Mesh('parkerized'), (at[0] - 0.7, at[1] - 0.22, tops[2] - 0.1),
+                       (at[0] + 0.7, at[1] + 0.22, top + 0.05)))
+    return out
+
+
+def _magazine(gun):
+    """The gun's magazine in j_clip's space: its triangles on j_clip by surface, their points, centre and principal
+    axis, the extent along it and the end at the well, where it meets the gun, with the way out of the well."""
     clip = gun.bone_index('j_clip')
     picked = []
     for index, surface in enumerate(gun.surfaces):
@@ -447,7 +615,7 @@ def extended_magazine(gun):
     points = [vertex['pos'] for index, kept in picked for tri in kept
               for vertex in (gun.surfaces[index]['vertices'][v] for v in tri)]
     if not points:
-        return []
+        return None
     centre = tuple(sum(p[k] for p in points) / len(points) for k in range(3))
     axis = _principal_axis(points, centre)
     s_values = [S._dot(S._sub(p, centre), axis) for p in points]
@@ -456,12 +624,30 @@ def extended_magazine(gun):
     near_high = math.dist(S._add(centre, S._scale(axis, high)), (0.0, 0.0, 0.0))
     near_low = math.dist(S._add(centre, S._scale(axis, low)), (0.0, 0.0, 0.0))
     well, sign = (high, -1.0) if near_high < near_low else (low, 1.0)
-    length = high - low
-    line = _centre_line(points, s_values, centre, axis, low, high)
+    return {'picked': picked, 'points': points, 'centre': centre, 'axis': axis, 's': s_values, 'low': low,
+            'high': high, 'well': well, 'sign': sign, 'length': high - low}
+
+
+def _magazine_vertex(vertex, position):
+    return (vertex['normal'], vertex['colour'], vertex['uv'], vertex['binormal'], vertex['tangent'],
+            canonical(position))
+
+
+def _fed_from_below(gun, mag):
+    """A magazine hanging under the gun: out of the well it heads mostly down in j_gun's space."""
+    out = S._qrot(gun.bones['j_clip'][0], S._scale(mag['axis'], mag['sign']))
+    return out[2] < -0.7
+
+
+def stretched_magazine(gun, mag):
+    """The gun's magazine, the part beyond MAG_KEEP of its length from the well stretched so the whole is
+    MAG_LONGER as long, a little fatter so the original hides inside, in the gun's own material."""
+    centre, axis, well, sign, length = mag['centre'], mag['axis'], mag['well'], mag['sign'], mag['length']
+    line = _centre_line(mag['points'], mag['s'], centre, axis, mag['low'], mag['high'])
     stretch = (MAG_LONGER - MAG_KEEP) / (1.0 - MAG_KEEP)
     keep_at = _line_at(line, well + sign * MAG_KEEP * length)
     out = []
-    for index, kept in picked:
+    for index, kept in mag['picked']:
         surface = gun.surfaces[index]
         used = sorted({v for tri in kept for v in tri})
         remap = {old: new for new, old in enumerate(used)}
@@ -473,10 +659,78 @@ def extended_magazine(gun):
             offset = S._scale(S._sub(vertex['pos'], on_line), MAG_FATTER)
             if abs(s - well) > MAG_KEEP * length:
                 on_line = S._add(keep_at, S._scale(S._sub(on_line, keep_at), stretch))
-            vertices.append((vertex['normal'], vertex['colour'], vertex['uv'], vertex['binormal'], vertex['tangent'],
-                             canonical(S._add(on_line, offset))))
-        out.append((index, vertices, [remap[v] for tri in kept for v in tri]))
+            vertices.append(_magazine_vertex(vertex, S._add(on_line, offset)))
+        out.append(Surface(gun.materials[index], vertices, [remap[v] for tri in kept for v in tri]))
     return out
+
+
+def dual_magazine(gun, mag, gap=0.08):
+    """WWII's longer magazine for a gun fed from below: its own magazine and a second one beside it on the gun's
+    left, the side the eye and the pictures see, set lower by DUAL_DROP of its length so its lips clear the
+    well and ahead by DUAL_AHEAD of its depth, clamped to the first by a band near the well and a bolted block
+    near the base."""
+    centre, axis = mag['centre'], mag['axis']
+    lateral = S._qrot(S._invert(gun.bones['j_clip'])[0], (0.0, 1.0, 0.0))
+    lateral = S._normalise(S._sub(lateral, S._scale(axis, S._dot(lateral, axis))))
+    third = S._cross(axis, lateral)
+    across = [S._dot(S._sub(p, centre), lateral) for p in mag['points']]
+    width = max(across) - min(across)
+    deep_all = [S._dot(S._sub(p, centre), third) for p in mag['points']]
+    ahead = mag['sign'] * DUAL_AHEAD * (max(deep_all) - min(deep_all))
+    lower = mag['sign'] * DUAL_DROP * mag['length']
+    shift = S._add(S._add(S._scale(lateral, width + gap), S._scale(axis, lower)), S._scale(third, ahead))
+    out = []
+    for index, kept in mag['picked']:
+        surface = gun.surfaces[index]
+        used = sorted({v for tri in kept for v in tri})
+        remap = {old: new for new, old in enumerate(used)}
+        triangles = [remap[v] for tri in kept for v in tri]
+        first = [_magazine_vertex(surface['vertices'][v], surface['vertices'][v]['pos']) for v in used]
+        second = [_magazine_vertex(surface['vertices'][v], S._add(surface['vertices'][v]['pos'], shift)) for v in used]
+        out.append(Surface(gun.materials[index], first, triangles))
+        out.append(Surface(gun.materials[index], second, list(triangles)))
+    frame = _quat_from_axes(axis, lateral, third)
+    for share, half, finish in ((DUAL_DROP + 0.12, 0.12, 'parkerized'), (0.86, 0.3, 'blued')):
+        at = mag['well'] + mag['sign'] * share * mag['length']
+        near = [p for p, s in zip(mag['points'], mag['s']) if abs(s - at) < 0.35] or mag['points']
+        deep = [S._dot(S._sub(p, centre), third) for p in near]
+        side = [S._dot(S._sub(p, centre), lateral) for p in near]
+        low = (at - half, min(side) - 0.06, min(deep) + min(ahead, 0.0) - 0.06)
+        high = (at + half, max(side) + width + gap + 0.06, max(deep) + max(ahead, 0.0) + 0.06)
+        out.append(box(Mesh(finish), low, high).moved(frame, centre))
+        if finish == 'blued':
+            for k in (0.25, 0.75):
+                d = low[2] + (high[2] - low[2]) * k
+                out.append(box(Mesh('worn'), (at - 0.09, high[1], d - 0.09),
+                               (at + 0.09, high[1] + 0.07, d + 0.09)).moved(frame, centre))
+    return out
+
+
+def extended_magazine(gun, pistol=False):
+    """WWII's longer magazine in j_clip's space: a second magazine clamped beside an SMG's own when it hangs
+    under the gun, else its own magazine longer."""
+    mag = _magazine(gun)
+    if not mag:
+        return []
+    if not pistol and gun.weapon in DUAL_MAGAZINES and _fed_from_below(gun, mag):
+        return dual_magazine(gun, mag)
+    return stretched_magazine(gun, mag)
+
+
+def box_magazine(gun):
+    """WWII's Extended Mag for a rifle loaded through the top, in j_gun's space: a blued box magazine down out of
+    the stock where BOX_MAGAZINES has it, its floorplate, ribs pressed in its sides and a catch at its back."""
+    back, front, top, bottom, width = BOX_MAGAZINES[gun.weapon]
+    half = width / 2
+    body = box(Mesh('blued'), (back, -half, bottom + 0.12), (front, half, top))
+    plate = box(Mesh('worn'), (back - 0.06, -half - 0.05, bottom), (front + 0.06, half + 0.05, bottom + 0.14))
+    ribs = Mesh('parkerized')
+    for share in (0.33, 0.67):
+        x = back + (front - back) * share
+        for side in (-1.0, 1.0):
+            box(ribs, (x - 0.05, side * half - 0.03, bottom + 0.3), (x + 0.05, side * half + 0.03, top - 0.35))
+    catch = box(Mesh('worn'), (back - 0.14, -0.2, top - 0.6), (back, 0.2, top - 0.25))
+    return [body, plate, ribs, catch]
 
 
 def _principal_axis(points, centre):
@@ -560,6 +814,7 @@ FINISH_COLOURS = {
     'brass': ((158, 117, 51), 0.35, (196, 158, 92)),
     'glass': ((26, 36, 43), 0.2, None),
     'black': ((9, 9, 9), 0.0, None),
+    'rust': ((88, 60, 41), 0.5, (126, 86, 55)),
 }
 
 
@@ -605,11 +860,18 @@ def rigid_model(name, surfaces, materials, bone):
     }
 
 
-def mesh_model(name, meshes, bone):
+def mesh_model(name, parts, bone):
+    """An xmodel of one bone from meshes, a surface for each finish, and retail surfaces as they are; the
+    picture-only meshes stay out of it."""
     by_finish = {}
-    for mesh in meshes:
-        by_finish.setdefault(mesh.finish, []).append(mesh)
     surfaces, materials = [], []
+    for part in parts:
+        if isinstance(part, Surface):
+            if part.triangles:
+                surfaces.append((part.vertices, part.triangles))
+                materials.append(part.material)
+        elif not part.picture_only:
+            by_finish.setdefault(part.finish, []).append(part)
     for finish in FINISHES:
         group = by_finish.get(finish)
         if not group:
@@ -635,23 +897,26 @@ def gun_attachments(read, weapon, takes):
             continue
         if attachment == 'suppressor':
             entries.update(mesh_model(base + attachment, suppressor(gun, pistol), RIDES[attachment]))
+        elif attachment == 'extmag' and weapon in BOX_MAGAZINES:
+            entries.update(mesh_model(base + EXTBOX, box_magazine(gun), 'j_gun'))
         elif attachment == 'extmag':
             if weapon not in MAGAZINES:
                 continue
-            magazine = extended_magazine(gun)
+            magazine = extended_magazine(gun, pistol)
             if not magazine:
                 continue
-            entries.update(rigid_model(base + attachment, [(v, t) for _, v, t in magazine],
-                                       [gun.materials[index] for index, _, _ in magazine], RIDES[attachment]))
+            entries.update(mesh_model(base + attachment, magazine, RIDES[attachment]))
             surfaces, materials = without_magazine(gun)
             lod = base + NOMAG + '0'
             entries['xmodel/' + base + NOMAG] = _copy_xmodel(gun, lod, materials)
             entries['xmodelparts/' + lod] = gun.parts
             entries['xmodelsurfs/' + lod] = write_surfaces(surfaces)
-        elif gun.weapon in SNIPERS and attachment == 'optic4x':
-            continue
+        elif attachment == 'optic4x':
+            if gun.weapon not in OPTIC_SOURCES:
+                continue
+            entries.update(mesh_model(base + attachment, optic4x(gun, read), RIDES[attachment]))
         else:
-            meshes = {'reflex': reflex, 'lens': lens, 'optic4x': optic4x}[attachment](gun)
+            meshes = {'reflex': reflex, 'lens': lens}[attachment](gun)
             entries.update(mesh_model(base + attachment, meshes, RIDES[attachment]))
         shown.append(attachment)
     return entries, shown
@@ -664,8 +929,6 @@ def _copy_xmodel(gun, lod, materials):
 
 
 PISTOLS = ('colt_mp', 'webley_mp', 'TT30_mp', 'luger_mp')
-# Scoped rifles already wear their scope; WWII's 4x Optic on them is a shorter one, not modelled yet.
-SNIPERS = ('springfield_mp', 'enfield_scope_mp', 'mosin_nagant_sniper_mp', 'kar98k_sniper_mp')
 
 
 def finish_assets(read, template):

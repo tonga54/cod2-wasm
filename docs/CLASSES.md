@@ -172,22 +172,35 @@ repository holds none of their data.
 
 | Attachment | Model | Rides | Guns |
 | --- | --- | --- | --- |
-| Suppressor | A can with a knurled collar over the muzzle, 8.5 long on SMGs and 5.5 on pistols, its radius by the barrel's | `tag_flash` | The six SMGs and four pistols |
-| Reflex Sight | A ring on a post and base | `j_gun` | Every gun that takes it |
-| Lens Sight | An open housing with a brass objective ring, on a low mount | `j_gun` | Every gun that takes it |
-| 4x Optic | A scope with turret, glass and two rings | `j_gun` | The rifles, BAR, Bren and the iron-sighted bolt-actions; the scoped rifles keep their own |
-| Extended Mag | The gun's own magazine, its lower part stretched to 1.5 times the length, in the gun's material, so it takes the camouflage | `j_clip` | The guns with a box magazine: not the PPSh's drum, the Garand's en-bloc clip, the bolt-actions' stripper clips, the Trench Gun's tube or the Webley |
+| Suppressor | WWII's two-part can: on an SMG whose barrel runs bare, a rusted, perforated sleeve over it back to the receiver, then a blued can of radius 1 reaching 6.5 past the muzzle; on a pistol a can of radius 0.62 reaching 4.8. A band at each end and a dark bore | `tag_flash` | The six SMGs and four pistols |
+| Reflex Sight | A round window in a thick frame with a lip, upright on a post over a clamped base | `j_gun` | Every gun that takes it |
+| Lens Sight | A short tube with a brass objective ring on a low mount | `j_gun` | Every gun that takes it |
+| 4x Optic | CoD2's own scopes: the Kar98k and Lee-Enfield take their sniper rifle's where it sits on it; the G43 and MP44 the Kar98k's, the Bren the Lee-Enfield's, the American and Soviet rifles the Springfield's, each along the gun's line of sight with its mount on the receiver | `j_gun` | The rifles, BAR, Bren and the iron-sighted bolt-actions; the scoped rifles keep their own |
+| Extended Mag | The SMGs' and MP44's: a second magazine clamped beside their own, on the left, lower and a little ahead, as WWII's M3 shows. The other rifles', LMGs' and pistols': their own magazine, its lower part stretched to 1.5 times the length. Both in the gun's material, so they take the camouflage | `j_clip` | The guns with a box magazine |
+| Extended Mag | A box magazine down out of the stock ahead of the trigger guard, with its floorplate, ribs and catch, as WWII's Kar98k shows; the Lee-Enfield's wraps its own | `j_gun` | The Kar98k, Springfield, Mosin-Nagant, Lee-Enfield, their scoped versions and the M1 Garand |
 
-- The sights are centred on the line of sight the gun's ADS up anim gives the
-  eye on its last frame, a set distance ahead of the eye, so the reticle drawn
-  at the screen's centre sits in the ring. The 4x Optic shows at the hip and
-  while raising; at full zoom the scope's overlay takes over, as the rule
-  above says.
-- Under an Extended Mag the game draws `xmodel/<gun>__nomag`, the gun without
-  the triangles on `j_clip`, so the original magazine does not show through.
-- The parts take six finishes, blued, parkerized, worn, brass, glass and black:
-  128 × 128 textures made from noise, in materials laid out as the Mk 2
-  grenade's.
+- The Reflex and Lens Sights are centred on the line of sight the gun's ADS up
+  anim gives the eye on its last frame, a set distance ahead of the eye, so the
+  reticle drawn at the screen's centre sits in the ring. Their glass shows in
+  the class pictures only: in a match the eye looks through to the reticle.
+- The 4x Optic's scope is a rigid copy of the source rifle's, turned from that
+  rifle's line of sight to the gun's, its middle 3 ahead of the sights' place,
+  its lowest point on the highest of the gun beneath its middle, magazines
+  aside and no higher than the iron sights' line; a bracket fills what room is
+  left, as under the Bren's, beside its magazine. It shows at the hip and while
+  raising; at full zoom the scope's overlay takes over, as the rule above says.
+- The can never rises into the line of sight: where that runs low over the
+  bore, as on the Thompson, Colt and TT-30, the can hangs below the bore, which
+  then nears its top.
+- Under a magazine on `j_clip` the game draws `xmodel/<gun>__nomag`, the gun
+  without the triangles on `j_clip`, so the original magazine does not show
+  through. A rifle loaded through the top keeps its gun, whose `j_clip` is the
+  stripper or en-bloc clip its reload uses, and wears
+  `xmodel/<gun>__extbox` on `j_gun`; the box's place comes from the rifle's
+  side view.
+- The parts take seven finishes, blued, parkerized, worn, brass, glass, black
+  and rust: 128 × 128 textures made from noise, in materials laid out as the
+  Mk 2 grenade's.
 - Floats are rounded to a millionth, so the Raspberry Pi writes the same bytes.
 - `cg_attachmodels_mp.c` puts each model on its bone after the hands and the
   gun, looking it up once a weapon registration: a missing model would load a
@@ -508,9 +521,13 @@ on canvases the generator accepts, for the day a class weapon matches one.
   guns, and every gun in third person, look the same with any of them: the
   attachments travel in the player state, which only its player receives.
   The 4x Optic at full zoom borrows a sniper rifle's scope image.
-- The attachment models are this port's, made from simple shapes; a gun's
-  attachments that change nothing visible (Grip, Quickdraw, FMJ and the
-  others) show nothing, as in WWII.
+- The cans, sights, clamps and box magazines are this port's, made from simple
+  shapes; the 4x Optics are CoD2's scopes, not WWII's shorter one, and the
+  Mosin-Nagant's own sniper scope, cut into its cloth, cannot be lifted. A
+  gun's attachments that change nothing visible (Grip, Quickdraw, FMJ and the
+  others) show nothing, as in WWII. The PPSh's drum and the Trench Gun's tube
+  look the same with an Extended Mag, and a rifle with a box magazine still
+  reloads through its stripper or en-bloc clip, as its retail animation does.
 - A suppressed shot is the gun's own sound made quieter, not a suppressed
   recording; the Suppressor cannot be taken off in a match as WWII's D-pad does.
 - Attachments belong to the class's guns. A weapon picked up from the ground,
@@ -551,15 +568,20 @@ on canvases the generator accepts, for the day a class weapon matches one.
   icons. It rejects 34 Python, 17 loader and 21 menu mutations.
 - `python3 scripts/test-browser-attachment-models.py` runs the attachment model
   generator on made-up guns: which models each weapon gets and the bone each
-  rides, the sights on the line of sight of the ADS up anim's last frame, the
-  can along the muzzle, the longer magazine and the gun without its own, the
-  retail winding, unit normals, canonical floats, the same bytes twice, and the
-  finishes. It rejects 9 mutations.
+  rides, the sights on the line of sight of the ADS up anim's last frame with
+  their glass only in the pictures, the 4x Optics from the scoped rifles'
+  scopes (in place, turned onto another line of sight, cut from the
+  Springfield's own material, on the Bren's bracket), the can past the muzzle
+  with its sleeve and below the line of sight, the two clamped magazines, the
+  longer one and the box magazine, the gun without its own, the retail
+  winding, unit normals, canonical floats, the same bytes twice, and the
+  finishes. It rejects 20 mutations.
 - `python3 scripts/test-view-attachments.py` compiles `cg_attachmodels_mp.c`
   with sanitizers: each model on its bone, the gun without its magazine under
-  the longer one, each model looked up once, a missing or broken one left off,
-  the view DObj's room kept; and that `cg_weapons.c` rebuilds the view weapon
-  when its visible attachments change. It rejects 11 mutations.
+  the longer one, a rifle's box magazine on `j_gun` with its gun kept, each
+  model looked up once, a missing or broken one left off, the view DObj's room
+  kept; and that `cg_weapons.c` rebuilds the view weapon when its visible
+  attachments change. It rejects 16 mutations.
 - `python3 scripts/test-xanim-final-frame.py` checks that a finished anim holds
   its last key, over every key table, which is what puts an aimed gun's sights
   on the view axis. It rejects the frame-short mutation.
@@ -685,3 +707,10 @@ on canvases the generator accepts, for the day a class weapon matches one.
     Kar98k's WWII scope centred. The class list, the editor's tiles and boxes,
     Modify Attachment's grid of icons and its preview, Select Class and the
     pause menu's Class tab showed each gun with its attachments.
+  - With WWII's models, on Carentan: Create a Class, Select Class and the
+    pause menu showed the Grease Gun painted Frogskin with its sleeve and can,
+    Lens Sight and two clamped magazines, the Thompson's hanging can, the
+    Kar98k's scope and box magazine, the Bren's scope beside its magazine and
+    the MP44's two magazines, painted. In a match the MP44's Lens Sight put
+    the amber reticle on its front sight, the Kar98k painted Ember carried its
+    scope with 7 rounds after a reload, and the Luger its can.
