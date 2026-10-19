@@ -22,9 +22,12 @@ the menus already use.
   `^`. Leading spaces cannot be typed, trailing spaces are removed.
 - Escape or the right mouse button goes back one screen.
 - **In a match**, the class list replaces the retail weapon menu after the team
-  choice and behind **Esc → 1. Choose Class**. Enter, a click or the keys 1 to
-  5 choose a class; F1 edits it there. A choice made while alive takes effect at
-  the next spawn, with the retail "You will respawn with..." message.
+  choice. Escape opens the pause menu on its **Class** tab: **Custom** lists
+  your five classes, **Standard Issue** the five defaults below, which stay as
+  they are whatever you edit. Left and right switch lists; Enter, a click or
+  the keys 1 to 5 choose; F1 edits a custom class and Escape in the editor
+  returns to the tab. A choice made while alive takes effect at the next spawn,
+  with the retail "You will respawn with..." message.
 - Any team may carry any country's weapons: a British player can spawn with a
   Kar98k and a TT-30, a German one with an M1 Garand.
 
@@ -140,8 +143,8 @@ and grenades.
 ## Limits
 
 - Gametags are shared, as described above.
-- The server keeps a player's class while they stay connected. The menu
-  highlights the last choice until the page reloads.
+- The server keeps a player's class while they stay connected. The menus
+  highlight the last choice until the page reloads.
 - The Grease Gun, PPS-42, SVT-40, G43 and Trench Gun have no retail menu
   description, so their lists show only the kind and the country.
 - A script `notify("x", a, b)` reaches `waittill("x", p, q)` with the arguments
@@ -166,6 +169,11 @@ and grenades.
 - `(cd downstream/gateway && npm test)` covers the store across reopening and
   the HTTP API: lookups, saves, cross-origin, invalid and oversized bodies,
   wrong methods, missing storage.
+- `python3 scripts/test-class-menu-pause.py` compiles the class screens with
+  the pause menu's side of them: both lists, the store's note, a class chosen
+  from either list or the class screen sent as the menu's response and
+  remembered with its list, and the editor opened from the pause menu going
+  back to it. It rejects 12 mutations.
 - `python3 scripts/test-room-maps.py` checks that every room receives the script.
 - `python3 scripts/test-browser-classes-runtime.py --assets PREPARED_MAIN` runs
   the dedicated server with a bot and no network. It makes eight class choices:

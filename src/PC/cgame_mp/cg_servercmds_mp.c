@@ -818,12 +818,17 @@ static void CG_ParseScores(void)
         }
     }
 
-    /* Our server follows the players with their kills, in the same order. */
+    /* Our server follows the players with their kills, in the same order,
+     * then the receiver's own assists and headshots. */
     CG_ScoreTableClearKills();
     if (Cmd_Argc() >= 4 + scoreCount * 6) {
         for (i = 0; i < scoreCount; ++i)
             CG_ScoreTableSetKills(cg->scores[i].client, atoi(CG_Argv(4 + scoreCount * 5 + i)));
     }
+    if (Cmd_Argc() >= 6 + scoreCount * 6)
+        CG_ScoreTableSetOwnStats(atoi(CG_Argv(4 + scoreCount * 6)), atoi(CG_Argv(5 + scoreCount * 6)));
+    else
+        CG_ScoreTableSetOwnStats(-1, -1);
 }
 
 static void CG_SetVoteStringFromConfigString(const char *configString)

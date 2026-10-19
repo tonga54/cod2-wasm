@@ -2,6 +2,7 @@
 #include "imports.h"
 #include "bytematch.h"
 #include "headers/PC/ui_mp/ui_class_menu.h"
+#include "headers/PC/ui_mp/ui_pause_menu.h"
 #include "headers/PC/ui_mp/ui_wwii_menu.h"
 
 #include <stdlib.h>
@@ -2356,7 +2357,7 @@ void Menus_Open(displayContextDef_t *dc, menuDef_t *menu)
 
 qboolean Menus_OpenByName(displayContextDef_t *dc, const char *p)
 {
-    menuDef_t *menu = Menus_FindByName_core(dc, p);
+    menuDef_t *menu = Menus_FindByName_core(dc, UI_PauseMenu_Redirect(p));
     if (menu) {
         Menus_Open(dc, menu);
         return 1;
@@ -5502,6 +5503,7 @@ paint_content:
     }
     UI_WWIIMenu_PaintMenu(dc, menu);
     UI_ClassMenu_Paint(dc, menu);
+    UI_PauseMenu_Paint(dc, menu);
 
     if (debugMode) {
         float color[4] = { 1.0f, 1.0f, 0.0f, 1.0f };

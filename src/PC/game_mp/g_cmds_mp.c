@@ -120,13 +120,17 @@ void DeathmatchScoreboardMessage(gentity_t *ent)
     int stringlength;
     char kill[16];
     char kills[GCMDS_SCORES_LIMIT];
+    char own[32];
     int killslength;
+    int ownlength;
     int k;
 
     string[0] = '\0';
     stringlength = 0;
     kills[0] = '\0';
     killslength = 0;
+    ownlength = Com_sprintf(own, sizeof(own), " %i %i", G_PointsAssists(ent - g_entities),
+                            G_PointsHeadshots(ent - g_entities));
 
     numSorted = lvl->numConnectedClients;
     if (numSorted > GCMDS_MAX_CLIENTS) {
@@ -155,7 +159,7 @@ void DeathmatchScoreboardMessage(gentity_t *ent)
 
         j = strlen(entry);
         k = Com_sprintf(kill, sizeof(kill), " %i", G_PointsKills(clientNum));
-        if (stringlength + j + killslength + k > GCMDS_SCORES_LIMIT) {
+        if (stringlength + j + killslength + k + ownlength > GCMDS_SCORES_LIMIT) {
             break;
         }
 
@@ -166,9 +170,10 @@ void DeathmatchScoreboardMessage(gentity_t *ent)
     }
 
     /* Retail clients read only the five fields of each listed player; the
-     * kills of the same players follow them, in the same order. */
-    Com_sprintf(entry, sizeof(entry), "%c %i %i %i%s%s", 98, i, lvl->teamScores[TEAM_AXIS],
-                lvl->teamScores[TEAM_ALLIES], string, kills);
+     * kills of the same players follow them, in the same order, then the
+     * receiver's own assists and headshots. */
+    Com_sprintf(entry, sizeof(entry), "%c %i %i %i%s%s%s", 98, i, lvl->teamScores[TEAM_AXIS],
+                lvl->teamScores[TEAM_ALLIES], string, kills, own);
     SV_GameSendServerCommand(ent - g_entities, SV_CMD_RELIABLE, entry);
 }
 

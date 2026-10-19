@@ -183,6 +183,9 @@ int main(void) {
     expect(1, "cod2_points 2 150");
     quiet();
     assert(G_PointsGet(1) == 575 && G_PointsGet(2) == 150);
+    /* Each assist and each headshot counts once; a melee hit to the head is no headshot. */
+    assert(G_PointsAssists(2) == 2 && G_PointsAssists(1) == 0 && G_PointsAssists(-1) == 0);
+    assert(G_PointsHeadshots(1) == 2 && G_PointsHeadshots(2) == 0 && G_PointsHeadshots(64) == 0);
 
     /* Team damage is no assist, even after a team switch, and a team kill
      * earns nothing. */
@@ -224,8 +227,14 @@ int main(void) {
     expect(2, "cod2_points 0 100");
     G_PointsClientConnect(2, 100 + 2);
     assert(G_PointsGet(2) == 100 && G_PointsKills(2) == 1);
+    damage(3, 1, 10);
+    kill(3, 2, RIFLE, HEAD);
+    expect(1, "cod2_points 3 25");
+    expect(2, "cod2_points 2 150");
+    G_PointsClientConnect(2, 100 + 2);
+    assert(G_PointsHeadshots(2) == 1);
     G_PointsClientConnect(2, 900);
-    assert(G_PointsGet(2) == 0 && G_PointsKills(2) == 0);
+    assert(G_PointsGet(2) == 0 && G_PointsKills(2) == 0 && G_PointsHeadshots(2) == 0);
     quiet();
 
     /* Retail score changes only matter in CTF and DM; team score zeroing at
@@ -240,9 +249,11 @@ int main(void) {
     G_PointsTeamScoresChanged(level.initializing, 0, 3);
     G_PointsTeamScoresChanged(level.initializing, 2, 0);
     assert(G_PointsGet(1) > 0);
+    assert(G_PointsAssists(1) > 0 && G_PointsHeadshots(2) == 0);
     G_PointsTeamScoresChanged(level.initializing, 0, 0);
     assert(G_PointsGet(0) == 0 && G_PointsGet(1) == 0 && G_PointsGet(2) == 0);
     assert(G_PointsKills(0) == 0 && G_PointsKills(1) == 0);
+    assert(G_PointsAssists(1) == 0 && G_PointsHeadshots(1) == 0);
 
     /* Points survive SD rounds, nothing else. */
     kill(0, 1, RIFLE, TORSO);
@@ -250,15 +261,20 @@ int main(void) {
     G_PointsInitGame(1, "tdm");
     assert(G_PointsGet(1) == 0 && G_PointsKills(1) == 0);
     G_PointsInitGame(0, "sd");
-    kill(0, 1, RIFLE, TORSO);
-    expect(1, "cod2_points 0 100");
+    clients[2].sess.connected = CON_CONNECTED;
+    damage(0, 2, 20);
+    kill(0, 1, RIFLE, HEAD);
+    expect(2, "cod2_points 3 25");
+    expect(1, "cod2_points 2 150");
     damage(0, 2, 20);
     G_PointsInitGame(1, "SD");
-    assert(G_PointsGet(1) == 100 && G_PointsKills(1) == 1);
+    assert(G_PointsGet(1) == 150 && G_PointsKills(1) == 1);
+    assert(G_PointsHeadshots(1) == 1 && G_PointsAssists(2) == 1);
     kill(0, 1, RIFLE, TORSO);
     expect(1, "cod2_points 0 100");
     G_PointsInitGame(0, "sd");
     assert(G_PointsGet(1) == 0 && G_PointsKills(1) == 0);
+    assert(G_PointsHeadshots(1) == 0 && G_PointsAssists(2) == 0);
     quiet();
 
     /* SD plants and defuses come from the script log line. */
@@ -325,7 +341,15 @@ int main(void) {
     int retailOrder[] = { 4, 3, 2, 1, 0 };
     memcpy(level.sortedClients, retailOrder, sizeof(retailOrder));
     DeathmatchScoreboardMessage(ent(2));
-    expect(2, "b 5 2 1 1 150 60 2 0 3 100 -1 0 0 0 100 40 1 0 2 0 80 0 3 4 200 20 0 0 1 1 1 0 0");
+    expect(2, "b 5 2 1 1 150 60 2 0 3 100 -1 0 0 0 100 40 1 0 2 0 80 0 3 4 200 20 0 0 1 1 1 0 0 0 0");
+    /* The receiver's own assists and headshots end it. */
+    damage(3, 2, 10);
+    kill(3, 1, RIFLE, TORSO);
+    sentCount = sentIndex = 0;
+    DeathmatchScoreboardMessage(ent(1));
+    expect(1, "b 5 2 1 1 225 60 2 0 3 100 -1 0 0 0 100 40 1 0 2 25 80 0 3 4 200 20 0 0 2 1 1 0 0 0 1");
+    DeathmatchScoreboardMessage(ent(2));
+    expect(2, "b 5 2 1 1 225 60 2 0 3 100 -1 0 0 0 100 40 1 0 2 25 80 0 3 4 200 20 0 0 2 1 1 0 0 1 0");
     quiet();
 
     /* A full server stays within one reliable command; the players that do not
@@ -354,10 +378,30 @@ int main(void) {
     for (char *t = strtok(copy, " "); t; t = strtok(NULL, " "))
         tokens[tokenCount++] = t;
     int listed = atoi(tokens[1]);
-    assert(listed > 30 && listed < 64 && tokenCount == 4 + 6 * listed);
+    assert(listed > 30 && listed < 64 && tokenCount == 6 + 6 * listed);
     assert(!strcmp(tokens[4], "1") && !strcmp(tokens[4 + 5 * listed], "2"));
     for (int i = 0; i < listed; ++i)
         assert(atoi(tokens[4 + 5 * listed + i]) == G_PointsKills(atoi(tokens[4 + 5 * i])));
+    assert(!strcmp(tokens[4 + 6 * listed], "0") && !strcmp(tokens[5 + 6 * listed], "0"));
+    /* The players' fields and the receiver's stats share the room after the
+     * header: 22 characters a player fill it exactly, so the stats push the
+     * last one out. */
+    setup("tdm", many, 64);
+    level.maxclients = 64;
+    for (int i = 0; i < 64; ++i) {
+        clients[i].sess.deaths = 12345678;
+        pings[i] = 999;
+        level.sortedClients[i] = 63 - i;
+    }
+    level.numConnectedClients = 64;
+    DeathmatchScoreboardMessage(ent(0));
+    {
+        const char *fields = sent[0];
+        for (int spaces = 0; spaces < 4; ++fields)
+            spaces += *fields == ' ';
+        assert(atoi(sent[0] + 2) == 44 && (int)strlen(fields - 1) == 44 * 22 + 4);
+        assert(!strcmp(sent[0] + strlen(sent[0]) - 4, " 0 0"));
+    }
     sentCount = sentIndex = 0;
 
     /* Every death by another player tells the victim who hurt them: the
@@ -451,11 +495,18 @@ module_mutants = [
      'G_PointsGet(other) >= points'),
     ('return teamA == TEAM_FREE || teamA != G_PointsTeam(b);', 'return teamA != G_PointsTeam(b);'),
     ('    ++s_pointsClients[attackerNum].kills;\n', ''),
-    ('            s_pointsClients[i].kills = 0;\n', ''),
-    ('        s_pointsClients[i].points = 0;\n        s_pointsClients[i].kills = 0;\n    }',
-     '        s_pointsClients[i].points = 0;\n    }'),
-    ('        slot->kills = 0;\n', ''),
+    ('            ++s_pointsClients[i].assists;\n', ''),
+    ('        ++s_pointsClients[attackerNum].headshots;\n', ''),
+    ('    slot->kills = 0;\n', ''),
+    ('    slot->assists = 0;\n', ''),
+    ('    slot->headshots = 0;\n', ''),
+    ('            G_PointsClear(&s_pointsClients[i]);\n', '            s_pointsClients[i].points = 0;\n'),
+    ('    for (i = 0; i < POINTS_MAX_CLIENTS; ++i)\n        G_PointsClear(&s_pointsClients[i]);\n}',
+     '    for (i = 0; i < POINTS_MAX_CLIENTS; ++i)\n        s_pointsClients[i].points = 0;\n}'),
+    ('        G_PointsClear(slot);\n', '        slot->points = 0;\n'),
     ('return s_pointsClients[clientNum].kills;', 'return s_pointsClients[clientNum].points;'),
+    ('return s_pointsClients[clientNum].assists;', 'return s_pointsClients[clientNum].kills;'),
+    ('return s_pointsClients[clientNum].headshots;', 'return s_pointsClients[clientNum].assists;'),
     ('slot->damageOrder[order[j - 1]] > slot->damageOrder[i]', 'slot->damageOrder[order[j - 1]] < slot->damageOrder[i]'),
     ('    if (!(s_pointsClients[victimNum].damagedBy & (1ull << attackerNum)))\n        s_pointsClients[victimNum].damageOrder',
      '    s_pointsClients[victimNum].damageOrder'),
@@ -473,9 +524,15 @@ scoreboard_mutants = [
     ('order[i] = lvl->sortedClients[i];\n    G_PointsSortClients(order, numSorted);', 'order[i] = lvl->sortedClients[i];'),
     ('clientNum, G_PointsGet(clientNum), ping,', 'clientNum, client->sess.score, ping,'),
     ('clientNum, G_PointsGet(clientNum), -1,', 'clientNum, client->sess.score, -1,'),
-    ('lvl->teamScores[TEAM_ALLIES], string, kills);', 'lvl->teamScores[TEAM_ALLIES], string, "");'),
-    ('if (stringlength + j + killslength + k > GCMDS_SCORES_LIMIT)', 'if (stringlength + j > GCMDS_SCORES_LIMIT)'),
+    ('lvl->teamScores[TEAM_ALLIES], string, kills, own);', 'lvl->teamScores[TEAM_ALLIES], string, "", own);'),
+    ('lvl->teamScores[TEAM_ALLIES], string, kills, own);', 'lvl->teamScores[TEAM_ALLIES], string, kills, "");'),
+    ('if (stringlength + j + killslength + k + ownlength > GCMDS_SCORES_LIMIT)',
+     'if (stringlength + j > GCMDS_SCORES_LIMIT)'),
+    ('if (stringlength + j + killslength + k + ownlength > GCMDS_SCORES_LIMIT)',
+     'if (stringlength + j + killslength + k > GCMDS_SCORES_LIMIT)'),
     ('" %i", G_PointsKills(clientNum));', '" %i", G_PointsGet(clientNum));'),
+    ('" %i %i", G_PointsAssists(ent - g_entities),', '" %i %i", G_PointsHeadshots(ent - g_entities),'),
+    ('                            G_PointsHeadshots(ent - g_entities));', '                            0);'),
 ]
 variants = [(body, scoreboard)]
 variants += [(mutate(body, old, new), scoreboard) for old, new in module_mutants]
@@ -491,6 +548,7 @@ with tempfile.TemporaryDirectory(prefix='cod2-points-') as directory:
         assert (result.returncode == 0) == (index == 0), (index, result.stderr[-2000:])
 print('PASS: kills earn 100, assisted kills 75, headshots 150 and assists 25 in team modes; DM has no assists and shares '
       'retail scores; CTF captures/returns and SD plants/defuses score; points survive only SD rounds; the scoreboard '
-      f'sends points ranked players first, then their kills of enemies (kept with the points), and fits a full '
-      f'server in one reliable command; a victim learns their killer and the other enemies that hurt them, by first '
+      f'sends points ranked players first, then their kills of enemies (kept with the points) and the receiver\'s '
+      f'own assists and headshots, and fits a full server in one reliable command; a victim learns their killer and '
+      f'the other enemies that hurt them, by first '
       f'hit; {len(hooks) + 1} hooks wired; {len(variants) - 1} failing regression mutants')

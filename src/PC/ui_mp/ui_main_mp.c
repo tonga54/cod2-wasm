@@ -3,6 +3,7 @@
 #include "bytematch.h"
 #include "cod2_feature_config.h"
 #include "headers/PC/ui_mp/ui_class_menu.h"
+#include "headers/PC/ui_mp/ui_pause_menu.h"
 #include "headers/PC/ui_mp/ui_wwii_menu.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -736,7 +737,7 @@ qboolean UI_CheckExecKey(int key)
         return 0;
     if (!menu)
         return 0;
-    if (UI_ClassMenu_WantsKeys(menu))
+    if (UI_ClassMenu_WantsKeys(menu) || UI_PauseMenu_WantsKeys(menu))
         return 1;
 
     if ((key >= 0xc8 && key <= 0xce) ||
@@ -1388,8 +1389,9 @@ static inline __attribute__((always_inline)) void UI_KeyEvent_impl(int key, qboo
         if (Dvar_GetBool("cl_bypassMouseInput"))
             bypassKeyClear = 1;
 
-        if (UI_ClassMenu_KeyEvent((displayContextDef_t *)uiInfo, menu, key, down)) {
-            /* The class screens take every key, characters included. */
+        if (UI_ClassMenu_KeyEvent((displayContextDef_t *)uiInfo, menu, key, down) ||
+            UI_PauseMenu_KeyEvent((displayContextDef_t *)uiInfo, menu, key, down)) {
+            /* The class screens and the pause menu take every key, characters included. */
         } else if (key == 0x1b && down && !Menus_AnyFullScreenVisible(uiInfo) && menu->onESC == 0) {
 
             Menus_CloseAll(uiInfo);
@@ -3334,6 +3336,11 @@ void UI_RunMenuScript(const char **args)
         if (!String_Parse(args, mode, sizeof(mode)))
             mode[0] = '\0';
         UI_ClassMenu_Open((displayContextDef_t *)uiInfo, !I_stricmp(mode, "choose"));
+        return;
+    }
+
+    if (I_stricmp(name, "pauseMenuOpen") == 0) {
+        UI_PauseMenu_Open((displayContextDef_t *)uiInfo);
         return;
     }
 

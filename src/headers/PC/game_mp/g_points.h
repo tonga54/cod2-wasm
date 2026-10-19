@@ -5,7 +5,8 @@
  * counting kills because the gametype scripts end DM matches with it and
  * restore it between SD rounds. Event codes are sent to the scoring client as
  * "cod2_points <event> <points>". Kills of enemies are counted beside the
- * points, for the scoreboard's Kills column. */
+ * points, for the scoreboard's Kills column, and assists and headshots for
+ * each player's own battle stats. */
 enum pointsEvent_t {
     POINTS_KILL = 0,
     POINTS_ASSISTED_KILL = 1,
@@ -31,6 +32,8 @@ void G_PointsTeamScoresChanged(int initializing, int axisScore, int alliesScore)
 void G_PointsLogLine(const char *line);
 int G_PointsGet(int clientNum);
 int G_PointsKills(int clientNum);
+int G_PointsAssists(int clientNum);
+int G_PointsHeadshots(int clientNum);
 void G_PointsSortClients(int *clients, int count);
 #endif
 

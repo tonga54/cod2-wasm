@@ -784,6 +784,7 @@ void R_RenderScene(const refdef_t *refdef)
     extern float g_webAdsDofFrac;
     extern float g_webAimFrac;
     extern float g_webBackdropFrac;
+    extern float g_webMenuBackdropFrac;
     extern float g_webAdsViewmodelStart;
     extern float g_webAdsViewmodelEnd;
     extern float g_webAdsNearEnd;
@@ -796,7 +797,7 @@ void R_RenderScene(const refdef_t *refdef)
     }
     WebSceneFx_SetAds(g_webAdsDofFrac, g_webAdsViewmodelStart, g_webAdsViewmodelEnd, g_webAdsNearEnd);
     WebSceneFx_SetAim(g_webAimFrac);
-    WebSceneFx_SetBackdrop(g_webBackdropFrac);
+    WebSceneFx_SetBackdrop(g_webBackdropFrac > g_webMenuBackdropFrac ? g_webBackdropFrac : g_webMenuBackdropFrac);
 #endif
 
     drawSurfStart = (int)(intptr_t)scene.drawSurfs;

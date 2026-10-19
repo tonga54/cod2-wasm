@@ -42,5 +42,10 @@ float UI_WWIIMenu_Width(const char *text, int bold, float cap, float tracking);
  * right edge when rightKey is set. */
 void UI_WWIIMenu_Prompts(const char *const *keys, const char *const *labels, int count, const char *rightKey,
                          const char *rightLabel);
+/* A prompts' keycap height units tall from x, its key in the prompts'
+ * lettering; tint colors both, NULL for the prompts' own. Its width. */
+float UI_WWIIMenu_Keycap(const char *key, float x, float top, float height, int horzAlign, int vertAlign,
+                         const vec_t *tint);
+float UI_WWIIMenu_KeycapWidth(const char *key, float height);
 
 #endif

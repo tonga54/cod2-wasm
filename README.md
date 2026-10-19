@@ -109,9 +109,18 @@ retail CoD2:
 - **Custom classes:** **Create a Class** in the main menu keeps five named
   classes for your gametag, each with a primary from any faction, a pistol, a
   frag and a smoke grenade. They replace the weapon menu after the team choice
-  and in **Esc → 1. Choose Class**, on either team. The gateway stores them in
-  SQLite; there are no accounts, so a gametag's classes belong to whoever uses
-  it. See [custom classes](docs/CLASSES.md).
+  and fill the pause menu's **Class** tab, on either team. The gateway stores
+  them in SQLite; there are no accounts, so a gametag's classes belong to
+  whoever uses it. See [custom classes](docs/CLASSES.md).
+- **WWII pause menu:** Escape in a match blurs and darkens the live view and
+  opens tabs laid out from Call of Duty: WWII's: **Class** (your five classes
+  under Custom, the five defaults under Standard Issue, with the focused
+  loadout), **Overview** (mode and map, both scores, your K/D, score, kills,
+  assists, deaths and headshots, the time left and the whole map with your
+  team), **Change Team** (free slots per side, Auto-Assign), **Leave Game**
+  and **Settings** (Controls, Graphics, Audio, Game). It replaces the retail
+  in-game menu, so its Call Vote and Mute Players entries are gone. See
+  [the pause menu's measurements](docs/GRAPHICS_2026-10-16.md#wwii-pause-menu-october-18-2026).
 - **Sprint:** Shift + W increases movement speed, lowers and swings the weapon,
   and uses the running body animation. It also stands up from crouch/prone when
   headroom permits. Sprint currently has no stamina limit.
@@ -317,6 +326,7 @@ sheet metal offer less protection than thick masonry or rock. See
 | Send / cancel chat | Enter / Escape |
 | Quick messages | H |
 | Class screens | Enter selects, F1 renames (edits in a match), Escape goes back; 1–5 choose in a match |
+| Pause menu (in a match) | Escape opens and closes; Q / E, Tab or LB / RB change tab; Enter or a click selects; arrows move; F1 edits a custom class; 1–5 choose a class |
 | Enter / exit fullscreen | Main menu's Fullscreen: Off/On text or F10 |
 
 Chat keeps mouse capture while typing and displays five wrapped lines for eight

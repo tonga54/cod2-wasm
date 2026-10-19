@@ -840,6 +840,19 @@ int main(void) {
     render(1.0f);
     assert(stripes(teal, NULL, NULL) == 1 && stripes(red, NULL, NULL) == 17 && !text("AXIS"));
 
+    /* The requester's own assists and headshots after the kills, for the
+     * pause menu; a retail server's command has none. */
+    {
+        int assists, headshots;
+        reset("tdm");
+        scores("b 2 1 2 5 10 5 0 0 7 5 5 0 0 3 1 4 2");
+        CG_ScoreTableOwnStats(&assists, &headshots);
+        assert(assists == 4 && headshots == 2 && CG_ScoreTableKills(7) == 1);
+        scores("b 2 1 2 5 10 5 0 0 7 5 5 0 0 3 1");
+        CG_ScoreTableOwnStats(&assists, &headshots);
+        assert(assists == -1 && headshots == -1 && CG_ScoreTableKills(5) == 3);
+    }
+
     /* The emblems traced from the capture, in units of half their size. */
     enum { AMERICAN = TABLE_EMBLEM_AMERICAN, BRITISH = TABLE_EMBLEM_BRITISH, RUSSIAN = TABLE_EMBLEM_RUSSIAN,
            GERMAN = TABLE_EMBLEM_GERMAN };
@@ -1130,6 +1143,10 @@ module_mutants = [
 ]
 parse_mutants = [
     ('if (Cmd_Argc() >= 4 + scoreCount * 6) {', 'if (1) {'),
+    ('    if (Cmd_Argc() >= 6 + scoreCount * 6)\n', '    if (Cmd_Argc() >= 4 + scoreCount * 6)\n'),
+    ('CG_ScoreTableSetOwnStats(atoi(CG_Argv(4 + scoreCount * 6)), atoi(CG_Argv(5 + scoreCount * 6)));',
+     'CG_ScoreTableSetOwnStats(atoi(CG_Argv(5 + scoreCount * 6)), atoi(CG_Argv(4 + scoreCount * 6)));'),
+    ('    else\n        CG_ScoreTableSetOwnStats(-1, -1);\n', ''),
     ('    CG_ScoreTableClearKills();\n', ''),
     ('atoi(CG_Argv(4 + scoreCount * 5 + i))', 'atoi(CG_Argv(4 + scoreCount * 5 + i + 1))'),
 ]

@@ -27,6 +27,8 @@ enum {
 typedef struct {
     int points;
     int kills;
+    int assists;
+    int headshots;
     int persId;
     int inUse;
     unsigned long long damagedBy;
@@ -92,6 +94,15 @@ static void G_PointsAward(int clientNum, int event)
     G_PointsSend(clientNum, va("cod2_points %i %i", event, value));
 }
 
+/* The match's tallies; the damage of the current life stays. */
+static void G_PointsClear(G_PointsClient *slot)
+{
+    slot->points = 0;
+    slot->kills = 0;
+    slot->assists = 0;
+    slot->headshots = 0;
+}
+
 static void G_PointsForgetAttacker(int clientNum)
 {
     unsigned long long mask = ~(1ull << clientNum);
@@ -117,10 +128,8 @@ void G_PointsInitGame(int restart, const char *gametype)
     /* SD plays every round as a map_restart and keeps the match going. */
     for (i = 0; i < POINTS_MAX_CLIENTS; ++i) {
         s_pointsClients[i].damagedBy = 0;
-        if (!restart || s_pointsGametype != POINTS_GT_SD) {
-            s_pointsClients[i].points = 0;
-            s_pointsClients[i].kills = 0;
-        }
+        if (!restart || s_pointsGametype != POINTS_GT_SD)
+            G_PointsClear(&s_pointsClients[i]);
     }
 }
 
@@ -133,10 +142,8 @@ void G_PointsClientConnect(int clientNum, int scriptPersId)
     if (clientNum < 0 || clientNum >= POINTS_MAX_CLIENTS)
         return;
     slot = &s_pointsClients[clientNum];
-    if (!slot->inUse || slot->persId != scriptPersId) {
-        slot->points = 0;
-        slot->kills = 0;
-    }
+    if (!slot->inUse || slot->persId != scriptPersId)
+        G_PointsClear(slot);
     slot->inUse = 1;
     slot->persId = scriptPersId;
     slot->damagedBy = 0;
@@ -247,13 +254,15 @@ void G_PointsPlayerKilled(gentity_t *victim, gentity_t *attacker, int meansOfDea
             if (!G_PointsConnected(i) || !G_PointsEnemies(i, victimNum))
                 continue;
             G_PointsAward(i, POINTS_ASSIST);
+            ++s_pointsClients[i].assists;
             assisted = 1;
         }
     }
 
-    if (hitLoc == POINTS_HITLOC_HEAD && meansOfDeath != POINTS_MOD_MELEE)
+    if (hitLoc == POINTS_HITLOC_HEAD && meansOfDeath != POINTS_MOD_MELEE) {
         G_PointsAward(attackerNum, POINTS_HEADSHOT);
-    else
+        ++s_pointsClients[attackerNum].headshots;
+    } else
         G_PointsAward(attackerNum, assisted ? POINTS_ASSISTED_KILL : POINTS_KILL);
 }
 
@@ -281,10 +290,8 @@ void G_PointsTeamScoresChanged(int initializing, int axisScore, int alliesScore)
 
     if (initializing || axisScore != 0 || alliesScore != 0)
         return;
-    for (i = 0; i < POINTS_MAX_CLIENTS; ++i) {
-        s_pointsClients[i].points = 0;
-        s_pointsClients[i].kills = 0;
-    }
+    for (i = 0; i < POINTS_MAX_CLIENTS; ++i)
+        G_PointsClear(&s_pointsClients[i]);
 }
 
 /* SD logs "A;<guid>;<entnum>;<team>;<name>;bomb_plant" and "...;bomb_defuse". */
@@ -330,6 +337,20 @@ int G_PointsKills(int clientNum)
     if (clientNum < 0 || clientNum >= POINTS_MAX_CLIENTS)
         return 0;
     return s_pointsClients[clientNum].kills;
+}
+
+int G_PointsAssists(int clientNum)
+{
+    if (clientNum < 0 || clientNum >= POINTS_MAX_CLIENTS)
+        return 0;
+    return s_pointsClients[clientNum].assists;
+}
+
+int G_PointsHeadshots(int clientNum)
+{
+    if (clientNum < 0 || clientNum >= POINTS_MAX_CLIENTS)
+        return 0;
+    return s_pointsClients[clientNum].headshots;
 }
 
 /* Players before spectators, then by points. The input is the retail rank

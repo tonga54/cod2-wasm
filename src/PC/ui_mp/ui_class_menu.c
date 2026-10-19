@@ -3,6 +3,7 @@
 #include "headers/PC/gfx_d3d/r_hud2d.h"
 #include "headers/PC/ui_mp/ui_class_data.h"
 #include "headers/PC/ui_mp/ui_class_menu.h"
+#include "headers/PC/ui_mp/ui_pause_menu.h"
 #include "headers/PC/ui_mp/ui_wwii_menu.h"
 #include <stdio.h>
 #include <string.h>
@@ -102,7 +103,11 @@ static struct {
     int choose;
     int screen;
     int classFocus;
+    /* The player's class chosen last, or the game's; -1 for none. */
     int chosen;
+    int chosenStandard;
+    /* The editor was opened from the pause menu, and goes back to it. */
+    int fromPause;
     int slotFocus;
     int pickSlot;
     int pickFocus;
@@ -112,6 +117,7 @@ static struct {
     int renaming;
     char rename[CLASS_NAME_MAX + 1];
     ClassLoadout classes[CLASS_COUNT];
+    ClassLoadout standard[CLASS_COUNT];
     int initialized;
     int store;
     int saveFailed;
@@ -145,8 +151,10 @@ static int Cac_Ready(void)
 {
     if (!s_cac.initialized) {
         ClassData_Defaults(s_cac.classes);
+        ClassData_Defaults(s_cac.standard);
         s_cac.initialized = 1;
         s_cac.chosen = -1;
+        s_cac.chosenStandard = -1;
     }
     return 1;
 }
@@ -420,6 +428,7 @@ void UI_ClassMenu_Open(displayContextDef_t *dc, int choose)
     s_cac.open = 1;
     s_cac.choose = choose;
     s_cac.screen = CAC_SCREEN_LIST;
+    s_cac.fromPause = 0;
     s_cac.renaming = 0;
     s_cac.hover = -1;
     if (choose && s_cac.chosen >= 0)
@@ -469,13 +478,14 @@ static void Cac_OpenPicker(int slot)
     s_cac.hover = -1;
 }
 
-static void Cac_Choose(displayContextDef_t *dc)
+/* The class as the browser_class menu's response, wherever it was chosen. */
+static int Cac_Respond(const ClassLoadout *loadout)
 {
     char response[192];
     int menuIndex = -1, i;
 
-    if (ClassData_Response(&s_cac.classes[s_cac.classFocus], response, sizeof(response)) < 0)
-        return;
+    if (ClassData_Response(loadout, response, sizeof(response)) < 0)
+        return 0;
     for (i = 0; i < 0x20; i++) {
         const char *menu = CL_GetConfigString(0x4de + i);
 
@@ -485,9 +495,17 @@ static void Cac_Choose(displayContextDef_t *dc)
         }
     }
     if (menuIndex < 0)
-        return;
+        return 0;
     Cbuf_ExecuteText(2, va("cmd mr %i %i %s\n", Dvar_GetInt("sv_serverId"), menuIndex, response));
+    return 1;
+}
+
+static void Cac_Choose(displayContextDef_t *dc)
+{
+    if (!Cac_Respond(&s_cac.classes[s_cac.classFocus]))
+        return;
     s_cac.chosen = s_cac.classFocus;
+    s_cac.chosenStandard = -1;
     s_cac.open = 0;
     Menus_CloseByName(dc, "browser_class");
 }
@@ -496,6 +514,11 @@ static void Cac_Back(displayContextDef_t *dc)
 {
     if (s_cac.screen == CAC_SCREEN_WEAPONS || s_cac.screen == CAC_SCREEN_EQUIPMENT) {
         s_cac.screen = CAC_SCREEN_EDIT;
+    } else if (s_cac.screen == CAC_SCREEN_EDIT && s_cac.fromPause) {
+        s_cac.fromPause = 0;
+        s_cac.open = 0;
+        UI_PauseMenu_Return(dc);
+        Menus_CloseByName(dc, "browser_class");
     } else if (s_cac.screen == CAC_SCREEN_EDIT) {
         s_cac.screen = CAC_SCREEN_LIST;
     } else {
@@ -716,16 +739,8 @@ static void Cac_Title(const char *first, const char *second)
 
 static void Cac_StatusNote(float baseline)
 {
-    const char *note = NULL;
+    const char *note = UI_ClassMenu_Note();
 
-    if (s_cac.store == CAC_STORE_LOADING)
-        note = "Loading your classes...";
-    else if (s_cac.store == CAC_STORE_NO_NAME)
-        note = "Choose a gametag in Options to save your classes.";
-    else if (s_cac.store == CAC_STORE_OFFLINE)
-        note = "Classes are unavailable: changes last until you leave.";
-    else if (s_cac.saveFailed)
-        note = "The last change was not saved.";
     if (note)
         Cac_Text(note, 0, CAC_LEFT, baseline, CAC_ALIGN_LEFT, CAC_ROW_NOTE_CAP, 0.0f, s_cacNote);
 }
@@ -1049,4 +1064,63 @@ void UI_ClassMenu_Paint(displayContextDef_t *dc, menuDef_t *menu)
         return;
     }
     UI_WWIIMenu_Prompts(keys, labels, labels[1] ? 2 : 1, "ESC", "Back");
+}
+
+const ClassLoadout *UI_ClassMenu_Classes(int standard)
+{
+    Cac_Load();
+    return standard ? s_cac.standard : s_cac.classes;
+}
+
+const char *UI_ClassMenu_Note(void)
+{
+    if (s_cac.store == CAC_STORE_LOADING)
+        return "Loading your classes...";
+    if (s_cac.store == CAC_STORE_NO_NAME)
+        return "Choose a gametag in Options to save your classes.";
+    if (s_cac.store == CAC_STORE_OFFLINE)
+        return "Classes are unavailable: changes last until you leave.";
+    if (s_cac.saveFailed)
+        return "The last change was not saved.";
+    return NULL;
+}
+
+const char *UI_ClassMenu_WeaponName(int weapon)
+{
+    return Cac_WeaponName(weapon);
+}
+
+void UI_ClassMenu_DrawWeapon(int weapon, float x, float y, float w, float h, int horzAlign, const vec_t *color)
+{
+    CacRect box = Cac_Rect(x, y, w, h, horzAlign);
+
+    Cac_Picture(weapon, &box, color);
+}
+
+int UI_ClassMenu_Choose(int standard, int index)
+{
+    if (index < 0 || index >= CLASS_COUNT || !Cac_Respond(&UI_ClassMenu_Classes(standard)[index]))
+        return 0;
+    s_cac.chosen = standard ? -1 : index;
+    s_cac.chosenStandard = standard ? index : -1;
+    return 1;
+}
+
+int UI_ClassMenu_Chosen(int *standard)
+{
+    Cac_Ready();
+    *standard = s_cac.chosenStandard >= 0;
+    return *standard ? s_cac.chosenStandard : s_cac.chosen;
+}
+
+void UI_ClassMenu_EditFromPause(displayContextDef_t *dc, int index)
+{
+    if (index < 0 || index >= CLASS_COUNT || !Menus_OpenByName(dc, "browser_class"))
+        return;
+    Menus_CloseByName(dc, "ingame");
+    s_cac.classFocus = index;
+    s_cac.slotFocus = CLASS_SLOT_PRIMARY;
+    s_cac.screen = CAC_SCREEN_EDIT;
+    s_cac.fromPause = 1;
+    s_cac.hover = -1;
 }

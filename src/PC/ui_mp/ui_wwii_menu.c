@@ -1140,6 +1140,43 @@ void UI_WWIIMenu_Prompts(const char *const *keys, const char *const *labels, int
                                 WWII_ALIGN_RIGHT, rightKey, rightLabel);
 }
 
+float UI_WWIIMenu_KeycapWidth(const char *key, float height)
+{
+    const float cap = height * (WWII_PROMPT_KEY_CAP / WWII_PROMPT_HEIGHT);
+    float keycap = UI_WWIIMenu_TextWidth(key, UI_WWIIMenu_Regular(cap), cap, 0.0f) +
+                   2.0f * WWII_PROMPT_PAD * (height / WWII_PROMPT_HEIGHT);
+
+    return keycap < height ? height : keycap;
+}
+
+float UI_WWIIMenu_Keycap(const char *key, float x, float top, float height, int horzAlign, int vertAlign,
+                         const vec_t *tint)
+{
+    /* The pill's half-circle ends and its middle, stretched between them. */
+    static const float slices[4] = { 0.0f, 0.25f, 0.75f, 1.0f };
+    const float cap = height * (WWII_PROMPT_KEY_CAP / WWII_PROMPT_HEIGHT);
+    FontHandle font = UI_WWIIMenu_Regular(cap);
+    float keyWidth = UI_WWIIMenu_TextWidth(key, font, cap, 0.0f);
+    float keycap = UI_WWIIMenu_KeycapWidth(key, height);
+    float edges[4];
+    int i;
+
+    edges[0] = x;
+    edges[1] = x + 0.5f * height;
+    edges[2] = x + keycap - 0.5f * height;
+    edges[3] = x + keycap;
+    UI_WWIIMenu_BuildImages();
+    for (i = 0; s_wwiiMenu.pill && i < 3; i++)
+        CL_DrawStretchPic(edges[i], top, edges[i + 1] - edges[i], height, horzAlign, vertAlign, slices[i], 0.0f,
+                          slices[i + 1], 1.0f, tint ? tint : s_wwiiWhite, s_wwiiMenu.pill);
+    /* The prompts' keys sit as far up their keycap as ENTER and ESC do. */
+    UI_WWIIMenu_DrawText(key, font, x + 0.5f * (keycap - keyWidth),
+                         top + height * ((WWII_PROMPT_BOTTOM + WWII_PROMPT_HEIGHT - WWII_PROMPT_KEY_BASELINE) /
+                                         WWII_PROMPT_HEIGHT),
+                         horzAlign, vertAlign, cap, 0.0f, tint ? tint : s_wwiiKey);
+    return keycap;
+}
+
 int UI_WWIIMenu_NextItem(const menuDef_t *menu, int cursor, int direction)
 {
     int count = menu->itemCount, next = -1, wrap = -1, i;

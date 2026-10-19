@@ -27,7 +27,7 @@ def items(source, transform):
 def apply_settings_menu(name, data):
     if name not in {'ui_mp/main.menu', 'ui_mp/options.menu', 'ui/options_game.menu',
                     'ui_mp/options_multi.menu', 'ui_mp/background.menu',
-                    'ui_mp/menu_background.menu', 'ui_mp/scriptmenus/ingame.menu'}:
+                    'ui_mp/menu_background.menu'}:
         return data
     text = data.decode().replace('\r\n', '\n')
     if name == 'ui_mp/main.menu':
@@ -129,11 +129,6 @@ def apply_settings_menu(name, data):
             action { play "mouse_click"; uiScript ReloadClient; }
         }
 ''' + text[insertion:]
-    elif name == 'ui_mp/scriptmenus/ingame.menu':
-        # The option opens the class choice, which replaced the weapon menus.
-        if text.count('"@MPUI_1_CHANGE_WEAPON"') != 2:
-            raise ValueError('Unexpected in-game menu')
-        text = text.replace('"@MPUI_1_CHANGE_WEAPON"', '"1. Choose Class"')
     elif name == 'ui_mp/options.menu':
         text = add_controller_menu(text, items)
     elif name == 'ui_mp/options_multi.menu':

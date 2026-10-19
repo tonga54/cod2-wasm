@@ -20,10 +20,47 @@ camera = backend.index('WebSceneFx_SetCamera((const float *)&vp->viewMatrix, (co
 assert backend.rindex('#ifdef __EMSCRIPTEN__', 0, begin) < camera < begin
 scene = (root / 'src/PC/gfx_d3d/r_scene.c').read_text()
 assert 'WebSceneFx_SetAds(g_webAdsDofFrac, g_webAdsViewmodelStart, g_webAdsViewmodelEnd, g_webAdsNearEnd);' in scene
+backdrop = 'WebSceneFx_SetBackdrop(g_webBackdropFrac > g_webMenuBackdropFrac ? g_webBackdropFrac : g_webMenuBackdropFrac);'
 assert scene.index('WebSceneFx_SetAds(g_webAdsDofFrac') < scene.index('WebSceneFx_SetAim(g_webAimFrac);') < \
-    scene.index('WebSceneFx_SetBackdrop(g_webBackdropFrac);') < scene.index('#endif', scene.index('WebSceneFx_SetAim('))
-# The end of a match blurs the view behind its scoreboard.
+    scene.index(backdrop) < scene.index('#endif', scene.index('WebSceneFx_SetAim('))
+# The end of a match blurs the view behind its scoreboard, and a menu that
+# blurs the world (the pause menu, the team and class choices) behind it.
 assert 'float g_webBackdropFrac = 0.0f;' in (root / 'src/PC/cgame_mp/cg_endgame_mp.c').read_text()
+view = (root / 'src/PC/cgame_mp/cg_view_mp.c').read_text()
+calc_view = view.index('static void CG_CalcViewValues(void)\n{')
+assert view.index('menuBlur = CL_GetMenuBlurRadius();', calc_view) < view.index(
+    'g_webMenuBackdropFrac = CG_MenuBackdropStep(g_webMenuBackdropFrac, menuBlur, cg->frametime);', calc_view) < \
+    view.index('if (cg->cubemapShot != 0) {', calc_view)
+step_start = view.index('float CG_MenuBackdropStep(float frac, float menuBlur, int frametime)\n{')
+step = view[view.rindex('#define CG_MENU_BACKDROP_MSEC', 0, step_start):view.index('\n}\n', step_start) + 3]
+
+
+def run_step(code):
+    with tempfile.TemporaryDirectory(prefix='cod2-menu-backdrop-') as tmp:
+        (Path(tmp) / 'step.c').write_text('#include <assert.h>\n' + code + r'''
+int main(void) {
+    float frac = 0.0f;
+    for (int i = 0; i < 9; ++i) frac = CG_MenuBackdropStep(frac, 5.0f, 16);
+    assert(frac > 0.9f && frac < 0.98f);
+    frac = CG_MenuBackdropStep(frac, 5.0f, 16);
+    assert(frac == 1.0f && CG_MenuBackdropStep(frac, 5.0f, 1000) == 1.0f);
+    frac = CG_MenuBackdropStep(frac, 0.0f, 75);
+    assert(frac > 0.49f && frac < 0.51f);
+    assert(CG_MenuBackdropStep(frac, 0.0f, 1000) == 0.0f && CG_MenuBackdropStep(0.0f, 0.0f, 16) == 0.0f);
+    assert(CG_MenuBackdropStep(0.5f, 5.0f, 0) == 0.5f);
+    return 0;
+}
+''')
+        subprocess.run(['cc', '-std=c99', '-fsanitize=address,undefined', '-fno-sanitize-recover=all',
+                        str(Path(tmp) / 'step.c'), '-o', str(Path(tmp) / 'step')], check=True)
+        return subprocess.run([str(Path(tmp) / 'step')], capture_output=True).returncode
+
+
+assert run_step(step) == 0
+for before, after in (('menuBlur > 0.0f ? step : -step', 'step'), ('150.0f', '1500.0f'),
+                      ('frac > 1.0f ? 1.0f : frac', 'frac')):
+    assert step.count(before) == 1 and run_step(step.replace(before, after)) != 0, after
+print('PASS: menus that blur the world ease the compositor backdrop in and out over 150 ms; 3 mutants fail')
 # The aim fraction is read before any early return, so scopes, which hide the
 # gun, still fade the blur out.
 weapons = (root / 'src/PC/cgame_mp/cg_weapons.c').read_text()

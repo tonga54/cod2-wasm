@@ -17,6 +17,7 @@ extern void Sys_QueEvent(int time, sysEventType_t type, int value, int value2,
                          int ptrLength, void *ptr);
 extern clientStatic_t cls;
 extern qboolean Display_KeyBindPending(void);
+extern qboolean UI_checkKeyExec(int key);
 extern void Key_SetBinding(int key, const char *command);
 extern const char *Key_GetBinding(int key);
 extern void Dvar_SetBoolByName(const char *name, int value);
@@ -530,10 +531,16 @@ static void Gamepad_SendKey(int key, int down)
         return;
     g_buttonDown[key] = (unsigned char)down;
     if (down) {
+        int catchers = Gamepad_KeyCatchers();
         emitted = key;
-        if ((Gamepad_KeyCatchers() & (1 | 8 | 0x10)) && !Display_KeyBindPending()) {
+        if ((catchers & (1 | 8 | 0x10)) && !Display_KeyBindPending()) {
             emitted = Gamepad_NavRemap(key);
             if (key == K_BUTTON_START) emitted = K_ESCAPE;
+            /* The bumpers page the pause menu's tabs. A menu that does not
+             * take them would hand them to their gameplay binds instead. */
+            if ((key == K_BUTTON_LSHLDR || key == K_BUTTON_RSHLDR) && (catchers & 8) &&
+                !(catchers & (1 | 0x10)) && UI_checkKeyExec(key))
+                emitted = key;
         }
         g_emittedKey[key] = emitted;
         if (!(Gamepad_KeyCatchers() & (1 | 8 | 0x10))) {
