@@ -141,6 +141,7 @@ static float CL_NormalizedTextScale(FontHandle font, float scale) {
 /* No weapon, a scoped rifle, an open-sighted one and a scoped class 9. */
 static WeaponDef weaponDefs[4] = { { 0, 0 }, { 1, 3 }, { 0, 3 }, { 1, 9 } };
 static WeaponDef *BG_GetWeaponDef(int weapon) { assert(weapon >= 0 && weapon < 4); return &weaponDefs[weapon]; }
+static WeaponDef *BG_GetPlayerWeaponDef(const playerState_t *ps, int weapon) { return BG_GetWeaponDef(weapon); }
 static int BG_GetViewmodelWeaponIndex(const playerState_t *ps) { return ps->weapon; }
 static const char *UI_SafeTranslateString(const char *ref) { assert(!strcmp(ref, "MENU_HOLD_BREATH")); return "Hold Breath"; }
 static void I_strncpyz(char *dest, const char *src, int size) { strncpy(dest, src, size - 1); dest[size - 1] = 0; }

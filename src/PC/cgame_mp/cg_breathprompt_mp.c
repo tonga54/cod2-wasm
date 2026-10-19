@@ -1,5 +1,6 @@
 #include "common_types.h"
 #include "imports.h"
+#include "headers/PC/bgame/bg_attachments.h"
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_breathprompt.h"
 #include "headers/PC/cgame_mp/cg_playernames.h"
@@ -77,7 +78,7 @@ static float CG_BreathPromptAlpha(const playerState_t *ps)
         (ps->eFlags & 0x300) || (ps->pm_flags & BREATH_PROMPT_HOLDING) || ps->fWeaponPosFrac != 1.0f ||
         (int)(player_breath_hold_time->current.value * 1000.0f) <= 0)
         return 0.0f;
-    weapDef = BG_GetWeaponDef(BG_GetViewmodelWeaponIndex(ps));
+    weapDef = BG_GetPlayerWeaponDef(ps, BG_GetViewmodelWeaponIndex(ps));
     if (!weapDef->overlayReticle || weapDef->weapClass == 9)
         return 0.0f;
     return ps->holdBreathTimer > 0 ? BREATH_PROMPT_RECOVERING_ALPHA : 1.0f;

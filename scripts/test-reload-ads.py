@@ -29,6 +29,7 @@ typedef struct {int almostGroundPlane,msec;} pml_t;
 typedef struct {struct {int enabled,integer;}current;} dvar_t;
 static dvar_t d,*player_scopeExitOnDamage=&d,*player_adsExitDelay=&d;
 static WeaponDef *bg_weaponDefs[2];static int bg_iNumWeapons=1,toggleAim,resets,reloadEvents;
+static WeaponDef *BG_GetPlayerWeaponDef(playerState_t *ps,int w){return bg_weaponDefs[w];}
 static int BG_GetViewmodelWeaponIndex_core(playerState_t *ps){return ps->weapon;}
 static int BG_GetViewmodelWeaponIndex(playerState_t *ps){return ps->weapon;}
 static int PM_IsBinocularsADS_core(playerState_t *ps){return 0;}

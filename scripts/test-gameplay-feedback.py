@@ -125,6 +125,7 @@ static dvar_t width={{128,0}},height={{64,0}},offset={{128,0}},scope={{0,0}};
 static dvar_t *cg_hudDamageIconWidth=&width,*cg_hudDamageIconHeight=&height,*cg_hudDamageIconOffset=&offset,*cg_hudDamageIconInScope=&scope;
 typedef struct {int overlayReticle;} WeaponDef;static WeaponDef weapon;
 static WeaponDef *BG_GetWeaponDef(int n){return &weapon;}
+static WeaponDef *BG_GetPlayerWeaponDef(const void *ps,int n){return &weapon;}
 typedef struct {int time,duration;float yaw;}viewDamage_t;
 typedef struct {int infoValid,team;char name[32];}clientInfo_t;
 typedef struct {int nextValid;struct {int eType,clientNum,eFlags;}nextState;float lerpOrigin[3];}centity_t;

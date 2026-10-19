@@ -1,6 +1,7 @@
 #include "common_types.h"
 #include "imports.h"
 #include <string.h>
+#include "headers/PC/bgame/bg_attachments.h"
 extern bgs_t level_bgs;
 extern void Com_Printf(const char *fmt, ...);
 
@@ -968,7 +969,7 @@ void ClientThink_real(gentity_t *ent, usercmd_t *ucmd)
     viewangles[1] = client->ps.viewangles[1] + angles[1];
     viewangles[2] = client->ps.viewangles[2] + angles[2];
 
-    weapDef = BG_GetWeaponDef(client->ps.weapon);
+    weapDef = BG_GetPlayerWeaponDef(&client->ps, client->ps.weapon);
 
     BG_CalculateWeaponPosition_Sway(&client->ps,
                                     client->swayViewAngles,

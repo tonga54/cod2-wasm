@@ -47,16 +47,24 @@ async function scenario(source, {normalizeClasses, defaultClasses}) {
   const classes = defaultClasses();
   classes[1] = {...classes[1], name: 'Kar\tRusher\nTwo'};
 
-  // A stored list: one line a class, tabs and line breaks in a field become spaces.
+  // A stored list: one line a class, tabs and line breaks in a field become
+  // spaces, attachments join with '+'.
   respond = () => reply(200, {classes, saved: true});
   load(stringToNewUTF8('Kar Rusher^1'), 7);
   await settle();
   assert.equal(requests[0].url, '/classes?player=Kar%20Rusher%5E1');
   assert.equal(requests[0].options.cache, 'no-store');
-  const expected = classes.map(c => [c.name.replace(/[\t\n]/g, ' '), c.primary, c.secondary, c.lethal, c.tactical]
-    .join('\t')).join('\n') + '\n';
+  const expected = classes.map(c => [c.name.replace(/[\t\n]/g, ' '), c.primary, c.secondary, c.lethal, c.tactical,
+    c.primaryAttachments.join('+'), c.secondaryAttachments.join('+')].join('\t')).join('\n') + '\n';
   assert.deepEqual([loaded[0].generation, loaded[0].status, loaded[0].text], [7, 200, expected]);
+  assert(expected.startsWith('Assault\tmp44_mp\tluger_mp\tfrag_grenade_german_mp\tsmoke_grenade_german_mp\tgrip+extmag\t\n'));
   assert(freed.has(loaded[0].lines), 'the lines are freed after the call');
+
+  // A host from before attachments, or one that lost them, gives empty fields.
+  respond = () => reply(200, {classes: classes.map(({primaryAttachments, secondaryAttachments, ...rest}) => rest)});
+  load(stringToNewUTF8('Kar Rusher'), 7);
+  await settle();
+  assert(loaded.at(-1).text.split('\n').filter(Boolean).every(line => line.endsWith('\t\t')));
 
   // Refusals keep their status; a reply without classes is unavailable.
   for (const [status, body, expectedStatus] of [[400, {error: 'Choose a gametag in Options to save classes.'}, 400],
@@ -96,6 +104,7 @@ async function scenario(source, {normalizeClasses, defaultClasses}) {
   assert.equal(body.player, 'Kar Rusher');
   assert.deepEqual(normalizeClasses(body.classes), body.classes, 'the gateway takes the body as sent');
   assert.equal(body.classes[1].name, 'Kar Rusher');
+  assert.deepEqual([body.classes[0].primaryAttachments, body.classes[0].secondaryAttachments], [['grip', 'extmag'], []]);
   release();
   await settle(); await settle();
   assert.equal(requests.length, 2);
@@ -124,6 +133,9 @@ const mutants = [
   ['.catch(() => _web_classes_saved(generation, 0))', ''],
   ['method: "PUT",\n    headers: {\n      "Content-Type": "application/json"\n    },', 'method: "PUT",'],
   ['.filter(Boolean)', ''],
+  ['const attachments = list => Array.isArray(list) ? list.map(field).join("+") : "";', 'const attachments = list => "";'],
+  ['.concat([ attachments(item?.primaryAttachments), attachments(item?.secondaryAttachments) ])', ''],
+  ['const list = text => text ? text.split("+") : [];', 'const list = text => [ text ];'],
 ];
 (async () => {
   const gateway = await import(path.join(root, 'downstream/gateway/classes.mjs'));

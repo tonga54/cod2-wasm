@@ -42,6 +42,8 @@ typedef struct {int weapon,buttons,serverTime; signed char forwardmove,rightmove
 typedef struct {playerState_t *ps;usercmd_t cmd,oldcmd;} pmove_t;
 typedef struct {int msec;} pml_t;
 static WeaponDef defs[3],*bg_weaponDefs[3],*bg_weapClips[3];static int bg_iNumWeapons=2;
+static WeaponDef *BG_GetPlayerWeaponDef(const playerState_t *ps,int w){return bg_weaponDefs[w];}
+static int BG_GetPlayerClipSize(const playerState_t *ps,int w){return bg_weapClips[bg_weaponDefs[w]->iClipIndex]->iClipSize;}
 static struct {struct {int enabled;}current;} reloadDvar,*player_allowfire=&reloadDvar;
 static int strikes;
 static void PM_AddEvent(playerState_t *ps,int event){if(event==0xa4)strikes++;}

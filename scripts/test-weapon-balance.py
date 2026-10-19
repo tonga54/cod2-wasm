@@ -97,7 +97,7 @@ typedef float vec_t,vec3_t[3];
 #define WEAPTYPE_BULLET 0
 #define WEAPCLASS_SPREAD 3
 typedef struct {int weapType,bRifleBullet,armorPiercing,damage,minDamage;float fMaxDamageRange,fMinDamageRange,locationDamageMultipliers[19];int weapClass;} WeaponDef;
-typedef struct {int noclip,ufo;struct {int connected;} sess;} gclient_t;
+typedef struct {int noclip,ufo;struct {int connected;} sess;int ps;} gclient_t;
 typedef struct entity {struct {int number,weapon,eType,eventParm,eventParm2,surfType,otherEntityNum;} s;gclient_t *client;int takedamage,flags,health,handler;} gentity_t,gentity_s;
 typedef struct {float fraction,normal[3];int entityNum,surfaceFlags,contents,partGroup,startsolid,allsolid;} trace_t;
 typedef struct {WeaponDef *weapDef;vec3_t muzzleTrace;} weaponParms;
@@ -115,6 +115,7 @@ static WeaponDef *activeWeapon;
 static float g_fHitLocDamageMult[19];
 static int hitLocation,receivedDamage,damageCalls;
 static void *BG_GetWeaponDef(int weapon) {assert(weapon==1);return activeWeapon;}
+static void *BG_GetPlayerWeaponDef(const void *ps,int weapon) {return BG_GetWeaponDef(weapon);}
 static void Scr_PlayerDamage(gentity_t *t,gentity_t *i,gentity_t *a,int damage,int flags,int mod,int weapon,const vec_t *p,const vec_t *d,int hit,int offset) {assert(t==entities+1 && hit==hitLocation);receivedDamage=damage;damageCalls++;}
 static void Com_DPrintf(const char *fmt,...) {}
 static void Com_Printf(const char *fmt,...) {assert(0);}

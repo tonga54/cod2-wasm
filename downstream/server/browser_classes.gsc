@@ -91,25 +91,34 @@ listed(weapons, weapon)
 	return false;
 }
 
-// "class,primary,secondary,lethal,tactical" from the class menu; a bare
-// weapon name, as bots send, goes to the original callback unchanged.
+// "class,primary,secondary,lethal,tactical,primary attachments,secondary
+// attachments" from the class menu, "none" or names joined by '+'; clients
+// from before attachments end after the tactical. A bare weapon name, as bots
+// send, goes to the original callback unchanged.
 menuClass(response)
 {
 	tokens = strtok(response, ",");
-	if(tokens.size != 5 || tokens[0] != "class")
+	if((tokens.size != 5 && tokens.size != 7) || tokens[0] != "class")
 	{
 		self [[level.browser_class_weapon]](response);
 		return;
 	}
+	if(tokens.size == 5)
+	{
+		tokens[5] = "none";
+		tokens[6] = "none";
+	}
 	if(!listed(level.browser_class_primary, tokens[1]) || !listed(level.browser_class_secondary, tokens[2]) ||
-	   !listed(level.browser_class_lethal, tokens[3]) || !listed(level.browser_class_tactical, tokens[4]))
+	   !listed(level.browser_class_lethal, tokens[3]) || !listed(level.browser_class_tactical, tokens[4]) ||
+	   !validWeaponAttachments(tokens[1], tokens[5], "primary") ||
+	   !validWeaponAttachments(tokens[2], tokens[6], "primaryb"))
 	{
 		if(isDefined(self.pers["team"]) && (self.pers["team"] == "allies" || self.pers["team"] == "axis"))
 			self openMenu(game["menu_weapon_" + self.pers["team"]]);
 		return;
 	}
 	loadout = [];
-	for(i = 0; i < 4; i++)
+	for(i = 0; i < 6; i++)
 		loadout[i] = tokens[i + 1];
 	self.pers["browser_class"] = loadout;
 	before = self getWeaponSlotWeapon("primary");
@@ -139,8 +148,10 @@ onPlayerSpawned()
 	}
 }
 
-// After the gametype's own loadout: the class's weapons in its slots, with
-// the original grenade count for its primary and one smoke grenade.
+// After the gametype's own loadout: the class's weapons in its slots with
+// their attachments, the original grenade count for its primary and one
+// smoke grenade. Attachments come before the ammunition, which fills an
+// extended magazine and reserve.
 applyClass()
 {
 	if(!isDefined(self.pers["browser_class"]) || !isDefined(self.pers["weapon"]))
@@ -152,6 +163,7 @@ applyClass()
 
 	self takeAllWeapons();
 	self setWeaponSlotWeapon("primaryb", loadout[1]);
+	self setWeaponSlotAttachments("primaryb", loadout[5]);
 	self giveMaxAmmo(loadout[1]);
 	if(getCvarInt("scr_allow_smokegrenades"))
 	{
@@ -166,6 +178,7 @@ applyClass()
 	}
 	self giveWeapon("binoculars_mp");
 	self giveWeapon(loadout[0]);
+	self setWeaponSlotAttachments("primary", loadout[4]);
 	self giveMaxAmmo(loadout[0]);
 	self setSpawnWeapon(loadout[0]);
 }

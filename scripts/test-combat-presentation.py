@@ -58,6 +58,7 @@ static int s_pendingLocalFireWeapon,s_pendingLocalFireBarrel,s_pendingLocalFireT
 static localEntity_t *CG_AllocLocalEntity(void){immediateSpawns++;return &immediateLe;}
 static int BG_IsAimDownSightWeapon(int w){return w==1;}
 static void *BG_GetWeaponDef(int w){return &testWeapon;}
+static void *BG_GetPlayerWeaponDef(const playerState_t *ps,int w){return &testWeapon;}
 static int CG_DObjGetViewModelTagPos(void *obj,unsigned t,float *out){out[0]=cg->refdef.vieworg[0]+12;out[1]=cg->refdef.vieworg[1]-2;out[2]=cg->refdef.vieworg[2]-1;return 1;}
 static void AngleVectors(const float *ang,float *f,float *r,float *u){f[0]=1;f[1]=f[2]=0;r[0]=r[2]=0;r[1]=1;u[0]=u[1]=0;u[2]=1;}
 static void BG_GetSpreadForWeapon(const playerState_t *ps,int w,float *lo,float *hi){*lo=1.f;*hi=4.f;}

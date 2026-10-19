@@ -1,6 +1,7 @@
 #include "common_types.h"
 #include "imports.h"
 #include "bytematch.h"
+#include "headers/PC/bgame/bg_attachments.h"
 #include "headers/PC/game_mp/g_points.h"
 extern char *getenv(const char *name);
 extern scr_const_t scr_const;
@@ -29,6 +30,7 @@ static void PlayerCmd_OpenMenuNoMouse(scr_entref_t entref);
 static void PlayerCmd_CloseMenu(scr_entref_t entref);
 static void PlayerCmd_CloseInGameMenu(scr_entref_t entref);
 static void PlayerCmd_SetWeaponSlotWeapon(scr_entref_t entref);
+static void PlayerCmd_SetWeaponSlotAttachments(scr_entref_t entref);
 static void PlayerCmd_SetWeaponSlotAmmo(scr_entref_t entref);
 static void PlayerCmd_GetWeaponSlotClipAmmo(scr_entref_t entref);
 static void PlayerCmd_SetWeaponSlotClipAmmo(scr_entref_t entref);
@@ -574,11 +576,56 @@ void PlayerCmd_SetWeaponSlotWeapon(scr_entref_t entref)
     if (swapToSecondPrimary) {
         ps->weaponslots[WEAPSLOT_PRIMARYB] = ps->weaponslots[WEAPSLOT_PRIMARY];
         ps->weaponslots[WEAPSLOT_PRIMARY] = 0;
+        BG_SetSlotAttachments(ps, WEAPSLOT_PRIMARYB, BG_GetSlotAttachments(ps, WEAPSLOT_PRIMARY));
+        BG_SetSlotAttachments(ps, WEAPSLOT_PRIMARY, 0);
     }
 
     ammoToAdd = weapDef->iStartAmmo - ps->ammo[weapDef->iAmmoIndex];
     if (ammoToAdd > 0)
         Add_Ammo(pSelf, weaponIndex, ammoToAdd, !hadWeapon);
+}
+
+/* The slot's weapon takes the attachments, "none" or names joined by '+';
+ * a set the weapon cannot take changes nothing. The magazine follows a new
+ * size, filling from the reserve or returning its extra rounds to it. */
+void PlayerCmd_SetWeaponSlotAttachments(scr_entref_t entref)
+{
+    gentity_t *pSelf = PlayerCmd_GetPlayerEntity(entref);
+    playerState_t *ps;
+    int slot;
+    int weaponIndex;
+    int mask;
+    int clipIndex;
+    int ammoIndex;
+    int moved;
+    int maxAmmo;
+
+    if (!pSelf)
+        return;
+
+    ps = &pSelf->client->ps;
+    slot = PlayerCmd_GetWeaponSlotParam(0);
+    weaponIndex = (unsigned char)ps->weaponslots[slot];
+    mask = weaponIndex ? BG_AttachmentsParse(BG_GetWeaponDef(weaponIndex)->szInternalName, Scr_GetString(1),
+                                             slot == WEAPSLOT_PRIMARY ? ATT_PRIMARY_MAX : ATT_SECONDARY_MAX)
+                       : -1;
+    if (mask < 0) {
+        Scr_AddBool(0);
+        return;
+    }
+
+    BG_SetSlotAttachments(ps, slot, (unsigned)mask);
+    clipIndex = BG_ClipForWeapon(weaponIndex);
+    ammoIndex = BG_AmmoForWeapon(weaponIndex);
+    moved = BG_GetPlayerClipSize(ps, weaponIndex) - ps->ammoclip[clipIndex];
+    if (moved > ps->ammo[ammoIndex])
+        moved = ps->ammo[ammoIndex];
+    ps->ammoclip[clipIndex] += moved;
+    ps->ammo[ammoIndex] -= moved;
+    maxAmmo = BG_GetPlayerMaxAmmo(ps, weaponIndex);
+    if (ps->ammo[ammoIndex] > maxAmmo)
+        ps->ammo[ammoIndex] = maxAmmo;
+    Scr_AddBool(1);
 }
 
 void PlayerCmd_SetWeaponSlotAmmo(scr_entref_t entref)
@@ -600,13 +647,15 @@ void PlayerCmd_SetWeaponSlotAmmo(scr_entref_t entref)
         if (!ammoIndex)
             return;
 
-        pSelf->client->ps.ammoclip[ammoIndex] = PlayerCmd_ClampAmmoCount(setAmmo, BG_GetAmmoClipSize(ammoIndex));
+        pSelf->client->ps.ammoclip[ammoIndex] =
+            PlayerCmd_ClampAmmoCount(setAmmo, BG_GetPlayerClipSize(&pSelf->client->ps, weaponIndex));
     } else {
         ammoIndex = BG_AmmoForWeapon(weaponIndex);
         if (!ammoIndex)
             return;
 
-        pSelf->client->ps.ammo[ammoIndex] = PlayerCmd_ClampAmmoCount(setAmmo, BG_GetAmmoTypeMax(ammoIndex));
+        pSelf->client->ps.ammo[ammoIndex] =
+            PlayerCmd_ClampAmmoCount(setAmmo, BG_GetPlayerMaxAmmo(&pSelf->client->ps, weaponIndex));
     }
 }
 
@@ -661,7 +710,8 @@ void PlayerCmd_SetWeaponSlotClipAmmo(scr_entref_t entref)
     if (!clipIndex)
         return;
 
-    pSelf->client->ps.ammoclip[clipIndex] = PlayerCmd_ClampAmmoCount(setClipAmmo, BG_GetAmmoClipSize(clipIndex));
+    pSelf->client->ps.ammoclip[clipIndex] =
+        PlayerCmd_ClampAmmoCount(setClipAmmo, BG_GetPlayerClipSize(&pSelf->client->ps, weaponIndex));
 }
 
 void PlayerCmd_SetWeaponClipAmmo(scr_entref_t entref)
@@ -684,7 +734,8 @@ void PlayerCmd_SetWeaponClipAmmo(scr_entref_t entref)
     if (!clipIndex)
         return;
 
-    pSelf->client->ps.ammoclip[clipIndex] = PlayerCmd_ClampAmmoCount(ammoCount, BG_GetAmmoClipSize(clipIndex));
+    pSelf->client->ps.ammoclip[clipIndex] =
+        PlayerCmd_ClampAmmoCount(ammoCount, BG_GetPlayerClipSize(&pSelf->client->ps, weaponIndex));
 }
 
 void iclientprintln(scr_entref_t entref)
@@ -1251,7 +1302,7 @@ void PlayerCmd_giveMaxAmmo(scr_entref_t entref)
         return;
 
     weapDef = BG_GetWeaponDef(weaponIndex);
-    ammoToAdd = BG_GetAmmoTypeMax(weapDef->iAmmoIndex) - pSelf->client->ps.ammo[weapDef->iAmmoIndex];
+    ammoToAdd = BG_GetPlayerMaxAmmo(&pSelf->client->ps, weaponIndex) - pSelf->client->ps.ammo[weapDef->iAmmoIndex];
     if (ammoToAdd > 0)
         Add_Ammo(pSelf, weaponIndex, ammoToAdd, 0);
 }
@@ -1291,7 +1342,7 @@ void PlayerCmd_getFractionMaxAmmo(scr_entref_t entref)
         { (void)(Scr_AddFloat(1.0f)); return; }
 
     weapDef = BG_GetWeaponDef(weaponIndex);
-    maxAmmo = BG_GetAmmoTypeMax(weapDef->iAmmoIndex);
+    maxAmmo = BG_GetPlayerMaxAmmo(&pSelf->client->ps, weaponIndex);
     if (maxAmmo <= 0)
         { (void)(Scr_AddFloat(1.0f)); return; }
 
@@ -1733,6 +1784,7 @@ static const BuiltinMethodDef player_methods[] __attribute__((used)) = {
     { "deactivatechannelvolumes", (BuiltinMethod)PlayerCmd_DeactivateChannelVolumes, 0 },
     { "getweaponslotweapon", (BuiltinMethod)PlayerCmd_GetWeaponSlotWeapon, 0 },
     { "setweaponslotweapon", (BuiltinMethod)PlayerCmd_SetWeaponSlotWeapon, 0 },
+    { "setweaponslotattachments", (BuiltinMethod)PlayerCmd_SetWeaponSlotAttachments, 0 },
     { "getweaponslotammo", (BuiltinMethod)PlayerCmd_GetWeaponSlotAmmo, 0 },
     { "setweaponslotammo", (BuiltinMethod)PlayerCmd_SetWeaponSlotAmmo, 0 },
     { "getweaponslotclipammo", (BuiltinMethod)PlayerCmd_GetWeaponSlotClipAmmo, 0 },

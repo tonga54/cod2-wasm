@@ -64,8 +64,9 @@ run()
 	players[2] [[level.allies]]();
 	players[3] [[level.axis]]();
 	wait .5;
+	// A client from before attachments ends after the tactical.
 	answer(players[0], "class,kar98k_mp,luger_mp,frag_grenade_german_mp,smoke_grenade_russian_mp");
-	answer(players[1], "class,ppsh_mp,colt_mp,frag_grenade_russian_mp,smoke_grenade_british_mp");
+	answer(players[1], "class,ppsh_mp,colt_mp,frag_grenade_russian_mp,smoke_grenade_british_mp,extmag+suppressor,suppressor");
 	answer(players[2], "class,mg42_bipod_stand_mp,colt_mp,frag_grenade_american_mp,smoke_grenade_american_mp");
 	answer(players[3], "mp40_mp");
 	wait 1;
@@ -81,17 +82,36 @@ run()
 		p getWeaponSlotWeapon("primary") == "ppsh_mp" && p getWeaponSlotWeapon("primaryb") == "colt_mp" &&
 		p getAmmoCount("frag_grenade_russian_mp") == 1 && p getAmmoCount("smoke_grenade_british_mp") == 1 &&
 		p getAmmoCount("frag_grenade_german_mp") == 0, loadout(p));
+	// The PPSh's 71 rounds and 213 in reserve, half again.
+	check("attachments-fit-at-spawn-with-full-magazines", p getWeaponSlotClipAmmo("primary") == 106 &&
+		p getWeaponSlotAmmo("primary") == 319 && p getWeaponSlotClipAmmo("primaryb") == 7,
+		loadout(p) + " clip=" + p getWeaponSlotClipAmmo("primary") + " ammo=" + p getWeaponSlotAmmo("primary"));
+	check("older-clients-carry-no-attachments", players[0] getWeaponSlotClipAmmo("primary") == 5 &&
+		players[0].pers["browser_class"][4] == "none" && players[0].pers["browser_class"][5] == "none", loadout(players[0]));
 	p = players[2];
 	check("invalid-class-rejected", !isAlive(p) && !isDefined(p.pers["weapon"]) &&
 		!isDefined(p.pers["browser_class"]), loadout(p));
+	answer(p, "class,m1garand_mp,colt_mp,frag_grenade_american_mp,smoke_grenade_american_mp,suppressor,none");
+	answer(p, "class,thompson_mp,colt_mp,frag_grenade_american_mp,smoke_grenade_american_mp,reflex+lens,none");
+	answer(p, "class,thompson_mp,colt_mp,frag_grenade_american_mp,smoke_grenade_american_mp,none,suppressor+extmag");
+	wait .5;
+	check("invalid-attachments-rejected", !isAlive(p) && !isDefined(p.pers["browser_class"]), loadout(p));
 	p = players[3];
 	check("bare-weapon-keeps-the-gametype-loadout", isAlive(p) && p getWeaponSlotWeapon("primary") == "mp40_mp" &&
 		p getWeaponSlotWeapon("primaryb") == "luger_mp" && p getAmmoCount("frag_grenade_german_mp") == 1 &&
 		!isDefined(p.pers["browser_class"]), loadout(p));
+	check("engine-validates-attachments", validWeaponAttachments("thompson_mp", "reflex+grip+extmag", "primary") &&
+		!validWeaponAttachments("thompson_mp", "reflex+lens", "primary") &&
+		!validWeaponAttachments("thompson_mp", "grip+extmag+fmj+rifling", "primary") &&
+		!validWeaponAttachments("colt_mp", "suppressor+extmag", "primaryb") &&
+		!validWeaponAttachments("m1garand_mp", "suppressor", "primary") &&
+		validWeaponAttachments("m1garand_mp", "none", "primary") &&
+		!p setWeaponSlotAttachments("primary", "highcal") && p setWeaponSlotAttachments("primary", "extmag") &&
+		p getWeaponSlotClipAmmo("primary") == 48, loadout(p) + " clip=" + p getWeaponSlotClipAmmo("primary"));
 
 	// A class chosen while alive waits for the next spawn.
 	p = players[0];
-	answer(p, "class,thompson_mp,webley_mp,frag_grenade_british_mp,smoke_grenade_german_mp");
+	answer(p, "class,thompson_mp,webley_mp,frag_grenade_british_mp,smoke_grenade_german_mp,extmag+rapidfire,quickdraw");
 	wait .5;
 	check("alive-change-waits-for-spawn", p getWeaponSlotWeapon("primary") == "kar98k_mp" &&
 		p getWeaponSlotWeapon("primaryb") == "luger_mp", loadout(p));
@@ -104,6 +124,16 @@ run()
 	check("respawn-applies-the-new-class", isAlive(p) && p getWeaponSlotWeapon("primary") == "thompson_mp" &&
 		p getWeaponSlotWeapon("primaryb") == "webley_mp" && p getAmmoCount("frag_grenade_british_mp") == 1 &&
 		p getAmmoCount("smoke_grenade_german_mp") == 1 && p getAmmoCount("frag_grenade_german_mp") == 0, loadout(p));
+	// The Thompson's 20 rounds and 180 in reserve, half again.
+	check("respawn-applies-the-new-attachments", p getWeaponSlotClipAmmo("primary") == 30 &&
+		p getWeaponSlotAmmo("primary") == 270 && p getWeaponSlotClipAmmo("primaryb") == 6,
+		loadout(p) + " clip=" + p getWeaponSlotClipAmmo("primary") + " ammo=" + p getWeaponSlotAmmo("primary"));
+	// A weapon given again starts without them.
+	p takeAllWeapons();
+	p giveWeapon("thompson_mp");
+	p setWeaponSlotClipAmmo("primary", 999);
+	check("weapon-leaves-its-slot-without-attachments", p getWeaponSlotClipAmmo("primary") == 20,
+		loadout(p) + " clip=" + p getWeaponSlotClipAmmo("primary"));
 	p = players[3];
 	check("restricted-primary-keeps-the-previous-weapon", isAlive(p) && p getWeaponSlotWeapon("primary") == "mp40_mp" &&
 		p getWeaponSlotWeapon("primaryb") == "luger_mp" && p getAmmoCount("frag_grenade_american_mp") == 0, loadout(p));
@@ -127,10 +157,11 @@ run()
 		p getAmmoCount("frag_grenade_russian_mp") == maps\mp\gametypes\_weapons::getWeaponBasedGrenadeCount("kar98k_mp"),
 		loadout(p));
 	// The gametype's own swap would hand over the allies' pistol and frags.
-	answer(p, "class,thompson_mp,luger_mp,frag_grenade_german_mp,smoke_grenade_russian_mp");
+	answer(p, "class,thompson_mp,luger_mp,frag_grenade_german_mp,smoke_grenade_russian_mp,extmag,none");
 	wait 1;
 	check("sd-pre-round-swap-applies-the-whole-class", isAlive(p) && p getWeaponSlotWeapon("primary") == "thompson_mp" &&
 		p getWeaponSlotWeapon("primaryb") == "luger_mp" && p getAmmoCount("smoke_grenade_russian_mp") == 1 &&
+		p getWeaponSlotClipAmmo("primary") == 30 && p getWeaponSlotAmmo("primary") == 270 &&
 		p getAmmoCount("frag_grenade_german_mp") == maps\mp\gametypes\_weapons::getWeaponBasedGrenadeCount("thompson_mp") &&
 		p getAmmoCount("frag_grenade_" + game["allies"] + "_mp") == 0 && p getAmmoCount("frag_grenade_russian_mp") == 0 &&
 		p getAmmoCount("smoke_grenade_german_mp") == 0, loadout(p));
@@ -138,7 +169,7 @@ run()
 }
 '''
 GAMETYPES = {
-    'tdm': (CHECKS, 8, '+set scr_bot_count 1 +set scr_forcerespawn 1 +set scr_tdm_timelimit 0 '
+    'tdm': (CHECKS, 14, '+set scr_bot_count 1 +set scr_forcerespawn 1 +set scr_tdm_timelimit 0 '
                        '+set scr_tdm_scorelimit 0 +set g_gametype tdm'),
     # A bot count only loads the checks in place of the bot script.
     'sd': (CHECKS_SD, 2, '+set scr_bot_count 1 +set g_gametype sd'),
@@ -198,7 +229,8 @@ def main():
               'then whole before the match instead of the team\'s pistol and frags')
     else:
         print(f'PASS: {expected} class choices on {args.map} through the dedicated server: any faction\'s weapons for '
-              'either team, invalid classes rejected, bare weapons and restrictions kept, changes applied at respawn')
+              'either team, attachments fitted with full magazines, invalid classes and attachments rejected, bare '
+              'weapons and restrictions kept, changes applied at respawn')
 
 
 if __name__ == '__main__':

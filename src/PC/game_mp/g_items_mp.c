@@ -1,6 +1,7 @@
 #include "common_types.h"
 #include "imports.h"
 #include <string.h>
+#include "headers/PC/bgame/bg_attachments.h"
 extern scr_data_t g_scr_data;
 extern level_locals_t level;
 extern scr_const_t scr_const;
@@ -1372,11 +1373,11 @@ loop:
         goto fill;
 clamp_ammo_chk:
     ps = (playerState_t *)ent->client;
-    if (ps->ammo[ammoIdx] > BG_GetAmmoTypeMax(ammoIdx))
+    if (ps->ammo[ammoIdx] > BG_GetPlayerMaxAmmo(ps, weapon))
         goto clamp_ammo;
 clamp_clip_chk:
     ps = (playerState_t *)ent->client;
-    if (ps->ammoclip[clipIdx] > BG_GetAmmoClipSize(clipIdx))
+    if (ps->ammoclip[clipIdx] > BG_GetPlayerClipSize(ps, weapon))
         goto clamp_clip;
 wd_chk:
     if (*(int *)((char *)BG_GetWeaponDef(weapon) + 0x1e4) < 0)
@@ -1392,12 +1393,12 @@ ret:
 
 clamp_ammo:
     ps = (playerState_t *)ent->client;
-    ps->ammo[ammoIdx] = BG_GetAmmoTypeMax(ammoIdx);
+    ps->ammo[ammoIdx] = BG_GetPlayerMaxAmmo(ps, weapon);
     goto clamp_clip_chk;
 
 clamp_clip:
     ps = (playerState_t *)ent->client;
-    ps->ammoclip[clipIdx] = BG_GetAmmoClipSize(clipIdx);
+    ps->ammoclip[clipIdx] = BG_GetPlayerClipSize(ps, weapon);
     if (*(int *)((char *)BG_GetWeaponDef(weapon) + 0x1e4) >= 0)
         goto pickup;
     ps = (playerState_t *)ent->client;
@@ -1422,13 +1423,13 @@ gave_chk:
     ps = (playerState_t *)ent->client;
     ps->ammo[ammoIdx] = 0;
     ps = (playerState_t *)ent->client;
-    if (ps->ammoclip[clipIdx] <= BG_GetAmmoClipSize(clipIdx))
+    if (ps->ammoclip[clipIdx] <= BG_GetPlayerClipSize(ps, weapon))
         goto wd_chk;
     goto clamp_clip;
 
 valid_fill:
     avail = cl2->ammo[ammoIdx2];
-    need = BG_GetAmmoClipSize(clipIdx2) - cl2->ammoclip[clipIdx2];
+    need = BG_GetPlayerClipSize(cl2, weapon) - cl2->ammoclip[clipIdx2];
     if (need > avail)
         need = avail;
     if (need == 0)

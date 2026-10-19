@@ -56,6 +56,7 @@ typedef struct {int msec;}pml_t;
 typedef struct {struct {int enabled,integer;}current;} dvar_t;
 static dvar_t damage,delay,*player_scopeExitOnDamage=&damage,*player_adsExitDelay=&delay;
 static WeaponDef *bg_weaponDefs[2];static int events;
+static WeaponDef *BG_GetPlayerWeaponDef(playerState_t *ps,int w){return bg_weaponDefs[w];}
 static int BG_GetViewmodelWeaponIndex(playerState_t *ps){return ps->weapon;}
 static void PM_AddEvent(playerState_t *ps,int e){assert(e==0x95);events++;}
 '''

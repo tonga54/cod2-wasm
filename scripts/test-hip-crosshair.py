@@ -82,7 +82,9 @@ static int CG_AreHudMenusHidden(void) {return hudHidden;}
 static void CG_DrawTurretCrossHair(void) {}
 static int BG_GetViewmodelWeaponIndex(playerState_t *ps) {return ps->weapon;}
 static void *BG_GetWeaponDef(int index) {return &weapon;}
+static void *BG_GetPlayerWeaponDef(playerState_t *ps,int index) {return &weapon;}
 static float CG_DrawWeapReticle(void) {overlayCalls++;return visibility;}
+static void CG_DrawAttachmentSight(const playerState_t *ps,int weapon,float x,float y) {}
 /* Where cg_crosshairDynamic would put the crosshair, off screen center:
  * between pixels at 1080p. */
 static float crosshairX=3.1f,crosshairY=-2.0f;

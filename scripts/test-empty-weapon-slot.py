@@ -35,6 +35,8 @@ static int G_GetWeaponIndexForName(const char *s){lookups++;return strcmp(s,"rif
 static void Scr_ParamError(unsigned index,const char *s){(void)s;assert(index==1);errors++;longjmp(onError,1);}
 static const char *va(const char *fmt,...){return fmt;}
 static WeaponDef *BG_GetWeaponDef(int index){assert(index==7);return &def;}
+static unsigned BG_GetSlotAttachments(const playerState_t *ps,int slot){(void)ps;assert(slot==WEAPSLOT_PRIMARY);return 0;}
+static void BG_SetSlotAttachments(playerState_t *ps,int slot,unsigned mask){(void)ps;(void)slot;assert(!mask);}
 static const char *BG_GetWeaponSlotNameForIndex(int index){assert(index==1||index==2);return "primary";}
 static void BG_TakePlayerWeapon(playerState_t *ps,int weapon){takes++;owned[weapon]=0;for(int i=1;i<=2;i++)if(ps->weaponslots[i]==weapon)ps->weaponslots[i]=0;}
 static int PlayerCmd_HasWeapon(playerState_t *ps,int weapon){(void)ps;return owned[weapon];}

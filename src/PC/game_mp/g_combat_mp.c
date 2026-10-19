@@ -1,6 +1,7 @@
 #include "common_types.h"
 #include "imports.h"
 #include <string.h>
+#include "headers/PC/bgame/bg_attachments.h"
 #include "headers/PC/game_mp/g_points.h"
 
 unsigned char riflePriorityMap[19] = { 0x1, 0x9, 0x9, 0x9, 0x8, 0x7, 0x6, 0x6, 0x6, 0x6, 0x5, 0x5, 0x4, 0x4, 0x4, 0x4, 0x3, 0x3, 0x0 };
@@ -277,7 +278,7 @@ float CanDamage(gentity_t *targ, const vec_t *origin)
     }
 }
 
-static float G_GetHitLocDamageMult(int weapon, hitLocation_t hitLoc)
+static float G_GetHitLocDamageMult(const gentity_t *shooter, int weapon, hitLocation_t hitLoc)
 {
     void *weapDef;
 
@@ -285,7 +286,7 @@ static float G_GetHitLocDamageMult(int weapon, hitLocation_t hitLoc)
         return g_fHitLocDamageMult[hitLoc];
     }
 
-    weapDef = BG_GetWeaponDef(weapon);
+    weapDef = BG_GetPlayerWeaponDef(shooter && shooter->client ? &shooter->client->ps : NULL, weapon);
     if (weapDef == NULL || ((WeaponDef *)weapDef)->weapType != WEAPTYPE_BULLET) {
         return g_fHitLocDamageMult[hitLoc];
     }
@@ -333,7 +334,7 @@ void G_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
         fDamage = (float)damage;
         /* MOD_MELEE uses its own damage, independent of bullet hit locations. */
         if (mod != 7)
-            fDamage *= G_GetHitLocDamageMult(weapon, hitLoc);
+            fDamage *= G_GetHitLocDamageMult(inflictor ? inflictor : attacker, weapon, hitLoc);
         iDamage = (int)fDamage;
 
         if (iDamage <= 0) {

@@ -2,9 +2,45 @@
 #include "cod2_sprint.h"
 #include <math.h>
 #include "imports.h"
+#include "headers/PC/bgame/bg_attachments.h"
 
 extern void *Hunk_AllocAlignInternal(int size, int align);
+extern int SND_PlaySoundAlias(const snd_alias_t *pAlias, int entnum, const vec_t *org, int timeshift,
+                              snd_alias_system_t system);
+extern snd_alias_t *Com_PickSoundAliasFromList(snd_alias_list_t *aliasList);
 static EffectTemplate *muzzleLightEffects[128];
+
+/* A suppressed shot plays its weapon's own sound, quieter, heard from a third
+ * of the distance and without the distant report. The channels keep the
+ * alias while it plays, so each copy stays here; a copy follows its source
+ * through reloads. */
+#define CG_SUPPRESSED_ALIAS_COUNT 128
+static struct {
+    snd_alias_t source;
+    snd_alias_t quiet;
+} s_suppressedAliases[CG_SUPPRESSED_ALIAS_COUNT];
+static int s_suppressedAliasNext;
+
+static const snd_alias_t *CG_SuppressedAlias(const snd_alias_t *alias)
+{
+    int i;
+
+    for (i = 0; i < CG_SUPPRESSED_ALIAS_COUNT; i++) {
+        if (s_suppressedAliases[i].source.pszAliasName &&
+            !memcmp(&s_suppressedAliases[i].source, alias, sizeof(*alias)))
+            return &s_suppressedAliases[i].quiet;
+    }
+    i = s_suppressedAliasNext;
+    s_suppressedAliasNext = (s_suppressedAliasNext + 1) % CG_SUPPRESSED_ALIAS_COUNT;
+    s_suppressedAliases[i].source = *alias;
+    s_suppressedAliases[i].quiet = *alias;
+    s_suppressedAliases[i].quiet.fVolMin *= 0.35f;
+    s_suppressedAliases[i].quiet.fVolMax *= 0.35f;
+    s_suppressedAliases[i].quiet.fDistMin *= 0.33f;
+    s_suppressedAliases[i].quiet.fDistMax *= 0.33f;
+    s_suppressedAliases[i].quiet.pszSecondaryAliasName = NULL;
+    return &s_suppressedAliases[i].quiet;
+}
 
 static EffectTemplate *CG_MuzzleLightsOnly(const EffectTemplate *original)
 {
@@ -700,10 +736,13 @@ void CG_FireWeapon(centity_t *cent, int event, int barrel)
     snd_alias_list_t *fireSound;
     vec3_t origin;
     int duration;
+    qboolean suppressed;
 
     ent = &cent->nextState;
     if (!ent->weapon)
         return;
+    /* Player movement marks a suppressed shot in the fire event's parameter. */
+    suppressed = ent->eType == 1 && (event == 0x9e || event == 0xa0) && ent->eventParm == 1;
 
     if (getenv("PTRACE"))
         fprintf(stderr, "[fire] time=%d entity=%d weapon=%d event=%d local=%d\n",
@@ -716,7 +755,7 @@ void CG_FireWeapon(centity_t *cent, int event, int barrel)
 
     weapInfo = &(*(weaponInfo_t **)imp_cg_weapons)[ent->weapon];
     BG_GetWeaponDef(ent->weapon);
-    cent->bMuzzleFlash = 1;
+    cent->bMuzzleFlash = !suppressed;
 
     if (CG_IsLocalClientEntity_inl(cg, ent)) {
         BG_WeaponFireRecoil(&cg->predictedPlayerState, cg->vGunSpeed, cg->kickAVel);
@@ -747,9 +786,16 @@ void CG_FireWeapon(centity_t *cent, int event, int barrel)
 
     if (fireSound) {
         CG_GetFireWeaponSoundOrigin(cent, ent, weapInfo, origin);
-        duration = CG_PlaySoundAlias(ent->number, origin, fireSound);
-        if (ent->eType == 1)
-            CG_CompassAddWeaponPingInfo(cent, origin, duration);
+        if (suppressed) {
+            const snd_alias_t *alias = Com_PickSoundAliasFromList(fireSound);
+
+            if (alias)
+                SND_PlaySoundAlias(CG_SuppressedAlias(alias), ent->number, origin, 0, SASYS_CGAME);
+        } else {
+            duration = CG_PlaySoundAlias(ent->number, origin, fireSound);
+            if (ent->eType == 1)
+                CG_CompassAddWeaponPingInfo(cent, origin, duration);
+        }
     }
 
     weapDef = (WeaponDef *)BG_GetWeaponDef(ent->weapon);
@@ -1497,7 +1543,7 @@ static void CG_UpdateWebWeaponPresentation(playerState_t *ps, int weaponIndex, q
     if (s_pendingLocalFireTime == cg->time && s_pendingLocalFireWeapon > 0) {
         int fireWeapon = s_pendingLocalFireWeapon;
         int barrel = s_pendingLocalFireBarrel & 3;
-        WeaponDef *weapDef = (WeaponDef *)BG_GetWeaponDef(fireWeapon);
+        WeaponDef *weapDef = BG_GetPlayerWeaponDef(ps, fireWeapon);
         s_pendingLocalFireTime = 0;
         if (weapDef && weapDef->weapType == 0 && cg_tracerChance->current.value > 0.0f) {
             vec3_t muzzle, shotAngles, forward, right, up;

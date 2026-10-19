@@ -51,7 +51,7 @@ typedef unsigned char byte;
 typedef float vec_t,vec3_t[3],vec2_t[2];
 #define WEAPTYPE_BULLET 0
 typedef struct {int weapType,iMeleeDamage;float locationDamageMultipliers[19];} WeaponDef;
-typedef struct {int noclip,ufo;struct {int connected;} sess;} gclient_t;
+typedef struct {int noclip,ufo;struct {int connected;} sess;int ps;} gclient_t;
 typedef struct entity {struct {int number,weapon,eventParm,otherEntityNum;} s;gclient_t *client;int takedamage,flags,health,handler;} gentity_t,gentity_s;
 typedef struct {float fraction,normal[3];int entityNum,surfaceFlags,partGroup;} trace_t;
 typedef struct {vec3_t muzzleTrace,forward,right,up;} weaponParms;
@@ -70,6 +70,7 @@ static WeaponDef *activeWeapon;
 static int hitLocation,receivedDamage,damageCalls,expectedMOD,expectedFlags,traceTarget=1,traceCalls,triggerDamage;
 static float targetDistance=32;
 static void *BG_GetWeaponDef(int weapon) {assert(weapon==1);return activeWeapon;}
+static void *BG_GetPlayerWeaponDef(const void *ps,int weapon) {return BG_GetWeaponDef(weapon);}
 static void Scr_PlayerDamage(gentity_t *t,gentity_t *i,gentity_t *a,int damage,int flags,int mod,int weapon,const vec_t *p,const vec_t *d,int hit,int offset) {
  assert(t==entities+1 && hit==hitLocation && mod==expectedMOD && flags==expectedFlags && weapon==1);
  receivedDamage=damage;damageCalls++;t->health-=damage;

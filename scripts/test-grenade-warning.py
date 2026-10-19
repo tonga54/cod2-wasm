@@ -92,6 +92,7 @@ static const dvar_t *Dvar_RegisterBool_mac(const char *name, int value, int flag
 }
 static int BG_GetNumWeapons(void) { return 3; }
 static WeaponDef *BG_GetWeaponDef(int index) { assert(index >= 1 && index <= 3); return &defs[index]; }
+static WeaponDef *BG_GetPlayerWeaponDef(const playerState_t *ps, int index) { return BG_GetWeaponDef(index); }
 static int CG_AreHudMenusHidden(void) { return hidden; }
 static float vectoyaw(const vec_t *v) { return v[0] == 0 && v[1] == 0 ? 0 : atan2f(v[1], v[0]) * 57.29577951f; }
 /* A screen screenHeight pixels tall: 480 virtual units to its height. */

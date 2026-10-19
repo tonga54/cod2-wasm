@@ -104,6 +104,13 @@ static void PM_AddEvent(playerState_t *ps,int e) {
     if(e==0xa1)rechambers++;
     if(e==0xa2)boltEvents++;
 }
+/* No attachments: the shared definitions and unsuppressed shots. */
+#define ATT_BIT(a) (1u << (a))
+#define ATT_SUPPRESSOR 12
+static WeaponDef *BG_GetPlayerWeaponDef(const playerState_t *ps,int w) {return bg_weaponDefs[w];}
+static int BG_GetPlayerClipSize(const playerState_t *ps,int w) {return bg_weapClips[bg_weaponDefs[w]->iClipIndex]->iClipSize;}
+static unsigned BG_GetWeaponAttachments(const playerState_t *ps,int w) {return 0;}
+static void BG_AddPredictableEventToPlayerstate(int e,int parm,playerState_t *ps) {assert(!parm);PM_AddEvent(ps,e);}
 static int BG_AnimScriptEvent(playerState_t *ps,int a,int b,int c) {return 0;}
 static void PM_SetProneMovementOverride(playerState_t *ps) {}
 static int BG_TakePlayerWeapon(playerState_t *ps,int w) {assert(0);return 0;}

@@ -1,6 +1,7 @@
 #include "common_types.h"
 #include "imports.h"
 #include "bytematch.h"
+#include "headers/PC/bgame/bg_attachments.h"
 
 extern int rand(void);
 extern double tan(double x);
@@ -720,7 +721,7 @@ void FireWeaponAntiLag(gentity_s (*ent)[16], int gametime)
     if ((entity->client->ps.eFlags & 0x300) && entity->active)
         return;
 
-    weapDef = BG_GetWeaponDef(entity->s.weapon);
+    weapDef = BG_GetPlayerWeaponDef(&entity->client->ps, entity->s.weapon);
     wp.weapDef = weapDef;
 
     {
@@ -805,10 +806,14 @@ qboolean G_GivePlayerWeapon(playerState_t *pPS, int iWeaponIndex)
         }
     } else if ((unsigned int)(weapDef->weapSlot - WEAPSLOT_PRIMARY) <=
                (WEAPSLOT_PRIMARYB - WEAPSLOT_PRIMARY)) {
-        if (!pPS->weaponslots[WEAPSLOT_PRIMARY])
-            pPS->weaponslots[WEAPSLOT_PRIMARY] = (char)iWeaponIndex;
-        else if (!pPS->weaponslots[WEAPSLOT_PRIMARYB])
-            pPS->weaponslots[WEAPSLOT_PRIMARYB] = (char)iWeaponIndex;
+        int slot = !pPS->weaponslots[WEAPSLOT_PRIMARY]    ? WEAPSLOT_PRIMARY
+                   : !pPS->weaponslots[WEAPSLOT_PRIMARYB] ? WEAPSLOT_PRIMARYB
+                                                          : 0;
+
+        if (slot) {
+            pPS->weaponslots[slot] = (char)iWeaponIndex;
+            BG_SetSlotAttachments(pPS, slot, 0);
+        }
     }
 
     altWeaponIndex = weapDef->iAltWeaponIndex;
