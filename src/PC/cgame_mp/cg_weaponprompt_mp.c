@@ -66,17 +66,26 @@ static int CG_WeaponPromptAction(const playerState_t *ps, int weapon)
     return (signed char)ps->weaponslots[weapDef->weapSlot] == weapon ? WEAPON_PROMPT_ICON_ONLY : WEAPON_PROMPT_SWAP;
 }
 
-static void CG_WeaponPromptDrawLine(const rectDef_t *rect, int textStyle, const char *key, const char *text,
-                                    float alpha)
+/* Words before the key, when given, the key in gold and the words after it,
+ * on one baseline centred on the anchor. */
+static void CG_WeaponPromptDrawLine(const rectDef_t *rect, int textStyle, const char *lead, const char *key,
+                                    const char *text, float alpha)
 {
     FontHandle keyFont = s_weaponPromptKeyFont ? s_weaponPromptKeyFont : UI_GetFontHandle(4, WEAPON_PROMPT_SCALE);
     FontHandle font = UI_GetFontHandle(WEAPON_PROMPT_FONT, WEAPON_PROMPT_SCALE);
+    float leadWidth = lead ? (float)UI_TextWidth(lead, 0, font, WEAPON_PROMPT_SCALE) + WEAPON_PROMPT_KEY_GAP : 0.0f;
     float keyWidth = (float)UI_TextWidth(key, 0, keyFont, WEAPON_PROMPT_SCALE);
     float x = rect->x - 0.5f * (keyWidth + WEAPON_PROMPT_KEY_GAP +
-                                (float)UI_TextWidth(text, 0, font, WEAPON_PROMPT_SCALE));
+                                (float)UI_TextWidth(text, 0, font, WEAPON_PROMPT_SCALE) + leadWidth);
     float y = rect->y + WEAPON_PROMPT_BASELINE;
     vec4_t color;
 
+    if (lead) {
+        CG_WeaponPromptColor(color, s_weaponPromptText, alpha);
+        UI_DrawText(lead, 0x7fffffff, font, x, y, rect->horzAlign, rect->vertAlign, WEAPON_PROMPT_SCALE, color,
+                    textStyle);
+        x += leadWidth;
+    }
     CG_WeaponPromptColor(color, s_weaponPromptKey, alpha);
     UI_DrawText(key, 0x7fffffff, keyFont, x, y, rect->horzAlign, rect->vertAlign, WEAPON_PROMPT_SCALE, color,
                 textStyle);
@@ -125,6 +134,17 @@ int CG_WeaponPromptActive(void)
     return cg_hudWeaponPrompt && cg_hudWeaponPrompt->current.enabled;
 }
 
+/* CoD WWII's prompt over its own S-Mine: the words around the gold key. */
+void CG_DrawMinePickupPrompt(const rectDef_t *rect, int textStyle, int weapon, float alpha)
+{
+    char key[0x100];
+
+    GetKeyBindingLocalizedString("+activate", key);
+    CG_WeaponPromptDrawLine(rect, textStyle, "Press and hold", key,
+                            va("to pickup %s", UI_SafeTranslateString(BG_GetWeaponDef(weapon)->szDisplayName)),
+                            alpha);
+}
+
 /* Where the stock hint would show the icon alone, so does the prompt. */
 void CG_DrawWeaponPrompt(const rectDef_t *rect, int textStyle, int weapon, MaterialHandle icon, const vec_t *fadeColor)
 {
@@ -134,7 +154,7 @@ void CG_DrawWeaponPrompt(const rectDef_t *rect, int textStyle, int weapon, Mater
 
     if (action != WEAPON_PROMPT_ICON_ONLY) {
         GetKeyBindingLocalizedString("+activate", key);
-        CG_WeaponPromptDrawLine(rect, textStyle, key,
+        CG_WeaponPromptDrawLine(rect, textStyle, NULL, key,
                                 va(action == WEAPON_PROMPT_SWAP ? "Press to swap for %s" : "Press to pick up %s",
                                    UI_SafeTranslateString(weapDef->szDisplayName)),
                                 fadeColor[3]);

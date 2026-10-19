@@ -50,6 +50,7 @@ static qboolean G_BounceMissile(gentity_t *ent, trace_t *trace);
 void G_RunMissile(gentity_t *ent);
 
 extern WeaponDef *BG_GetWeaponDef(int weaponIndex);
+extern int BG_GetNumWeapons(void);
 extern void BG_EvaluateTrajectory(trajectory_t *tr, int atTime, vec_t *result);
 extern void BG_EvaluateTrajectoryDelta(trajectory_t *tr, int atTime, vec_t *result);
 extern unsigned char G_SetOrigin(gentity_t *ent, const vec_t *origin);
@@ -84,6 +85,34 @@ extern void G_CheckHitTriggerDamage(gentity_t *attacker, vec_t *start, vec_t *en
 extern void G_GrenadeTouchTriggerDamage(gentity_t *ent, vec_t *oldOrigin, vec_t *origin, int radius, int mod);
 extern void SnapVectorTowards(vec_t *v, vec_t *to);
 extern void G_GetPlayerViewOrigin(gentity_t *ent, vec_t *origin);
+extern qboolean OnSameTeam(gentity_t *ent1, gentity_t *ent2);
+extern SoundAlias G_SoundAliasIndex(const char *name);
+extern float atan2f(float y, float x);
+extern float asinf(float x);
+extern float cosf(float x);
+extern float sinf(float x);
+
+/* A placed explosive's spawnflags: a charge stuck where it hit, a mine that
+ * has sensed its enemy. */
+#define GMISSILE_PLACED_STUCK 1
+#define GMISSILE_PLACED_TRIGGERED 2
+/* How far above or below a mine an enemy's feet may be. */
+#define GMISSILE_PROXIMITY_BELOW 24.0f
+#define GMISSILE_PROXIMITY_ABOVE 48.0f
+/* The S-Mine is set down this far ahead of its owner's feet, this far short
+ * of a wall, found from the hand's height down to this far below them; a
+ * resting grenade's origin stands 1.5 above the ground. */
+#define GMISSILE_MINE_STEP 20.0f
+#define GMISSILE_MINE_WALL 4.0f
+#define GMISSILE_MINE_HAND 24.0f
+#define GMISSILE_MINE_DEPTH 64.0f
+#define GMISSILE_MINE_REST 1.5f
+/* Its owner takes it back by holding Use (+activate or +usereload) for half
+ * a second within reach of their feet, with it in sight. */
+#define GMISSILE_PICKUP_REACH 52.0f
+#define GMISSILE_PICKUP_HEIGHT 40.0f
+#define GMISSILE_PICKUP_MSEC 500
+#define GMISSILE_BUTTONS_USE 0x28
 
 static inline void VectorCopy(const vec_t *src, vec_t *dst)
 {
@@ -225,7 +254,8 @@ static gentity_t *G_FindNearbyGrenade(gentity_t *player)
             !(missile->s.eFlags & GMISSILE_EF_GRENADE_BOUNCE) ||
             (missile->flags & GMISSILE_FL_HELD) || missile->nextthink <= LEVEL_TIME)
             continue;
-        if (BG_GetWeaponDef(missile->s.weapon)->offhandClass != OFFHAND_CLASS_FRAG_GRENADE)
+        if (BG_GetWeaponDef(missile->s.weapon)->offhandClass != OFFHAND_CLASS_FRAG_GRENADE ||
+            BG_IsPlacedExplosive(BG_GetWeaponDef(missile->s.weapon)))
             continue;
         VectorSubtract(missile->r.currentOrigin, reach, delta);
         distSq = DotProduct(delta, delta);
@@ -338,6 +368,349 @@ void G_EndGrenadeInput(gentity_t *player)
         ps->grenadeTimeLeft = remaining;
         G_HoldGrenade(player, missile);
     }
+}
+
+static int s_placedSequence;
+
+static int G_PlacedTeam(const gentity_t *owner)
+{
+    return owner->client ? owner->client->sess.cs.team : 0;
+}
+
+static void G_PlacedSound(gentity_t *ent, const char *alias)
+{
+    gentity_t *tent;
+
+    if (!alias || !*alias)
+        return;
+    tent = G_TempEntity(ent->r.currentOrigin, 0xb3); /* EV_SOUND_ALIAS, as playSound sends it */
+    tent->r.svFlags |= 8;
+    tent->s.eventParm = G_SoundAliasIndex(alias);
+}
+
+/* An explosive stays its owner's while they are connected on the side that
+ * placed it. */
+static gentity_t *G_PlacedOwner(gentity_t *ent)
+{
+    gentity_t *owner = COD2_GEntityFromHandle(ent->parent);
+
+    if (!owner || !owner->r.inuse || !owner->client || owner->client->sess.connected != 2 ||
+        G_PlacedTeam(owner) != ent->team)
+        return NULL;
+    return owner;
+}
+
+/* Upright, facing as its owner does, on the ground a step ahead of their
+ * feet, short of any wall; over a drop it falls from the hand. */
+static void G_SetDownMine(gentity_t *owner, gentity_t *ent)
+{
+    vec3_t hand, spot, below, angles;
+    trace_t trace;
+    float yaw = owner->client ? owner->client->ps.viewangles[1] : owner->r.currentAngles[1];
+
+    VectorCopy(owner->r.currentOrigin, hand);
+    hand[2] += GMISSILE_MINE_HAND;
+    spot[0] = hand[0] + cosf(yaw * 0.0174532925f) * GMISSILE_MINE_STEP;
+    spot[1] = hand[1] + sinf(yaw * 0.0174532925f) * GMISSILE_MINE_STEP;
+    spot[2] = hand[2];
+    G_LocationalTrace(&trace, hand, spot, owner->s.number, ent->clipmask, pPriorityMap);
+    if (trace.startsolid)
+        trace.fraction = 0.0f;
+    else if (trace.fraction < 1.0f)
+        trace.fraction = trace.fraction > GMISSILE_MINE_WALL / GMISSILE_MINE_STEP ?
+            trace.fraction - GMISSILE_MINE_WALL / GMISSILE_MINE_STEP : 0.0f;
+    LerpPosition(hand, spot, trace.fraction, spot);
+    VectorCopy(spot, below);
+    below[2] = owner->r.currentOrigin[2] - GMISSILE_MINE_DEPTH;
+    G_LocationalTrace(&trace, spot, below, owner->s.number, ent->clipmask, pPriorityMap);
+    angles[0] = angles[2] = 0.0f;
+    angles[1] = yaw;
+    if (!trace.startsolid && trace.fraction < 1.0f && trace.normal[2] > 0.7f) {
+        LerpPosition(spot, below, trace.fraction, spot);
+        spot[2] += GMISSILE_MINE_REST;
+        G_SetOrigin(ent, spot);
+        ent->s.groundEntityNum = trace.entityNum;
+    } else {
+        G_SetOrigin(ent, spot);
+        ent->s.pos.trType = 5;
+        ent->s.pos.trTime = LEVEL_TIME;
+    }
+    G_SetAngle(ent, angles);
+    /* A mine at rest never moves, so the missile code would never link it
+     * and no client would be sent it. */
+    SV_LinkEntity(ent);
+}
+
+/* Nothing waits on a fuse. The owner keeps as many of a kind as the weapon
+ * holds; a newer one replaces the oldest. The owner travels with it so the
+ * client can show it to their team. */
+static void G_PlaceExplosive(gentity_t *owner, gentity_t *ent, const WeaponDef *weapDef)
+{
+    int limit = weapDef->iMaxAmmo > 0 ? weapDef->iMaxAmmo : 1;
+    int i;
+
+    ent->nextthink = 0;
+    ent->s.otherEntityNum = owner->s.number;
+    ent->team = (byte)G_PlacedTeam(owner);
+    ent->count = 0;
+    ent->spawnflags = 0;
+    ent->maxHealth = ++s_placedSequence;
+    if (weapDef->proximityRadius > 0.0f)
+        G_SetDownMine(owner, ent);
+    for (;;) {
+        gentity_t *oldest = NULL;
+        int count = 0;
+
+        for (i = 64; i < level.num_entities; i++) {
+            gentity_t *other = &g_entities[i];
+
+            if (other == ent || !other->r.inuse || other->s.eType != 4 || other->handler != 7 ||
+                other->s.weapon != ent->s.weapon || other->parent != ent->parent)
+                continue;
+            count++;
+            if (!oldest || other->maxHealth < oldest->maxHealth)
+                oldest = other;
+        }
+        if (count < limit || !oldest)
+            return;
+        G_FreeEntity(oldest);
+    }
+}
+
+/* CoD4's stickiness "all": the charge stays where it first hits anything but
+ * a player, its flat side to the surface (-y along the normal) and its top
+ * up the wall, or along the throw on a floor or ceiling. */
+static void G_StickMissile(gentity_t *ent, const trace_t *trace, const vec_t *endpos)
+{
+    vec3_t left, up, forward, origin, angles;
+    float along;
+
+    VectorScale(trace->normal, -1.0f, left);
+    up[0] = up[1] = 0.0f;
+    up[2] = 1.0f;
+    along = DotProduct(up, trace->normal);
+    VectorMA(up, -along, trace->normal, up);
+    if (VectorLength(up) < 0.1f) {
+        VectorCopy(ent->s.pos.trDelta, up);
+        along = DotProduct(up, trace->normal);
+        VectorMA(up, -along, trace->normal, up);
+        if (VectorLength(up) < 0.1f) {
+            up[0] = 1.0f;
+            up[1] = up[2] = 0.0f;
+        }
+    }
+    Vec3Normalize(up);
+    forward[0] = left[1] * up[2] - left[2] * up[1];
+    forward[1] = left[2] * up[0] - left[0] * up[2];
+    forward[2] = left[0] * up[1] - left[1] * up[0];
+    /* AngleVectors' axes: forward (cp cy, cp sy, -sp), left's z sr cp, up's z cr cp. */
+    angles[0] = -asinf(forward[2] > 1.0f ? 1.0f : forward[2] < -1.0f ? -1.0f : forward[2]) * 57.2957795f;
+    angles[1] = atan2f(forward[1], forward[0]) * 57.2957795f;
+    angles[2] = atan2f(left[2], up[2]) * 57.2957795f;
+    VectorMA(endpos, 0.25f, trace->normal, origin);
+    G_SetOrigin(ent, origin);
+    G_SetAngle(ent, angles);
+    ent->s.groundEntityNum = trace->entityNum;
+    ent->s.eFlags &= ~GMISSILE_EF_GRENADE_BOUNCE;
+    ent->spawnflags |= GMISSILE_PLACED_STUCK;
+    G_PlacedSound(ent, BG_GetWeaponDef(ent->s.weapon)->szBounceSound);
+    SV_LinkEntity(ent);
+}
+
+/* A placed explosive's frame before the missile code: 1 when it has nothing
+ * left to do. A mine arms once it lies still, then senses enemies' feet. */
+static qboolean G_RunPlacedExplosive(gentity_t *ent, const WeaponDef *weapDef)
+{
+    gentity_t *owner = G_PlacedOwner(ent);
+    float radiusSq = weapDef->proximityRadius * weapDef->proximityRadius;
+    int i;
+
+    if (!owner) {
+        G_FreeEntity(ent);
+        return 1;
+    }
+    if (ent->spawnflags & GMISSILE_PLACED_STUCK) {
+        G_RunThink(ent);
+        return 1;
+    }
+    if (weapDef->proximityRadius <= 0.0f || ent->s.pos.trType != 0 || ent->s.groundEntityNum == 1023)
+        return 0;
+    if (!ent->count) {
+        ent->count = LEVEL_TIME + (weapDef->iProximityArmTime > 0 ? weapDef->iProximityArmTime : 1);
+        ent->r.currentAngles[2] = 0.0f;
+        G_SetAngle(ent, ent->r.currentAngles);
+        G_PlacedSound(ent, weapDef->szArmSound);
+    }
+    if ((ent->spawnflags & GMISSILE_PLACED_TRIGGERED) || LEVEL_TIME < ent->count)
+        return 0;
+    for (i = 0; i < 64; i++) {
+        gentity_t *other = &g_entities[i];
+        vec3_t delta;
+
+        if (!other->r.inuse || !other->client || other == owner || other->health <= 0 ||
+            other->client->sess.connected != 2 || other->client->sess.sessionState != 0 ||
+            OnSameTeam(owner, other))
+            continue;
+        VectorSubtract(other->r.currentOrigin, ent->r.currentOrigin, delta);
+        if (delta[0] * delta[0] + delta[1] * delta[1] > radiusSq ||
+            delta[2] < -GMISSILE_PROXIMITY_BELOW || delta[2] > GMISSILE_PROXIMITY_ABOVE)
+            continue;
+        ent->spawnflags |= GMISSILE_PLACED_TRIGGERED;
+        ent->nextthink = LEVEL_TIME + weapDef->iProximityDelay;
+        G_PlacedSound(ent, weapDef->szTriggerSound);
+        break;
+    }
+    return 0;
+}
+
+/* The player's detonator: every charge of theirs goes off on its next frame,
+ * near or far, still in flight or stuck. */
+void G_DetonateExplosives(gentity_t *player)
+{
+    int i;
+
+    for (i = 64; i < level.num_entities; i++) {
+        gentity_t *ent = &g_entities[i];
+
+        if (!ent->r.inuse || ent->s.eType != 4 || ent->handler != 7 ||
+            !BG_GetWeaponDef(ent->s.weapon)->hasDetonator || COD2_GEntityFromHandle(ent->parent) != player)
+            continue;
+        ent->nextthink = LEVEL_TIME;
+    }
+}
+
+static qboolean G_CanTakeMine(const gentity_t *player)
+{
+    const playerState_t *ps = &player->client->ps;
+
+    return player->health > 0 && ps->pm_type == 0 && player->client->sess.sessionState == 0 &&
+        !(ps->eFlags & 0x300) && !(ps->pm_flags & (0x10 | 0x4));
+}
+
+static int s_mineListTime = -1;
+static int s_mineCount;
+static unsigned short s_mineList[128];
+
+/* The mines in the level, listed once a frame for every player's search. */
+static void G_ListMines(void)
+{
+    int i;
+
+    if (s_mineListTime == LEVEL_TIME)
+        return;
+    s_mineListTime = LEVEL_TIME;
+    s_mineCount = 0;
+    for (i = 64; i < level.num_entities && s_mineCount < (int)(sizeof(s_mineList) / sizeof(s_mineList[0])); i++) {
+        const gentity_t *ent = &g_entities[i];
+
+        if (ent->r.inuse && ent->s.eType == 4 && ent->handler == 7 &&
+            BG_GetWeaponDef(ent->s.weapon)->proximityRadius > 0.0f)
+            s_mineList[s_mineCount++] = (unsigned short)i;
+    }
+}
+
+/* The nearest of the player's own mines lying still within reach and in
+ * sight, which they carry and have room for; NULL otherwise. */
+static gentity_t *G_FindOwnMine(gentity_t *player)
+{
+    const playerState_t *ps = &player->client->ps;
+    float nearest = GMISSILE_PICKUP_REACH * GMISSILE_PICKUP_REACH;
+    gentity_t *found = NULL;
+    vec3_t eye;
+    int i;
+
+    if (!G_CanTakeMine(player))
+        return NULL;
+    G_ListMines();
+    G_GetPlayerViewOrigin(player, eye);
+    for (i = 0; i < s_mineCount; i++) {
+        gentity_t *mine = &g_entities[s_mineList[i]];
+        const WeaponDef *weapDef;
+        vec3_t delta;
+        trace_t trace;
+        float distance;
+
+        if (!mine->r.inuse || mine->s.eType != 4 || mine->handler != 7 ||
+            COD2_GEntityFromHandle(mine->parent) != player || mine->s.pos.trType != 0 ||
+            (mine->spawnflags & GMISSILE_PLACED_TRIGGERED))
+            continue;
+        weapDef = BG_GetWeaponDef(mine->s.weapon);
+        if (weapDef->proximityRadius <= 0.0f || weapDef->hasDetonator ||
+            !((ps->weapons[mine->s.weapon >> 5] >> (mine->s.weapon & 0x1f)) & 1) ||
+            ps->ammoclip[weapDef->iClipIndex] >= weapDef->iClipSize)
+            continue;
+        VectorSubtract(mine->r.currentOrigin, player->r.currentOrigin, delta);
+        distance = delta[0] * delta[0] + delta[1] * delta[1];
+        if (distance > nearest || delta[2] < -GMISSILE_PICKUP_HEIGHT || delta[2] > GMISSILE_PICKUP_HEIGHT)
+            continue;
+        G_TraceCapsule(&trace, eye, (vec_t *)vec3_origin_ptr, (vec_t *)vec3_origin_ptr, mine->r.currentOrigin,
+                       player->s.number, 0x811);
+        if (trace.startsolid || (trace.fraction < 1.0f && trace.entityNum != mine->s.number))
+            continue;
+        nearest = distance;
+        found = mine;
+    }
+    return found;
+}
+
+static int s_minePickupStart[64];
+static int s_minePickupEntity[64];
+
+/* Each server frame, after the cursor hints: where nothing else is offered,
+ * a mine of the player's within reach offers itself and a held Use takes it. */
+void G_UpdateMinePickup(gentity_t *player)
+{
+    playerState_t *ps = &player->client->ps;
+    int clientNum = player->s.number;
+    gentity_t *mine;
+    const WeaponDef *weapDef;
+
+    if ((unsigned)clientNum >= 64)
+        return;
+    mine = ps->cursorHint ? NULL : G_FindOwnMine(player);
+    if (!mine || !(player->client->buttons & GMISSILE_BUTTONS_USE)) {
+        s_minePickupStart[clientNum] = 0;
+    } else if (!s_minePickupStart[clientNum] || s_minePickupStart[clientNum] > LEVEL_TIME ||
+               s_minePickupEntity[clientNum] != mine->s.number) {
+        s_minePickupStart[clientNum] = LEVEL_TIME;
+        s_minePickupEntity[clientNum] = mine->s.number;
+    } else if (LEVEL_TIME - s_minePickupStart[clientNum] >= GMISSILE_PICKUP_MSEC) {
+        weapDef = BG_GetWeaponDef(mine->s.weapon);
+        ps->ammoclip[weapDef->iClipIndex]++;
+        G_PlacedSound(mine, weapDef->szPickupSound);
+        G_FreeEntity(mine);
+        s_minePickupStart[clientNum] = 0;
+        return;
+    }
+    if (mine) {
+        ps->cursorHint = PLACED_PICKUP_HINT;
+        ps->cursorHintString = mine->s.weapon;
+        ps->cursorHintEntIndex = 1023;
+    }
+}
+
+/* Asked by the snapshot before sight: a placed explosive at rest goes to its
+ * owner and, in a team mode, their teammates (the Axis 1, the Allies 2)
+ * within the emblem's reach of their eyes wherever it lies, so its squad
+ * emblem shows through walls. Anyone else gets it only in sight. */
+qboolean G_PlacedExplosiveSentTo(const entityState_t *es, const vec_t *eye, int clientNum)
+{
+    vec3_t delta;
+    int team;
+
+    if (es->eType != 4 || es->pos.trType != 0 || es->weapon <= 0 || es->weapon > BG_GetNumWeapons() ||
+        (unsigned)es->otherEntityNum >= 64 || (unsigned)clientNum >= 64 ||
+        !BG_IsPlacedExplosive(BG_GetWeaponDef(es->weapon)))
+        return 0;
+    if (es->otherEntityNum != clientNum) {
+        if (!g_entities[es->otherEntityNum].client || !g_entities[clientNum].client)
+            return 0;
+        team = G_PlacedTeam(&g_entities[clientNum]);
+        if ((team != 1 && team != 2) || G_PlacedTeam(&g_entities[es->otherEntityNum]) != team)
+            return 0;
+    }
+    VectorSubtract(es->pos.trBase, eye, delta);
+    return DotProduct(delta, delta) <= PLACED_EMBLEM_RANGE * PLACED_EMBLEM_RANGE;
 }
 
 void G_ExplodeMissile(gentity_t *ent)
@@ -490,6 +863,9 @@ gentity_t *fire_grenade(gentity_t *self, vec_t *start, vec_t *dir, int grenadeWP
     VectorCopy(start, (_ENT(bolt)->r.currentOrigin));
 
     VectorCopy((&_ENT(bolt)->s.apos)->trBase, (_ENT(bolt)->r.currentAngles));
+
+    if (BG_IsPlacedExplosive(weapDef))
+        G_PlaceExplosive(self, bolt, weapDef);
 
     return bolt;
 }
@@ -746,6 +1122,10 @@ void G_RunMissile(gentity_t *ent)
         VectorClear(ent->s.pos.trDelta);
     }
 
+    weapDef = BG_GetWeaponDef(ent->s.weapon);
+    if (BG_IsPlacedExplosive(weapDef) && G_RunPlacedExplosive(ent, weapDef))
+        return;
+
     if ((&_ENT(ent)->s.pos)->trType == 0 && (_ENT(ent)->s.groundEntityNum) != 0x3FE) {
 
         VectorCopy((_ENT(ent)->r.currentOrigin), origin);
@@ -976,6 +1356,11 @@ after_trace:
         gentity_t *other = G_ENTITY(tr.entityNum);
 
         (_ENT(ent)->s.surfType) = (tr.surfaceFlags & 0x1F00000) >> 20;
+
+        if (weapDef->stickiness == WEAPSTICKINESS_ALL && !(_ENT(other)->client) && !tr.startsolid) {
+            G_StickMissile(ent, &tr, endpos);
+            goto run_think;
+        }
 
         /* Use the same bounce flag set by fire_grenade. The FX lifetime flag
          * (0x10000) does not identify a bouncing projectile. Without this,

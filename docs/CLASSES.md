@@ -2,8 +2,8 @@
 
 Players build up to five named classes in the browser and pick one in any
 match, on either team. A class sets the primary weapon, the secondary pistol,
-the lethal grenade (frag) and the tactical grenade (smoke): CoD2's two offhand
-slots. The screens follow the Create a Class flow of the Call of Duty: WWII
+the lethal item (a frag, the S-Mine 44 or C4) and the tactical grenade
+(smoke): CoD2's two offhand slots. The screens follow the Create a Class flow of the Call of Duty: WWII
 capture the owner supplied, drawn with CoD2's own images and the Barlow fonts
 the menus already use.
 
@@ -29,8 +29,9 @@ the menus already use.
   Kar98k and a TT-30, a German one with an M1 Garand.
 
 The 21 primaries are those of the four factions' retail weapon menus. The
-secondaries are the Colt .45, Webley, TT-30 and Luger, and the grenades are the
-four frags and four smokes. Every new gametag starts with these classes:
+secondaries are the Colt .45, Webley, TT-30 and Luger. The lethal items are the
+four frags, the S-Mine 44 and C4; the tactical items are the four smokes (see
+[placed explosives](#placed-explosives)). Every new gametag starts with these classes:
 
 | Class | Primary | Secondary | Lethal | Tactical |
 | --- | --- | --- | --- | --- |
@@ -63,7 +64,7 @@ order.
 
 Every room loads `browser_classes.gsc` before the level finishes initializing:
 
-- It precaches the 33 class weapons and the class menu.
+- It precaches the 35 class weapons and the class menu.
 - It points both teams' weapon menus at the class menu.
 - It wraps the gametype's weapon callback. A class response names one weapon
   for each slot from the lists, or it is refused and the menu reopens.
@@ -78,7 +79,7 @@ At each spawn the class gives:
 - the primary and the pistol, both with full ammunition;
 - one smoke grenade, when smoke is allowed;
 - the frag count retail gives for that primary (`getWeaponBasedGrenadeCount`),
-  when frags are allowed;
+  or two S-Mines or two C4 charges, when frags are allowed;
 - binoculars.
 
 When S&D swaps weapons in place before a round, the whole class applies at
@@ -102,11 +103,42 @@ These are comparisons, not retail statistics. The lethal note uses the frag's
 `fuseTime`, 3.5 seconds: as elsewhere in this port, a frag cooks in the hand
 from the moment the pin comes out. Smoke grenades do not cook.
 
+## Placed explosives
+
+The S-Mine 44 and C4 are generated from the owner's files when the private
+archives are prepared (`scripts/browser_explosives.py`,
+`scripts/browser_smine.py`); the repository holds none of their data.
+
+- **S-Mine 44**, as Call of Duty: WWII shows it. G lowers the gun; the right
+  hand brings up a green canister with a yellow band and its igniter, the left
+  hand draws the safety pin, the right hand stands the mine upright beside the
+  view and sets it down at the player's feet, upright and facing where they
+  look. It takes about two seconds with a rifle. The hand animations are the
+  Mk 2 grenade's pull-pin, with the left arm reaching for the S-Mine's pin and
+  a held pose and setting down added. The mine arms after 1.2 s; an enemy's
+  feet within 40 units click it and it goes off 0.15 s later. Its owner takes
+  it back by holding Use (F, or X on a controller) for half a second within
+  52 units of it, with it in sight and room in their kit: "Press and hold F to
+  pickup S-Mine 44" shows under the crosshair.
+- **C4**, CoD4's charge with CoD2's sticky bomb. G takes out the detonator,
+  fire throws a charge that sticks where it lands, and aim sets off every
+  charge the player placed, wherever they are.
+- Both show the **squad emblem** above them, pulsing slowly between faint and
+  nearly full every 1.8 s: the Allies' star in its ring, or the Axis' iron
+  cross in the same ring. The owner and teammates see it through walls up to
+  1600 units away; enemies never do. It is a 16-unit disc 17 units above the
+  explosive, drawn between 22 and 96 virtual units across. `cg_hudExplosiveIcons
+  0` hides it.
+- Each player keeps two of each kind; a third replaces the oldest. Both go
+  away when their owner leaves or changes sides.
+
 ## Download and runtime cost
 
 The Soviet weapons now ship with every map. They add 3.87 MB to the renderer
-archive and 1.60 MB to the audio archive. The four prepared archives total
-329.6 MB, against 324.1 MB before.
+archive and 1.60 MB to the audio archive, taking the four prepared archives
+from 324.1 MB to 329.6 MB. The S-Mine 44 and C4 add 0.41 MB to the renderer
+archive and 2.90 MB to the audio archive, nearly all of it the development
+host's 22 owner sounds for them, for 332.9 MB.
 
 Toujane TDM was measured in Chrome at 1280×800, two runs each with the same
 build, against a room whose class script was empty:

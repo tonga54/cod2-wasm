@@ -20,6 +20,7 @@ def function(name):
 
 
 constants = source[source.index('#define WEAPON_READY'):source.index('static qboolean PM_WeaponHasInventoryWeapon')]
+constants += re.search(r'#define EV_DETONATE [^\n]+\n', (root / 'src/headers/cod2_grenade.h').read_text())[0]
 support = r'''
 #include <assert.h>
 #include <stdio.h>
@@ -37,7 +38,7 @@ typedef struct {int bSemiAuto,bBoltAction,bSegmentedReload,bClipOnly,bNoPartialR
  iAmmoIndex,iClipIndex,iClipSize,iReloadStartAdd,iReloadAmmoAdd,iReloadStartAddTime,
  iReloadStartTime,iReloadTime,iReloadEmptyTime,iReloadAddTime,iRechamberBoltTime,
  iReloadEndTime,iMeleeDamage,iMeleeDelay,iMeleeTime,iAltWeaponIndex,iDropTime,iAltDropTime,
- iRaiseTime,iAltRaiseTime,offhandClass,weapType,weapSlot;} WeaponDef;
+ iRaiseTime,iAltRaiseTime,offhandClass,weapType,weapSlot,hasDetonator,iHoldFireTime;} WeaponDef;
 typedef struct {int weapon,buttons,serverTime; signed char forwardmove,rightmove;} usercmd_t;
 typedef struct {playerState_t *ps;usercmd_t cmd,oldcmd;} pmove_t;
 typedef struct {int msec;} pml_t;
@@ -70,7 +71,7 @@ names = ('PM_WeaponHasInventoryWeapon', 'PM_WeaponSetAnim', 'PM_WeaponClearAnim'
          'PM_CheckWeaponChange', 'PM_ReloadClip', 'PM_Weapon_AllowReload',
          'PM_Weapon_ReloadDelayedAction', 'PM_SetReloadDelay', 'PM_SetReloadingState',
          'PM_BeginWeaponReload', 'PM_UpdateWeaponTimers', 'PM_StartMelee',
-         'PM_CheckMeleeStart', 'PM_FinishMeleeDelay', 'PM_RunReloadState', 'PM_Weapon')
+         'PM_CheckMeleeStart', 'PM_FinishMeleeDelay', 'PM_RunReloadState', 'PM_TryDetonate', 'PM_Weapon')
 body = ''.join(function(name) for name in names)
 checks = r'''
 static void tick(pmove_t *pm,int dt){pml_t pml={dt};pm->cmd.serverTime+=dt;PM_Weapon(pm,&pml);pm->oldcmd=pm->cmd;}

@@ -21,7 +21,7 @@ support=r'''
 typedef int qboolean;typedef unsigned char byte;
 #define WEAPTYPE_GRENADE 2
 typedef struct {int weapon,offHandIndex,weaponstate,weaponTime,weaponDelay,weaponRestrictKickTime,pm_flags,grenadeTimeLeft,eFlags,ammoclip[128],eventSequence,events[4],eventParms[4],stats[1];} playerState_t;
-typedef struct {int iFireTime,iFireDelay,iFuseTime,quickRaiseTime,iHoldFireTime,iClipIndex,weapType,offhandClass,bCookOffHold,bBoltAction,bSemiAuto;} WeaponDef;
+typedef struct {int iFireTime,iFireDelay,iFuseTime,quickRaiseTime,iHoldFireTime,iClipIndex,weapType,offhandClass,bCookOffHold,bBoltAction,bSemiAuto,hasDetonator;float proximityRadius;} WeaponDef;
 typedef struct {playerState_t *ps;struct {int buttons,weapon;} cmd;} pmove_t;
 typedef struct {int msec;} pml_t;
 typedef struct {playerState_t ps;int lastServerTime;} gclient_t;
@@ -45,6 +45,8 @@ static void G_UseOffHand(gentity_t *e){throws++;throwTime=now;throwFuse=e->clien
 static void Scr_Notify(gentity_t *e,int s,int n){notifications++;}
 static void G_Damage(gentity_t*a,void*b,void*c,void*d,void*e,int f,int g,int h,int i,int j){}
 static void G_GrenadeCookOff(gentity_t *e){deaths++;}
+static int detonations;
+static void G_DetonateExplosives(gentity_t *e){detonations++;}
 static void player_die(gentity_t*a,gentity_t*b,gentity_t*c,int d,int e,int f,void*g,int h,int i){deaths++;}
 '''
 body=''.join(function(weapons,n) for n in ['PM_UpdateOffhandCook','PM_UpdateWeaponTimers','PM_StartOffhandPrepare','PM_ReleaseOffhand','PM_RunOffhandState'])+function(active,'ClientEvents')
@@ -77,9 +79,10 @@ int main(void){
   assert(throwFuse>0 && throwFuse<=grenade.iFuseTime);
   int fuse=pm.ps->grenadeTimeLeft;for(int i=0;i<10;i++)tick(&ent,&pm,step);assert(pm.ps->grenadeTimeLeft==fuse);
  }
- for(int event=0x9e;event<=0xc5;event++){
+ for(int event=0x9e;event<=EV_DETONATE;event++){
   gclient_t c={.ps={.eventSequence=1,.events={event}}};gentity_t e={.client=&c};
-  throws=shots=melees=notifications=deaths=0;ClientEvents(&e,0);
+  throws=shots=melees=notifications=deaths=detonations=0;ClientEvents(&e,0);
+  assert(detonations==(event==EV_DETONATE));
   assert(throws==(event==0xa6));assert(melees==(event==0xa4));
   assert(shots==(event==0x9e||event==0x9f||event==0xa0||event==0xaf));
   assert(deaths==(event==0xc5));assert(notifications==(event>=0xa8&&event<=0xac));

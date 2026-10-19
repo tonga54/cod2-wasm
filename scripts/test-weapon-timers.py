@@ -31,7 +31,7 @@ support=r'''
 #define PM_WEAPON_FLAG_TRIGGER_HELD 0x40000
 typedef int qboolean;
 typedef struct { int pm_time,pm_flags,legsTimer,torsoTimer,weaponTime,weaponDelay,grenadeTimeLeft,weaponRestrictKickTime,foliageSoundTime,damageTimer,damageDuration,holdBreathTimer,weapon,weaponstate,offHandIndex,weaponrechamber[4],ammo[128],ammoclip[128]; } playerState_t;
-typedef struct { int bBoltAction,bSemiAuto,bSegmentedReload,iReloadStartAddTime,iReloadStartTime,iReloadTime,iReloadEmptyTime,iReloadAddTime,iRechamberBoltTime,iClipIndex,iAmmoIndex,iClipSize,iReloadStartAdd,iReloadAmmoAdd,weapType,offhandClass,bCookOffHold; } WeaponDef;
+typedef struct { int bBoltAction,bSemiAuto,bSegmentedReload,iReloadStartAddTime,iReloadStartTime,iReloadTime,iReloadEmptyTime,iReloadAddTime,iRechamberBoltTime,iClipIndex,iAmmoIndex,iClipSize,iReloadStartAdd,iReloadAmmoAdd,weapType,offhandClass,bCookOffHold,hasDetonator; float proximityRadius; } WeaponDef;
 typedef struct { playerState_t *ps;struct {int buttons,weapon;} cmd; } pmove_t;
 typedef struct { int msec; } pml_t;
 static WeaponDef weapon,grenade,*bg_weaponDefs[128],*bg_weapClips[128];

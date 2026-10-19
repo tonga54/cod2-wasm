@@ -44,6 +44,7 @@ static const char *const s_hudImageNames[R_HUD_IMAGE_COUNT] = {
     "*menu_shade",
     "*menu_pill",
     "*menu_cursor",
+    "*hud_squad_emblems",
 };
 
 static GfxImage s_hudImages[R_HUD_IMAGE_COUNT];

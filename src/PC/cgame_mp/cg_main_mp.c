@@ -13,6 +13,7 @@
 #include "headers/PC/cgame_mp/cg_playernames.h"
 #include "headers/PC/cgame_mp/cg_mantleprompt.h"
 #include "headers/PC/cgame_mp/cg_grenadewarning.h"
+#include "headers/PC/cgame_mp/cg_explosives.h"
 #include "headers/PC/cgame_mp/cg_scoretable.h"
 #include <float.h>
 
@@ -1232,6 +1233,7 @@ void CG_Init(int serverMessageNum, int serverCommandSequence, int clientNum)
     CG_KillcamInit();
     CG_EndgameInit();
     CG_HitMarkerInit();
+    CG_ExplosivesInit();
     CG_LoadingString("sounds");
     CG_RegisterSounds();
     CG_LoadingString("clients");

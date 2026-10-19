@@ -9,6 +9,8 @@ import tempfile
 import types
 import zipfile
 
+from browser_explosives import ALIASES as EXPLOSIVE_ALIASES
+
 root = Path(__file__).resolve().parent.parent
 module_path = root / 'scripts/browser_sound_assets.py'
 module_source = module_path.read_text()
@@ -28,6 +30,11 @@ MENU_ROW = row(name='music_mainmenu', **MUSIC)
 MENU_MP_ROW = row(name='music_mainmenu_mp', **MUSIC)
 AMBIENT_ROW = row(name='ambient_africa', file='ambient/africa.mp3', vol_min='0.5', channel='ambient',
                   type='streamed', loop='looping', loadspec='all_mp')
+# Every archive carries the retail rows the explosives' aliases start from.
+# Retail sounds are packaged as they are, so any bytes do for theirs.
+GRENADE_ROWS = [row(name=source, file=f'weapons/{source}.wav', channel='auto', loadspec='all_mp')
+                for source in sorted(set(EXPLOSIVE_ALIASES.values()))]
+GRENADE_SOUND = b'RIFF' + struct.pack('<I', 36) + b'WAVEfmt ' + bytes(28)
 
 
 def csv_text(rows):
@@ -212,6 +219,9 @@ with tempfile.TemporaryDirectory(prefix='cod2-menu-music-') as directory:
         archive.writestr('soundaliases/iw_code.csv', csv_text([HEADER, MENU_ROW, MENU_MP_ROW, AMBIENT_ROW]))
         archive.writestr('soundaliases/iw_sound2.csv', csv_text(
             [HEADER, ['#music_mainmenu', '', 'music\\other.mp3'], ['#music_mainmenu_mp', '', 'music\\other.mp3']]))
+        archive.writestr('soundaliases/test_grenades.csv', csv_text([HEADER, *GRENADE_ROWS]))
+        for values in GRENADE_ROWS:
+            archive.writestr('sound/' + values[2], GRENADE_SOUND)
         archive.writestr('sound/music/menu_grtemp.mp3', ORIGINAL)
         archive.writestr('sound/ambient/africa.mp3', AMBIENT)
 

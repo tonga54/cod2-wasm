@@ -12,13 +12,16 @@ import io
 from weapon_balance import apply_weapon_balance, load_profile
 from browser_bot_menu import apply_bot_menu
 from browser_class_menus import CLASS_MENU_LINE, class_menus
+from browser_explosives import (ALIAS_TABLE as EXPLOSIVE_ALIAS_TABLE, ALIASES as EXPLOSIVE_ALIASES,
+                                WEAPONS as EXPLOSIVE_WEAPONS, explosive_assets)
 from browser_settings_menu import apply_settings_menu
 from browser_objective_assets import objective_asset_roots
 from browser_spawn_safety import apply_spawn_safety
 from browser_sound_assets import (HIT_SOUND_ALIAS, HIT_SOUND_FILE, HIT_SOUND_OWNER_FILE, HIT_SOUND_TABLE,
                                   MENU_MUSIC_ALIASES, MENU_MUSIC_FILE, MENU_MUSIC_OWNER_FILE, MENU_MUSIC_TABLE,
                                   OWNER_SOUNDS_DIR, OWNER_SOUNDS_FOLDER, OWNER_SOUNDS_TABLE, alias_table,
-                                  load_owner_sounds, verify_hit_sound, verify_menu_music, verify_owner_sounds)
+                                  explosive_alias_table, load_owner_sounds, verify_hit_sound, verify_menu_music,
+                                  verify_owner_sounds)
 
 root = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
@@ -33,6 +36,14 @@ policy = json.loads(args.manifest.read_text())["variants"]["cod2-mp"]
 originals = [zipfile.ZipFile(p) for p in sorted((root / "data/main").glob("*.iwd"))]
 try:
     index = {n.lower(): (z, n) for z in originals for n in z.namelist() if not n.endswith("/")}
+    explosives = explosive_assets(lambda name: index[name][0].read(index[name][1]))
+    retail_alias_rows = {}
+    for name, (source, original_name) in index.items():
+        if name.startswith("soundaliases/") and name.endswith(".csv"):
+            header, rows = alias_table(source.read(original_name).decode("utf-8-sig", "replace"))
+            for fields in (dict(zip(header, row)) for row in rows):
+                retail_alias_rows.setdefault(fields.get("name", "").lower(), []).append((header, fields))
+    explosive_header, explosive_rows = explosive_alias_table(retail_alias_rows)
     entries = {}
     total = 0
     for item in policy["files"]:
@@ -50,6 +61,14 @@ try:
                     continue
                 if name in class_menus():
                     assert data == class_menus()[name], name
+                    continue
+                if name in explosives:
+                    assert data == explosives[name], name
+                    continue
+                if name == EXPLOSIVE_ALIAS_TABLE:
+                    selected_rows = list(csv.reader(io.StringIO(data.decode("utf-8"))))
+                    assert selected_rows[0] == explosive_header, name
+                    assert all(row in explosive_rows for row in selected_rows[1:]), name
                     continue
                 if name.endswith('.arena'):
                     mapname = 'mp_' + Path(name).stem
@@ -128,6 +147,8 @@ try:
         assert "weapons/mp/" + weapon.lower() in entries, "Missing class weapon: " + weapon
     for name in class_menus():
         assert name in entries, "Missing class menu: " + name
+    for name in list(explosives) + ["weapons/mp/" + weapon for weapon in EXPLOSIVE_WEAPONS]:
+        assert name in entries, "Missing explosive resource: " + name
     aliases = {}
     for name, data in entries.items():
         if name.startswith("soundaliases/") and name.endswith(".csv"):
@@ -146,6 +167,10 @@ try:
                     original_hit_rows.append((header, fields))
                 elif alias in MENU_MUSIC_ALIASES:
                     original_music_rows.append((header, fields))
+    # The explosives' aliases stand in for originals of their own.
+    for row in explosive_rows:
+        fields = dict(zip(explosive_header, row))
+        original_rows.setdefault(fields["name"].lower(), []).append((explosive_header, fields))
     owner_hit_sound = root / "data/main" / HIT_SOUND_OWNER_FILE
     verify_hit_sound(entries, original_hit_rows,
                      owner_hit_sound.read_bytes() if owner_hit_sound.is_file() else None)
@@ -154,6 +179,9 @@ try:
                       owner_menu_music.read_bytes() if owner_menu_music.is_file() else None)
     owner_sounds = load_owner_sounds(root / "data/main" / OWNER_SOUNDS_DIR)
     verify_owner_sounds(entries, original_rows, owner_sounds)
+    # From the explosives' own table, or the owner's where the pack replaces them.
+    for name in EXPLOSIVE_ALIASES:
+        assert name in aliases, "Missing explosive sound alias: " + name
     for name in ("weap_sten_fire_plr", "weap_mp40_fire", "step_run_plr_default",
                  "bullet_small_flesh", "ambient_africa", "ambient_france", "music_mainmenu_mp",
                  "us_mp_cmd_followme"):

@@ -1730,6 +1730,14 @@ void CG_AddViewWeapon(playerState_t *ps)
     CG_Madd(hand.origin, finalAxis[0], cg->swayOffset[0] + CG_DvarValue(imp_cg_gun_x));
     CG_Madd(hand.origin, finalAxis[1], cg->swayOffset[1] + CG_DvarValue(imp_cg_gun_y));
     CG_Madd(hand.origin, finalAxis[2], cg->swayOffset[2] + CG_DvarValue(imp_cg_gun_z));
+    {
+        const WeaponDef *viewDef = (const WeaponDef *)BG_GetWeaponDef(weaponIndex);
+
+        /* The weapon's right is the axis's left negated. */
+        CG_Madd(hand.origin, finalAxis[0], viewDef->vGunOfs[0]);
+        CG_Madd(hand.origin, finalAxis[1], -viewDef->vGunOfs[1]);
+        CG_Madd(hand.origin, finalAxis[2], viewDef->vGunOfs[2]);
+    }
 
     if (BG_IsAimDownSightWeapon(weaponIndex) && playerState->fWeaponPosFrac > 0.0f) {
         vec3_t worldAngles;

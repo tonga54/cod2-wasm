@@ -2,6 +2,7 @@
 """Stamp a generated browser package with its source revision and content ID."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -16,6 +17,9 @@ for path in sorted(site.iterdir()):
     if path.is_file() and path.name != 'build-info.json':
         digest.update(path.name.encode() + b'\0')
         digest.update(hashlib.sha256(path.read_bytes()).digest())
-info = {'revision': revision, 'dirty': dirty, 'buildId': digest.hexdigest()}
+# A build with the player console (COD2_DEV_CONSOLE=1) is for local debugging;
+# the static suite and the Pi release refuse it.
+info = {'revision': revision, 'dirty': dirty, 'buildId': digest.hexdigest(),
+        'devConsole': os.environ.get('COD2_DEV_CONSOLE', '0') == '1'}
 (site / 'build-info.json').write_text(json.dumps(info, indent=2) + '\n')
 print(f'Browser build: {revision[:12]}{" (local changes)" if dirty else ""}')

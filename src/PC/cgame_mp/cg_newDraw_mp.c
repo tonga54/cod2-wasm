@@ -331,6 +331,14 @@ static void CG_DrawCursorhint(const rectDef_t *rect, struct Font_s *font, float 
         return;
     }
 
+    if (snap && snap->ps.cursorHint == PLACED_PICKUP_HINT) {
+        cg->cursorHintIcon = 0;
+        if (!cg->renderingThirdPerson && snap->ps.stats[0] > 0 && snap->ps.cursorHintString > 0 &&
+            snap->ps.cursorHintString <= BG_GetNumWeapons())
+            CG_DrawMinePickupPrompt(rect, textStyle, snap->ps.cursorHintString, 1.0f);
+        return;
+    }
+
     if (!cg->renderingThirdPerson) {
 
         snap = cg->nextSnap;

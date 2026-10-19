@@ -84,9 +84,11 @@ extern void Web_ClassesSave(const char *player, const char *lines, int generatio
 #define CAC_STAT_TOP 300.0f
 #define CAC_STAT_ROW 17.0f
 #define CAC_STAT_BAR 104.0f
-/* The equipment rows' icons, 34.5 square, 48 apart. */
-#define CAC_ICON_SIZE 34.5f
-#define CAC_ICON_STEP 48.0f
+/* The equipment rows' icons, 30 square, 38 apart, six to a row: four
+ * grenades, the S-Mine and C4. */
+#define CAC_ICON_SIZE 30.0f
+#define CAC_ICON_STEP 38.0f
+#define CAC_EQUIP_COLUMNS 6
 #define CAC_RETAIL_IMAGE_ASPECT (199.0f / 112.0f)
 
 enum { CAC_SCREEN_LIST, CAC_SCREEN_EDIT, CAC_SCREEN_WEAPONS, CAC_SCREEN_EQUIPMENT };
@@ -128,9 +130,9 @@ static struct {
 
 static const char *const s_cacGroups[] = {
     "Submachine Gun", "Rifle", "Automatic Rifle", "Sniper Rifle", "Shotgun", "Pistol",
-    "Lethal Fragmentation Grenade", "Tactical Smoke Grenade",
+    "Lethal Fragmentation Grenade", "Tactical Smoke Grenade", "Lethal Proximity Mine", "Lethal Remote Charge",
 };
-static const char *const s_cacNations[] = { "United States", "United Kingdom", "Soviet Union", "Germany" };
+static const char *const s_cacNations[] = { "United States", "United Kingdom", "Soviet Union", "Germany", NULL };
 static const char *const s_cacSlots[] = { "Primary", "Secondary", "Lethal", "Tactical" };
 static const char *const s_cacStats[] = { "Damage", "Range", "Accuracy", "Fire Rate", "Mobility" };
 static const vec4_t s_cacRow = { 0.0f, 0.0f, 0.0f, 0.45f };
@@ -619,8 +621,8 @@ static void Cac_FocusHover(void)
         s_cac.slotFocus = s_cac.hover;
         break;
     case CAC_SCREEN_EQUIPMENT:
-        s_cac.pickSlot = s_cac.hover / 4 ? CLASS_SLOT_LETHAL : CLASS_SLOT_TACTICAL;
-        s_cac.pickFocus = s_cac.hover % 4;
+        s_cac.pickSlot = s_cac.hover / CAC_EQUIP_COLUMNS ? CLASS_SLOT_LETHAL : CLASS_SLOT_TACTICAL;
+        s_cac.pickFocus = s_cac.hover % CAC_EQUIP_COLUMNS;
         break;
     default:
         s_cac.pickFocus = s_cac.hover;
@@ -779,20 +781,24 @@ static void Cac_Stats(int weapon)
              UI_WWIIMenu_Color(WWII_COLOR_WHITE));
 }
 
-/* Name, kind and origin, and the retail description. */
-static void Cac_Detail(int weapon, float x, float baseline, int horz, float width)
+/* Name, kind and origin, and the retail description; the baseline after them. */
+static float Cac_Detail(int weapon, float x, float baseline, int horz, float width)
 {
     char kind[96];
     const ClassWeapon *entry;
 
     if (weapon < 0)
-        return;
+        return baseline;
     entry = &g_classWeapons[weapon];
     Cac_Caps(Cac_WeaponName(weapon), 1, x, baseline, horz, 10.0f, 0.06f, UI_WWIIMenu_Color(WWII_COLOR_WHITE));
-    snprintf(kind, sizeof(kind), "%s, %s", s_cacGroups[entry->group], s_cacNations[entry->nation]);
+    if (s_cacNations[entry->nation])
+        snprintf(kind, sizeof(kind), "%s, %s", s_cacGroups[entry->group], s_cacNations[entry->nation]);
+    else
+        snprintf(kind, sizeof(kind), "%s", s_cacGroups[entry->group]);
     Cac_Text(kind, 1, x, baseline + 11.0f, horz, 4.8f, 0.0f, UI_WWIIMenu_Color(WWII_COLOR_TITLE));
     if (entry->description)
-        Cac_Wrapped(Cac_Translate(entry->description, ""), x, baseline + 24.0f, horz, width, 4.4f, 5, s_cacNote);
+        return Cac_Wrapped(Cac_Translate(entry->description, ""), x, baseline + 24.0f, horz, width, 4.4f, 5, s_cacNote);
+    return baseline + 24.0f;
 }
 
 static void Cac_PaintList(displayContextDef_t *dc)
@@ -929,17 +935,19 @@ static void Cac_PaintEquipment(displayContextDef_t *dc)
     static const int rows[2] = { CLASS_SLOT_TACTICAL, CLASS_SLOT_LETHAL };
     int row, focusWeapon = -1;
     char hint[96];
+    float below;
     CacRect box;
 
     Cac_Title("Modify Equipment", NULL);
     for (row = 0; row < 2; row++) {
         int indexes[64], count = Cac_SlotCandidates(rows[row], indexes), i;
         float top = row ? 236.0f : 115.0f;
-        CacRect line = Cac_Rect(CAC_LEFT, top - 6.0f, 186.0f, CAC_LINE, CAC_ALIGN_LEFT);
+        CacRect line = Cac_Rect(CAC_LEFT, top - 6.0f, CAC_EQUIP_COLUMNS * CAC_ICON_STEP - (CAC_ICON_STEP - CAC_ICON_SIZE),
+                                CAC_LINE, CAC_ALIGN_LEFT);
 
         Cac_Fill(&line, s_cacEdge);
         Cac_Caps(s_cacSlots[rows[row]], 0, CAC_LEFT, top + 1.5f, CAC_ALIGN_LEFT, 4.4f, 0.12f, s_cacNote);
-        for (i = 0; i < count && i < 4; i++) {
+        for (i = 0; i < count && i < CAC_EQUIP_COLUMNS; i++) {
             CacRect tile = Cac_Rect(CAC_LEFT + (float)i * CAC_ICON_STEP, top + 8.0f, CAC_ICON_SIZE, CAC_ICON_SIZE,
                                     CAC_ALIGN_LEFT);
             int isFocus = s_cac.pickSlot == rows[row] && i == s_cac.pickFocus;
@@ -947,7 +955,7 @@ static void Cac_PaintEquipment(displayContextDef_t *dc)
             CacRect picture = tile;
 
             if (Cac_Hover(dc, &tile))
-                s_cac.hover = row * 4 + i;
+                s_cac.hover = row * CAC_EQUIP_COLUMNS + i;
             if (isFocus)
                 focusWeapon = indexes[i];
             Cac_Fill(&tile, isFocus ? s_cacRowFocus : s_cacTile);
@@ -961,15 +969,22 @@ static void Cac_PaintEquipment(displayContextDef_t *dc)
     }
     if (focusWeapon < 0)
         return;
-    Cac_Detail(focusWeapon, CAC_LEFT + 4.0f * CAC_ICON_STEP + 12.0f, 135.0f, CAC_ALIGN_LEFT, CAC_DETAIL_WIDTH);
-    /* The default binds. Every frag cooks in the hand (BG_GrenadeCanCook); smoke does not. */
-    if (s_cac.pickSlot == CLASS_SLOT_LETHAL && s_cac.stats[focusWeapon].fuse > 0.0f)
+    below = Cac_Detail(focusWeapon, CAC_LEFT + CAC_EQUIP_COLUMNS * CAC_ICON_STEP + 12.0f, 135.0f, CAC_ALIGN_LEFT,
+                       CAC_DETAIL_WIDTH);
+    /* The default binds. Every frag cooks in the hand (BG_GrenadeCanCook); smoke, the
+     * mine and C4 do not. */
+    if (g_classWeapons[focusWeapon].group == CLASS_GROUP_MINE)
+        snprintf(hint, sizeof(hint), "%s", "Press G to set it at your feet; hold F over it to take it back.");
+    else if (g_classWeapons[focusWeapon].group == CLASS_GROUP_CHARGE)
+        snprintf(hint, sizeof(hint), "%s", "Press G to take it out: fire throws it, aim sets them off.");
+    else if (s_cac.pickSlot == CLASS_SLOT_LETHAL && s_cac.stats[focusWeapon].fuse > 0.0f)
         snprintf(hint, sizeof(hint), "Hold G to cook it: the %g-second fuse starts with the pin.",
                  (double)s_cac.stats[focusWeapon].fuse);
     else
         snprintf(hint, sizeof(hint), "%s", s_cac.pickSlot == CLASS_SLOT_LETHAL ? "Hold G to cook it." : "Press 4 to throw it.");
-    Cac_Text(hint, 0, CAC_LEFT + 4.0f * CAC_ICON_STEP + 12.0f, 172.0f, CAC_ALIGN_LEFT, 4.4f, 0.0f, s_cacNote);
-    box = Cac_Rect(90.0f, 190.0f, 130.0f, 130.0f, CAC_ALIGN_CENTER);
+    Cac_Text(hint, 0, CAC_LEFT + CAC_EQUIP_COLUMNS * CAC_ICON_STEP + 12.0f, below + 4.0f, CAC_ALIGN_LEFT, 4.4f, 0.0f,
+             s_cacNote);
+    box = Cac_Rect(90.0f, 235.0f, 130.0f, 130.0f, CAC_ALIGN_CENTER);
     Cac_Picture(focusWeapon, &box, s_cacNote);
 }
 

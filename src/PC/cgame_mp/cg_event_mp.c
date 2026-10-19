@@ -5,6 +5,7 @@
 #include "headers/PC/cgame_mp/cg_killcam.h"
 #include "headers/PC/cgame_mp/cg_killfeed.h"
 #include "bytematch.h"
+#include "cod2_grenade.h"
 
 extern char **cg_dvar_debug;
 extern char **cg_dvar_footsteps;
@@ -19,6 +20,11 @@ extern void Com_Printf(const char *msg, ...);
 extern void Com_DPrintf(const char *msg, ...);
 extern void Com_Error(int level, const char *msg, ...);
 extern void *BG_GetWeaponDef(int weapon);
+
+static const WeaponDef *CG_EventWeaponDef(int weapon)
+{
+    return (const WeaponDef *)BG_GetWeaponDef(weapon);
+}
 extern int BG_WeaponIsClipOnly(int weapon);
 extern int CG_PlayEntitySoundAlias(int entNum, int alias);
 extern int CG_PlaySoundAlias(int entitynum, const vec_t *origin, snd_alias_list_t *aliasList);
@@ -462,7 +468,7 @@ void CG_EntityEvent(centity_t *cent, int event)
 
     {
         int jmpIdx = event - 0x8b;
-        if ((unsigned int)jmpIdx > 0x3b) {
+        if ((unsigned int)jmpIdx > EV_DETONATE - 0x8b) {
 
             char **eventNames = CG_EventNames();
 
@@ -800,9 +806,19 @@ void CG_EntityEvent(centity_t *cent, int event)
             if (es->number != *(int *)(snap + SNAP_PS_CLIENTNUM))
                 return;
 
+            /* With every charge thrown the detonator stays in hand, as CoD4's. */
+            if (w && CG_EventWeaponDef(w)->hasDetonator)
+                return;
             CG_OutOfAmmoChange();
             return;
         }
+
+        case EV_DETONATE:
+            if (weapon && CG_EventWeaponDef(weapon)->szDetonateSound &&
+                CG_EventWeaponDef(weapon)->szDetonateSound[0])
+                CG_PlaySoundAliasByName(es->number, (const vec_t *)position,
+                                        CG_EventWeaponDef(weapon)->szDetonateSound);
+            return;
 
         case 0x94:
         {
@@ -1079,8 +1095,13 @@ void CG_EntityEvent(centity_t *cent, int event)
             ByteToDir(es->eventParm, dir);
 
             int surfType = es->surfType;
-            CG_PlaySoundAlias(0x3fe, position,
-                              cgs->media.grenadeBounceSound[surfType]);
+            /* A placed explosive lands with its own sound on every surface. */
+            if (es->weapon && CG_EventWeaponDef(es->weapon)->szBounceSound &&
+                CG_EventWeaponDef(es->weapon)->szBounceSound[0])
+                CG_PlaySoundAliasByName(0x3fe, (const vec_t *)position, CG_EventWeaponDef(es->weapon)->szBounceSound);
+            else
+                CG_PlaySoundAlias(0x3fe, position,
+                                  cgs->media.grenadeBounceSound[surfType]);
 
             {
                 char *fxLookup = (char *)cgs->media.fx;

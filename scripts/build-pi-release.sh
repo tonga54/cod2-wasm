@@ -41,7 +41,7 @@ npm test --prefix downstream/gateway
 for script in test-update-notifier test-fullscreen-control test-web-shell test-engine-version test-input-capture test-web-room-create; do
   node "scripts/${script}.cjs"
 done
-for script in test-client-update-menu test-native-fullscreen test-respawn-fall-jump test-script-vector-order test-script-native-callbacks test-player-lean test-corner-movement test-reload-cancel test-grenade-lifecycle test-mantle-movement test-mantle-hint test-mantle-view test-usercmd-delta test-hud-rotation test-server-frame-wait test-room-maps; do
+for script in test-dev-console test-client-update-menu test-native-fullscreen test-respawn-fall-jump test-script-vector-order test-script-native-callbacks test-player-lean test-corner-movement test-reload-cancel test-grenade-lifecycle test-mantle-movement test-mantle-hint test-mantle-view test-usercmd-delta test-hud-rotation test-server-frame-wait test-room-maps; do
   python3 "scripts/${script}.py"
 done
 mkdir -p out/pi-release
@@ -58,7 +58,7 @@ for service,tag in zip(('cod2-web','cod2-server','cod2-gateway'),tags):
     assert image['Config']['Labels']['org.opencontainers.image.revision']==revision
     images[service]={'tag':tag,'id':image['Id']}
 build=json.loads(Path('out/cod2-wasm-core/site/build-info.json').read_text())
-assert build['revision']==revision and not build['dirty']
+assert build['revision']==revision and not build['dirty'] and build['devConsole'] is False
 assert not subprocess.check_output(['git','status','--porcelain'])
 archive=Path('out/pi-release/pi-images.tar.gz')
 # Inspect the configuration actually exported, rather than defaults injected

@@ -3,6 +3,7 @@ import csv
 import io
 import re
 import struct
+from browser_explosives import ALIAS_TABLE, ALIASES, alias_rows
 
 # The owner may keep a hit confirmation sound of their own beside the original
 # IWDs, never in Git. It replaces the sound of the scripts' MP_hit_alert.
@@ -297,6 +298,27 @@ def verify_owner_sounds(entries, original_rows, owner):
                        for row in other_rows), 'Original rows kept beside the owner pack: ' + name
 
 
+def explosive_alias_table(rows_by_alias):
+    """The explosives' table: its header and rows, each new alias starting
+    from its retail source's rows. rows_by_alias maps an alias to a list of
+    (header, fields) for its original rows."""
+    headers = {tuple(header) for source in ALIASES.values() for header, _ in rows_by_alias.get(source, [])}
+    if len(headers) != 1:
+        raise ValueError('The explosives\' source aliases need one original alias table layout')
+    header = list(headers.pop())
+    return header, alias_rows(header, lambda source: [fields for _, fields in rows_by_alias.get(source, [])])
+
+
+def add_explosive_aliases(tables, aliases):
+    rows_by_alias = {alias: [(tables[table][0], fields) for table, _, fields in entries]
+                     for alias, entries in aliases.items()}
+    header, rows = explosive_alias_table(rows_by_alias)
+    tables[ALIAS_TABLE] = (header, [])
+    for row in rows:
+        fields = dict(zip(header, row))
+        aliases.setdefault(fields['name'].lower(), []).append((ALIAS_TABLE, row, fields))
+
+
 def collect_sound_assets(root, asset_index, originals, renderer, maps, hit_sound=None, menu_music=None,
                          owner_sounds=None):
     def read(name):
@@ -314,6 +336,7 @@ def collect_sound_assets(root, asset_index, originals, renderer, maps, hit_sound
             alias = fields.get('name', '').lower()
             if alias:
                 aliases.setdefault(alias, []).append((name, row, fields))
+    add_explosive_aliases(tables, aliases)
 
     # Authored weapon/animation/FX/menu/script references and engine constants.
     references = {'null', 'ambient_africa', 'ambient_france', 'music_mainmenu'}

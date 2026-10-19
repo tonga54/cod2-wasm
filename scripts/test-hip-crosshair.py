@@ -48,7 +48,7 @@ typedef struct {int weapon,eFlags,viewlocked_entNum,pm_flags,weaponstate,grenade
     float fWeaponPosFrac,aimSpreadScale;} playerState_t;
 typedef struct {char *unused;float fAdsCrosshairInFrac,fAdsCrosshairOutFrac;
     int iReticleCenterSize,iReticleSideSize,iReticleMinOfs,weapType,bCookOffHold,offhandClass;
-    float fHipReticleSidePos;const char *szReticleSide;} WeaponDef;
+    float fHipReticleSidePos;const char *szReticleSide;int hasDetonator;float proximityRadius;} WeaponDef;
 #include "cod2_grenade.h"
 #include "cod2_sprint.h"
 ''' + ''.join(f'#define {name} {value}f\n' for name, value in constants.items()) + lines_max.group(0) + '\n' + \
