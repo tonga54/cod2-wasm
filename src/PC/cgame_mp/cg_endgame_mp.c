@@ -161,6 +161,8 @@ static CG_EndgameState s_endgame;
 static CG_EndgameView s_endgameView;
 static const dvar_t *cg_hudEndgame;
 float g_webBackdropFrac = 0.0f;
+float g_webBackdropGray = 0.0f;
+float g_webMenuBackdrop = 0.0f;
 
 static int CG_EndgameEnabled(void)
 {
@@ -249,6 +251,8 @@ void CG_EndgameInit(void)
     s_endgame.boldFont = CL_RegisterFont("$boldfont", 0);
     s_endgame.regularFont = R_RegisterWwiiFont("$regularfont");
     g_webBackdropFrac = 0.0f;
+    g_webBackdropGray = 0.0f;
+    g_webMenuBackdrop = 0.0f;
 }
 
 void CG_EndgameMessage(const char *message)
@@ -267,7 +271,10 @@ void CG_EndgameFrame(int intermission)
     if (intermission && !s_endgame.intermission)
         s_endgame.start = cg->time;
     s_endgame.intermission = intermission;
-    g_webBackdropFrac = 0.0f;
+    /* The UI paints after the scene, so its request waits for this frame. */
+    g_webBackdropFrac = g_webMenuBackdrop;
+    g_webBackdropGray = g_webMenuBackdrop;
+    g_webMenuBackdrop = 0.0f;
     CG_EndgamePrepare();
 }
 

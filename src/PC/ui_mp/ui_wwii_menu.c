@@ -3,6 +3,7 @@
 #include "headers/PC/gfx_d3d/r_hud2d.h"
 #include "headers/PC/gfx_d3d/r_font_wwii.h"
 #include "headers/PC/ui_mp/ui_wwii_menu.h"
+#include "headers/PC/ui_mp/ui_wwii_settings.h"
 #include <math.h>
 #include <string.h>
 
@@ -671,15 +672,17 @@ static int UI_WWIIMenu_MainOpen(const displayContextDef_t *dc)
     return 0;
 }
 
-/* Create a Class paints its own page over the backdrop alone. */
-static int UI_WWIIMenu_ClassPageOpen(const displayContextDef_t *dc)
+/* Create a Class and Start New Server paint their own pages over the
+ * backdrop alone. */
+static int UI_WWIIMenu_PageOpen(const displayContextDef_t *dc)
 {
     int i;
 
     for (i = 0; i < dc->openMenuCount; i++) {
         const menuDef_t *menu = dc->menuStack[i];
 
-        if (menu && menu->window.name && !I_stricmp(menu->window.name, "create_a_class"))
+        if (menu && menu->window.name &&
+            (!I_stricmp(menu->window.name, "create_a_class") || !I_stricmp(menu->window.name, "createserver")))
             return 1;
     }
     return 0;
@@ -765,6 +768,11 @@ static void UI_WWIIMenu_Layout(void)
 void UI_WWIIMenu_RegisterDvars(void)
 {
     s_wwiiMenu.enabled = Dvar_RegisterBool_mac("ui_wwiiMainMenu", 1, 0x1001);
+}
+
+int UI_WWIIMenu_LayoutOn(void)
+{
+    return s_wwiiMenu.enabled && s_wwiiMenu.enabled->current.enabled;
 }
 
 void UI_WWIIMenu_Reset(const displayContextDef_t *dc)
@@ -878,10 +886,16 @@ static int UI_WWIIMenu_PaintBackdrop(displayContextDef_t *dc, itemDef_t *item)
     UI_WWIIMenu_BackdropRect(dc->realTime, height > 0.0f ? width / height : 0.0f, aspect, st);
     CL_DrawStretchPic(0.0f, 0.0f, 640.0f, 480.0f, WWII_ALIGN_FULLSCREEN, WWII_ALIGN_FULLSCREEN, st[0], st[1], st[2],
                       st[3], s_wwiiWhite, s_wwiiMenu.backdrop);
+    UI_WWIIMenu_PaintWash();
+    return 1;
+}
+
+void UI_WWIIMenu_PaintWash(void)
+{
+    UI_WWIIMenu_BuildImages();
     if (s_wwiiMenu.shade)
         CL_DrawStretchPic(0.0f, 0.0f, 640.0f * WWII_SHADE_WIDTH, 480.0f, WWII_ALIGN_FULLSCREEN, WWII_ALIGN_FULLSCREEN,
                           0.0f, 0.0f, 1.0f, 1.0f, s_wwiiShade, s_wwiiMenu.shade);
-    return 1;
 }
 
 int UI_WWIIMenu_PaintItem(displayContextDef_t *dc, itemDef_t *item)
@@ -890,7 +904,7 @@ int UI_WWIIMenu_PaintItem(displayContextDef_t *dc, itemDef_t *item)
         return 0;
     if (item == s_wwiiMenu.bgImage)
         return UI_WWIIMenu_PaintBackdrop(dc, item);
-    return UI_WWIIMenu_MainOpen(dc) || UI_WWIIMenu_ClassPageOpen(dc);
+    return UI_WWIIMenu_MainOpen(dc) || UI_WWIIMenu_PageOpen(dc) || UI_WWIISettings_Covers(dc);
 }
 
 static void UI_WWIIMenu_Animate(WWIIMenuItem *entry, int time, int focused)
@@ -1004,10 +1018,11 @@ static float UI_WWIIMenu_PromptWidth(const char *key, const char *label, float *
            UI_WWIIMenu_TextWidth(label, UI_WWIIMenu_Regular(WWII_PROMPT_CAP), WWII_PROMPT_CAP, 0.0f);
 }
 
-static void UI_WWIIMenu_PaintPrompt(float x, int horzAlign, const char *key, const char *label)
+/* lower moves the prompt that far down from the capture's row. */
+static void UI_WWIIMenu_PaintPrompt(float x, float lower, int horzAlign, const char *key, const char *label)
 {
     const float radius = 0.5f * WWII_PROMPT_HEIGHT;
-    const float top = -(WWII_PROMPT_BOTTOM + WWII_PROMPT_HEIGHT);
+    const float top = lower - (WWII_PROMPT_BOTTOM + WWII_PROMPT_HEIGHT);
     FontHandle keyFont = UI_WWIIMenu_Regular(WWII_PROMPT_KEY_CAP);
     float keycap, keyWidth;
 
@@ -1021,10 +1036,11 @@ static void UI_WWIIMenu_PaintPrompt(float x, int horzAlign, const char *key, con
                           0.0f, 1.0f, 1.0f, s_wwiiWhite, s_wwiiMenu.pill);
     }
     keyWidth = UI_WWIIMenu_TextWidth(key, keyFont, WWII_PROMPT_KEY_CAP, 0.0f);
-    UI_WWIIMenu_DrawText(key, keyFont, x + 0.5f * (keycap - keyWidth), -WWII_PROMPT_KEY_BASELINE, horzAlign,
+    UI_WWIIMenu_DrawText(key, keyFont, x + 0.5f * (keycap - keyWidth), lower - WWII_PROMPT_KEY_BASELINE, horzAlign,
                          WWII_ALIGN_BOTTOM, WWII_PROMPT_KEY_CAP, 0.0f, s_wwiiKey);
     UI_WWIIMenu_DrawText(label, UI_WWIIMenu_Regular(WWII_PROMPT_CAP), x + keycap + WWII_PROMPT_GAP,
-                         -WWII_PROMPT_BASELINE, horzAlign, WWII_ALIGN_BOTTOM, WWII_PROMPT_CAP, 0.0f, s_wwiiLabel);
+                         lower - WWII_PROMPT_BASELINE, horzAlign, WWII_ALIGN_BOTTOM, WWII_PROMPT_CAP, 0.0f,
+                         s_wwiiLabel);
 }
 
 /* Enter selects the focused item; Escape returns to a match only from
@@ -1034,12 +1050,12 @@ static void UI_WWIIMenu_PaintPrompts(void)
     const char *back;
     float keycap;
 
-    UI_WWIIMenu_PaintPrompt(WWII_PROMPT_LEFT, WWII_ALIGN_LEFT, "ENTER", "Select");
+    UI_WWIIMenu_PaintPrompt(WWII_PROMPT_LEFT, 0.0f, WWII_ALIGN_LEFT, "ENTER", "Select");
     if (!Dvar_GetBool("cl_ingame"))
         return;
     back = UI_SafeTranslateString("MENU_BACKTOGAME");
-    UI_WWIIMenu_PaintPrompt(-WWII_PROMPT_RIGHT - UI_WWIIMenu_PromptWidth("ESC", back, &keycap), WWII_ALIGN_RIGHT,
-                            "ESC", back);
+    UI_WWIIMenu_PaintPrompt(-WWII_PROMPT_RIGHT - UI_WWIIMenu_PromptWidth("ESC", back, &keycap), 0.0f,
+                            WWII_ALIGN_RIGHT, "ESC", back);
 }
 
 void UI_WWIIMenu_PaintMenu(displayContextDef_t *dc, menuDef_t *menu)
@@ -1127,17 +1143,60 @@ float UI_WWIIMenu_Width(const char *text, int bold, float cap, float tracking)
 void UI_WWIIMenu_Prompts(const char *const *keys, const char *const *labels, int count, const char *rightKey,
                          const char *rightLabel)
 {
-    float x = WWII_PROMPT_LEFT, keycap;
+    UI_WWIIMenu_PromptsAt(keys, labels, count, rightKey, rightLabel, WWII_PROMPT_LEFT, WWII_PROMPT_RIGHT, 0.0f);
+}
+
+void UI_WWIIMenu_PromptsAt(const char *const *keys, const char *const *labels, int count, const char *rightKey,
+                           const char *rightLabel, float left, float right, float lower)
+{
+    float x = left, keycap;
     int i;
 
     UI_WWIIMenu_BuildImages();
     for (i = 0; i < count; i++) {
-        UI_WWIIMenu_PaintPrompt(x, WWII_ALIGN_LEFT, keys[i], labels[i]);
+        UI_WWIIMenu_PaintPrompt(x, lower, WWII_ALIGN_LEFT, keys[i], labels[i]);
         x += UI_WWIIMenu_PromptWidth(keys[i], labels[i], &keycap) + WWII_PROMPT_SPACING;
     }
     if (rightKey)
-        UI_WWIIMenu_PaintPrompt(-WWII_PROMPT_RIGHT - UI_WWIIMenu_PromptWidth(rightKey, rightLabel, &keycap),
+        UI_WWIIMenu_PaintPrompt(-right - UI_WWIIMenu_PromptWidth(rightKey, rightLabel, &keycap), lower,
                                 WWII_ALIGN_RIGHT, rightKey, rightLabel);
+}
+
+float UI_WWIIMenu_KeycapWidth(const char *key, float height)
+{
+    const float cap = height * (WWII_PROMPT_KEY_CAP / WWII_PROMPT_HEIGHT);
+    float keycap = UI_WWIIMenu_TextWidth(key, UI_WWIIMenu_Regular(cap), cap, 0.0f) +
+                   2.0f * WWII_PROMPT_PAD * (height / WWII_PROMPT_HEIGHT);
+
+    return keycap < height ? height : keycap;
+}
+
+float UI_WWIIMenu_Keycap(const char *key, float x, float top, float height, int horzAlign, int vertAlign,
+                         const vec_t *tint)
+{
+    /* The pill's half-circle ends and its middle, stretched between them. */
+    static const float slices[4] = { 0.0f, 0.25f, 0.75f, 1.0f };
+    const float cap = height * (WWII_PROMPT_KEY_CAP / WWII_PROMPT_HEIGHT);
+    FontHandle font = UI_WWIIMenu_Regular(cap);
+    float keyWidth = UI_WWIIMenu_TextWidth(key, font, cap, 0.0f);
+    float keycap = UI_WWIIMenu_KeycapWidth(key, height);
+    float edges[4];
+    int i;
+
+    edges[0] = x;
+    edges[1] = x + 0.5f * height;
+    edges[2] = x + keycap - 0.5f * height;
+    edges[3] = x + keycap;
+    UI_WWIIMenu_BuildImages();
+    for (i = 0; s_wwiiMenu.pill && i < 3; i++)
+        CL_DrawStretchPic(edges[i], top, edges[i + 1] - edges[i], height, horzAlign, vertAlign, slices[i], 0.0f,
+                          slices[i + 1], 1.0f, tint ? tint : s_wwiiWhite, s_wwiiMenu.pill);
+    /* The prompts' keys sit as far up their keycap as ENTER and ESC do. */
+    UI_WWIIMenu_DrawText(key, font, x + 0.5f * (keycap - keyWidth),
+                         top + height * ((WWII_PROMPT_BOTTOM + WWII_PROMPT_HEIGHT - WWII_PROMPT_KEY_BASELINE) /
+                                         WWII_PROMPT_HEIGHT),
+                         horzAlign, vertAlign, cap, 0.0f, tint ? tint : s_wwiiKey);
+    return keycap;
 }
 
 int UI_WWIIMenu_NextItem(const menuDef_t *menu, int cursor, int direction)

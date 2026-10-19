@@ -34,7 +34,7 @@ static struct {struct {int integer;} current;} selectedMap, selectedType;
 static char output[256];
 static int calls;
 static int I_stricmp(const char *a, const char *b) {return strcmp(a,b);}
-static const char *Dvar_GetString(const char *name) {assert(!strcmp(name,"sv_hostname"));return "Test room";}
+static void UI_MatchMenu_RoomName(char *name, int size) {assert(size==64); snprintf(name,(size_t)size,"Test room");}
 static int Dvar_GetInt(const char *name) {
     if(!strcmp(name,"ui_botCount")) return 8;
     assert(!strcmp(name,"ui_botDifficulty")); return 2;

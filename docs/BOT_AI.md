@@ -372,6 +372,9 @@ Separately observe autonomous matches on Toujane, Carentan and Dawnville: check 
 reach objectives, score, change roles, obey round transitions and fight under
 the selected difficulty. Include a real browser client when measuring network
 latency; bots do not consume browser snapshot traffic or client rendering.
+A room's bots stand frozen until a person spawns or spectates and the
+countdown before the match ends, so join such a room before observing it.
+`scripts/test-bot-runtime.py` does not load that countdown.
 
 ## Reproduce routing and runtime measurements
 

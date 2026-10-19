@@ -39,7 +39,8 @@ body = '\n'.join([
 # with only the killcam over it.
 assert commands.count('if (!strcmp(cmd, "cod2_points")) {\n        if (Cmd_Argc() == 3)\n'
                       '            CG_ScorePopupAdd(atoi(CG_Argv(1)), atoi(CG_Argv(2)));\n        return;\n    }') == 1
-assert draw.count('            CG_Draw2dHudElems(1);\n        if (drawHudMenus) {\n            CG_DrawScorePanel();\n'
+assert draw.count('            CG_Draw2dHudElems(1);\n        if (drawHudMenus && prematch) {\n            CG_DrawPrematch();\n'
+                  '        } else if (drawHudMenus) {\n            CG_DrawScorePanel();\n'
                   '            CG_DrawKillFeed();\n            CG_DrawAmmoCounter();\n            CG_DrawScorePopup();\n'
                   '        }\n        if (killcam)\n            CG_DrawKillcam();\n    }') == 1
 assert main.count('    CG_MinimapInit(cgs->mapname);\n    CG_ScorePopupInit();\n') == 1

@@ -50,9 +50,10 @@ static void Item_RunScript(displayContextDef_t *dc,itemDef_t *i,const char *scri
 static void UI_PlayLocalSoundAlias(void *s){(void)s;}
 static void Item_MouseLeave(displayContextDef_t *dc,itemDef_t *i){(void)dc;(void)i;}
 static void Item_MouseEnter(displayContextDef_t *dc,itemDef_t *i,float x,float y){(void)dc;(void)x;(void)y;i->window.dynamicFlags[0]|=1;}
-/* The WWII main menu switched off: the menu's order. */
+/* The WWII main menu switched off: the menu's order; and its settings. */
 static int UI_WWIIMenu_NextItem(const menuDef_t *m,int cursor,int direction){
  return (cursor+direction+m->itemCount)%m->itemCount;}
+static int UI_WWIISettings_Owns(const menuDef_t *m){(void)m;return 0;}
 qboolean Item_SetFocus(displayContextDef_t *,itemDef_t *,float,float);
 qboolean Menu_HandleMouseMove(displayContextDef_t *,menuDef_t *,float,float);
 '''

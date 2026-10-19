@@ -33,7 +33,7 @@ typedef int qboolean; typedef unsigned char byte; typedef float vec_t; typedef f
 #define WEAPCLASS_MG 1
 typedef struct { float fraction; vec3_t normal; unsigned short entityNum; int startsolid,allsolid,surfaceFlags,contents; } trace_t;
 typedef struct { vec3_t origin,viewangles,velocity; float viewHeightCurrent,fWeaponPosFrac; int pm_type,weapon,weaponTime,pm_flags,groundEntityNum,cursorHintEntIndex,ammoclip[128],ammo[128],stats[6];char weaponslots[8]; } playerState_t;
-typedef struct { playerState_t ps; vec3_t damage_from; int damage_fromWorld; struct {int connected,sessionState; struct {int team;}cs;}sess;} gclient_t;
+typedef struct { playerState_t ps; vec3_t damage_from; int damage_fromWorld, bFrozen; struct {int connected,sessionState; struct {int team;}cs;}sess;} gclient_t;
 typedef struct {gclient_t *client; int health; unsigned classname; struct {int inuse;vec3_t currentOrigin,absmin,absmax;}r;} gentity_t;
 typedef struct { int maxclients,num_entities; } level_locals_t;
 typedef struct {const char *szInternalName; int iClipIndex,iAmmoIndex,bSemiAuto,overlayReticle,weapClass,iClipSize;} WeaponDef;
@@ -1245,6 +1245,24 @@ int main(void){
  SV_BotRunAI(0,&clients[0].ps);
  assert(actor->lastOrigin[0]==2048 && actor->pathPending && !actor->stuckCount);
  puts("PASS: original spawn counter resets stale routes/perception/cooldowns, rejects old pending work, respects death/spectator rules");
+ // Held by freezeControls until a match begins: a new spawn starts its fresh
+ // life at once, then it neither moves, presses nor turns and its clocks keep
+ // up, so the release resumes as a new spawn would.
+ clients[0].bFrozen=1;++clients[0].ps.stats[5];
+ clients[0].ps.viewangles[0]=12;clients[0].ps.viewangles[1]=34;
+ s_botCmdState[0].hasAngles=1;
+ for(i=0;i<40;i++){
+  svs.time+=50;SV_BotRunAI(0,&clients[0].ps);
+  assert(!s_botCmdState[0].buttons && !s_botCmdState[0].forwardmove && !s_botCmdState[0].rightmove &&
+         !s_botCmdState[0].hasAngles && !s_botCmdState[0].hasWeapon);
+  assert(actor->spawnCount==clients[0].ps.stats[5] && actor->lastMoveCheck==svs.time && actor->lastFrame==svs.time &&
+         actor->nextThink==svs.time && actor->aim[0]==12 && actor->aim[1]==34 && !actor->pathPending &&
+         !actor->wantsMove && !actor->stuckCount && actor->target==-1);
+ }
+ clients[0].bFrozen=0;svs.time+=50;s_botNavFrame=svs.time;SV_BotRunAI(0,&clients[0].ps);
+ assert(actor->spawnCount==clients[0].ps.stats[5] && actor->pathPending && !actor->stuckCount &&
+        s_botCmdState[0].hasAngles);
+ puts("PASS: a bot held by freezeControls stands still on a fresh life and resumes as from a new spawn");
  SV_BotResetAIClient(0);assert(!s_botAI[0].enabled);
  puts("PASS: bounded/hash navigation, enemy teams, fair perception/memory, difficulty, route progress/recovery, guard spacing, ladders/safe directed drops/time budget, jump tracking/scoped ADS, weapon-range pursuit, friendly-fire avoidance, objective priority/expiry, original use holds, reload/cadence, death/reset");
  return 0;

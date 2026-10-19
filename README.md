@@ -23,14 +23,17 @@ Raspberry Pi 5; larger matches and lower-end client hardware need broader testin
 | Toujane, Tunisia (`mp_toujane`) | British | Afrika Korps |
 
 All three maps support the original **Deathmatch, Team Deathmatch, Capture the Flag,
-Headquarters, and Search and Destroy** modes. Select a map and Game Type in
-**Start New Server**. Click Game Type to cycle forward; right-click to go back.
-Rooms rotate through Toujane, Carentan and Dawnville while keeping their selected mode. TDM uses
+Headquarters, and Search and Destroy** modes. **Start New Server** is laid out
+as CoD WWII's MATCH screen: **Mode** and **Map** open lists of the modes and
+maps, each described at the right (a map with its loading-screen art),
+**Bots** opens the bot setup, and **Start Match** creates the room and joins
+it. Rooms rotate through Toujane, Carentan and Dawnville while keeping their selected mode. TDM uses
 100 team points or 15 minutes; the other modes use their original scripts and
 settings.
 
-The host starts with **no rooms**. Users create their own named servers, with
-up to three concurrent rooms and 64 configured player slots per room. An empty
+The host starts with **no rooms**. Users create their own servers, each named
+after its creator's gametag (its letters, digits, spaces and `_|.-`, up to 32),
+with up to three concurrent rooms and 64 configured player slots per room. An empty
 room closes after five minutes. **Join Game → Delete my server** lets its owner
 remove it immediately. Ownership is stored in that browser and checked with a
 private token; changing browsers or clearing site storage loses that record.
@@ -39,9 +42,10 @@ load-tested.
 
 ## Bots
 
-In **Start New Server**, choose **Bots** (None, 1–16, 20, 24, 28 or 32) and **Bot Difficulty**
-(Easy, Normal or Hard), alongside the room name, map and Game Type. Left-click
-cycles forward; right-click cycles backward. The default is **None**. Settings
+In **Start New Server → Bots**, set **Bot Count** (None, 1–16, 20, 24, 28 or 32)
+and **Difficulty** (Easy, Normal or Hard) with ← and →, Enter or a click; a
+click left of the value steps back. One count and difficulty cover the whole
+room. The default is **None**. Settings
 belong to that room and survive map rotation.
 
 | Difficulty | Reaction delay | Aim and turning |
@@ -94,7 +98,8 @@ the distinction between autonomous matches and controlled interaction tests.
 
 Bots occupy ordinary player slots: eight bots leave 56 human slots, and 32 bots leave 32. They do not
 keep a room alive after its last human leaves; the usual five-minute idle
-cleanup still applies. No browser or rendering process is needed for each bot.
+cleanup still applies. A room's bots wait frozen where they spawned until the
+first person spawns or spectates and the countdown before the match ends. No browser or rendering process is needed for each bot.
 For a custom room creator, POST `/servers` with `botCount` (integer 0–32) and
 `botDifficulty` (`easy`, `normal`, `hard`); omitted fields retain the defaults.
 
@@ -108,10 +113,38 @@ retail CoD2:
   rules and collision-based navigation.
 - **Custom classes:** **Create a Class** in the main menu keeps five named
   classes for your gametag, each with a primary from any faction, a pistol, a
-  frag and a smoke grenade. They replace the weapon menu after the team choice
-  and in **Esc → 1. Choose Class**, on either team. The gateway stores them in
-  SQLite; there are no accounts, so a gametag's classes belong to whoever uses
-  it. See [custom classes](docs/CLASSES.md).
+  frag and a smoke grenade. Either gun can wear one of ten camouflage
+  patterns, chosen from a WWII-style swatch grid (F2 or a controller's Y on a
+  gun's tile); the first-person gun and each player's gun in hand are painted
+  with it. Joining a match opens **Select Class** first, laid
+  out as CoD WWII's Select Division: **Custom** lists your classes, **Standard
+  Issue** the game's five defaults, and choosing one puts you on the team the
+  mode's auto-assign picks. The pause menu's **Class** tab (Escape) lists both
+  again, with or without a team. The gateway stores the classes in SQLite;
+  there are no accounts, so a gametag's classes belong to whoever uses it.
+  See [custom classes](docs/CLASSES.md).
+- **WWII countdown before a match:** players who spawn before a match begins
+  wait through one 15-second countdown, free to look around and aim but not to
+  move, fire, throw, reload or use. It starts when the first person spawns or
+  chooses to spectate; bots wait frozen until then, and the time limit starts
+  when it ends. The
+  view turns black and white. In place of the HUD it shows the mode and map
+  over the mode's retail objective, the viewer's team and, at the right, the
+  seconds left. The last five turn red, and color returns over the last two.
+  Whoever joins after the match has begun plays at once. S&D counts down
+  through its first round's grace period instead. `cg_hudPrematch 0` hides it
+  on a client; the room's `scr_prematch_time` (0 to 60 s, default 15) sets or
+  disables it. See the
+  [graphics notes](docs/GRAPHICS_2026-10-16.md#wwii-countdown-before-a-match-october-18-2026).
+- **WWII pause menu:** Escape in a match blurs and darkens the live view and
+  opens tabs laid out from Call of Duty: WWII's: **Class** (your five classes
+  under Custom, the five defaults under Standard Issue, with the focused
+  loadout), **Overview** (mode and map, both scores, your K/D, score, kills,
+  assists, deaths and headshots, the time left and the whole map with your
+  team), **Change Team** (free slots per side, Auto-Assign), **Leave Game**
+  and **Settings** (Controls, Graphics, Audio, Game). It replaces the retail
+  in-game menu, so its Call Vote and Mute Players entries are gone. See
+  [the pause menu's measurements](docs/GRAPHICS_2026-10-16.md#wwii-pause-menu-october-18-2026).
 - **Sprint:** Shift + W increases movement speed, lowers and swings the weapon,
   and uses the running body animation. It also stands up from crouch/prone when
   headroom permits. Sprint currently has no stamina limit.
@@ -152,13 +185,14 @@ retail CoD2:
   wall/frustum culling, texture resolution and mip filtering remain in use.
 - **Browser hosting and controls:** create/delete rooms without a desktop game
   installation on each client, cached asset downloads with actual byte progress,
-  English interface text, update notices, compact chat, and an explicit
-  native **Fullscreen: Off/On** menu option or F10. Change your gametag in **Options → Game Options**.
+  English interface text, update notices, compact chat, and F10 for
+  fullscreen. Change your gametag in **Options → Game Options**.
   The native profile saves the name, key bindings, mouse, sound and graphics
   settings in this browser, including across reloads and game updates. Browser
   storage must be enabled; clearing site data removes the saved profile.
 - **Browser menus and video settings:** the main menu omits profile selection,
-  Multiplayer Options and the online-play notice; settings omit voice chat.
+  Multiplayer Options, Quit and the online-play notice, and has no fullscreen
+  option; settings omit voice chat.
   The menu version follows the deployed Git revision. Applying graphics
   settings releases renderer resources with the correct WebAssembly signature
   and resizes the canvas, including while connected to a match.
@@ -204,7 +238,7 @@ retail CoD2:
   the selector maximizes distance to the nearest enemy. See the
   [respawn rules and validation](docs/RESPAWN_SAFETY.md) for crowded-map limits.
   Spectator and S&D round spawns retain their original rules.
-- **Native update notice and fullscreen menus:** new installed client builds
+- **Native update notice and Escape in fullscreen:** new installed client builds
   appear inside the main menu with an Update game action after disconnect.
   Repository pushes do not create player popups. Chrome/Edge keyboard capture
   lets a short Escape open the menu without exiting fullscreen; hold Escape
@@ -316,8 +350,10 @@ sheet metal offer less protection than thick masonry or rock. See
 | Public / team chat | T / Y |
 | Send / cancel chat | Enter / Escape |
 | Quick messages | H |
-| Class screens | Enter selects, F1 renames (edits in a match), Escape goes back; 1–5 choose in a match |
-| Enter / exit fullscreen | Main menu's Fullscreen: Off/On text or F10 |
+| Class screens | Enter selects, F1 renames (edits a Custom class in a match), F2 or a controller's Y customizes a gun's camouflage, Escape goes back; in a match ← → or Tab switch Custom / Standard Issue and 1–5 choose |
+| Pause menu (in a match) | Escape opens and closes; Q / E, Tab or LB / RB change tab; Enter or a click selects; arrows move; F1 edits a custom class; 1–5 choose a class |
+| Start New Server | ↑ ↓ or the pointer choose, Enter or a click opens and selects, ← → change a bot setting, Escape or right-click goes back |
+| Enter / exit fullscreen | F10 |
 
 Chat keeps mouse capture while typing and displays five wrapped lines for eight
 seconds by default. Clicking the canvas does not change fullscreen mode.

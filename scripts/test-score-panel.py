@@ -32,10 +32,12 @@ def definition(text, head):
 
 # Players and free spectators both get the panel, before the kill feed above
 # it; every level starts with a fresh panel.
-assert draw.count('        if (drawHudMenus) {\n            CG_DrawScorePanel();\n            CG_DrawKillFeed();\n') == 2
+assert draw.count('if (drawHudMenus) {\n            CG_DrawScorePanel();\n            CG_DrawKillFeed();\n') == 2
 assert main.count('    CG_KillFeedInit();\n    CG_ScorePanelInit();\n') == 1
 
 panel = source[source.index('/* Virtual units from the bottom-left corner'):]
+neutral = re.search(r'^#define CG_SCORE_PANEL_NEUTRAL (\d+)$',
+                    (root / 'src/headers/PC/cgame_mp/cg_scorepanel.h').read_text(), re.M).group(1)
 timer = ''.join(function(hud, name) for name in (
     'cg_time', 'CG_FormatTimerString', 'CG_GetHudElemColor', 'CG_GetHudElemTimer'))
 
@@ -53,6 +55,7 @@ typedef float vec_t;
 typedef vec_t vec4_t[4];
 typedef const struct FakeFont { const char *name; float perScale, rise; int pixelHeight; } *FontHandle;
 typedef const char *MaterialHandle;
+#define CG_SCORE_PANEL_NEUTRAL ''' + neutral + r'''
 ''' + definition(vector, 'enum he_type_t {') + r'''
 typedef enum he_type_t he_type_t;
 ''' + definition(vector, 'union hudelem_color_t {') + r'''
@@ -368,6 +371,35 @@ int main(void) {
     serverinfo = "\\sv_hostname\\QA";
     CG_ScorePanelGetView(&s_scorePanel, SCORE_PANEL_TDM, 3, &view);
     assert(view.limit == 0);
+
+    /* The pause menu's overview reads the same numbers for the viewer, its
+     * standing as 1, 0, -1 or neutral, in any mode the panel knows. */
+    {
+        int top, bottom, limit, standing, client = snapState.ps.clientNum;
+        serverinfo = "\\ui_tdm_scorelimit\\75";
+        snprintf(cgs->gametype, sizeof(cgs->gametype), "TDM");
+        snapState.ps.clientNum = 3;
+        player(3, TEAM_AXIS);
+        assert(CG_ScorePanelMatch(&top, &bottom, &limit, &standing));
+        assert(top == 11 && bottom == 21 && limit == 75 && standing == -1);
+        player(3, TEAM_ALLIES);
+        assert(CG_ScorePanelMatch(&top, &bottom, &limit, &standing) && top == 21 && standing == 1);
+        cgs->teamScores[0] = 21;
+        assert(CG_ScorePanelMatch(&top, &bottom, &limit, &standing) && standing == 0);
+        cgs->teamScores[0] = 11;
+        player(3, TEAM_SPECTATOR);
+        assert(CG_ScorePanelMatch(&top, &bottom, &limit, &standing) && standing == CG_SCORE_PANEL_NEUTRAL);
+        snprintf(cgs->gametype, sizeof(cgs->gametype), "koth");
+        assert(!CG_ScorePanelMatch(&top, &bottom, &limit, &standing));
+        snprintf(cgs->gametype, sizeof(cgs->gametype), "tdm");
+        snapState.ps.clientNum = 64;
+        assert(!CG_ScorePanelMatch(&top, &bottom, &limit, &standing));
+        snapState.ps.clientNum = 3;
+        cg->snap = NULL;
+        assert(!CG_ScorePanelMatch(&top, &bottom, &limit, &standing));
+        cg->snap = &snapState;
+        snapState.ps.clientNum = client;
+    }
 
     /* Deathmatch: a player against the best other player, a spectator sees the
      * two best; spectators' scores do not count and a slot that empties starts

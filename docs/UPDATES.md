@@ -13,9 +13,9 @@ There is no HTML popup, guide link or repository-push notice. The gateway also
 suppresses the obsolete host-update notice for clients running older scripts.
 
 The generic launcher is hidden in the document head before configuration loads;
-players see the game startup screen and then its native menu. The native main
-menu's **Fullscreen: Off/On** text toggles the browser display mode. There is no
-floating HTML fullscreen button.
+players see the game startup screen and then its native menu. F10 toggles the
+browser display mode; neither the native menu nor the page has a fullscreen
+button.
 
 The game draws at 1920 × 1080 by default, its 3D view at 720 lines. On the
 first start after this default arrived, a saved profile still at the old

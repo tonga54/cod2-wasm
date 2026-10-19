@@ -179,6 +179,8 @@ typedef struct {
     FontHandle boldFont;
     FontHandle regularFont;
     int kills[TABLE_MAX_CLIENTS];
+    int ownAssists;
+    int ownHeadshots;
 } CG_ScoreTableState;
 
 /* A signed distance, negative inside, and its gradient, which points out. */
@@ -436,6 +438,12 @@ static void CG_ScoreTableRasterize(const CG_ScoreTableState *state, int kind, by
             texel[3] = (byte)(coverage * 255.0f + 0.5f);
         }
     }
+}
+
+void CG_ScoreTableRasterizeEmblem(int kind, byte *bgra, int stride, int size)
+{
+    CG_ScoreTableBuildShapes(&s_table);
+    CG_ScoreTableRasterize(&s_table, kind, bgra, stride, size);
 }
 
 /* How much of a sample a shape covers, its edge spread over a sample. */
@@ -1257,6 +1265,8 @@ void CG_ScoreTableInit(void)
     s_table.regularFont = R_RegisterWwiiFont("$regularfont");
     for (i = 0; i < TABLE_MAX_CLIENTS; ++i)
         s_table.kills[i] = -1;
+    s_table.ownAssists = -1;
+    s_table.ownHeadshots = -1;
 }
 
 int CG_ScoreTableEnabled(void)
@@ -1281,6 +1291,23 @@ void CG_ScoreTableSetKills(int clientNum, int kills)
 {
     if ((unsigned)clientNum < TABLE_MAX_CLIENTS)
         s_table.kills[clientNum] = kills < 0 ? 0 : kills;
+}
+
+int CG_ScoreTableKills(int clientNum)
+{
+    return (unsigned)clientNum < TABLE_MAX_CLIENTS ? s_table.kills[clientNum] : -1;
+}
+
+void CG_ScoreTableSetOwnStats(int assists, int headshots)
+{
+    s_table.ownAssists = assists;
+    s_table.ownHeadshots = headshots;
+}
+
+void CG_ScoreTableOwnStats(int *assists, int *headshots)
+{
+    *assists = s_table.ownAssists;
+    *headshots = s_table.ownHeadshots;
 }
 
 /* result is NULL while the match goes on, and the clock shows. */

@@ -41,6 +41,7 @@ extern void R_ShutdownModels(void);
 extern void Material_Shutdown(void);
 extern void R_ShutdownImages(void);
 extern void R_ShutdownHudImages(void);
+extern void R_ShutdownWeaponCamos(void);
 extern void R_UnlockSkinnedCache(void);
 extern void R_FlushStaticModelCache(void);
 extern void R_UnregisterCmds(void);
@@ -523,6 +524,7 @@ static void R_Shutdown(qboolean destroyWindow)
     R_ShutdownFonts();
     R_ShutdownModels();
     Material_Shutdown();
+    R_ShutdownWeaponCamos();
     R_ShutdownHudImages();
     R_ShutdownImages();
 

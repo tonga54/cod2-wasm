@@ -33,8 +33,10 @@ with tempfile.TemporaryDirectory(prefix='cod2-room-maps-') as directory:
             assert ';' not in args[args.index('sv_hostname') + 1]
             assert '+' not in args[args.index('sv_hostname') + 1]
             config = (profile / f'room-{room_id}/raw/server.cfg').read_text()
-            # Every room offers classes; only bot rooms run the bot script.
+            # Every room offers classes and the countdown before its matches;
+            # only bot rooms run the bot script.
             assert (profile / f'room-{room_id}/raw/maps/mp/browser_classes.gsc').read_text() == (root / 'downstream/server/browser_classes.gsc').read_text()
+            assert (profile / f'room-{room_id}/raw/maps/mp/browser_prematch.gsc').read_text() == (root / 'downstream/server/browser_prematch.gsc').read_text()
             assert not (profile / f'room-{room_id}/raw/maps/mp/browser_bots.gsc').exists()
             assert 'set scr_allies ""' in config and 'set scr_axis ""' in config
             assert 'set scr_tdm_scorelimit "100"' in config

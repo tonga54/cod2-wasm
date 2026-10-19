@@ -10,7 +10,6 @@ extern int FS_ReadFile(const char *path, void **buffer);
 extern void FS_FreeFile(void *buffer);
 extern void Dvar_SetBoolByName(const char *name, int value);
 extern int Dvar_GetBool(const char *name);
-extern void Dvar_SetIntByName(const char *name, int value);
 
 EM_JS(void, Web_StoreProfile, (const char *data, int length), {
     if (Module.cod2SaveProfile) Module.cod2SaveProfile(UTF8ToString(data, length));
@@ -73,19 +72,6 @@ void Web_ReloadClient(void) {
     if (!cls.uiStarted || web_client_connected() || !Dvar_GetBool("ui_clientUpdateAvailable"))
         return;
     EM_ASM({ if (Module.cod2ReloadClient) Module.cod2ReloadClient(); });
-}
-
-EMSCRIPTEN_KEEPALIVE int web_client_fullscreen_state(int mode, int pending, int failed) {
-    if (!cls.uiStarted) return 0;
-    Dvar_SetIntByName("ui_browserFullscreen", mode);
-    Dvar_SetBoolByName("ui_browserFullscreenPending", pending);
-    Dvar_SetBoolByName("ui_browserFullscreenFailed", failed);
-    return 1;
-}
-
-void Web_ToggleFullscreen(void) {
-    if (!cls.uiStarted) return;
-    EM_ASM({ if (Module.cod2ToggleFullscreen) Module.cod2ToggleFullscreen(); });
 }
 
 EMSCRIPTEN_KEEPALIVE void web_background_frame(void) {

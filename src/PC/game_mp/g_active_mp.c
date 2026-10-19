@@ -26,6 +26,7 @@ extern void SV_GameDropClient(int clientNum, const char *reason);
 extern void SV_GameSendServerCommand(int clientNum, int type, const char *text);
 extern const char *va(const char *fmt, ...);
 extern void Pmove(pmove_t *pm);
+extern void PM_FilterFrozenCommand(const playerState_t *ps, usercmd_t *cmd);
 extern int PM_GetEffectiveStance(playerState_t *ps);
 extern int PM_GetViewHeightLerpTime(const playerState_t *ps, int iTarget, qboolean bDown);
 extern float AngleNormalize180(float angle);
@@ -907,6 +908,8 @@ void ClientThink_real(gentity_t *ent, usercmd_t *ucmd)
         client->ps.pm_flags |= 0x8000;
     else
         client->ps.pm_flags &= ~0x8000;
+    /* Before the buttons reach the scripts, triggers and grenade input. */
+    PM_FilterFrozenCommand(&client->ps, ucmd);
 
     if (client->sess.sessionState == 3) {
         client->oldbuttons = client->buttons;

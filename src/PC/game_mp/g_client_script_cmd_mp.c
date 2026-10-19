@@ -69,6 +69,7 @@ void PlayerCmd_getCurrentWeapon(scr_entref_t entref);
 void PlayerCmd_getCurrentOffhand(scr_entref_t entref);
 static void PlayerCmd_GetWeaponSlotWeapon(scr_entref_t entref);
 static void PlayerCmd_GetWeaponSlotAmmo(scr_entref_t entref);
+extern void PlayerCmd_SetWeaponCamos(scr_entref_t entref);
 
 extern void Scr_ObjectError(const char *msg);
 extern void Scr_Error(const char *msg);
@@ -1749,6 +1750,7 @@ static const BuiltinMethodDef player_methods[] __attribute__((used)) = {
     { "istalking", (BuiltinMethod)PlayerCmd_IsTalking, 0 },
     { "allowspectateteam", (BuiltinMethod)PlayerCmd_AllowSpectateTeam, 0 },
     { "getguid", (BuiltinMethod)PlayerCmd_GetGuid, 0 },
+    { "setweaponcamos", (BuiltinMethod)PlayerCmd_SetWeaponCamos, 0 },
     { 0, 0, 0 },
 };
 

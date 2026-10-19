@@ -300,6 +300,12 @@ void PM_ClipVelocity(const vec_t *in, const vec_t *normal, vec_t *out)
 #define PMF_LADDER 0x00000020
 #define PMF_ADS 0x00000040
 #define PMF_JUMPING 0x00080000
+/* Set while the script's freezeControls holds the player. */
+#define PMF_FROZEN 0x00008000
+/* What a frozen player keeps, as in WWII's countdown before a match: the
+ * shellshock state, aiming, binoculars, holding breath and an open console or
+ * menu. Looking around and changing weapons are not buttons. */
+#define PMF_FROZEN_BUTTONS (0x800 | 0x1000 | 0x4000 | 0x8000 | 0x40000)
 #define ENTITYNUM_WORLD 0x3fe
 #define ENTITYNUM_NONE 0x3ff
 
@@ -2056,6 +2062,15 @@ static void PM_REGPARM2_ABI PM_GroundTrace(pmove_t *pm, pml_t *pml)
     }
 }
 
+void PM_FilterFrozenCommand(const playerState_t *ps, usercmd_t *cmd)
+{
+    if (!(ps->pm_flags & PMF_FROZEN) || ps->pm_type > 1)
+        return;
+    cmd->forwardmove = 0;
+    cmd->rightmove = 0;
+    cmd->buttons &= PMF_FROZEN_BUTTONS;
+}
+
 void Pmove(pmove_t *pm)
 {
     playerState_t *ps;
@@ -2086,6 +2101,7 @@ void Pmove(pmove_t *pm)
     if (finalTime > ps->commandTime + 1000)
         ps->commandTime = finalTime - 1000;
 
+    PM_FilterFrozenCommand(ps, &pm->cmd);
     pm->numtouch = 0;
     pm->mantleStarted = 0;
 

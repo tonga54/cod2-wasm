@@ -2,6 +2,7 @@
 #include "cod2_sprint.h"
 #include <math.h>
 #include "imports.h"
+#include "headers/PC/cgame_mp/cg_weaponcamo.h"
 
 extern void *Hunk_AllocAlignInternal(int size, int align);
 static EffectTemplate *muzzleLightEffects[128];
@@ -1275,8 +1276,10 @@ void CG_AddPlayerWeapon(GfxEntity *parent, playerState_t *ps, centity_t *cent, q
                     ++apwTrace;
                 }
             }
-            if (skinEnt)
+            if (skinEnt) {
+                CG_SetWeaponCamo(skinEnt, weapInfo->viewModelDObj, playerState->clientNum, weaponNum);
                 R_SkinGfxEntityDelayed(skinEnt);
+            }
         }
 
         cg->viewModelOrigin[0] = parent->origin[0];

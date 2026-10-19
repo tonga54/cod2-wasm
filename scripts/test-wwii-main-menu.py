@@ -40,6 +40,7 @@ def function(text, name):
 assert shared.count('#include "headers/PC/ui_mp/ui_wwii_menu.h"\n') == 1
 assert main.count('#include "headers/PC/ui_mp/ui_wwii_menu.h"\n') == 1
 assert re.search(r'UI_ConfigureBrowserMenu\(menuList->menus\[i\]\);\n#endif\n        UI_WWIIMenu_AddMenu\(dc, menuList->menus\[i\]\);\n'
+                 r'        UI_WWIISettings_AddMenu\(dc, menuList->menus\[i\]\);\n'
                  r'        if \(dc->menuCount > 0x7f\)', function(shared, 'UI_AddMenuList'))
 assert function(shared, 'Menu_Setup').startswith('void Menu_Setup(displayContextDef_t *dc)\n{\n    UI_WWIIMenu_Reset(dc);\n')
 text_paint = function(shared, 'Item_Text_Paint')
@@ -275,6 +276,8 @@ static Bool Dvar_GetBool(const char *name) { assert(!strcmp(name, "cl_ingame"));
 static const char *Dvar_GetVariantString(const char *name) { assert(!strcmp(name, "shortversion")); return versionText; }
 static int enableLookups;
 static qboolean Item_EnableShowViaDvar(const itemDef_t *item, int flag) { assert(flag == 1); enableLookups++; return item->enabled; }
+static int settingsCover;
+static int UI_WWIISettings_Covers(const displayContextDef_t *dc) { assert(dc); return settingsCover; }
 /* Item_SetScreenCoords for each item: the menu's origin, and its alignment
  * where the item has none. */
 static int positionUpdates;
@@ -692,8 +695,8 @@ int main(void) {
     assert(!UI_WWIIMenu_PaintItem(&uiDc, bgLogo));
     mainText.window.dynamicFlags[0] = 4;
     cases++;
-    /* Create a Class paints its own page over the backdrop alone; other
-     * submenus keep bg's logo, bars and version. */
+    /* Create a Class and Start New Server paint their own pages over the
+     * backdrop alone; other submenus keep bg's logo, bars and version. */
     {
         menuDef_t page = { .window.name = "create_a_class" };
 
@@ -701,8 +704,15 @@ int main(void) {
         assert(UI_WWIIMenu_PaintItem(&uiDc, bgImage) == 1);
         for (int i = 1; i < bg.itemCount; i++)
             assert(UI_WWIIMenu_PaintItem(&uiDc, bgList[i]) == 1);
+        page.window.name = "createserver";
+        for (int i = 1; i < bg.itemCount; i++)
+            assert(UI_WWIIMenu_PaintItem(&uiDc, bgList[i]) == 1);
         page.window.name = "options_look";
         assert(!UI_WWIIMenu_PaintItem(&uiDc, bgLogo));
+        /* Laid out, Options' pages show the backdrop alone too. */
+        settingsCover = 1;
+        assert(UI_WWIIMenu_PaintItem(&uiDc, bgImage) == 1 && UI_WWIIMenu_PaintItem(&uiDc, bgLogo) == 1);
+        settingsCover = 0;
         uiDc.menuStack[1] = &mainText;
         cases++;
     }
@@ -994,8 +1004,10 @@ mutants = [
     [("        if (text[i] != ' ')\n", "        if (1)\n")],
     [('    if ((item->dvarFlags & 3) && !Item_EnableShowViaDvar(item, 1)) {', '    if (0) {')],
     [('WWII_MENU_NOTE_CAP, 0.0f, item->window.foreColor);', 'WWII_MENU_NOTE_CAP, 0.0f, s_wwiiIdle);')],
-    [('    return UI_WWIIMenu_MainOpen(dc) || UI_WWIIMenu_ClassPageOpen(dc);\n}', '    return 1;\n}')],
+    [('    return UI_WWIIMenu_MainOpen(dc) || UI_WWIIMenu_PageOpen(dc) || UI_WWIISettings_Covers(dc);\n}',
+      '    return 1;\n}')],
     [('!I_stricmp(menu->window.name, "create_a_class")', '0')],
+    [('!I_stricmp(menu->window.name, "createserver")', '0')],
     [('    if (!s_wwiiMenu.backdrop)\n        return 0;', '    if (!s_wwiiMenu.backdrop)\n        return 1;')],
     [('    if (source != s_wwiiMenu.backdropSource) {', '    if (1) {')],
     [('aspect = rect->w > 0.0f && rect->h > 0.0f ? rect->w / rect->h : s_wwiiMenu.backdropAspect;',

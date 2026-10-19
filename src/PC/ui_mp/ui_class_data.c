@@ -1,4 +1,5 @@
 #include "headers/PC/ui_mp/ui_class_data.h"
+#include "headers/PC/bgame/bg_weapon_camo.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -113,7 +114,15 @@ void ClassData_Defaults(ClassLoadout *classes)
         snprintf(classes[i].name, sizeof(classes[i].name), "%s", s_classDefaults[i].name);
         for (slot = 0; slot < CLASS_SLOT_COUNT; slot++)
             classes[i].weapon[slot] = ClassData_Find(s_classDefaults[i].weapon[slot]);
+        for (slot = 0; slot < CLASS_CAMO_SLOTS; slot++)
+            classes[i].camo[slot] = WEAPON_CAMO_NONE;
     }
+}
+
+static int ClassData_Camos(const ClassLoadout *loadout)
+{
+    return loadout->camo[0] >= 0 && loadout->camo[0] < WEAPON_CAMO_COUNT && loadout->camo[1] >= 0 &&
+           loadout->camo[1] < WEAPON_CAMO_COUNT;
 }
 
 static int ClassData_NameChar(int c)
@@ -140,7 +149,7 @@ int ClassData_Parse(const char *text, ClassLoadout *classes)
 
     ClassData_Defaults(classes);
     for (i = 0; i < CLASS_COUNT; i++) {
-        char fields[1 + CLASS_SLOT_COUNT][64];
+        char fields[1 + CLASS_SLOT_COUNT + CLASS_CAMO_SLOTS][64];
         const char *end = text ? strchr(text, '\n') : NULL;
         int count = 0;
 
@@ -151,7 +160,7 @@ int ClassData_Parse(const char *text, ClassLoadout *classes)
         }
         if (!end)
             end = text + strlen(text);
-        while (text < end && count < 1 + CLASS_SLOT_COUNT) {
+        while (text < end && count < 1 + CLASS_SLOT_COUNT + CLASS_CAMO_SLOTS) {
             const char *tab = memchr(text, '\t', (size_t)(end - text));
             size_t length = (size_t)((tab ? tab : end) - text);
 
@@ -164,7 +173,7 @@ int ClassData_Parse(const char *text, ClassLoadout *classes)
             if (!tab)
                 break;
         }
-        if (count != 1 + CLASS_SLOT_COUNT)
+        if (count != 1 + CLASS_SLOT_COUNT + CLASS_CAMO_SLOTS)
             valid = 0;
         if (ClassData_ValidName(fields[0]))
             snprintf(classes[i].name, sizeof(classes[i].name), "%s", fields[0]);
@@ -175,6 +184,14 @@ int ClassData_Parse(const char *text, ClassLoadout *classes)
 
             if (weapon >= 0 && g_classWeapons[weapon].slot == slot)
                 classes[i].weapon[slot] = weapon;
+            else
+                valid = 0;
+        }
+        for (slot = 0; slot < CLASS_CAMO_SLOTS; slot++) {
+            int camo = BG_WeaponCamo_Find(fields[1 + CLASS_SLOT_COUNT + slot]);
+
+            if (camo >= 0)
+                classes[i].camo[slot] = camo;
             else
                 valid = 0;
         }
@@ -194,11 +211,12 @@ int ClassData_Serialize(const ClassLoadout *classes, char *out, int size)
         const int *weapon = classes[i].weapon;
         int written;
 
-        if (weapon[0] < 0 || weapon[1] < 0 || weapon[2] < 0 || weapon[3] < 0)
+        if (weapon[0] < 0 || weapon[1] < 0 || weapon[2] < 0 || weapon[3] < 0 || !ClassData_Camos(&classes[i]))
             return -1;
-        written = snprintf(out + length, (size_t)(size - length), "%s\t%s\t%s\t%s\t%s\n", classes[i].name,
+        written = snprintf(out + length, (size_t)(size - length), "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", classes[i].name,
                            g_classWeapons[weapon[0]].weapon, g_classWeapons[weapon[1]].weapon,
-                           g_classWeapons[weapon[2]].weapon, g_classWeapons[weapon[3]].weapon);
+                           g_classWeapons[weapon[2]].weapon, g_classWeapons[weapon[3]].weapon,
+                           g_weaponCamos[classes[i].camo[0]].id, g_weaponCamos[classes[i].camo[1]].id);
         if (written < 0 || written >= size - length)
             return -1;
         length += written;
@@ -228,11 +246,17 @@ int ClassData_Response(const ClassLoadout *loadout, char *out, int size)
     const int *weapon = loadout->weapon;
     int written;
 
-    if (weapon[0] < 0 || weapon[1] < 0 || weapon[2] < 0 || weapon[3] < 0)
+    if (weapon[0] < 0 || weapon[1] < 0 || weapon[2] < 0 || weapon[3] < 0 || !ClassData_Camos(loadout))
         return -1;
     written = snprintf(out, (size_t)size, "class,%s,%s,%s,%s", g_classWeapons[weapon[0]].weapon,
                        g_classWeapons[weapon[1]].weapon, g_classWeapons[weapon[2]].weapon,
                        g_classWeapons[weapon[3]].weapon);
+    if (written >= 0 && written < size && (loadout->camo[0] || loadout->camo[1])) {
+        int camos = snprintf(out + written, (size_t)(size - written), ",%s,%s", g_weaponCamos[loadout->camo[0]].id,
+                             g_weaponCamos[loadout->camo[1]].id);
+
+        written = camos < 0 ? -1 : written + camos;
+    }
     return written < 0 || written >= size ? -1 : written;
 }
 

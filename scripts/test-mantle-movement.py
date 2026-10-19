@@ -224,9 +224,20 @@ static void Mantle_Move(pmove_t *pm,playerState_t *ps,pml_t *pml) {
     if(ps->mantleState.timer>=200){ps->pm_flags&=~4;pm->mantleStarted=0;}
 }
 '''
+pmove_source = (root / 'src/PC/bgame/bg_pmove.c').read_text()
+dispatch_support += pmove_source[pmove_source.index('#define PMF_FROZEN '):pmove_source.index('#define ENTITYNUM_WORLD')]
+dispatch_support += function('src/PC/bgame/bg_pmove.c', 'PM_FilterFrozenCommand')
 dispatch_body = function('src/PC/bgame/bg_pmove.c', 'Pmove')
 dispatch_checks = r'''
 int main(void) {
+    /* freezeControls drops the jump before the mantle check sees it. */
+    {
+        playerState_t ps={.commandTime=1000,.pm_flags=0x8000};
+        pmove_t pm={.ps=&ps,.cmd={.serverTime=1050,.buttons=0x400,.forwardmove=127}};
+        checks=moves=slides=0;Pmove(&pm);
+        assert(checks==1&&!moves&&slides==1&&!(ps.pm_flags&4)&&!pm.mantleStarted);
+        assert(!pm.cmd.buttons&&!pm.cmd.forwardmove&&ps.commandTime==1050);
+    }
     for(int packet=1;packet<200;packet++) {
         playerState_t ps={.commandTime=1000,.pm_flags=32};
         pmove_t pm={.ps=&ps,.cmd={.serverTime=1000+packet,.buttons=0x400}};
@@ -286,7 +297,8 @@ suites = [
     ('dispatch', dispatch_support, dispatch_body, dispatch_checks, [
         dispatch_body.replace('Mantle_Check(pm, &pml);', ''),
         dispatch_body.replace('if (ps->pm_flags & PMF_MANTLE)', 'if (0)'),
-        dispatch_body.replace('PM_UpdateAimDownSightLerp(pm, &pml);', 'PM_UpdateAimDownSightLerp(pm, &pml); PM_UpdateAimDownSightLerp(pm, &pml);')]),
+        dispatch_body.replace('PM_UpdateAimDownSightLerp(pm, &pml);', 'PM_UpdateAimDownSightLerp(pm, &pml); PM_UpdateAimDownSightLerp(pm, &pml);'),
+        dispatch_body.replace('    PM_FilterFrozenCommand(ps, &pm->cmd);\n', '')]),
     ('jump', jump_support, jump_body, jump_checks, []),
 ]
 with tempfile.TemporaryDirectory(prefix='cod2-mantle-') as directory:
@@ -300,4 +312,4 @@ with tempfile.TemporaryDirectory(prefix='cod2-mantle-') as directory:
                             str(source), '-lm', '-o', str(binary)], check=True)
             result = subprocess.run([str(binary)], capture_output=True, text=True)
             assert (result.returncode == 0) == (index == 0), (name, index, result.stderr)
-print('PASS: 168 ledge/root-motion paths, held-key/blocked-path cancellation, finite animation timers, 9 invalid ledges, 219 movement schedules with one ADS integration before firing, original jump height and 4 failing regression mutants')
+print('PASS: 168 ledge/root-motion paths, held-key/blocked-path cancellation, finite animation timers, 9 invalid ledges, 219 movement schedules with one ADS integration before firing, no mantle while frozen, original jump height and 5 failing regression mutants')

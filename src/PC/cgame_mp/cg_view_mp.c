@@ -16,6 +16,22 @@ EM_JS(void, CG_WebPerfMark, (const char *name), {
 
 vec3_t maxs = { 4.0f, 4.0f, 4.0f };
 
+#ifdef __EMSCRIPTEN__
+/* The browser's compositor blurs the whole view behind a menu that blurs the
+ * world (blurWorld), as the DX9 renderer does, easing in and out over this
+ * long. */
+#define CG_MENU_BACKDROP_MSEC 150.0f
+float g_webMenuBackdropFrac = 0.0f;
+
+float CG_MenuBackdropStep(float frac, float menuBlur, int frametime)
+{
+    float step = (float)frametime / CG_MENU_BACKDROP_MSEC;
+
+    frac += menuBlur > 0.0f ? step : -step;
+    return frac < 0.0f ? 0.0f : frac > 1.0f ? 1.0f : frac;
+}
+#endif
+
 extern const dvar_t *bg_bobMax;
 extern const dvar_t *cg_dumpAnims;
 extern const dvar_t *cg_errorDecay;
@@ -474,6 +490,9 @@ static void CG_CalcViewValues(void)
         float cgBlur = *(float *)((char *)imp_cgDC + 0x28);
         cg->refdef.blurRadius = __builtin_sqrtf(cgBlur * cgBlur + menuBlur * menuBlur);
     }
+#ifdef __EMSCRIPTEN__
+    g_webMenuBackdropFrac = CG_MenuBackdropStep(g_webMenuBackdropFrac, menuBlur, cg->frametime);
+#endif
 
     if (cg->cubemapShot != 0) {
         int size = cg->cubemapSize;

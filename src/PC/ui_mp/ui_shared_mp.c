@@ -2,7 +2,10 @@
 #include "imports.h"
 #include "bytematch.h"
 #include "headers/PC/ui_mp/ui_class_menu.h"
+#include "headers/PC/ui_mp/ui_match_menu.h"
+#include "headers/PC/ui_mp/ui_pause_menu.h"
 #include "headers/PC/ui_mp/ui_wwii_menu.h"
+#include "headers/PC/ui_mp/ui_wwii_settings.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -868,6 +871,26 @@ qboolean Display_KeyBindPending(void)
     return g_waitingForKey;
 }
 
+/* Edits the field as Enter on it does: from its start, typing over it. */
+void Item_EditField_Begin(itemDef_t *item)
+{
+    Item_SetCursorPos(item, 0);
+    g_editingField = 1;
+    g_editItem = item;
+    Key_SetOverstrikeMode(1);
+}
+
+itemDef_t *Item_EditField_Current(void)
+{
+    return g_editingField ? g_editItem : NULL;
+}
+
+void Item_EditField_End(void)
+{
+    g_editingField = 0;
+    g_editItem = NULL;
+}
+
 int Menu_Count(displayContextDef_t *dc)
 {
     return dc->menuCount;
@@ -929,6 +952,7 @@ void UI_AddMenuList(displayContextDef_t *dc, MenuList *menuList)
         UI_ConfigureBrowserMenu(menuList->menus[i]);
 #endif
         UI_WWIIMenu_AddMenu(dc, menuList->menus[i]);
+        UI_WWIISettings_AddMenu(dc, menuList->menus[i]);
         if (dc->menuCount > 0x7f)
             Com_Error(1, "UI_AddMenu: Maximum number of menus %d exceeded.", 0x80);
         dc->Menus[dc->menuCount] = menuList->menus[i];
@@ -2058,6 +2082,7 @@ void Window_Paint(displayContextDef_t *dc, float (*w_param)[4][32], float fadeAm
 void Menu_Setup(displayContextDef_t *dc)
 {
     UI_WWIIMenu_Reset(dc);
+    UI_WWIISettings_Reset(dc);
     dc->menuCount = 0;
     dc->openMenuCount = 0;
     Item_SetupKeywordHash();
@@ -2325,6 +2350,7 @@ void Menus_Open(displayContextDef_t *dc, menuDef_t *menu)
     }
     if ((*(void **)&((menuDef_t *)m)->soundName))
         UI_PlayLocalSoundAliasByName(((menuDef_t *)m)->soundName);
+    UI_MatchMenu_Opened(dc, menu);
     openCount = (((displayContextDef_s*)(d))->openMenuCount);
     for (i = openCount - 1; i >= 0; i--) {
         byte *om = *(byte **)((char *)&((displayContextDef_s *)d)->menuStack[i]);
@@ -2356,7 +2382,7 @@ void Menus_Open(displayContextDef_t *dc, menuDef_t *menu)
 
 qboolean Menus_OpenByName(displayContextDef_t *dc, const char *p)
 {
-    menuDef_t *menu = Menus_FindByName_core(dc, p);
+    menuDef_t *menu = Menus_FindByName_core(dc, UI_PauseMenu_Redirect(p));
     if (menu) {
         Menus_Open(dc, menu);
         return 1;
@@ -2405,6 +2431,9 @@ qboolean Display_MouseMove(displayContextDef_t *dc, void *p, int x, int y)
         Menu_UpdatePosition((menuDef_t *)p);
         return 1;
     }
+    /* The match screen's own pointer, not its hidden retail items. */
+    if (UI_MatchMenu_Covers(dc, Menu_GetFocused(dc)))
+        return 1;
     int openCount = (((displayContextDef_s*)(d))->openMenuCount);
     int i = openCount - 1;
     if (i < 0)
@@ -3019,6 +3048,32 @@ void Item_Slider_Paint(displayContextDef_t *dc, itemDef_t *item)
         ((sharedUiInfo_t *)uiInfo)->assets.sliderThumb);
 }
 
+/* The keys bound to a BIND item's command as its row shows them: a
+ * controller row's button, else the keyboard and mouse keys. */
+void Item_BindText(itemDef_t *item, char *text, int size)
+{
+    char bindText[0x100];
+    const char *bindName = item->dvar ? item->dvar : "";
+
+#if COD2_FEATURE_GAMEPAD
+    if (item->parent && item->parent->window.name &&
+        !I_stricmp(item->parent->window.name, "browser_gamepad")) {
+        int key;
+        I_strncpyz(bindText, UI_SafeTranslateString("KEY_UNBOUND"), sizeof(bindText));
+        for (key = 0xcf; key <= 0xde; ++key) {
+            char binding[256];
+            Key_GetBindingBuf(key, binding, sizeof(binding));
+            if (!I_stricmp(binding, bindName)) {
+                Key_KeynumToStringBuf(key, bindText, sizeof(bindText));
+                break;
+            }
+        }
+    } else
+#endif
+    BindingFromName(bindName, bindText);
+    I_strncpyz(text, bindText, size);
+}
+
 void Item_Bind_Paint(displayContextDef_t *dc, itemDef_t *item)
 {
     byte *it = (byte *)item;
@@ -3053,22 +3108,7 @@ void Item_Bind_Paint(displayContextDef_t *dc, itemDef_t *item)
         goto draw;
     }
 
-#if COD2_FEATURE_GAMEPAD
-    if (item->parent && item->parent->window.name &&
-        !I_stricmp(item->parent->window.name, "browser_gamepad")) {
-        int key;
-        I_strncpyz(bindText, UI_SafeTranslateString("KEY_UNBOUND"), sizeof(bindText));
-        for (key = 0xcf; key <= 0xde; ++key) {
-            char binding[256];
-            Key_GetBindingBuf(key, binding, sizeof(binding));
-            if (!I_stricmp(binding, bindName)) {
-                Key_KeynumToStringBuf(key, bindText, sizeof(bindText));
-                break;
-            }
-        }
-    } else
-#endif
-    BindingFromName(bindName, bindText);
+    Item_BindText(item, bindText, sizeof(bindText));
     drawText = bindText;
 
     int flags = ((itemDef_t *)it)->window.dynamicFlags[0];
@@ -4537,6 +4577,8 @@ qboolean Menu_HandleMouseMove(displayContextDef_t *dc, menuDef_t *menu, float x,
 
     if (!menu)
         return 0;
+    if (UI_WWIISettings_Owns(menu))
+        return 0;
     if ((((menuDef_t *)m)->window.dynamicFlags[0] & 0x4004) == 0)
         return 0;
     if (itemCapture)
@@ -5042,6 +5084,51 @@ void Menu_HandleKey(displayContextDef_t *dc, menuDef_t *menu, int key, qboolean 
     return;
 }
 
+/* The text a MULTI or DVARENUM item shows for its dvar's value. */
+const char *Item_ValueText(itemDef_t *item)
+{
+    if (item->type == 0x0d) {
+        const char *enumDvarName = item->typeData.enumDvarName;
+        struct dvar_s *dvar;
+        const char *enumString;
+        const char **strings;
+        int idx, enumCount, j;
+
+        if (!enumDvarName)
+            return "<dvarEnumList not set>";
+        dvar = Dvar_FindVar(enumDvarName);
+        if (!dvar || dvar->type != 6)
+            return "<not an enum dvar>";
+        if (dvar->domain.enumeration.stringCount <= 0 || !dvar->domain.enumeration.strings)
+            return "";
+        enumString = Dvar_GetVariantString(item->dvar);
+        idx = atoi(enumString);
+        enumCount = dvar->domain.enumeration.stringCount;
+        strings = (const char **)dvar->domain.enumeration.strings;
+        if (idx >= 0 && idx < enumCount)
+            return strings[idx];
+        for (j = 0; j < enumCount; j++) {
+            if (I_stricmp(enumString, strings[j]) == 0)
+                return strings[j];
+        }
+        return strings[0];
+    } else {
+        multiDef_t *multiDef = Item_GetMultiDef(item);
+        const char *value;
+        int j;
+
+        if (!multiDef)
+            return "<dvarStrList or dvarFloatList not set>";
+        value = Dvar_GetVariantString(item->dvar);
+        for (j = 0; j < multiDef->count; j++) {
+            if (multiDef->strDef ? I_stricmp(value, multiDef->dvarStr[j]) == 0
+                                 : (float)atof(value) == multiDef->dvarValue[j])
+                return multiDef->dvarList[j];
+        }
+        return "";
+    }
+}
+
 void Item_Paint(displayContextDef_t *dc, itemDef_t *item)
 {
     byte *it = (byte *)item;
@@ -5049,6 +5136,9 @@ void Item_Paint(displayContextDef_t *dc, itemDef_t *item)
     int flags;
     rectDef_t newRect;
     int traceScriptItem = 0;
+
+    if (UI_WWIISettings_Owns((menuDef_t *)parent))
+        return;
 
     flags = ((itemDef_t *)it)->window.dynamicFlags[0];
     if (parent && ((menuDef_t *)parent)->window.name &&
@@ -5320,75 +5410,10 @@ void Item_Paint(displayContextDef_t *dc, itemDef_t *item)
         case 0xb:
             Item_YesNo_Paint(dc, item);
             break;
-        case 0x0c:  {
-            const char *text;
-            multiDef_t *multiDef = Item_GetMultiDef(item);
-            if (!multiDef) {
-                text = "<dvarStrList or dvarFloatList not set>";
-            } else if (multiDef->strDef) {
-
-                const char *value = Dvar_GetVariantString(item->dvar);
-                int j;
-                text = "";
-                for (j = 0; j < multiDef->count; j++) {
-                    if (I_stricmp(value, multiDef->dvarStr[j]) == 0) {
-                        text = multiDef->dvarList[j];
-                        break;
-                    }
-                }
-            } else {
-
-                const char *value = Dvar_GetVariantString(item->dvar);
-                float fval = (float)atof(value);
-                int j;
-                text = "";
-                for (j = 0; j < multiDef->count; j++) {
-                    if (fval == multiDef->dvarValue[j]) {
-                        text = multiDef->dvarList[j];
-                        break;
-                    }
-                }
-            }
-            Item_List_Paint(dc, item, text);
+        case 0x0c:
+        case 0x0d:
+            Item_List_Paint(dc, item, Item_ValueText(item));
             break;
-        }
-        case 0x0d:  {
-            const char *text;
-            const char *enumDvarName = (*(const char **)&((itemDef_t *)it)->typeData.listBox);
-            if (!enumDvarName) {
-                text = "<dvarEnumList not set>";
-            } else {
-                struct dvar_s *dvar = Dvar_FindVar(enumDvarName);
-                if (!dvar || dvar->type != 6) {
-
-                    text = "<not an enum dvar>";
-                } else if (dvar->domain.enumeration.stringCount <= 0 || !dvar->domain.enumeration.strings) {
-
-                    text = "";
-                } else {
-
-                    const char *enumString = Dvar_GetVariantString(item->dvar);
-                    int idx = atoi(enumString);
-                    int enumCount = dvar->domain.enumeration.stringCount;
-                    const char **strings = (const char **)dvar->domain.enumeration.strings;
-                    if (idx >= 0 && idx < enumCount) {
-                        text = strings[idx];
-                    } else {
-
-                        int j;
-                        text = strings[0];
-                        for (j = 0; j < enumCount; j++) {
-                            if (I_stricmp(enumString, strings[j]) == 0) {
-                                text = strings[j];
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            Item_List_Paint(dc, item, text);
-            break;
-        }
         case 0x0e:
             Item_Bind_Paint(dc, item);
             break;
@@ -5482,6 +5507,11 @@ void Menu_Paint(displayContextDef_t *dc, menuDef_t *menu, qboolean forcePaint)
 
 paint_content:
 
+    if (UI_MatchMenu_Covers(dc, menu)) {
+        UI_MatchMenu_Paint(dc, menu);
+        return;
+    }
+
     if ((((menuDef_t*)(m))->fullScreen) && ((menuDef_t *)m)->window.background) {
         UI_DrawHandlePic(
             0.0f, 0.0f, 640.0f, 480.0f,
@@ -5502,6 +5532,8 @@ paint_content:
     }
     UI_WWIIMenu_PaintMenu(dc, menu);
     UI_ClassMenu_Paint(dc, menu);
+    UI_WWIISettings_Paint(dc, menu);
+    UI_PauseMenu_Paint(dc, menu);
 
     if (debugMode) {
         float color[4] = { 1.0f, 1.0f, 0.0f, 1.0f };
@@ -5517,6 +5549,7 @@ void Menu_PaintAll(displayContextDef_t *dc)
 
     (((displayContextDef_s*)(d))->blurRadiusOut) = 0.0f;
     UI_WWIIMenu_Update(dc);
+    UI_WWIISettings_Update(dc);
 
     if (captureFunc)
         captureFunc(dc, captureData);
@@ -5595,6 +5628,8 @@ void Menus_HandleOOBClick(displayContextDef_t *dc, menuDef_t *menu, int key, qbo
     for (i = openCount - 1; i >= 0; i--) {
         byte *openMenu = *(byte **)((char *)&((displayContextDef_s *)d)->menuStack[i]);
         if (!openMenu)
+            continue;
+        if (UI_WWIISettings_Owns((menuDef_t *)openMenu))
             continue;
         if ((((menuDef_t *)openMenu)->window.dynamicFlags[0] & 0x4004) == 0)
             continue;

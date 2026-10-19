@@ -5,6 +5,7 @@
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_endgame.h"
 #include "headers/PC/cgame_mp/cg_killcam.h"
+#include "headers/PC/cgame_mp/cg_prematch.h"
 #include "headers/PC/cgame_mp/cg_scorepopup.h"
 #include "headers/PC/cgame_mp/cg_scorepanel.h"
 #include "headers/PC/cgame_mp/cg_scoretable.h"
@@ -462,6 +463,8 @@ static void __attribute_regparm__(2) CG_SetClientDvarFromServer(const char *dvar
     if (stricmp(dvarname, "cg_respawnDeadline") == 0) {
         extern void CG_SetRespawnDeadline(int deadline);
         CG_SetRespawnDeadline(atoi(value));
+    } else if (stricmp(dvarname, "cg_prematch") == 0) {
+        CG_PrematchSetCountdown(value);
     } else if (stricmp(dvarname, (const char *)"cg_objectiveText") == 0) {
         I_strncpyz(cg->objectiveText, value, sizeof(cg->objectiveText));
     } else if (stricmp(dvarname, (const char *)"cg_drawHud") == 0) {
@@ -818,12 +821,17 @@ static void CG_ParseScores(void)
         }
     }
 
-    /* Our server follows the players with their kills, in the same order. */
+    /* Our server follows the players with their kills, in the same order,
+     * then the receiver's own assists and headshots. */
     CG_ScoreTableClearKills();
     if (Cmd_Argc() >= 4 + scoreCount * 6) {
         for (i = 0; i < scoreCount; ++i)
             CG_ScoreTableSetKills(cg->scores[i].client, atoi(CG_Argv(4 + scoreCount * 5 + i)));
     }
+    if (Cmd_Argc() >= 6 + scoreCount * 6)
+        CG_ScoreTableSetOwnStats(atoi(CG_Argv(4 + scoreCount * 6)), atoi(CG_Argv(5 + scoreCount * 6)));
+    else
+        CG_ScoreTableSetOwnStats(-1, -1);
 }
 
 static void CG_SetVoteStringFromConfigString(const char *configString)

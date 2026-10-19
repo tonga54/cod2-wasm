@@ -1,20 +1,26 @@
-// First-party custom classes. Players pick one of their five classes where
-// the gametype offered their faction's weapons; any class serves either team.
-// The original callbacks keep spawning, restrictions, messages and rounds.
+// First-party custom classes. A player joining a match picks a class before
+// anything else and the gametype assigns the team; later choices replace the
+// faction's weapon menu. Any class serves either team. The original callbacks
+// keep team balance, spawning, restrictions, messages and rounds.
 main()
 {
 	level.browser_class_primary = primaryWeapons();
 	level.browser_class_secondary = secondaryWeapons();
 	level.browser_class_lethal = lethalWeapons();
 	level.browser_class_tactical = tacticalWeapons();
+	level.browser_class_camos = camoIds();
 	precacheWeapons(level.browser_class_primary);
 	precacheWeapons(level.browser_class_secondary);
 	precacheWeapons(level.browser_class_lethal);
 	precacheWeapons(level.browser_class_tactical);
 
-	precacheMenu("browser_class");
-	game["menu_weapon_allies"] = "browser_class";
-	game["menu_weapon_axis"] = "browser_class";
+	level.browser_class_menu = "browser_class";
+	precacheMenu(level.browser_class_menu);
+	game["menu_weapon_allies"] = level.browser_class_menu;
+	game["menu_weapon_axis"] = level.browser_class_menu;
+	// The connect callbacks open it for a player without a team, in place of
+	// the server's information and the team choice.
+	game["menu_serverinfo"] = level.browser_class_menu;
 	level.browser_class_weapon = level.weapon;
 	level.weapon = ::menuClass;
 	level thread onPlayerConnect();
@@ -83,6 +89,25 @@ tacticalWeapons()
 	return weapons;
 }
 
+// The camouflage a class paints on its primary and its pistol; "none"
+// keeps the gun's own finish.
+camoIds()
+{
+	camos = [];
+	camos[0] = "none";
+	camos[1] = "frogskin";
+	camos[2] = "brownspot";
+	camos[3] = "splinter";
+	camos[4] = "oakleaf";
+	camos[5] = "peapattern";
+	camos[6] = "planetree";
+	camos[7] = "desert";
+	camos[8] = "winter";
+	camos[9] = "ambush";
+	camos[10] = "ember";
+	return camos;
+}
+
 listed(weapons, weapon)
 {
 	for(i = 0; i < weapons.size; i++)
@@ -91,25 +116,47 @@ listed(weapons, weapon)
 	return false;
 }
 
-// "class,primary,secondary,lethal,tactical" from the class menu; a bare
+onTeam()
+{
+	return isDefined(self.pers["team"]) && (self.pers["team"] == "allies" || self.pers["team"] == "axis");
+}
+
+// "class,primary,secondary,lethal,tactical,primaryCamo,secondaryCamo" from the
+// class menu, or without the camouflage from a client built before it; a bare
 // weapon name, as bots send, goes to the original callback unchanged.
 menuClass(response)
 {
 	tokens = strtok(response, ",");
-	if(tokens.size != 5 || tokens[0] != "class")
+	if((tokens.size != 5 && tokens.size != 7) || tokens[0] != "class")
 	{
 		self [[level.browser_class_weapon]](response);
 		return;
 	}
-	if(!listed(level.browser_class_primary, tokens[1]) || !listed(level.browser_class_secondary, tokens[2]) ||
-	   !listed(level.browser_class_lethal, tokens[3]) || !listed(level.browser_class_tactical, tokens[4]))
+	if(tokens.size == 5)
 	{
-		if(isDefined(self.pers["team"]) && (self.pers["team"] == "allies" || self.pers["team"] == "axis"))
-			self openMenu(game["menu_weapon_" + self.pers["team"]]);
+		tokens[5] = "none";
+		tokens[6] = "none";
+	}
+	if(!listed(level.browser_class_primary, tokens[1]) || !listed(level.browser_class_secondary, tokens[2]) ||
+	   !listed(level.browser_class_lethal, tokens[3]) || !listed(level.browser_class_tactical, tokens[4]) ||
+	   !listed(level.browser_class_camos, tokens[5]) || !listed(level.browser_class_camos, tokens[6]))
+	{
+		self openMenu(level.browser_class_menu);
 		return;
 	}
+	if(!self onTeam())
+	{
+		if(isDefined(game["state"]) && game["state"] == "intermission")
+			return;
+		// The gametype's own choice: the smaller team, or the one behind.
+		self [[level.autoassign]]();
+		// It opens the team's weapon menu, the class menu just answered.
+		self closeMenu();
+		if(!self onTeam())
+			return;
+	}
 	loadout = [];
-	for(i = 0; i < 4; i++)
+	for(i = 0; i < 6; i++)
 		loadout[i] = tokens[i + 1];
 	self.pers["browser_class"] = loadout;
 	before = self getWeaponSlotWeapon("primary");
@@ -125,7 +172,26 @@ onPlayerConnect()
 	for(;;)
 	{
 		level waittill("connecting", player);
+		// A client slot keeps its configstring: not its last owner's paint.
+		player setWeaponCamos("");
 		player thread onPlayerSpawned();
+		player thread onMenuResponse();
+	}
+}
+
+// Without a team, the in-game menu's Choose Class opens the class menu too:
+// choosing there assigns the team.
+onMenuResponse()
+{
+	self endon("disconnect");
+	for(;;)
+	{
+		self waittill("menuresponse", menu, response);
+		if(menu != game["menu_ingame"] || response != "changeweapon" || self onTeam())
+			continue;
+		// After _menus.gsc has closed the in-game menu for the same response.
+		waittillframeend;
+		self openMenu(level.browser_class_menu);
 	}
 }
 
@@ -140,7 +206,8 @@ onPlayerSpawned()
 }
 
 // After the gametype's own loadout: the class's weapons in its slots, with
-// the original grenade count for its primary and one smoke grenade.
+// the original grenade count for its primary and one smoke grenade, and
+// their camouflage for every client to paint.
 applyClass()
 {
 	if(!isDefined(self.pers["browser_class"]) || !isDefined(self.pers["weapon"]))
@@ -148,7 +215,10 @@ applyClass()
 	loadout = self.pers["browser_class"];
 	// A restricted or different weapon was chosen since; keep the gametype's.
 	if(loadout[0] != self.pers["weapon"])
+	{
+		self setWeaponCamos("");
 		return;
+	}
 
 	self takeAllWeapons();
 	self setWeaponSlotWeapon("primaryb", loadout[1]);
@@ -168,4 +238,5 @@ applyClass()
 	self giveWeapon(loadout[0]);
 	self giveMaxAmmo(loadout[0]);
 	self setSpawnWeapon(loadout[0]);
+	self setWeaponCamos(loadout[0] + " " + loadout[4] + " " + loadout[1] + " " + loadout[5]);
 }

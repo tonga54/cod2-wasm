@@ -1330,10 +1330,6 @@ void CL_MouseMove(usercmd_t *cmd)
         Com_Printf((const char *)"%f : %f\n", rate, sensitivity);
     }
 
-    if ((short)cl->snap.ps.pm_flags < 0) {
-        return;
-    }
-
     if (cl->snap.ps.eFlags & 0x300) {
         mx *= 2.5f;
         my *= 2.0f;

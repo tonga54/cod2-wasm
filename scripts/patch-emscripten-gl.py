@@ -195,14 +195,29 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
             var pointSample = "texture2D(u_texUnit0, " + pointUV + ")";
             var pointAlbedo = pointSample;
             var hasBaseTexel = fsTexEnvPass.indexOf(pointSample) !== -1;
+            // COD2_WEAPON_CAMO: a camouflaged gun's pattern and paint mask,
+            // bound by the device on units 16-17. Lit models paint the base
+            // texel before its lighting; a uniform flag turns it on per draw.
+            var camoPaint = pointNormal && hasBaseTexel;
             if (hasBaseTexel) {
               // Preserve the authored texture footprint. A positive mip bias
               // erases weapon detail; it cannot reproduce COD4's resolved-scene
               // depth of field, which filters silhouettes and lighting too.
               fsTexEnvPass = "vec4 cod2BaseTexel = " + pointSample + ";\n" +
+                (camoPaint ? "float cod2Paint = 0.0;\nif (u_cod2Camo.x > 0.5) cod2BaseTexel.rgb = cod2Camouflage(" +
+                  "cod2BaseTexel.rgb, " + pointUV + ", cod2Paint);\n" : "") +
                 fsTexEnvPass.split(pointSample).join("cod2BaseTexel");
               pointAlbedo = "cod2BaseTexel";
             }
+            if (camoPaint)
+              pointDefs += "uniform sampler2D u_cod2CamoMap; uniform sampler2D u_cod2CamoMask; uniform vec4 u_cod2Camo;\n" +
+                // The pattern where the mask paints, shaded by the texel against
+                // the material's painted median: its grain, edges and wear.
+                "vec3 cod2Camouflage(vec3 base, highp vec2 uv, out float paint) {\n" +
+                "  paint = texture2D(u_cod2CamoMask, uv).r;\n" +
+                "  vec3 camo = texture2D(u_cod2CamoMap, uv * u_cod2Camo.y).rgb;\n" +
+                "  float wear = clamp(dot(base, vec3(0.299, 0.587, 0.114)) / u_cod2Camo.z, 0.5, 1.5);\n" +
+                "  return mix(base, camo * (1.0 + 0.4 * (wear - 1.0)), paint);\n}\n";
             pointPass = "if (u_cod2LightCount > 0) {\n" +
               (pointNormal ? "highp vec3 n = v_cod2Normal;\n" :
                 "highp vec3 n = cross(dFdx(v_cod2Eye), dFdy(v_cod2Eye));\n") +
@@ -289,6 +304,8 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "highp vec3 cod2B = cod2N;\n" +
                 "if (u_cod2Surface.x > 0.5) cod2B = cod2Bump(cod2N, " + pointUV + ", 1.0);\n" +
                 "vec4 cod2S = u_cod2Surface.y > 0.5 ? texture2D(u_cod2SpecMap, " + pointUV + ") : vec4(0.0);\n" +
+                // Paint is duller than the bare steel or varnish under it.
+                (camoPaint ? "cod2S.rgb *= 1.0 - 0.5 * cod2Paint;\n" : "") +
                 "highp float cod2P = cod2SpecPower(cod2S.a);\n" +
                 // Relight the vertex color with the bumped normal: the ratio
                 // keeps the original grid lights, clamp and tint.
@@ -396,6 +413,9 @@ POINT_UNIFORMS_REPLACEMENT = r'''        this.normalMatrixLocation = GLctx.getUn
         this.cod2DetailMapLocation = GLctx.getUniformLocation(this.program, "u_cod2DetailMap");
         this.cod2NormalMapLocation = GLctx.getUniformLocation(this.program, "u_cod2NormalMap");
         this.cod2SpecMapLocation = GLctx.getUniformLocation(this.program, "u_cod2SpecMap");
+        this.cod2CamoLocation = GLctx.getUniformLocation(this.program, "u_cod2Camo");
+        this.cod2CamoMapLocation = GLctx.getUniformLocation(this.program, "u_cod2CamoMap");
+        this.cod2CamoMaskLocation = GLctx.getUniformLocation(this.program, "u_cod2CamoMask");
         this.cod2MaterialUniforms = null;
         this.cod2LightCount = -1;
         this.cod2LightRevision = -1;
@@ -450,14 +470,19 @@ POINT_UPLOAD_REPLACEMENT = r'''        // COD2_POINT_LIGHT_UNIFORMS: cache per p
             GLctx.uniform1i(this.cod2DetailMapLocation, 5);
             GLctx.uniform1i(this.cod2NormalMapLocation, 6);
             GLctx.uniform1i(this.cod2SpecMapLocation, 7);
+            // Only lit model programs paint camouflage.
+            if (this.cod2CamoMapLocation) {
+              GLctx.uniform1i(this.cod2CamoMapLocation, 16);
+              GLctx.uniform1i(this.cod2CamoMaskLocation, 17);
+            }
             // Values are compared per program: world and model draws
             // alternate, but each program mostly sees the same ones.
             materialUniforms = this.cod2MaterialUniforms = [];
-            var materialNames = ["surface", "detail", "sunEye", "sunColor", "skyEye", "model"];
+            var materialNames = ["surface", "detail", "sunEye", "sunColor", "skyEye", "model", "camo"];
             var materialLocations = [this.cod2SurfaceLocation, this.cod2DetailLocation, this.cod2SunEyeLocation,
-              this.cod2SunColorLocation, this.cod2SkyEyeLocation, this.cod2ModelLocation];
+              this.cod2SunColorLocation, this.cod2SkyEyeLocation, this.cod2ModelLocation, this.cod2CamoLocation];
             for (var materialIndex = 0; materialIndex < materialNames.length; ++materialIndex) {
-              if (materialLocations[materialIndex] === null) continue;
+              if (!materialLocations[materialIndex]) continue;
               materialUniforms.push({name: materialNames[materialIndex], location: materialLocations[materialIndex],
                 last: new Float32Array(cod2Material[materialNames[materialIndex]].length).fill(NaN)});
             }

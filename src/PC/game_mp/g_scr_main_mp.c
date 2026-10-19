@@ -2682,6 +2682,7 @@ void Scr_LoadGameType(void)
 
 static unsigned int s_browserBotsMain;
 static unsigned int s_browserClassesMain;
+static unsigned int s_browserPrematchMain;
 
 void Scr_StartupGameType(void)
 {
@@ -2692,6 +2693,11 @@ void Scr_StartupGameType(void)
      * level initializes and may precache. */
     if (s_browserClassesMain) {
         threadId = Scr_ExecThread(s_browserClassesMain, 0);
+        Scr_FreeThread((unsigned short)threadId);
+    }
+    /* Before any player connects, with the gametype's clock and round state. */
+    if (s_browserPrematchMain) {
+        threadId = Scr_ExecThread(s_browserPrematchMain, 0);
         Scr_FreeThread((unsigned short)threadId);
     }
     if (s_browserBotsMain) {
@@ -4492,6 +4498,9 @@ void GScr_LoadScripts(int inst)
         s_browserClassesMain = 0;
         if (FS_ReadFile("maps/mp/browser_classes.gsc", NULL) > 0)
             s_browserClassesMain = GScr_LoadScriptFunction("maps/mp/browser_classes", "main");
+        s_browserPrematchMain = 0;
+        if (FS_ReadFile("maps/mp/browser_prematch.gsc", NULL) > 0)
+            s_browserPrematchMain = GScr_LoadScriptFunction("maps/mp/browser_prematch", "main");
     }
 
     {

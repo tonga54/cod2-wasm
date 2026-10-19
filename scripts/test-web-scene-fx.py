@@ -20,10 +20,54 @@ camera = backend.index('WebSceneFx_SetCamera((const float *)&vp->viewMatrix, (co
 assert backend.rindex('#ifdef __EMSCRIPTEN__', 0, begin) < camera < begin
 scene = (root / 'src/PC/gfx_d3d/r_scene.c').read_text()
 assert 'WebSceneFx_SetAds(g_webAdsDofFrac, g_webAdsViewmodelStart, g_webAdsViewmodelEnd, g_webAdsNearEnd);' in scene
+backdrop = 'WebSceneFx_SetBackdrop(g_webBackdropFrac > g_webMenuBackdropFrac ? g_webBackdropFrac : g_webMenuBackdropFrac);'
 assert scene.index('WebSceneFx_SetAds(g_webAdsDofFrac') < scene.index('WebSceneFx_SetAim(g_webAimFrac);') < \
-    scene.index('WebSceneFx_SetBackdrop(g_webBackdropFrac);') < scene.index('#endif', scene.index('WebSceneFx_SetAim('))
-# The end of a match blurs the view behind its scoreboard.
-assert 'float g_webBackdropFrac = 0.0f;' in (root / 'src/PC/cgame_mp/cg_endgame_mp.c').read_text()
+    scene.index(backdrop) < \
+    scene.index('WebSceneFx_SetBackdropGray(g_webBackdropGray);') < scene.index('#endif', scene.index('WebSceneFx_SetAim('))
+# The end of a match blurs the view behind its scoreboard; the class screens
+# of a match blur it and turn it gray; a menu that blurs the world (the pause
+# menu, the team and class choices) blurs it too.
+endgame = (root / 'src/PC/cgame_mp/cg_endgame_mp.c').read_text()
+assert 'float g_webBackdropFrac = 0.0f;' in endgame and 'float g_webBackdropGray = 0.0f;' in endgame
+# The countdown before a match grays the view after a menu's gray is set.
+assert 'float g_webGrayFrac = 0.0f;' in (root / 'src/PC/cgame_mp/cg_prematch_mp.c').read_text()
+assert scene.index('WebSceneFx_SetBackdropGray(g_webBackdropGray);') < scene.index('WebSceneFx_SetGray(g_webGrayFrac);') < \
+    scene.index('#endif', scene.index('WebSceneFx_SetAim('))
+view = (root / 'src/PC/cgame_mp/cg_view_mp.c').read_text()
+calc_view = view.index('static void CG_CalcViewValues(void)\n{')
+assert view.index('menuBlur = CL_GetMenuBlurRadius();', calc_view) < view.index(
+    'g_webMenuBackdropFrac = CG_MenuBackdropStep(g_webMenuBackdropFrac, menuBlur, cg->frametime);', calc_view) < \
+    view.index('if (cg->cubemapShot != 0) {', calc_view)
+step_start = view.index('float CG_MenuBackdropStep(float frac, float menuBlur, int frametime)\n{')
+step = view[view.rindex('#define CG_MENU_BACKDROP_MSEC', 0, step_start):view.index('\n}\n', step_start) + 3]
+
+
+def run_step(code):
+    with tempfile.TemporaryDirectory(prefix='cod2-menu-backdrop-') as tmp:
+        (Path(tmp) / 'step.c').write_text('#include <assert.h>\n' + code + r'''
+int main(void) {
+    float frac = 0.0f;
+    for (int i = 0; i < 9; ++i) frac = CG_MenuBackdropStep(frac, 5.0f, 16);
+    assert(frac > 0.9f && frac < 0.98f);
+    frac = CG_MenuBackdropStep(frac, 5.0f, 16);
+    assert(frac == 1.0f && CG_MenuBackdropStep(frac, 5.0f, 1000) == 1.0f);
+    frac = CG_MenuBackdropStep(frac, 0.0f, 75);
+    assert(frac > 0.49f && frac < 0.51f);
+    assert(CG_MenuBackdropStep(frac, 0.0f, 1000) == 0.0f && CG_MenuBackdropStep(0.0f, 0.0f, 16) == 0.0f);
+    assert(CG_MenuBackdropStep(0.5f, 5.0f, 0) == 0.5f);
+    return 0;
+}
+''')
+        subprocess.run(['cc', '-std=c99', '-fsanitize=address,undefined', '-fno-sanitize-recover=all',
+                        str(Path(tmp) / 'step.c'), '-o', str(Path(tmp) / 'step')], check=True)
+        return subprocess.run([str(Path(tmp) / 'step')], capture_output=True).returncode
+
+
+assert run_step(step) == 0
+for before, after in (('menuBlur > 0.0f ? step : -step', 'step'), ('150.0f', '1500.0f'),
+                      ('frac > 1.0f ? 1.0f : frac', 'frac')):
+    assert step.count(before) == 1 and run_step(step.replace(before, after)) != 0, after
+print('PASS: menus that blur the world ease the compositor backdrop in and out over 150 ms; 3 mutants fail')
 # The aim fraction is read before any early return, so scopes, which hide the
 # gun, still fade the blur out.
 weapons = (root / 'src/PC/cgame_mp/cg_weapons.c').read_text()
@@ -52,8 +96,14 @@ assert 'glDepthMask(dev->zWriteEnable ? 1 : 0);' in draw and 'glDepthMask(0);' i
 assert draw.index('glColorMask(\n            (dev->colorWriteEnable & 1) != 0') < draw.index('glColorMask(1, 1, 1, 1);')
 compositor = source.read_text()
 assert 'COLOR_WRITEMASK' not in compositor and 'DEPTH_WRITEMASK' not in compositor
-# The compositor reads the backdrop where the C side writes it.
-assert 'backdrop = H[o + 33];' in compositor
+# The compositor reads the backdrop and its gray where the C side writes
+# them, and mixes the composed color toward its Rec. 709 luma last.
+assert 'backdrop = H[o + 33];' in compositor and 'var gray = H[o + 34]' in compositor
+assert 'gl.uniform4f(C.u_px, 1 / w, 1 / h, w / h, gray > 0 ? gray : 0);' in compositor
+compose_shader = compositor[compositor.index('link("compose"'):compositor.index('link("upscale"')]
+assert compose_shader.index('if (u_glow.x > 0.0)') < compose_shader.index('if (u_film.w > 0.0) {') < \
+    compose_shader.index('col = mix(col, vec3(dot(col, vec3(0.2126, 0.7152, 0.0722))), u_px.w);') < \
+    compose_shader.index('o = vec4(col, 1.0);')
 
 emscripten = '#define EM_JS(ret, name, params, ...) ret name params;\ndouble emscripten_get_now(void);\n'
 common_types = r'''
@@ -92,10 +142,11 @@ int WebSceneFx_Bind(int width, int height, int sampleCount, int screenWidth, int
     boundScreenWidth = screenWidth; boundScreenHeight = screenHeight;
     return bindResult;
 }
-void WebSceneFx_Compose(const float *params)
+void WebSceneFx_Compose(const float *params, const float *mesh)
 {
     ++composes;
     memcpy(composed, params, sizeof(composed));
+    assert(mesh == s_vmMesh);
 }
 static void defaults(void)
 {
@@ -361,7 +412,7 @@ int main(void)
 
     /* A menu's blurred backdrop composes on its own, whatever the other
      * effects, and stays between none and all of it. */
-    assert(SCENE_FX_BACKDROP == 33 && SCENE_FX_PARAM_COUNT == 34);
+    assert(SCENE_FX_BACKDROP == 33 && SCENE_FX_BACKDROP_GRAY == 34 && SCENE_FX_PARAM_COUNT > SCENE_FX_BACKDROP_GRAY);
     defaults();
     glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
     motion.current.enabled = 0;
@@ -371,6 +422,7 @@ int main(void)
     WebSceneFx_SetBackdrop(0.6f);
     frame(0, 1280, 0.1f);
     assert(binds == 1 && composes == 1 && composed[SCENE_FX_BACKDROP] == 0.6f && composed[SCENE_FX_ADS] == 0);
+    assert(composed[SCENE_FX_BACKDROP_GRAY] == 0);
     WebSceneFx_SetBackdrop(4);
     frame(0, 1280, 0.1f);
     assert(composes == 2 && composed[SCENE_FX_BACKDROP] == 1);
@@ -379,9 +431,51 @@ int main(void)
     WebSceneFx_SetBackdrop(-1);
     frame(0, 1280, 0.1f);
     assert(composes == 2);
+    /* Its gray composes on its own too, within the same bounds. */
+    WebSceneFx_SetBackdropGray(0.6f);
+    frame(0, 1280, 0.1f);
+    assert(composes == 3 && composed[SCENE_FX_BACKDROP_GRAY] == 0.6f && composed[SCENE_FX_BACKDROP] == 0);
+    WebSceneFx_SetBackdrop(1);
+    WebSceneFx_SetBackdropGray(4);
+    frame(0, 1280, 0.1f);
+    assert(composes == 4 && composed[SCENE_FX_BACKDROP_GRAY] == 1 && composed[SCENE_FX_BACKDROP] == 1);
+    WebSceneFx_SetBackdrop(0);
+    WebSceneFx_SetBackdropGray(NAN);
+    frame(0, 1280, 0.1f);
+    WebSceneFx_SetBackdropGray(-1);
+    frame(0, 1280, 0.1f);
+    assert(composes == 4);
     defaults();
     frame(0, 1280, 0.1f);
-    assert(composes == 3 && composed[SCENE_FX_BACKDROP] == 0);
+    assert(composes == 5 && composed[SCENE_FX_BACKDROP] == 0 && composed[SCENE_FX_BACKDROP_GRAY] == 0);
+    /* The countdown before a match grays the view on its own as well, the
+     * larger gray winning, and lifts the film grade's contrast with it. */
+    glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
+    motion.current.enabled = 0;
+    binds = composes = 0;
+    WebSceneFx_SetGray(0.6f);
+    frame(0, 1280, 0.1f);
+    assert(binds == 1 && composes == 1 && composed[SCENE_FX_BACKDROP_GRAY] == 0.6f && composed[SCENE_FX_CONTRAST] == 0);
+    WebSceneFx_SetBackdropGray(0.8f);
+    frame(0, 1280, 0.1f);
+    assert(composes == 2 && composed[SCENE_FX_BACKDROP_GRAY] == 0.8f);
+    WebSceneFx_SetBackdropGray(0.2f);
+    frame(0, 1280, 0.1f);
+    assert(composes == 3 && composed[SCENE_FX_BACKDROP_GRAY] == 0.6f);
+    WebSceneFx_SetBackdropGray(0);
+    film.current.enabled = 1;
+    WebSceneFx_SetGray(4);
+    frame(0, 1280, 0.1f);
+    assert(composes == 4 && composed[SCENE_FX_BACKDROP_GRAY] == 1 && fabsf(composed[SCENE_FX_CONTRAST] - 1.2f) < 1e-6f);
+    film.current.enabled = 0;
+    WebSceneFx_SetGray(NAN);
+    frame(0, 1280, 0.1f);
+    WebSceneFx_SetGray(-1);
+    frame(0, 1280, 0.1f);
+    assert(composes == 4);
+    defaults();
+    frame(0, 1280, 0.1f);
+    assert(composes == 5 && composed[SCENE_FX_BACKDROP_GRAY] == 0 && composed[SCENE_FX_CONTRAST] == 0.35f);
 
     /* A screen taller than r_sceneHeight renders its scene at that many lines
      * and the screen's aspect, even with every effect off; a shorter one, or
@@ -420,7 +514,7 @@ int main(void)
     WebSceneFx_EndView();
     WebSceneFx_EndFrame();
     assert(!binds && !composes);
-    puts("PASS: 600 composed frames, single compose per frame before Present, partial/fullbright/disabled views drawn directly, bounded glow, viewmodel and near world focus parameters, camera motion reprojected over a 10 ms exposure with aim fade, cuts and still cameras, a bounded menu backdrop, scenes rendered at r_sceneHeight lines and the screen's aspect on taller screens");
+    puts("PASS: 600 composed frames, single compose per frame before Present, partial/fullbright/disabled views drawn directly, bounded glow, viewmodel and near world focus parameters, camera motion reprojected over a 10 ms exposure with aim fade, cuts and still cameras, a bounded menu backdrop and its gray, scenes rendered at r_sceneHeight lines and the screen's aspect on taller screens");
     return 0;
 }
 '''
@@ -440,15 +534,24 @@ mutants = [
     ('s_lastViewValid = valid;', 's_lastViewValid = 1;'),
     ('WebSceneFx_Enabled(r_motionBlur) && ', ''),
     (' && s_motionScale <= 0.0f && ', ' && '),
-    (' && s_backdropFrac <= 0.0f)', ')'),
+    (' && s_backdropFrac <= 0.0f &&\n', ' &&\n'),
+    (' &&\n        s_backdropGray <= 0.0f)', ')'),
     ('params[SCENE_FX_BACKDROP] = s_backdropFrac;', 'params[SCENE_FX_BACKDROP] = 0.0f;'),
     ('s_backdropFrac = WebSceneFx_Clamp(backdropFrac, 0.0f, 1.0f);', 's_backdropFrac = backdropFrac;'),
+    ('params[SCENE_FX_BACKDROP_GRAY] = s_backdropGray;', 'params[SCENE_FX_BACKDROP_GRAY] = s_backdropFrac;'),
+    ('s_backdropGray = WebSceneFx_Clamp(gray, 0.0f, 1.0f);', 's_backdropGray = gray;'),
+    ('!scaled && s_grayFrac <= 0.0f && ', '!scaled && '),
+    ('    if (s_grayFrac > params[SCENE_FX_BACKDROP_GRAY])\n        params[SCENE_FX_BACKDROP_GRAY] = s_grayFrac;\n', ''),
+    ('params[SCENE_FX_CONTRAST] += 0.85f * s_grayFrac;', 'params[SCENE_FX_CONTRAST] += 0.0f * s_grayFrac;'),
+    ('s_grayFrac = WebSceneFx_Clamp(grayFrac, 0.0f, 1.0f);', 's_grayFrac = grayFrac;'),
     ('params[SCENE_FX_MOTION_PROJECTION + 1] = s_motionProjection[1];',
      'params[SCENE_FX_MOTION_PROJECTION + 1] = s_motionProjection[0];'),
-    ('    WebSceneFx_TrackCamera();\n    /* r_fullbright clears the frame buffer before it begins the view. */\n'
+    ('    WebSceneFx_TrackCamera();\n    WebSceneFx_TrackViewmodel(sceneWidth, sceneHeight, nearClip);\n'
+     '    /* r_fullbright clears the frame buffer before it begins the view. */\n'
      '    if (WebSceneFx_Enabled(r_fullbright))\n        return;\n',
      '    /* r_fullbright clears the frame buffer before it begins the view. */\n'
-     '    if (WebSceneFx_Enabled(r_fullbright))\n        return;\n    WebSceneFx_TrackCamera();\n'),
+     '    if (WebSceneFx_Enabled(r_fullbright))\n        return;\n'
+     '    WebSceneFx_TrackCamera();\n    WebSceneFx_TrackViewmodel(sceneWidth, sceneHeight, nearClip);\n'),
     ('    if (lines > 0 && lines < height) {', '    if (lines > 0) {'),
     ('(float)lines / (float)height + 0.5f);', '(float)lines / (float)height);'),
     ('        if (*sceneWidth < 1)\n            *sceneWidth = 1;\n', ''),

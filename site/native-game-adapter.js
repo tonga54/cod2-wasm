@@ -11,7 +11,6 @@
   let chatCancelledCapture = false;
   let keyboardCaptureAfter = 0;
   let updateNotifier;
-  let fullscreenControl;
   let gametag;
   const gametagStorageKey = 'cod2-wasm-gametag';
   const startupStyle = document.createElement('link');
@@ -522,36 +521,22 @@
     return factoryPromise;
   }
   function startFullscreenControl(context) {
-    let pending = false, failedRequest = false, nativeClient, sentState;
+    let pending = false;
     const available = () => typeof document.documentElement?.requestFullscreen === 'function' &&
       document.fullscreenEnabled !== false;
-    function sync(client = nativeClient) {
-      nativeClient = client;
-      const state = [available() ? (document.fullscreenElement ? 2 : 1) : 0,
-        pending ? 1 : 0, failedRequest ? 1 : 0];
-      const key = state.join(':');
-      if (client?._web_client_fullscreen_state && key !== sentState &&
-          client._web_client_fullscreen_state(...state)) sentState = key;
-    }
     async function toggle() {
       if (pending || !available() ||
           (globalThis.navigator?.userActivation && !navigator.userActivation.isActive)) return;
       pending = true;
-      failedRequest = false;
-      sync();
       try {
         if (document.fullscreenElement) await document.exitFullscreen();
         else await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
-      } catch {
-        failedRequest = true;
-      } finally {
+      } catch { /* A denied request keeps the current display mode. */ } finally {
         pending = false;
-        sync();
       }
     }
     let keyboardGeneration = 0, escapeLocked = false;
     document.addEventListener('fullscreenchange', async () => {
-      sync();
       const generation = ++keyboardGeneration;
       escapeLocked = false;
       const keyboard = globalThis.navigator?.keyboard;
@@ -573,7 +558,6 @@
       event.stopImmediatePropagation();
       if (type === 'keydown' && !event.repeat) toggle();
     }, true);
-    return { toggle, sync };
   }
   function startUpdateNotifier(context) {
     if (!context.config?.updates) return;
@@ -594,7 +578,7 @@
   }
   globalThis.WasmGameAdapter = Object.freeze({
     async init(context) {
-      fullscreenControl = startFullscreenControl(context);
+      startFullscreenControl(context);
       startUpdateNotifier(context);
       // Keep right-click available to the game, including before pointer lock.
       context.elements.canvas.addEventListener('contextmenu', event => event.preventDefault());
@@ -706,7 +690,6 @@
           cod2Performance: meter,
           cod2SaveProfile: config => saveProfile(context, config),
           cod2ReloadClient: () => updateNotifier?.reload(),
-          cod2ToggleFullscreen: () => fullscreenControl?.toggle(),
           canvas: context.elements.canvas, noInitialRun: true,
           // Emscripten's default terminal stdin opens window.prompt("Input:").
           // Browser gameplay receives keyboard events through SDL instead.
@@ -748,7 +731,6 @@
           '+set', 'com_hunkMegs', '128', '+set', 'r_fullscreen', '0',
           '+set', 'ui_browserVersion', `"${browserVersion}"`
         ]);
-        fullscreenControl?.sync(native);
         const state = native._web_client_state();
         if (state === 1 || state === 2) context.showRuntime(state === 2 ? 'gameplay' : 'menu');
       } catch (error) {
@@ -761,13 +743,11 @@
     readEngineState() {
       if (failed) return 'crashed';
       if (!native) return 'launcher';
-      fullscreenControl?.sync(native);
       const state = native._web_client_state();
       return state === 2 || state === 3 ? 'gameplay' : state === 1 ? 'menu' : 'loading';
     },
     readCaptureIntent() {
       if (failed || !native) return false;
-      fullscreenControl?.sync(native);
       const state = native._web_client_state();
       return state === 2 || state === 3;
     },

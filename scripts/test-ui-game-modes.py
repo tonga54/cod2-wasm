@@ -10,6 +10,7 @@ action=source.split('if (I_stricmp(name, "StartServer") == 0) {',1)[1].split('#i
 key=source.split('static int UI_IsActionKey(int key)\n',1)[1].split('\nstatic int UI_UpdateMapVisibility',1)[0]
 code=r'''
 #include <assert.h>
+#include <stdio.h>
 #include <string.h>
 typedef struct {struct {int integer;} current;} dvar_t;
 typedef struct {const char *gameType, *gameTypeName;} gameType_t;
@@ -20,7 +21,7 @@ static int botCount=8,botDifficulty=2;
 static int visibilityCalls,selectionCalls,creates;static const char *createdMap,*createdType;
 static void Dvar_SetInt(dvar_t *var,int value){var->current.integer=value;}
 static void Dvar_SetString(char *var,const char *value){strcpy(var,value);}
-static const char *Dvar_GetString(const char *name){assert(!strcmp(name,"sv_hostname"));return "Mode test";}
+static void UI_MatchMenu_RoomName(char *name,int size){assert(size==64);snprintf(name,(size_t)size,"Mode test");}
 static int Dvar_GetInt(const char *name){if(!strcmp(name,"ui_botCount"))return botCount;assert(!strcmp(name,"ui_botDifficulty"));return botDifficulty;}
 static void UI_UpdateMapVisibility(int value){assert(value==gt.current.integer);visibilityCalls++;}
 static void UI_SelectFirstVisibleMap(int value){assert(value==map.current.integer);selectionCalls++;}

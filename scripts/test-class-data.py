@@ -8,6 +8,7 @@ import tempfile
 
 root = Path(__file__).resolve().parent.parent
 source = root / 'src/PC/ui_mp/ui_class_data.c'
+camo_source = root / 'src/PC/bgame/bg_weapon_camo.c'
 rules = json.loads((root / 'downstream/gateway/classes.json').read_text())
 
 # One set of lists and defaults: the host's, the client's and the server's.
@@ -25,6 +26,20 @@ for slot, function in (('primary', 'primaryWeapons'), ('secondary', 'secondaryWe
     body = gsc[gsc.index(function + '()\n{'):]
     body = body[:body.index('return weapons;')]
     assert re.findall(r'weapons\[\d+\] = "([^"]+)";', body) == rules[slot], slot
+# The camouflage ids in the same order everywhere, "none" first; each gun of
+# the primary and secondary lists names the material it paints.
+camo_text = camo_source.read_text()
+camo_table = camo_text[camo_text.index('const WeaponCamo g_weaponCamos'):camo_text.index('};')]
+assert re.findall(r'\{ "([a-z]+)", "[^"]+", "[^"]+" \}', camo_table) == rules['camos']
+body = gsc[gsc.index('camoIds()\n{'):]
+assert re.findall(r'camos\[\d+\] = "([a-z]+)";', body[:body.index('return camos;')]) == rules['camos']
+assert int(re.search(r'#define WEAPON_CAMO_COUNT (\d+)',
+                     (root / 'src/headers/PC/bgame/bg_weapon_camo.h').read_text())[1]) == len(rules['camos'])
+guns = re.findall(r'\{ "([A-Za-z0-9_]+_mp)", "(mtl_[a-z0-9_]+)", WEAPON_CAMO_(WOOD|BODY) \}', camo_text)
+assert [gun for gun, _, _ in guns] == rules['primary'] + rules['secondary']
+assert all(style == 'BODY' for gun, _, style in guns if gun in rules['secondary']), 'pistols are painted whole'
+for item in rules['defaults']:
+    assert (item['primaryCamo'], item['secondaryCamo']) == ('none', 'none'), item['name']
 # Every image the screens draw is a retail menu image or HUD icon.
 for image in re.findall(r'"(weapon_[a-z0-9_]+|gfx/icons/hud@[a-z0-9_]+\.tga|hud_[a-z0-9_]+)"', source.read_text()):
     assert re.fullmatch(r'weapon_[a-z0-9]+|gfx/icons/hud@[a-z0-9_]+\.tga|hud_us_smokegrenade', image), image
@@ -34,6 +49,7 @@ test = r'''
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include "CAMO_SOURCE"
 #include "SOURCE"
 static ClassLoadout classes[CLASS_COUNT];
 static char text[1024];
@@ -51,26 +67,48 @@ int main(void)
     /* Lines round-trip; a bad field falls back to its slot's default only. */
     ClassData_Defaults(classes);
     assert(!strcmp(classes[3].name, "Sniper"));
+    assert(classes[3].camo[0] == WEAPON_CAMO_NONE && classes[3].camo[1] == WEAPON_CAMO_NONE);
     strcpy(classes[1].name, "Kar Rusher");
     classes[1].weapon[CLASS_SLOT_PRIMARY] = ClassData_Find("kar98k_mp");
     classes[1].weapon[CLASS_SLOT_SECONDARY] = ClassData_Find("TT30_mp");
+    classes[1].camo[CLASS_SLOT_PRIMARY] = BG_WeaponCamo_Find("brownspot");
+    classes[2].camo[CLASS_SLOT_SECONDARY] = BG_WeaponCamo_Find("ember");
     assert(ClassData_Serialize(classes, text, sizeof(text)) > 0);
-    assert(strstr(text, "Kar Rusher\tkar98k_mp\tTT30_mp\tfrag_grenade_american_mp\tsmoke_grenade_american_mp\n"));
+    assert(strstr(text, "Kar Rusher\tkar98k_mp\tTT30_mp\tfrag_grenade_american_mp\tsmoke_grenade_american_mp"
+                        "\tbrownspot\tnone\n"));
+    assert(strstr(text, "Rifleman\tm1garand_mp\tcolt_mp\tfrag_grenade_american_mp\tsmoke_grenade_american_mp"
+                        "\tnone\tember\n"));
     {
         ClassLoadout read[CLASS_COUNT];
         int i;
         assert(ClassData_Parse(text, read) == 1);
         for (i = 0; i < CLASS_COUNT; i++)
-            assert(!strcmp(read[i].name, classes[i].name) && !memcmp(read[i].weapon, classes[i].weapon, sizeof(read[i].weapon)));
+            assert(!strcmp(read[i].name, classes[i].name) && !memcmp(read[i].weapon, classes[i].weapon, sizeof(read[i].weapon)) &&
+                   !memcmp(read[i].camo, classes[i].camo, sizeof(read[i].camo)));
     }
     assert(ClassData_Serialize(classes, text, 40) < 0);
     {
+        /* A camouflage out of the list does not serialize. */
+        ClassLoadout broken[CLASS_COUNT];
+        memcpy(broken, classes, sizeof(broken));
+        broken[4].camo[1] = WEAPON_CAMO_COUNT;
+        assert(ClassData_Serialize(broken, text, sizeof(text)) < 0);
+        broken[4].camo[1] = -1;
+        assert(ClassData_Serialize(broken, text, sizeof(text)) < 0);
+    }
+    {
         ClassLoadout read[CLASS_COUNT];
+        /* Lines from before camouflage keep their weapons, unpainted; an unknown
+         * camouflage is the gun's own finish. */
         const char *mixed = "Fine\tppsh_mp\tluger_mp\tfrag_grenade_russian_mp\tsmoke_grenade_russian_mp\n"
                             "bad\"name\tcolt_mp\tkar98k_mp\tsmoke_grenade_german_mp\tfrag_grenade_german_mp\n"
-                            "Short\tmp40_mp\n";
+                            "Short\tmp40_mp\n"
+                            "Painted\tg43_mp\tluger_mp\tfrag_grenade_german_mp\tsmoke_grenade_german_mp\ttiger\twinter\n";
         assert(ClassData_Parse(mixed, read) == 0);
         assert(!strcmp(read[0].name, "Fine") && read[0].weapon[0] == ClassData_Find("ppsh_mp"));
+        assert(read[0].camo[0] == WEAPON_CAMO_NONE && read[0].camo[1] == WEAPON_CAMO_NONE);
+        assert(!strcmp(read[3].name, "Painted") && read[3].weapon[0] == ClassData_Find("g43_mp"));
+        assert(read[3].camo[0] == WEAPON_CAMO_NONE && read[3].camo[1] == BG_WeaponCamo_Find("winter"));
         assert(!strcmp(read[1].name, "Submachine Gunner"));
         assert(read[1].weapon[0] == ClassData_Find("thompson_mp") && read[1].weapon[1] == ClassData_Find("colt_mp"));
         assert(read[1].weapon[2] == ClassData_Find("frag_grenade_american_mp"));
@@ -110,11 +148,24 @@ int main(void)
         assert(ClassData_EditName(name, 0x400 | 8) && !name[0]);
     }
 
-    /* The menu's response, one token the server splits on commas. */
+    /* The menu's response, one token the server splits on commas: an
+     * unpainted class as before camouflage, a painted one with both ids. */
+    assert(ClassData_Response(&classes[0], text, sizeof(text)) > 0);
+    assert(!strcmp(text, "class,mp44_mp,luger_mp,frag_grenade_german_mp,smoke_grenade_german_mp"));
     assert(ClassData_Response(&classes[1], text, sizeof(text)) > 0);
-    assert(!strcmp(text, "class,kar98k_mp,TT30_mp,frag_grenade_american_mp,smoke_grenade_american_mp"));
+    assert(!strcmp(text, "class,kar98k_mp,TT30_mp,frag_grenade_american_mp,smoke_grenade_american_mp,brownspot,none"));
     assert(!strchr(text, ' ') && !strchr(text, ';'));
+    assert(ClassData_Response(&classes[2], text, sizeof(text)) > 0);
+    assert(!strcmp(text, "class,m1garand_mp,colt_mp,frag_grenade_american_mp,smoke_grenade_american_mp,none,ember"));
     assert(ClassData_Response(&classes[1], text, 20) < 0);
+    /* Room for the weapons but not the camouflage is no response. */
+    assert(ClassData_Response(&classes[1], text, (int)strlen("class,kar98k_mp,TT30_mp,frag_grenade_american_mp,"
+                                                        "smoke_grenade_american_mp,brownspot") + 1) < 0);
+    {
+        ClassLoadout broken = classes[1];
+        broken.camo[0] = WEAPON_CAMO_COUNT;
+        assert(ClassData_Response(&broken, text, sizeof(text)) < 0);
+    }
 
     /* Stats from a weapon file's own fields. */
     {
@@ -143,8 +194,9 @@ int main(void)
     assert(ClassData_Rate(35.0f, 35.0f, 90.0f) == 1 && ClassData_Rate(90.0f, 35.0f, 90.0f) == 10);
     assert(ClassData_Rate(62.5f, 35.0f, 90.0f) == 6 && ClassData_Rate(500.0f, 35.0f, 90.0f) == 10);
     assert(ClassData_Rate(-5.0f, 35.0f, 90.0f) == 1 && ClassData_Rate(7.0f, 7.0f, 7.0f) == 5);
-    puts("PASS: 33 weapons in four slots, storage lines round-trip with per-field defaults, host name rules, "
-         "bounded rename, the comma response and stats from weapon files");
+    puts("PASS: 33 weapons in four slots, two camouflages per class, storage lines round-trip with per-field defaults, "
+         "host name rules, bounded rename, the comma response with camouflage only when painted and stats from "
+         "weapon files");
     return 0;
 }
 '''
@@ -166,11 +218,21 @@ mutants = [
     ("    if (!(highest > lowest))\n        return 5;\n", ""),
     ("            if (length < sizeof(fields[0]))\n                memcpy(fields[count], text, length);\n            else\n                valid = 0;\n",
      "            memcpy(fields[count], text, length);\n"),
+    ('        while (text < end && count < 1 + CLASS_SLOT_COUNT + CLASS_CAMO_SLOTS) {',
+     '        while (text < end && count < 1 + CLASS_SLOT_COUNT) {'),
+    ('            if (camo >= 0)\n                classes[i].camo[slot] = camo;', '            if (camo > 0)\n                classes[i].camo[slot] = camo;'),
+    ('            classes[i].camo[slot] = WEAPON_CAMO_NONE;\n', '            classes[i].camo[slot] = 1;\n'),
+    ('(loadout->camo[0] || loadout->camo[1])', '(loadout->camo[0])'),
+    ('loadout->camo[1] >= 0 &&\n           loadout->camo[1] < WEAPON_CAMO_COUNT', 'loadout->camo[1] >= 0'),
+    ('        written = camos < 0 ? -1 : written + camos;', '        written = camos < 0 ? -1 : written;'),
+    ('g_weaponCamos[classes[i].camo[0]].id, g_weaponCamos[classes[i].camo[1]].id);',
+     'g_weaponCamos[classes[i].camo[0]].id, g_weaponCamos[classes[i].camo[0]].id);'),
 ]
 with tempfile.TemporaryDirectory(prefix='cod2-class-data-') as tmp:
     path = Path(tmp)
     flags = ['-std=c99', '-I', str(root / 'src'), '-fsanitize=address,undefined', '-fno-sanitize-recover=all']
-    (path / 'test.c').write_text(test.replace('SOURCE', str(source)))
+    program = test.replace('CAMO_SOURCE', str(camo_source))
+    (path / 'test.c').write_text(program.replace('SOURCE', str(source)))
     subprocess.run(['cc', *flags, '-O1', '-g', '-Wall', '-Werror', str(path / 'test.c'), '-lm', '-o', str(path / 'test')],
                    check=True)
     subprocess.run([str(path / 'test')], check=True)
@@ -179,7 +241,7 @@ with tempfile.TemporaryDirectory(prefix='cod2-class-data-') as tmp:
         assert original.count(before) == 1, before
         mutant = path / f'mutant{index}.c'
         mutant.write_text(original.replace(before, after))
-        (path / f'mutant{index}-test.c').write_text(test.replace('SOURCE', str(mutant)))
+        (path / f'mutant{index}-test.c').write_text(program.replace('SOURCE', str(mutant)))
         subprocess.run(['cc', *flags, '-O0', '-w', str(path / f'mutant{index}-test.c'), '-lm', '-o',
                         str(path / f'mutant{index}')], check=True)
         result = subprocess.run([str(path / f'mutant{index}')], capture_output=True)

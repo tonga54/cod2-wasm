@@ -2,6 +2,7 @@
 #include "imports.h"
 #include "bytematch.h"
 #include "headers/PC/cgame_mp/cg_local.h"
+#include "headers/PC/cgame_mp/cg_weaponcamo.h"
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
@@ -310,6 +311,10 @@ void CG_AddCEntityToScene(const GfxEntity *ent, const struct DObj_s *obj, const 
     sceneEnt = R_AddRefEntityToScene(ent, model, cent);
     if (!sceneEnt)
         return;
+
+    /* A player's model carries the weapon in hand, except on a turret. */
+    if (cent->nextState.eType == 1 && !(cent->nextState.eFlags & 0x300))
+        CG_SetWeaponCamo(sceneEnt, obj, cent->nextState.clientNum, cent->nextState.weapon);
 
     if (cent->cullIn == 1) {
         ((centity_t *)cent)->cullIn = 0;

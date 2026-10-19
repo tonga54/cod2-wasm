@@ -65,6 +65,11 @@ void Cbuf_AddText(const char *s){(void)s;}
 void Com_Printf(const char *fmt,...){(void)fmt;}
 static int pending;
 qboolean Display_KeyBindPending(void){return pending;}
+static int classMenu;
+qboolean UI_ClassMenuFocused(void){return classMenu;}
+/* The focused menu takes every key, as the pause menu does. */
+static int menuTakesKeys;
+qboolean UI_checkKeyExec(int key){(void)key;return menuTakesKeys;}
 static struct {int key,down;} events[1024];static int eventCount;
 void Sys_QueEvent(int t,sysEventType_t type,int key,int down,int len,void *p){
  assert(eventCount<1024);events[eventCount].key=key;events[eventCount++].down=down;
@@ -117,6 +122,30 @@ int main(void){
  assert(events[0].key==K_ENTER && events[0].down);
  pending=1;pad.buttons[SDL_CONTROLLER_BUTTON_A]=0;CL_Gamepad_Frame();
  assert(events[1].key==K_ENTER && !events[1].down);
+ // The bumpers reach a menu that takes every key, as the pause menu's tabs;
+ // any other menu would run their gameplay binds, so they stay quiet there.
+ pending=0;eventCount=0;pad.buttons[SDL_CONTROLLER_BUTTON_LEFTSHOULDER]=1;CL_Gamepad_Frame();
+ pad.buttons[SDL_CONTROLLER_BUTTON_LEFTSHOULDER]=0;CL_Gamepad_Frame();assert(eventCount==0);
+ menuTakesKeys=1;
+ pad.buttons[SDL_CONTROLLER_BUTTON_LEFTSHOULDER]=1;CL_Gamepad_Frame();
+ assert(eventCount==1 && events[0].key==K_BUTTON_LSHLDR && events[0].down);
+ pad.buttons[SDL_CONTROLLER_BUTTON_LEFTSHOULDER]=0;CL_Gamepad_Frame();
+ assert(eventCount==2 && events[1].key==K_BUTTON_LSHLDR && !events[1].down);
+ pad.buttons[SDL_CONTROLLER_BUTTON_RIGHTSHOULDER]=1;CL_Gamepad_Frame();
+ assert(eventCount==3 && events[2].key==K_BUTTON_RSHLDR && events[2].down);
+ pad.buttons[SDL_CONTROLLER_BUTTON_RIGHTSHOULDER]=0;CL_Gamepad_Frame();
+ client.keyCatchers=8|0x10;eventCount=0;
+ pad.buttons[SDL_CONTROLLER_BUTTON_RIGHTSHOULDER]=1;CL_Gamepad_Frame();
+ pad.buttons[SDL_CONTROLLER_BUTTON_RIGHTSHOULDER]=0;CL_Gamepad_Frame();assert(eventCount==0);
+ client.keyCatchers=8;menuTakesKeys=0;pending=1;
+ // Y is the class screens' Customize; other menus get nothing for it.
+ pending=0;eventCount=0;pad.buttons[SDL_CONTROLLER_BUTTON_Y]=1;CL_Gamepad_Frame();
+ pad.buttons[SDL_CONTROLLER_BUTTON_Y]=0;CL_Gamepad_Frame();assert(eventCount==0);
+ classMenu=1;pad.buttons[SDL_CONTROLLER_BUTTON_Y]=1;CL_Gamepad_Frame();
+ assert(eventCount==1 && events[0].key==K_BUTTON_Y && events[0].down);
+ classMenu=0;pad.buttons[SDL_CONTROLLER_BUTTON_Y]=0;CL_Gamepad_Frame();
+ assert(eventCount==2 && events[1].key==K_BUTTON_Y && !events[1].down);
+ pending=1;eventCount=2;
  pad.axes[4]=pad.axes[5]=32767;CL_Gamepad_Frame();
  assert(g_buttonDown[K_BUTTON_LTRIG] && g_buttonDown[K_BUTTON_RTRIG]);
  // Opening a menu releases attack; held controls wait for release.
@@ -187,7 +216,8 @@ int main(void){
  pending=1;CL_Gamepad_Frame();assert(!events[2].down);
  CL_Gamepad_Shutdown();return 0;
 }
-''', 'controller hotplug, saved mapping migration, click-to-sprint/cancellation, raw capture, triggers, focus, analog sticks and repeat')
+''', 'controller hotplug, saved mapping migration, click-to-sprint/cancellation, raw capture, bumpers for a menu '
+     'that takes every key, triggers, focus, analog sticks and repeat')
 
 def input_function(name):
     text = (root / 'src/PC/client_mp/cl_input.c').read_text()

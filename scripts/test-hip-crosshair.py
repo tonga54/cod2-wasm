@@ -79,6 +79,8 @@ static int CG_GetTeammateNameColor(float *color) {
     return 1;
 }
 static int CG_AreHudMenusHidden(void) {return hudHidden;}
+static int prematch;
+static int CG_PrematchActive(void) {return prematch;}
 static void CG_DrawTurretCrossHair(void) {}
 static int BG_GetViewmodelWeaponIndex(playerState_t *ps) {return ps->weapon;}
 static void *BG_GetWeaponDef(int index) {return &weapon;}
@@ -316,13 +318,16 @@ int main(void) {
     visibility=1;ps->fWeaponPosFrac=1;
     reset();CG_DrawCrosshair();assert(!rasterCalls&&!centerDraws);
     ps->fWeaponPosFrac=0;
-    for(int gate=0;gate<5;gate++) {
+    /* The countdown before a match hides the marks but keeps a scope's overlay. */
+    for(int gate=0;gate<6;gate++) {
         ps->pm_flags=PMF_SPRINT;
         hudHidden=(gate==0);cg->renderingThirdPerson=(gate==1);
         cg_paused->current.integer=(gate==2);cg_drawCrosshair=(gate==3?&disabled:&enabled);
-        ps->weaponstate=(gate==4?5:0);
+        ps->weaponstate=(gate==4?5:0);prematch=(gate==5);
         reset();CG_DrawCrosshair();assert(!rasterCalls&&!centerDraws);
+        assert(gate!=5||overlayCalls==1);
     }
+    prematch=0;
     ps->pm_flags=0;ps->weaponstate=0;CG_ResetSprintView();
     /* Only the image's file name says it is the bar, in either case and after
      * either slash. */
@@ -369,6 +374,10 @@ replacements = [
     ('color[3] = reticleVisibility *', 'color[3] = posLerp *'),
     ('(alpha >= alphaMin ? alpha : alphaMin) * reticleVisibility', '(alpha >= alphaMin ? alpha : alphaMin)'),
     ('if (cg->renderingThirdPerson)\n', 'if (cg->renderingThirdPerson || (ps->pm_flags & PMF_SPRINT))\n'),
+    # The countdown before a match lets the marks show, or takes the overlay too.
+    ('    if (!drawHudMenus || CG_PrematchActive())\n', '    if (!drawHudMenus)\n'),
+    ('    reticleVisibility = CG_DrawWeapReticle();\n', '    if (CG_PrematchActive())\n        return 0;\n'
+                                                       '    reticleVisibility = CG_DrawWeapReticle();\n'),
     (blend_call, ''),
     (blend_call, blend_call.replace('CG_SprintCarryBlend(ps)', '((ps->pm_flags & PMF_SPRINT) ? 1.0f : 0.0f)')),
     (alpha_floor, 'cg_crosshairAlphaMin->current.value'),
@@ -418,6 +427,7 @@ print('PASS: four thin hip-fire lines rasterized at 18 spread levels with a 0.6 
       'and sharp at 576p to 1440p, on and off center and with both sub-pixel 2D offsets, their opacity making up '
       'the measured width, starting exactly at the spread; sprint opening/closing over 66 frame intervals '
       '(linear and eased), firing out of sprint, white over enemies, the teammate labels\' color over teammates '
-      '(green with the stock labels), ADS fade and shortening, five HUD gates; the bar told by its file name in any '
+      '(green with the stock labels), ADS fade and shortening, six HUD gates including the countdown before a '
+      'match, which keeps the scope overlay; the bar told by its file name in any '
       'case, other side images such as the launchers\' arcs drawn as before; '
       f'{len(mutants)} failing regression mutants')

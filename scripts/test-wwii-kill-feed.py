@@ -29,7 +29,7 @@ def block(text, start_text, declaration=False):
 # it with the menus, for players and free spectators, and every level starts
 # with an empty feed.
 assert event.count('CG_KillFeedAdd(attackerName[0] ? attacker : -1, target, iconShader, iconWidth > 2.0f, iconHorzFlip,\n') == 1
-assert draw.count('        if (drawHudMenus) {\n            CG_DrawScorePanel();\n            CG_DrawKillFeed();\n') == 2
+assert draw.count('if (drawHudMenus) {\n            CG_DrawScorePanel();\n            CG_DrawKillFeed();\n') == 2
 assert main.count('    CG_ScorePopupInit();\n    CG_KillFeedInit();\n') == 1
 
 defines = '\n'.join(re.findall(r'^#define KILLFEED_\w+ .*$', source, re.M))

@@ -6,6 +6,8 @@
  * version and key prompts, and a gold cursor; the menu files stay as they
  * are. ui_wwiiMainMenu switches it while the menus are up. */
 void UI_WWIIMenu_RegisterDvars(void);
+/* Whether ui_wwiiMainMenu is on. */
+int UI_WWIIMenu_LayoutOn(void);
 /* Forgets the menus before dc loads a new set, when dc is the one main_text
  * and bg came from: cgame's HUD menus set up a context of their own. */
 void UI_WWIIMenu_Reset(const displayContextDef_t *dc);
@@ -42,5 +44,17 @@ float UI_WWIIMenu_Width(const char *text, int bold, float cap, float tracking);
  * right edge when rightKey is set. */
 void UI_WWIIMenu_Prompts(const char *const *keys, const char *const *labels, int count, const char *rightKey,
                          const char *rightLabel);
+/* The same row left and right units in from the edges, lower units down
+ * from the main menu's. */
+void UI_WWIIMenu_PromptsAt(const char *const *keys, const char *const *labels, int count, const char *rightKey,
+                           const char *rightLabel, float left, float right, float lower);
+/* The main menu's black wash behind its column, fading out across the left
+ * of the screen. */
+void UI_WWIIMenu_PaintWash(void);
+/* A prompts' keycap height units tall from x, its key in the prompts'
+ * lettering; tint colors both, NULL for the prompts' own. Its width. */
+float UI_WWIIMenu_Keycap(const char *key, float x, float top, float height, int horzAlign, int vertAlign,
+                         const vec_t *tint);
+float UI_WWIIMenu_KeycapWidth(const char *key, float height);
 
 #endif

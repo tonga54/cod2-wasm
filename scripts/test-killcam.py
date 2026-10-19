@@ -54,12 +54,12 @@ draw2d = function(draw, 'unsigned int CG_Draw2D(void)\n{')
 ordered(draw2d,
         '    hudCovered = CG_ScoreTableHidesHud();\n',
         '    killcam = drawHudElems && CG_KillcamActive();\n',
-        '    CG_MinimapSetHudVisible(drawHudMenus && pm_type != 4 && pm_type != 5 && !killcam);\n',
+        '    CG_MinimapSetHudVisible(drawHudMenus && pm_type != 4 && pm_type != 5 && !killcam && !prematch);\n',
         '            CG_DrawCrosshair();\n',
         '                CG_DrawEnemyNames();\n',
         '            CG_DrawChatMessages();\n        }\n        CG_CheckTimedMenus();\n',
         '            CG_Draw2dHudElems(0);\n        if (killcam)\n            drawHudMenus = 0;\n'
-        '        if (drawHudMenus)\n            Menu_PaintAll((void *)imp_cgDC);\n',
+        '        if (drawHudMenus && !prematch)\n            Menu_PaintAll((void *)imp_cgDC);\n',
         '            CG_DrawScorePopup();\n        }\n        if (killcam)\n            CG_DrawKillcam();\n    }\n',
         '    drewScoreboard = CG_DrawScoreboard();\n    if (!drawHudMenus)\n        return 0;\n',
         '    if (cg->centerPrintTime != 0) {')

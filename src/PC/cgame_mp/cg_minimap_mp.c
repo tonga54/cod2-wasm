@@ -56,6 +56,22 @@ extern const dvar_t **dvar_compassPingFadeTime;
 #define MINIMAP_MAX_ICONS 72
 #define MINIMAP_ENTITYNUM_NONE 1023
 
+/* The pause menu's whole map lets the menu show through around the playable
+ * area, with a faint light glow round it, as WWII's: at least this many
+ * texels, or a 64th of the map's longer side. */
+#define MINIMAP_OVERVIEW_GLOW 8
+#define MINIMAP_OVERVIEW_GLOW_SPAN 64
+#define MINIMAP_OVERVIEW_GLOW_ALPHA 0.32f
+/* A playable area under a tenth of the map is a walk that went wrong: the
+ * whole map shows instead. Walls and fences running out of it, under twice
+ * this many world units thick, are left out. */
+#define MINIMAP_OVERVIEW_MIN_AREA 10
+#define MINIMAP_OVERVIEW_OPENING 32.0f
+/* Icons' half sizes, of the box's shorter side. */
+#define MINIMAP_OVERVIEW_ARROW 0.022f
+#define MINIMAP_OVERVIEW_FRIEND 0.018f
+#define MINIMAP_OVERVIEW_OBJECTIVE 0.03f
+
 #define MINIMAP_TEXEL_VOID 0x80
 #define MINIMAP_TEXEL_WATER 0x40
 #define MINIMAP_TEXEL_STEEP 0x20
@@ -68,6 +84,12 @@ enum {
     MINIMAP_CLASS_UNKNOWN,
     MINIMAP_CLASS_MARKED,
     MINIMAP_CLASS_KEPT,
+};
+
+enum {
+    MINIMAP_AREA_UNSEEN,
+    MINIMAP_AREA_IN,
+    MINIMAP_AREA_OUT,
 };
 
 /* The texture covers width * texelSize world units east of minX and
@@ -111,6 +133,7 @@ static const float s_minimapFloor[3] = {52.0f, 43.0f, 32.0f};
 static const float s_minimapWater[3] = {28.0f, 40.0f, 48.0f};
 static const float s_minimapRoof[3] = {150.0f, 134.0f, 100.0f};
 static const float s_minimapRoofEdge[3] = {88.0f, 77.0f, 58.0f};
+static const float s_minimapGlow[3] = {196.0f, 190.0f, 172.0f};
 
 static const dvar_t *cg_minimap;
 static const dvar_t *cg_minimapSize;
@@ -121,7 +144,11 @@ static struct {
     char builtMapName[64];
     MinimapLayout layout;
     byte *pixels;
+    byte *overviewPixels;
+    /* The overview's texels, as CG_MinimapOverviewBounds gives them. */
+    int overviewBounds[4];
     MaterialHandle mapMaterial;
+    MaterialHandle overviewMaterial;
     MaterialHandle arrowMaterial;
     MaterialHandle dotMaterial;
     int attempted;
@@ -271,9 +298,10 @@ static void CG_MinimapGroundLevel(const float *heights, const byte *flags, int w
 /* Ground is what a player can walk to from the seeds without climbing a wall,
  * plus low areas the walk cannot reach (closed courtyards); the rest stands
  * above the ground and is drawn as buildings. Without seeds, the texels at
- * ground level start the walk. */
-static void CG_MinimapClassify(const float *heights, const byte *flags, const float *ground, int width, int height, float texelSize,
-                               const int *seeds, int seedCount, byte *classes, int *queue)
+ * ground level start the walk. Returns how many texels the walk reached, the
+ * first ones of queue. */
+static int CG_MinimapClassify(const float *heights, const byte *flags, const float *ground, int width, int height, float texelSize,
+                              const int *seeds, int seedCount, byte *classes, int *queue)
 {
     static const int dx[4] = {1, -1, 0, 0};
     static const int dy[4] = {0, 0, 1, -1};
@@ -329,6 +357,75 @@ static void CG_MinimapClassify(const float *heights, const byte *flags, const fl
     for (i = 0; i < count; i++) {
         if (classes[i] == MINIMAP_CLASS_UNKNOWN)
             classes[i] = heights[i] - ground[i] <= MINIMAP_LOW_GROUND ? MINIMAP_CLASS_GROUND : MINIMAP_CLASS_BUILDING;
+    }
+    return tail;
+}
+
+/* Marks the unseen neighbors of the queued texels, and theirs, as value;
+ * with onlyBuildings, only through buildings. */
+static void CG_MinimapSpreadArea(const byte *classes, int width, int height, int onlyBuildings, byte value, int *queue,
+                                 int tail, byte *area)
+{
+    static const int dx[4] = {1, -1, 0, 0};
+    static const int dy[4] = {0, 0, 1, -1};
+    int head = 0;
+
+    while (head < tail) {
+        int current = queue[head++];
+        int x = current % width;
+        int y = current / width;
+        int dir;
+
+        for (dir = 0; dir < 4; dir++) {
+            int nx = x + dx[dir];
+            int ny = y + dy[dir];
+            int next;
+
+            if (nx < 0 || ny < 0 || nx >= width || ny >= height)
+                continue;
+            next = ny * width + nx;
+            if (area[next] != MINIMAP_AREA_UNSEEN || (onlyBuildings && classes[next] != MINIMAP_CLASS_BUILDING))
+                continue;
+            area[next] = value;
+            queue[tail++] = next;
+        }
+    }
+}
+
+/* Where the pause menu's map shows: the ground walked to from the spawns,
+ * the first reachedCount texels of queue, with the buildings standing on it
+ * and whatever they close in; the land beyond stays clear. area gets 1 in
+ * it, 0 out of it; queue is reused. */
+static void CG_MinimapPlayableArea(const byte *classes, int width, int height, int reachedCount, int *queue, byte *area)
+{
+    int count = width * height;
+    int inside = 0;
+    int solid = 0;
+    int tail = 0;
+    int i;
+
+    memset(area, MINIMAP_AREA_UNSEEN, (size_t)count);
+    for (i = 0; i < reachedCount; i++)
+        area[queue[i]] = MINIMAP_AREA_IN;
+    CG_MinimapSpreadArea(classes, width, height, 1, MINIMAP_AREA_IN, queue, reachedCount, area);
+    for (i = 0; i < count; i++) {
+        int x = i % width;
+        int y = i / width;
+
+        if ((x == 0 || y == 0 || x == width - 1 || y == height - 1) && area[i] == MINIMAP_AREA_UNSEEN) {
+            area[i] = MINIMAP_AREA_OUT;
+            queue[tail++] = i;
+        }
+    }
+    CG_MinimapSpreadArea(classes, width, height, 0, MINIMAP_AREA_OUT, queue, tail, area);
+    for (i = 0; i < count; i++) {
+        area[i] = area[i] != MINIMAP_AREA_OUT;
+        inside += area[i];
+        solid += classes[i] != MINIMAP_CLASS_VOID;
+    }
+    if (inside * MINIMAP_OVERVIEW_MIN_AREA < solid) {
+        for (i = 0; i < count; i++)
+            area[i] = classes[i] != MINIMAP_CLASS_VOID;
     }
 }
 
@@ -503,6 +600,122 @@ static void CG_MinimapColorize(const float *heights, const byte *flags, const by
             }
         }
     }
+}
+
+/* Each texel's distance in texels to the nearest one at 0, a step one
+ * across and the square root of two diagonally: a two-pass chamfer. */
+static void CG_MinimapChamfer(float *dist, int width, int height)
+{
+    const float diagonal = 1.41421356f;
+    int x;
+    int y;
+
+    for (y = 0; y < height; y++) {
+        for (x = 0; x < width; x++) {
+            float *d = &dist[y * width + x];
+            if (x > 0)
+                *d = fminf(*d, d[-1] + 1.0f);
+            if (y > 0) {
+                *d = fminf(*d, d[-width] + 1.0f);
+                if (x > 0)
+                    *d = fminf(*d, d[-width - 1] + diagonal);
+                if (x + 1 < width)
+                    *d = fminf(*d, d[-width + 1] + diagonal);
+            }
+        }
+    }
+    for (y = height - 1; y >= 0; y--) {
+        for (x = width - 1; x >= 0; x--) {
+            float *d = &dist[y * width + x];
+            if (x + 1 < width)
+                *d = fminf(*d, d[1] + 1.0f);
+            if (y + 1 < height) {
+                *d = fminf(*d, d[width] + 1.0f);
+                if (x + 1 < width)
+                    *d = fminf(*d, d[width + 1] + diagonal);
+                if (x > 0)
+                    *d = fminf(*d, d[width - 1] + diagonal);
+            }
+        }
+    }
+}
+
+/* Without the walls and fences that run out of it: whatever is under twice
+ * radius texels across goes, the rest keeps its outline but for rounder
+ * corners. dist is scratch. */
+static void CG_MinimapOpenArea(byte *area, int width, int height, float radius, float *dist)
+{
+    int count = width * height;
+    int i;
+
+    for (i = 0; i < count; i++)
+        dist[i] = area[i] ? FLT_MAX : 0.0f;
+    CG_MinimapChamfer(dist, width, height);
+    for (i = 0; i < count; i++)
+        area[i] = area[i] ? (dist[i] > radius ? 2 : 1) : 0;
+    for (i = 0; i < count; i++)
+        dist[i] = area[i] == 2 ? 0.0f : FLT_MAX;
+    CG_MinimapChamfer(dist, width, height);
+    for (i = 0; i < count; i++)
+        area[i] = area[i] && dist[i] <= radius + 0.5f;
+}
+
+/* The map for the pause menu: the texels in area, the rest clear but for a
+ * glow that fades over glow texels from it. dist is scratch. */
+static void CG_MinimapOverviewImage(const byte *bgra, const byte *area, int width, int height, int glow, float *dist,
+                                    byte *out)
+{
+    int count = width * height;
+    int i;
+
+    for (i = 0; i < count; i++)
+        dist[i] = area[i] ? 0.0f : FLT_MAX;
+    CG_MinimapChamfer(dist, width, height);
+    for (i = 0; i < count; i++) {
+        byte *texel = out + 4 * i;
+        float alpha;
+
+        if (area[i]) {
+            memcpy(texel, bgra + 4 * i, 4);
+            continue;
+        }
+        alpha = 1.0f - dist[i] / (float)glow;
+        alpha = alpha > 0.0f ? alpha * alpha * MINIMAP_OVERVIEW_GLOW_ALPHA : 0.0f;
+        CG_MinimapPutTexel(texel, s_minimapGlow, 1.0f);
+        texel[3] = (byte)(alpha * 255.0f + 0.5f);
+    }
+}
+
+/* The texels the pause menu draws, x0, y0, x1, y1 from the texture's corner:
+ * the area's with room for its glow, else all used. */
+static void CG_MinimapOverviewBounds(const byte *area, const MinimapLayout *layout, int glow, int *bounds)
+{
+    int x0 = layout->usedWidth;
+    int y0 = layout->usedHeight;
+    int x1 = 0;
+    int y1 = 0;
+    int x;
+    int y;
+
+    for (y = 0; y < layout->usedHeight; y++) {
+        for (x = 0; x < layout->usedWidth; x++) {
+            if (!area[y * layout->width + x])
+                continue;
+            x0 = x < x0 ? x : x0;
+            y0 = y < y0 ? y : y0;
+            x1 = x + 1 > x1 ? x + 1 : x1;
+            y1 = y + 1 > y1 ? y + 1 : y1;
+        }
+    }
+    if (x1 <= x0 || y1 <= y0) {
+        x0 = y0 = glow;
+        x1 = layout->usedWidth - glow;
+        y1 = layout->usedHeight - glow;
+    }
+    bounds[0] = x0 - glow > 0 ? x0 - glow : 0;
+    bounds[1] = y0 - glow > 0 ? y0 - glow : 0;
+    bounds[2] = x1 + glow < layout->usedWidth ? x1 + glow : layout->usedWidth;
+    bounds[3] = y1 + glow < layout->usedHeight ? y1 + glow : layout->usedHeight;
 }
 
 static int CG_MinimapInsidePolygon(const float (*points)[2], int count, float x, float y)
@@ -829,12 +1042,17 @@ static int CG_MinimapGenerate(void)
     byte *flags = NULL;
     byte *classes = NULL;
     byte *pixels = NULL;
+    byte *area = NULL;
+    byte *overview = NULL;
     int *queue = NULL;
     int *seeds = NULL;
     MinimapLayout layout;
+    int bounds[4] = {0, 0, 0, 0};
     int startTime = Sys_Milliseconds();
     int spawnCount;
     int seedCount = 0;
+    int reached;
+    int glow;
     int count;
     int radius;
     int lineLength;
@@ -899,10 +1117,25 @@ static int CG_MinimapGenerate(void)
     }
 
     CG_MinimapGroundLevel(heights, flags, layout.width, layout.height, radius, ground, prefix, suffix);
-    CG_MinimapClassify(heights, flags, ground, layout.width, layout.height, layout.texelSize, seeds, seedCount, classes, queue);
+    reached = CG_MinimapClassify(heights, flags, ground, layout.width, layout.height, layout.texelSize, seeds, seedCount,
+                                 classes, queue);
+    /* The playable area reads the walk off the queue before the specks reuse it. */
+    area = malloc(count);
+    if (area)
+        CG_MinimapPlayableArea(classes, layout.width, layout.height, reached, queue, area);
     CG_MinimapRemoveSpecks(classes, layout.width, layout.height,
                            (int)(MINIMAP_MIN_BUILDING_AREA / (layout.texelSize * layout.texelSize) + 0.5f), queue);
     CG_MinimapColorize(heights, flags, classes, layout.width, layout.height, layout.texelSize, pixels);
+    /* The heights are no longer needed: they hold the glow's distances. */
+    overview = area ? malloc(4 * count) : NULL;
+    if (overview) {
+        glow = (layout.usedWidth > layout.usedHeight ? layout.usedWidth : layout.usedHeight) / MINIMAP_OVERVIEW_GLOW_SPAN;
+        if (glow < MINIMAP_OVERVIEW_GLOW)
+            glow = MINIMAP_OVERVIEW_GLOW;
+        CG_MinimapOpenArea(area, layout.width, layout.height, MINIMAP_OVERVIEW_OPENING / layout.texelSize, heights);
+        CG_MinimapOverviewImage(pixels, area, layout.width, layout.height, glow, heights, overview);
+        CG_MinimapOverviewBounds(area, &layout, glow, bounds);
+    }
     ok = 1;
 
     Com_Printf("Minimap: %ix%i texels of %.1f units, %i of %i spawns on the ground, built in %i ms\n", layout.usedWidth,
@@ -914,16 +1147,21 @@ done:
     free(ground);
     free(flags);
     free(classes);
+    free(area);
     free(queue);
     free(seeds);
     free(prefix);
     free(suffix);
     if (!ok) {
         free(pixels);
+        free(overview);
         return 0;
     }
     free(s_minimap.pixels);
+    free(s_minimap.overviewPixels);
     s_minimap.pixels = pixels;
+    s_minimap.overviewPixels = overview;
+    memcpy(s_minimap.overviewBounds, bounds, sizeof(bounds));
     s_minimap.layout = layout;
     memcpy(s_minimap.builtMapName, s_minimap.mapName, sizeof(s_minimap.builtMapName));
     return 1;
@@ -934,6 +1172,10 @@ static int CG_MinimapUpload(void)
     static byte icon[MINIMAP_ICON_SIZE * MINIMAP_ICON_SIZE * 4];
 
     s_minimap.mapMaterial = R_CreateHudImageMaterial(R_HUD_IMAGE_MINIMAP, s_minimap.pixels, s_minimap.layout.width, s_minimap.layout.height);
+    s_minimap.overviewMaterial = s_minimap.overviewPixels
+                                     ? R_CreateHudImageMaterial(R_HUD_IMAGE_MINIMAP_OVERVIEW, s_minimap.overviewPixels,
+                                                                s_minimap.layout.width, s_minimap.layout.height)
+                                     : NULL;
     CG_MinimapRasterIcon(icon, MINIMAP_ICON_SIZE, 0);
     s_minimap.arrowMaterial = R_CreateHudImageMaterial(R_HUD_IMAGE_MINIMAP_ARROW, icon, MINIMAP_ICON_SIZE, MINIMAP_ICON_SIZE);
     CG_MinimapRasterIcon(icon, MINIMAP_ICON_SIZE, 1);
@@ -969,6 +1211,7 @@ void CG_MinimapInit(const char *mapName)
     s_minimap.ready = 0;
     s_minimap.hudOffset = 0.0f;
     s_minimap.mapMaterial = NULL;
+    s_minimap.overviewMaterial = NULL;
     s_minimap.arrowMaterial = NULL;
     s_minimap.dotMaterial = NULL;
     if (cg_minimap->current.enabled)
@@ -1132,4 +1375,162 @@ void CG_DrawMinimap(float alpha)
     team = CG_CompassUpdateFriendlies();
     CG_MinimapDrawObjectives(&view, team, alpha);
     CG_MinimapDrawActors(&view, team, alpha);
+}
+
+/* The whole map as the pause menu draws it: physical pixels from its top-left
+ * corner, and turned a quarter clockwise (north to the right) when that draws
+ * it larger in its box. */
+typedef struct MinimapOverview {
+    /* The texels drawn, x0, y0, x1, y1 from the texture's corner. */
+    int texels[4];
+    float x;
+    float y;
+    float width;
+    float height;
+    float scale;
+    int turned;
+} MinimapOverview;
+
+/* The texels as large as they fit in the box (physical pixels), centered,
+ * turned when that is larger. */
+static void CG_MinimapOverviewFit(const MinimapLayout *layout, const int *texels, float x, float y, float w, float h,
+                                  MinimapOverview *overview)
+{
+    float across = (float)(texels[2] - texels[0]);
+    float down = (float)(texels[3] - texels[1]);
+    float northScale = fminf(w / across, h / down);
+    float turnedScale = fminf(w / down, h / across);
+
+    memcpy(overview->texels, texels, sizeof(overview->texels));
+    overview->turned = turnedScale > northScale;
+    overview->scale = (overview->turned ? turnedScale : northScale) / layout->texelSize;
+    overview->width = (overview->turned ? down : across) * layout->texelSize * overview->scale;
+    overview->height = (overview->turned ? across : down) * layout->texelSize * overview->scale;
+    overview->x = x + 0.5f * (w - overview->width);
+    overview->y = y + 0.5f * (h - overview->height);
+}
+
+static void CG_MinimapOverviewPoint(const MinimapLayout *layout, const MinimapOverview *overview, float worldX,
+                                    float worldY, float *x, float *y)
+{
+    float east = worldX - (layout->minX + (float)overview->texels[0] * layout->texelSize);
+    float south = layout->maxY - (float)overview->texels[1] * layout->texelSize - worldY;
+
+    if (overview->turned) {
+        *x = overview->x +
+             ((float)(overview->texels[3] - overview->texels[1]) * layout->texelSize - south) * overview->scale;
+        *y = overview->y + east * overview->scale;
+    } else {
+        *x = overview->x + east * overview->scale;
+        *y = overview->y + south * overview->scale;
+    }
+}
+
+/* An icon's clockwise turn on the overview for a world yaw: up is north,
+ * or east when the map is turned. */
+static float CG_MinimapOverviewAngle(const MinimapOverview *overview, float yaw)
+{
+    return 90.0f - yaw + (overview->turned ? 90.0f : 0.0f);
+}
+
+static void CG_MinimapOverviewObjectives(const MinimapOverview *overview, int team, float half, float alpha)
+{
+    vec4_t color = {1.0f, 1.0f, 1.0f, alpha};
+    int i;
+
+    for (i = 0; i < 16; i++) {
+        const objective_t *objective = &cg->snap->ps.objective[i];
+        char materialName[64];
+        const float *origin = objective->origin;
+        float x;
+        float y;
+
+        if (objective->state != OBJST_ACTIVE && objective->state != OBJST_CURRENT)
+            continue;
+        if (objective->teamNum && objective->teamNum != team)
+            continue;
+        if (!CG_ServerMaterialName(objective->icon, materialName, sizeof(materialName)))
+            continue;
+        if (objective->entNum >= 0 && objective->entNum < MINIMAP_ENTITYNUM_NONE && cg_entities[objective->entNum].nextValid)
+            origin = cg_entities[objective->entNum].lerpOrigin;
+        CG_MinimapOverviewPoint(&s_minimap.layout, overview, origin[0], origin[1], &x, &y);
+        CL_DrawStretchPicPhysical(x - half, y - half, 2.0f * half, 2.0f * half, 0.0f, 0.0f, 1.0f, 1.0f, color,
+                                  CL_RegisterMaterial(materialName, 7));
+    }
+}
+
+/* The image's corners clockwise from the top left; turned, the map's
+ * south-west corner is the top left. */
+static void CG_MinimapOverviewQuad(const MinimapLayout *layout, const MinimapOverview *overview, const float *rgba,
+                                   HudVertex2D *verts)
+{
+    float s0 = (float)overview->texels[0] / (float)layout->width;
+    float t0 = (float)overview->texels[1] / (float)layout->height;
+    float s1 = (float)overview->texels[2] / (float)layout->width;
+    float t1 = (float)overview->texels[3] / (float)layout->height;
+    float right = overview->x + overview->width;
+    float bottom = overview->y + overview->height;
+
+    if (overview->turned) {
+        CG_MinimapSetVertex(&verts[0], overview->x, overview->y, s0, t1, rgba);
+        CG_MinimapSetVertex(&verts[1], right, overview->y, s0, t0, rgba);
+        CG_MinimapSetVertex(&verts[2], right, bottom, s1, t0, rgba);
+        CG_MinimapSetVertex(&verts[3], overview->x, bottom, s1, t1, rgba);
+    } else {
+        CG_MinimapSetVertex(&verts[0], overview->x, overview->y, s0, t0, rgba);
+        CG_MinimapSetVertex(&verts[1], right, overview->y, s1, t0, rgba);
+        CG_MinimapSetVertex(&verts[2], right, bottom, s1, t1, rgba);
+        CG_MinimapSetVertex(&verts[3], overview->x, bottom, s0, t1, rgba);
+    }
+}
+
+void CG_DrawMinimapOverview(float x, float y, float w, float h, int horzAlign, int vertAlign, float alpha)
+{
+    static const unsigned short quad[6] = {3, 0, 2, 2, 0, 1};
+    static MinimapBatch arrows;
+    const MinimapLayout *layout = &s_minimap.layout;
+    const float white[4] = {1.0f, 1.0f, 1.0f, alpha};
+    const float viewer[4] = {1.0f, 0.97f, 0.88f, alpha};
+    HudVertex2D verts[4];
+    MinimapOverview overview;
+    float size;
+    int team;
+    int self;
+    int i;
+
+    if (alpha <= 0.0f || !cg->snap || !CG_MinimapPrepare() || !s_minimap.overviewMaterial)
+        return;
+    CalcScreenPlacement(&x, &y, &w, &h, horzAlign, vertAlign);
+    CG_MinimapOverviewFit(layout, s_minimap.overviewBounds, x, y, w, h, &overview);
+    CG_MinimapOverviewQuad(layout, &overview, white, verts);
+    R_AddCmdDrawTriangles2D(verts, 4, quad, 6, s_minimap.overviewMaterial);
+
+    size = fminf(w, h);
+    team = CG_CompassUpdateFriendlies();
+    CG_MinimapOverviewObjectives(&overview, team, MINIMAP_OVERVIEW_OBJECTIVE * size, alpha);
+    self = cg->snap->ps.clientNum;
+    for (i = 0; team > 0 && i < 64; i++) {
+        const compassactor_t *actor = &cg->compassActors[i];
+        float rgba[4] = {0.3f, 0.82f, 1.0f, alpha};
+        float px;
+        float py;
+
+        if (i == self || actor->iLastUpdate > cg->time || actor->iLastUpdate < cg->time - MINIMAP_ACTOR_TIMEOUT)
+            continue;
+        /* Out of the server's packing range only the direction is known. */
+        if (fabsf(actor->vLastPos[0]) <= 1.0f && fabsf(actor->vLastPos[1]) <= 1.0f)
+            continue;
+        CG_MinimapOverviewPoint(layout, &overview, actor->vLastPos[0], actor->vLastPos[1], &px, &py);
+        CG_MinimapAddIcon(&arrows, px, py, MINIMAP_OVERVIEW_FRIEND * size,
+                          CG_MinimapOverviewAngle(&overview, actor->fLastYaw), rgba);
+    }
+    {
+        float px;
+        float py;
+
+        CG_MinimapOverviewPoint(layout, &overview, cg->refdef.vieworg[0], cg->refdef.vieworg[1], &px, &py);
+        CG_MinimapAddIcon(&arrows, px, py, MINIMAP_OVERVIEW_ARROW * size,
+                          CG_MinimapOverviewAngle(&overview, cg->refdefViewAngles[1]), viewer);
+    }
+    CG_MinimapFlush(&arrows, s_minimap.arrowMaterial);
 }

@@ -771,6 +771,12 @@ int main(void) {
     unitScale = 1.2f;
     cg->clientNum = 64;
     assert(!frame(1, 76000, 1.0f) && !drawCount && g_webBackdropFrac == 0.0f);
+
+    /* A menu painted over the last frame, as the class screens of a match
+     * are, has the next one blurred and gray behind it, and only that one. */
+    g_webMenuBackdrop = 1.0f;
+    assert(!frame(0, 77000, 1.0f) && near(g_webBackdropFrac, 1) && near(g_webBackdropGray, 1) && !g_webMenuBackdrop);
+    assert(!frame(0, 77050, 1.0f) && g_webBackdropFrac == 0.0f && g_webBackdropGray == 0.0f);
     puts("PASS");
     return 0;
 }
@@ -785,7 +791,9 @@ def mutate(text, old, new):
 mutants = [
     ('    if (intermission && !s_endgame.intermission)\n        s_endgame.start = cg->time;',
      '    if (intermission)\n        s_endgame.start = cg->time;'),
-    ('    g_webBackdropFrac = 0.0f;\n    CG_EndgamePrepare();', '    CG_EndgamePrepare();'),
+    ('    g_webBackdropFrac = g_webMenuBackdrop;\n', ''),
+    ('    g_webBackdropGray = g_webMenuBackdrop;\n', ''),
+    ('    g_webMenuBackdrop = 0.0f;\n    CG_EndgamePrepare();', '    CG_EndgamePrepare();'),
     ('        g_webBackdropFrac = summary;\n', ''),
     ('#define ENDGAME_ANNOUNCE_MSEC 3000', '#define ENDGAME_ANNOUNCE_MSEC 4500'),
     ('#define ENDGAME_FADE_MSEC 400', '#define ENDGAME_FADE_MSEC 250'),

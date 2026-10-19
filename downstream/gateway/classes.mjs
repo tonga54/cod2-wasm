@@ -8,6 +8,8 @@ const require = createRequire(import.meta.url);
 
 export const classRules = JSON.parse(readFileSync(new URL('./classes.json', import.meta.url), 'utf8'));
 const slots = ['primary', 'secondary', 'lethal', 'tactical'];
+// The guns' camouflage; a client built before it sends none.
+const camoSlots = ['primaryCamo', 'secondaryCamo'];
 // Every new browser starts as "Player"; their classes would overwrite each other.
 const sharedNames = new Set(['player', 'unknown soldier']);
 
@@ -36,6 +38,11 @@ export function normalizeClasses(value) {
       if (!classRules[slot].includes(item[slot])) throw new ClassError(`Invalid ${slot} for class ${index + 1}.`);
       normalized[slot] = item[slot];
     }
+    for (const slot of camoSlots) {
+      const camo = item[slot] === undefined ? 'none' : item[slot];
+      if (!classRules.camos.includes(camo)) throw new ClassError(`Invalid ${slot} for class ${index + 1}.`);
+      normalized[slot] = camo;
+    }
     return normalized;
   });
 }
@@ -47,6 +54,8 @@ function restore(rows) {
     const row = rows.find(candidate => candidate.slot === index + 1);
     const restored = { name: row && validName(row.name) ? row.name : fallback.name };
     for (const slot of slots) restored[slot] = row && classRules[slot].includes(row[slot]) ? row[slot] : fallback[slot];
+    for (const slot of camoSlots)
+      restored[slot] = row && classRules.camos.includes(row[slot]) ? row[slot] : fallback[slot];
     return restored;
   });
 }
@@ -64,15 +73,23 @@ export function createClassStore(path) {
       lethal TEXT NOT NULL,
       tactical TEXT NOT NULL,
       updated_at INTEGER NOT NULL,
+      primary_camo TEXT NOT NULL DEFAULT 'none',
+      secondary_camo TEXT NOT NULL DEFAULT 'none',
       PRIMARY KEY (player, slot)
     ) WITHOUT ROWID;`);
+  // A store created before camouflage gains its columns, its rows unpainted.
+  const columns = new Set(db.prepare('PRAGMA table_info(classes)').all().map(column => column.name));
+  for (const column of ['primary_camo', 'secondary_camo'])
+    if (!columns.has(column)) db.exec(`ALTER TABLE classes ADD COLUMN ${column} TEXT NOT NULL DEFAULT 'none'`);
   const select = db.prepare(`SELECT slot, name, primary_weapon AS "primary", secondary_weapon AS secondary,
-    lethal, tactical FROM classes WHERE player = ? ORDER BY slot`);
+    lethal, tactical, primary_camo AS primaryCamo, secondary_camo AS secondaryCamo
+    FROM classes WHERE player = ? ORDER BY slot`);
   const upsert = db.prepare(`INSERT INTO classes
-    (player, slot, name, primary_weapon, secondary_weapon, lethal, tactical, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    (player, slot, name, primary_weapon, secondary_weapon, lethal, tactical, primary_camo, secondary_camo, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT (player, slot) DO UPDATE SET name = excluded.name, primary_weapon = excluded.primary_weapon,
       secondary_weapon = excluded.secondary_weapon, lethal = excluded.lethal, tactical = excluded.tactical,
+      primary_camo = excluded.primary_camo, secondary_camo = excluded.secondary_camo,
       updated_at = excluded.updated_at`);
   return {
     get(key) {
@@ -83,7 +100,7 @@ export function createClassStore(path) {
       db.exec('BEGIN IMMEDIATE');
       try {
         classes.forEach((item, index) => upsert.run(key, index + 1, item.name, item.primary, item.secondary,
-          item.lethal, item.tactical, now));
+          item.lethal, item.tactical, item.primaryCamo, item.secondaryCamo, now));
         db.exec('COMMIT');
       } catch (error) {
         db.exec('ROLLBACK');

@@ -2,6 +2,7 @@
 #include "imports.h"
 #include "headers/PC/gfx_d3d/r_hud2d.h"
 #include "headers/PC/gfx_d3d/r_font_wwii.h"
+#include "headers/PC/gfx_d3d/r_weapon_camo.h"
 
 extern char *getenv(const char *name);
 
@@ -215,6 +216,7 @@ static inline __attribute__((always_inline)) void R_ResetFrameBackendData(void)
     frontEndDataOut->drawSurfCount = 0;
     frontEndDataOut->surfPos = 0;
     frontEndDataOut->entityCount = 0;
+    R_ClearWeaponCamoEntities();
     frontEndDataOut->polyCount = 0;
     frontEndDataOut->polyVertCount = 0;
     frontEndDataOut->viewParmCount = 0;
@@ -470,6 +472,10 @@ static void R_BeginFrame_impl(void)
 
 void R_BeginFrame(void)
 {
+#ifdef __EMSCRIPTEN__
+    extern void WebSceneFx_BeginFrame(void);
+    WebSceneFx_BeginFrame();
+#endif
     R_BeginFrame_impl();
 }
 

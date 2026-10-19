@@ -3,7 +3,10 @@
 #include "bytematch.h"
 #include "cod2_feature_config.h"
 #include "headers/PC/ui_mp/ui_class_menu.h"
+#include "headers/PC/ui_mp/ui_match_menu.h"
+#include "headers/PC/ui_mp/ui_pause_menu.h"
 #include "headers/PC/ui_mp/ui_wwii_menu.h"
+#include "headers/PC/ui_mp/ui_wwii_settings.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -736,7 +739,7 @@ qboolean UI_CheckExecKey(int key)
         return 0;
     if (!menu)
         return 0;
-    if (UI_ClassMenu_WantsKeys(menu))
+    if (UI_ClassMenu_WantsKeys(menu) || UI_PauseMenu_WantsKeys(menu))
         return 1;
 
     if ((key >= 0xc8 && key <= 0xce) ||
@@ -754,6 +757,11 @@ qboolean UI_CheckExecKey(int key)
         node = *(int **)((byte *)node + 8);
     }
     return 0;
+}
+
+qboolean UI_ClassMenuFocused(void)
+{
+    return UI_ClassMenu_WantsKeys((menuDef_t *)Menu_GetFocused(uiInfo)) != 0;
 }
 
 #if !defined(__EMSCRIPTEN__) || __SIZEOF_POINTER__ == 4
@@ -1390,6 +1398,12 @@ static inline __attribute__((always_inline)) void UI_KeyEvent_impl(int key, qboo
 
         if (UI_ClassMenu_KeyEvent((displayContextDef_t *)uiInfo, menu, key, down)) {
             /* The class screens take every key, characters included. */
+        } else if (UI_PauseMenu_KeyEvent((displayContextDef_t *)uiInfo, menu, key, down)) {
+            /* So does the pause menu over a match. */
+        } else if (UI_MatchMenu_KeyEvent((displayContextDef_t *)uiInfo, menu, key, down)) {
+            /* So does the match screen, over Start New Server's menus. */
+        } else if (UI_WWIISettings_KeyEvent((displayContextDef_t *)uiInfo, menu, key, down)) {
+            /* And Options' laid-out list and pages. */
         } else if (key == 0x1b && down && !Menus_AnyFullScreenVisible(uiInfo) && menu->onESC == 0) {
 
             Menus_CloseAll(uiInfo);
@@ -3337,11 +3351,8 @@ void UI_RunMenuScript(const char **args)
         return;
     }
 
-    if (I_stricmp(name, "ToggleFullscreen") == 0) {
-#ifdef __EMSCRIPTEN__
-        extern void Web_ToggleFullscreen(void);
-        Web_ToggleFullscreen();
-#endif
+    if (I_stricmp(name, "pauseMenuOpen") == 0) {
+        UI_PauseMenu_Open((displayContextDef_t *)uiInfo);
         return;
     }
 
@@ -3358,10 +3369,12 @@ void UI_RunMenuScript(const char **args)
         extern void Web_CreateServer(const char *name, const char *mapName, const char *gameType, int botCount, int botDifficulty);
         int mapIdx = (ui_currentNetMap)->current.integer;
         int gameTypeIdx = (ui_netGameType)->current.integer;
+        char roomName[64];
         if (mapIdx < 0 || mapIdx >= sharedUiInfo.mapCount ||
             gameTypeIdx < 0 || gameTypeIdx >= sharedUiInfo.numGameTypes)
             return;
-        Web_CreateServer(Dvar_GetString("sv_hostname"), sharedUiInfo.mapList[mapIdx].mapLoadName,
+        UI_MatchMenu_RoomName(roomName, sizeof(roomName));
+        Web_CreateServer(roomName, sharedUiInfo.mapList[mapIdx].mapLoadName,
                          sharedUiInfo.gameTypes[gameTypeIdx].gameType,
                          Dvar_GetInt("ui_botCount"), Dvar_GetInt("ui_botDifficulty"));
         return;

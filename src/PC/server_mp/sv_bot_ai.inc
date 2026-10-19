@@ -1870,6 +1870,18 @@ static void SV_BotRunAI(int clientNum, playerState_t *ps)
         ai->lastFrame=svs.time;
         return;
     }
+    // Held by freezeControls until a match begins: stand where it spawned on a
+    // fresh life, keep building the graph, and resume as from a new spawn.
+    if(client->bFrozen) {
+        if(ai->spawnCount!=ps->stats[5]) Bot_ResetLife(ai,ps);
+        Bot_NavFrame();
+        cmd->hasAngles=0;
+        memcpy(ai->aim,ps->viewangles,sizeof(vec3_t));
+        memcpy(ai->lastOrigin,ps->origin,sizeof(vec3_t));
+        ai->lastFrame=ai->lastMoveCheck=svs.time;
+        ai->nextThink=svs.time+(clientNum%4)*50;
+        return;
+    }
     if(ai->spawnCount!=ps->stats[5]) {
         Bot_ResetLife(ai,ps);
         if(Dvar_GetInt("scr_bot_debug"))

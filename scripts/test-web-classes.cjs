@@ -45,16 +45,21 @@ async function scenario(source, {normalizeClasses, defaultClasses}) {
   };
   const load = bind('Web_ClassesLoad'), save = bind('Web_ClassesSave');
   const classes = defaultClasses();
-  classes[1] = {...classes[1], name: 'Kar\tRusher\nTwo'};
+  classes[1] = {...classes[1], name: 'Kar\tRusher\nTwo', primaryCamo: 'frogskin', secondaryCamo: 'ember'};
+  // A host from before camouflage sends classes without it.
+  const {primaryCamo, secondaryCamo, ...unpainted} = classes[2];
+  assert.deepEqual([primaryCamo, secondaryCamo], ['none', 'none']);
+  classes[2] = unpainted;
 
-  // A stored list: one line a class, tabs and line breaks in a field become spaces.
+  // A stored list: one line a class, tabs and line breaks in a field become
+  // spaces; a class without camouflage keeps the guns' own finish.
   respond = () => reply(200, {classes, saved: true});
   load(stringToNewUTF8('Kar Rusher^1'), 7);
   await settle();
   assert.equal(requests[0].url, '/classes?player=Kar%20Rusher%5E1');
   assert.equal(requests[0].options.cache, 'no-store');
-  const expected = classes.map(c => [c.name.replace(/[\t\n]/g, ' '), c.primary, c.secondary, c.lethal, c.tactical]
-    .join('\t')).join('\n') + '\n';
+  const expected = classes.map((c, i) => [c.name.replace(/[\t\n]/g, ' '), c.primary, c.secondary, c.lethal, c.tactical,
+    ...(i === 1 ? ['frogskin', 'ember'] : ['none', 'none'])].join('\t')).join('\n') + '\n';
   assert.deepEqual([loaded[0].generation, loaded[0].status, loaded[0].text], [7, 200, expected]);
   assert(freed.has(loaded[0].lines), 'the lines are freed after the call');
 
@@ -96,6 +101,8 @@ async function scenario(source, {normalizeClasses, defaultClasses}) {
   assert.equal(body.player, 'Kar Rusher');
   assert.deepEqual(normalizeClasses(body.classes), body.classes, 'the gateway takes the body as sent');
   assert.equal(body.classes[1].name, 'Kar Rusher');
+  assert.deepEqual([body.classes[1].primaryCamo, body.classes[1].secondaryCamo, body.classes[2].primaryCamo,
+    body.classes[2].secondaryCamo], ['frogskin', 'ember', 'none', 'none']);
   release();
   await settle(); await settle();
   assert.equal(requests.length, 2);
@@ -124,6 +131,9 @@ const mutants = [
   ['.catch(() => _web_classes_saved(generation, 0))', ''],
   ['method: "PUT",\n    headers: {\n      "Content-Type": "application/json"\n    },', 'method: "PUT",'],
   ['.filter(Boolean)', ''],
+  ['item?.primaryCamo ?? "none"', 'item?.primaryCamo'],
+  ['item?.secondaryCamo ?? "none"', 'item?.secondaryCamo'],
+  ['        primaryCamo: primaryCamo,\n        secondaryCamo: secondaryCamo\n', ''],
 ];
 (async () => {
   const gateway = await import(path.join(root, 'downstream/gateway/classes.mjs'));
@@ -139,6 +149,7 @@ const mutants = [
     assert(failed, `the mutant survives: ${before}`);
     killed++;
   }
-  console.log(`PASS: the linked class bridge loads lines for the UI, reports refusals and outages, and saves ` +
-    `bodies the gateway accepts one at a time; ${killed} bridge mutants fail`);
+  console.log(`PASS: the linked class bridge loads lines for the UI with each gun's camouflage, none from a host ` +
+    `before it, reports refusals and outages, and saves bodies the gateway accepts one at a time; ${killed} bridge ` +
+    `mutants fail`);
 })().catch(error => { console.error(error); process.exit(1); });

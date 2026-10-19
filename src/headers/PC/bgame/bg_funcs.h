@@ -76,6 +76,8 @@ void PM_UpdateViewAngles(playerState_t *ps, float msec, usercmd_t *cmd, int hand
 void PM_playerTrace(pmove_t *pm, trace_t *results, const vec_t *start, const vec_t *mins, const vec_t *maxs, const vec_t *end, int passEntityNum, int contentMask);
 void PM_UpdatePronePitch(pmove_t *pm, pml_t *pml);
 void PM_FootstepEvent(pmove_t *pm, pml_t *pml, int iOldBobCycle, int iNewBobCycle, qboolean bFootStep);
+/* Strips movement and actions from a frozen player's command. */
+void PM_FilterFrozenCommand(const playerState_t *ps, usercmd_t *cmd);
 void Pmove(pmove_t *pm);
 
 void PM_StepSlideMove(pmove_t *pm, pml_t *pml, qboolean gravity);

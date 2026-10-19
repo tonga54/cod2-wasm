@@ -27,21 +27,22 @@ def items(source, transform):
 def apply_settings_menu(name, data):
     if name not in {'ui_mp/main.menu', 'ui_mp/options.menu', 'ui/options_game.menu',
                     'ui_mp/options_multi.menu', 'ui_mp/background.menu',
-                    'ui_mp/menu_background.menu', 'ui_mp/scriptmenus/ingame.menu'}:
+                    'ui_mp/menu_background.menu'}:
         return data
     text = data.decode().replace('\r\n', '\n')
     if name == 'ui_mp/main.menu':
+        # Quit is matched with its quotes so that @MENU_QUIT_CURRENT_GAME stays.
         remove = ('@MENU_SELECT_PROFILE', '@MENU_MULTIPLAYER_OPTIONS',
-                  '@MENU_GAME_EXPERIENCE_MAY_CHANGE')
+                  '@MENU_GAME_EXPERIENCE_MAY_CHANGE', '"@MENU_QUIT"')
         text = items(text, lambda item: '' if any(key in item for key in remove) else item)
         text = re.sub(r'\s*uiScript (?:addPlayerProfiles|openMenuOnDvar[^;]*player_profile|openMenuOnDvarNot[^;]*player_profile);', '', text)
-        # Options and Quit leave row 250 to Create a Class.
-        text = text.replace('MAIN_RECT_X 310', 'MAIN_RECT_X 280').replace('MAIN_RECT_X 370', 'MAIN_RECT_X 310')
+        # Options leaves row 250 to Create a Class.
+        text = text.replace('MAIN_RECT_X 310', 'MAIN_RECT_X 280')
         marker = 'name "main_text"'
         if text.count(marker) != 1:
             raise ValueError('Unexpected main menu')
         insertion = text.index('itemDef', text.index(marker))
-        fullscreen_items = '''
+        text = text[:insertion] + '''
         itemDef {
             name browser_create_a_class
             type ITEM_TYPE_BUTTON
@@ -57,45 +58,6 @@ def apply_settings_menu(name, data):
             mouseEnter { play "mouse_over"; }
             action { play "mouse_click"; close main_text; open create_a_class; }
         }
-'''
-        for mode, label in ((1, 'Fullscreen: Off'), (2, 'Fullscreen: On')):
-            fullscreen_items += f'''
-        itemDef {{
-            name browser_fullscreen_{mode}
-            type ITEM_TYPE_BUTTON
-            style WINDOW_STYLE_EMPTY
-            text "{label}"
-            rect MAIN_RECT_X 340 MAIN_RECT_WIDTH MAIN_RECT_HEIGHT
-            textfont UI_FONT_NORMAL
-            textstyle ITEM_TEXTSTYLE_SHADOWED
-            textscale MAIN_TEXTSCALE
-            textaligny MAIN_TEXTALIGN_Y
-            forecolor MAIN_FORECOLOR
-            visible 1
-            dvarTest "ui_browserFullscreen"
-            showDvar {{ "{mode}" }}
-            mouseEnter {{ play "mouse_over"; }}
-            action {{ play "mouse_click"; uiScript ToggleFullscreen; }}
-        }}
-'''
-        fullscreen_items += '''
-        itemDef {
-            name browser_fullscreen_failed
-            type ITEM_TYPE_TEXT
-            text "Fullscreen unavailable. Try again."
-            rect MAIN_RECT_X 366 230 12
-            textfont UI_FONT_NORMAL
-            textstyle ITEM_TEXTSTYLE_SHADOWED
-            textscale .18
-            textaligny 12
-            forecolor .85 .75 .55 1
-            visible 1
-            decoration
-            dvarTest "ui_browserFullscreenFailed"
-            showDvar { "1" }
-        }
-'''
-        text = text[:insertion] + fullscreen_items + '''
         itemDef {
             name browser_client_update_notice
             type ITEM_TYPE_TEXT
@@ -129,11 +91,6 @@ def apply_settings_menu(name, data):
             action { play "mouse_click"; uiScript ReloadClient; }
         }
 ''' + text[insertion:]
-    elif name == 'ui_mp/scriptmenus/ingame.menu':
-        # The option opens the class choice, which replaced the weapon menus.
-        if text.count('"@MPUI_1_CHANGE_WEAPON"') != 2:
-            raise ValueError('Unexpected in-game menu')
-        text = text.replace('"@MPUI_1_CHANGE_WEAPON"', '"1. Choose Class"')
     elif name == 'ui_mp/options.menu':
         text = add_controller_menu(text, items)
     elif name == 'ui_mp/options_multi.menu':

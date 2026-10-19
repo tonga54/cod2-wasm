@@ -39,13 +39,13 @@ try {
     check(!!gl, 'WebGL2 available');
     // Production wraps the context with its redundant-state cache first.
     Function(cache + 'return cacheWebGlState;')()(gl, canvas);
-    const Module = {}, HEAPF32 = new Float32Array(64);
+    const Module = {}, HEAPF32 = new Float32Array(1 << 19);
     const warnings = [], warn = console.warn;
     console.warn = (...args) => { warnings.push(args.join(' ')); warn(...args); };
     const bindScene = Function('GLctx', 'Module', 'HEAPF32', 'width', 'height', 'samples', 'screenWidth', 'screenHeight', bindBody);
     const bind = (gl, Module, HEAPF32, width, height, samples, screenWidth = width, screenHeight = height) =>
       bindScene(gl, Module, HEAPF32, width, height, samples, screenWidth, screenHeight);
-    const compose = Function('GLctx', 'Module', 'HEAPF32', 'params', composeBody);
+    const compose = Function('GLctx', 'Module', 'HEAPF32', 'params', 'mesh', composeBody);
     const W = 1280, H = 720;
 
     const shader = (type, text) => { const s = gl.createShader(type); gl.shaderSource(s, text); gl.compileShader(s);
@@ -104,11 +104,46 @@ try {
       rotation: [Math.cos(angle), 0, -Math.sin(angle), 0, 1, 0, Math.sin(angle), 0, Math.cos(angle)]});
     const strafe = (units, scale = 1) => ({scale, move: [units, 0, 0], rotation: [1, 0, 0, 0, 1, 0, 0, 0, 1]});
     // The production viewmodel range for a muzzle 28 units out (a Thompson).
-    function params(ads, {glow = 1, film = 1, nearEnd = 512, motion = null, backdrop = 0} = {}) {
+    function params(ads, {glow = 1, film = 1, nearEnd = 512, motion = null, backdrop = 0, gray = 0, vm = null} = {}) {
       HEAPF32.set([0.42 * glow, 0.30 * glow, 0.9, 0.75, 5, 12, ads, 4.55, 17.5, near, 3,
         film ? 0.147 : 0, 0.96, film ? 0.35 : 0, film, worldNear, nearEnd, 1,
-        ...(motion ? [motion.scale, ...motion.rotation, ...motion.move] : Array(13).fill(0)), 1, 16 / 9, backdrop], 16);
+        ...(motion ? [motion.scale, ...motion.rotation, ...motion.move] : Array(13).fill(0)), 1, 16 / 9, backdrop, gray,
+        ...(vm ? [vm.smear, vm.triangles, vm.indexRow, vm.tileRow, vm.rows, vm.tile, vm.tilesX] : Array(7).fill(0))], 16);
       return 64;
+    }
+    // The viewmodel mesh as WebSceneFx_TrackViewmodel lays it out in rows of
+    // 1024 texels: two a vertex (GL clip position, half smear in pixels), four
+    // indices a texel, then for each 22-pixel tile the largest smear within
+    // one tile of it. Each quad is a rectangle in normalized device
+    // coordinates, z units from the eye, with a half smear in pixels.
+    const MESH = 4096;
+    function viewmodelMesh(quads) {
+      const tile = Math.ceil(0.03 * H), tilesX = Math.ceil(W / tile), tilesY = Math.ceil(H / tile);
+      const indexRow = Math.ceil(quads.length * 8 / 1024), tileRow = indexRow + Math.ceil(quads.length * 6 / 4096);
+      const rows = tileRow + Math.ceil(tilesX * tilesY / 1024);
+      const mesh = new Float32Array(rows * 4096), tiles = new Float32Array(tilesX * tilesY * 2);
+      const speedAt = (v, i) => Math.hypot(v[i], v[i + 1]);
+      let smear = 0;
+      quads.forEach(({rect: [x0, y0, x1, y1], z, smear: v}, n) => {
+        const depth = 2 * (c - near / z) - 1;
+        [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].forEach(([x, y], k) =>
+          mesh.set([x * z, y * z, depth * z, z, v[0], v[1], 0, 0], (n * 4 + k) * 8));
+        [0, 1, 2, 0, 2, 3].forEach((k, i) => { mesh[indexRow * 4096 + n * 6 + i] = n * 4 + k; });
+        smear = Math.max(smear, speedAt(v, 0));
+        for (let ty = Math.floor((y0 + 1) / 2 * H / tile); ty <= Math.floor((y1 + 1) / 2 * H / tile); ++ty)
+          for (let tx = Math.floor((x0 + 1) / 2 * W / tile); tx <= Math.floor((x1 + 1) / 2 * W / tile); ++tx)
+            if (speedAt(v, 0) > speedAt(tiles, (ty * tilesX + tx) * 2)) tiles.set(v, (ty * tilesX + tx) * 2);
+      });
+      for (let ty = 0; ty < tilesY; ++ty)
+        for (let tx = 0; tx < tilesX; ++tx) {
+          let best = (ty * tilesX + tx) * 2;
+          for (let y = Math.max(ty - 1, 0); y <= Math.min(ty + 1, tilesY - 1); ++y)
+            for (let x = Math.max(tx - 1, 0); x <= Math.min(tx + 1, tilesX - 1); ++x)
+              if (speedAt(tiles, (y * tilesX + x) * 2) > speedAt(tiles, best)) best = (y * tilesX + x) * 2;
+          mesh.set([tiles[best], tiles[best + 1]], (tileRow * 1024 + ty * tilesX + tx) * 4);
+        }
+      HEAPF32.set(mesh, MESH);
+      return {smear, triangles: quads.length * 2, indexRow, tileRow, rows, tile, tilesX};
     }
     function read() {
       const pixels = new Uint8Array(W * H * 4);
@@ -118,7 +153,7 @@ try {
     function render(samples, ads, options) {
       check(bind(gl, Module, HEAPF32, W, H, samples) === 1, `offscreen scene bound with ${samples} sample(s)`);
       drawScene(options?.layout);
-      compose(gl, Module, HEAPF32, params(ads, options));
+      compose(gl, Module, HEAPF32, params(ads, options), MESH * 4);
       return read();
     }
     function direct() { gl.bindFramebuffer(gl.FRAMEBUFFER, null); drawScene(); return read(); }
@@ -190,6 +225,39 @@ try {
     check(pixel(flick, 716, 360) > 0 && pixel(flick, 728, 360) === 0 && pixel(flick, 551, 360) === 0,
       'a flick smears 6% of the screen height at most');
 
+    // The viewmodel's own motion. A white viewmodel square over the black
+    // world covers pixels 576-703 by 324-395 and moves right with a half
+    // smear of 15 pixels; its tiles reach pixels 550-725.
+    function viewmodelSquare() {
+      rect(-1, -1, 1, 1, worldDepth(2000), [0, 0, 0], 0);
+      rect(-0.1, -0.1, 0.1, 0.1, vmDepth(10), [1, 1, 1], 0);
+    }
+    const square = {rect: [-0.1, -0.1, 0.1, 0.1], z: 10, smear: [15, 0]};
+    const still = render(4, 0, {glow: 0, film: 0, layout: viewmodelSquare});
+    check(same(render(4, 0, {glow: 0, film: 0, layout: viewmodelSquare, vm: {...viewmodelMesh([square]), smear: 0}}),
+      still, [-1, -1, 1, 1]), 'without viewmodel motion nothing smears');
+    const moving = render(4, 0, {glow: 0, film: 0, layout: viewmodelSquare, vm: viewmodelMesh([square])}); snapshot('viewmodel');
+    check(pixel(moving, 640, 360) === 255, 'the moving viewmodel stays solid inside its smear');
+    check(pixel(moving, 700, 360) < 250 && pixel(moving, 700, 360) > 128, 'the world shows through its trailing edge');
+    check(pixel(moving, 709, 360) > 20 && pixel(moving, 571, 360) > 20, 'it smears over the world beyond both edges');
+    check(pixel(moving, 722, 360) === 0 && pixel(moving, 556, 360) === 0, 'the smear reaches no further than its motion');
+    check(pixel(moving, 640, 400) === 0 && pixel(moving, 640, 319) === 0, 'sideways motion does not smear vertically');
+    check(same(moving, still, [-1, 0.5, 1, 1]) && same(moving, still, [-1, -1, -0.2, 1]), 'the world away from it stays sharp');
+    // Where viewmodel parts overlap, the nearer part's smear is drawn. The far
+    // part is drawn last; RG8 stores each half smear over the longest, 12.
+    const smearAt = (x, y) => {
+      const texel = new Uint8Array(4);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, Module.cod2SceneFx.t.vm.fbo);
+      gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, texel);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+      return [texel[0], texel[1]];
+    };
+    render(4, 0, {glow: 0, film: 0, vm: viewmodelMesh([{rect: [-0.5, -0.2, 0, 0.2], z: 8, smear: [0, 10]},
+      {rect: [-0.3, -0.2, 0.2, 0.2], z: 15, smear: [12, 0]}])});
+    const near12 = (texel, r, g) => Math.abs(texel[0] - r) <= 1 && Math.abs(texel[1] - g) <= 1;
+    check(near12(smearAt(544, 360), 128, 234) && near12(smearAt(384, 360), 128, 234), 'the nearer part\'s smear wins where parts overlap');
+    check(near12(smearAt(704, 360), 255, 128) && near12(smearAt(960, 360), 128, 128), 'each part draws its own smear, the rest none');
+
     // Behind the end of a match's scoreboard the whole view, the viewmodel
     // too, blurs by about 20 pixels at 720 lines. Across the square's right
     // edge the light falls from 84% to 16% over two deviations.
@@ -204,6 +272,22 @@ try {
     const halfway = render(4, 0, {glow: 0, film: 0, layout: squares, backdrop: 0.5});
     check(pixel(halfway, 720, 360) > 0 && pixel(halfway, 720, 360) < pixel(backdrop, 720, 360),
       'half the backdrop blurs less');
+    // Behind the class screens of a match the view also turns gray: each
+    // pixel takes its Rec. 709 luma, wholly or halfway.
+    const colour = render(4, 0, {glow: 0, film: 0});
+    const gray = render(4, 0, {glow: 0, film: 0, gray: 1}); snapshot('gray');
+    const halfGray = render(4, 0, {glow: 0, film: 0, gray: 0.5});
+    const spread = (px, i) => Math.max(px[i], px[i + 1], px[i + 2]) - Math.min(px[i], px[i + 1], px[i + 2]);
+    let grayest = 0, vivid = 0;
+    for (let i = 0; i < W * H * 4; i += 4) {
+      grayest = Math.max(grayest, spread(gray, i));
+      if (spread(colour, i) > spread(colour, vivid)) vivid = i;
+    }
+    check(grayest <= 1 && spread(colour, vivid) > 20, 'a gray backdrop leaves no color');
+    const luma = 0.2126 * colour[vivid] + 0.7152 * colour[vivid + 1] + 0.0722 * colour[vivid + 2];
+    check(Math.abs(gray[vivid] - luma) <= 2, 'the gray keeps each pixel\'s luma');
+    check(spread(halfGray, vivid) > 5 && spread(halfGray, vivid) < spread(colour, vivid) - 5,
+      'half the gray keeps half the color');
 
     // A scene of half the canvas's lines renders at its size from the canvas
     // viewport the engine sets, and is filtered up to the whole canvas with
@@ -232,7 +316,7 @@ try {
       let draws = 0, blits = 0;
       gl.drawArrays = function(...args) { ++draws; return drawArrays.apply(this, args); };
       gl.blitFramebuffer = function(...args) { ++blits; return blit.apply(this, args); };
-      compose(gl, Module, HEAPF32, params(ads, options));
+      compose(gl, Module, HEAPF32, params(ads, options), MESH * 4);
       gl.drawArrays = drawArrays; gl.blitFramebuffer = blit;
       return `${draws}+${blits}`;
     };
@@ -240,7 +324,9 @@ try {
     check(passes(0) === '3+1', 'glow adds two 1/8-resolution passes');
     check(passes(1) === '5+1', 'aiming adds two 1/4-resolution passes');
     check(passes(0, {glow: 0, motion: turn(0.03)}) === '1+1', 'motion blur adds no pass');
+    check(passes(0, {glow: 0, vm: viewmodelMesh([square])}) === '2+1', 'viewmodel motion adds its own full-resolution draw');
     check(passes(0, {glow: 0, backdrop: 1}) === '5+1', 'the backdrop adds four 1/4-resolution passes');
+    check(passes(0, {glow: 0, gray: 1}) === '1+1', 'its gray adds no pass');
     check(passes(0, {glow: 0}, 2) === '2+1', 'a scene below the canvas adds one full-canvas pass');
 
     // A steady scaled frame queries nothing the GPU process has to answer.
@@ -255,6 +341,38 @@ try {
       check(queried.length && queried.every(pname => answered.has(pname)), 'a scaled frame makes no synchronous GL queries');
     }
     gl.viewport(0, 0, W, H);
+
+    // Once its target exists, a frame with viewmodel motion queries nothing
+    // the GPU process has to answer, and leaves the caller's vertex array and
+    // buffers bound: the velocity pass reads its vertices from a texture.
+    {
+      const mesh = viewmodelMesh([square]);
+      render(4, 0, {glow: 0, film: 0, layout: viewmodelSquare, vm: mesh});
+      const callerVao = gl.createVertexArray(), arrayBuffer = gl.createBuffer(), indexBuffer = gl.createBuffer();
+      check(bind(gl, Module, HEAPF32, W, H, 4) === 1, 'a frame with viewmodel motion binds');
+      drawScene(viewmodelSquare);
+      gl.bindVertexArray(callerVao);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+      gl.bindBuffer(gl.ARRAY_BUFFER, arrayBuffer);
+      const queried = [], getParameter = gl.getParameter, checkStatus = gl.checkFramebufferStatus;
+      gl.getParameter = function(pname) { queried.push(pname); return getParameter.call(this, pname); };
+      gl.checkFramebufferStatus = function(target) { queried.push('checkFramebufferStatus'); return checkStatus.call(this, target); };
+      compose(gl, Module, HEAPF32, params(0, {glow: 0, film: 0, vm: mesh}), MESH * 4);
+      gl.getParameter = getParameter; gl.checkFramebufferStatus = checkStatus;
+      const answered = new Set([gl.CURRENT_PROGRAM, gl.VERTEX_ARRAY_BINDING, gl.ACTIVE_TEXTURE, gl.VIEWPORT]);
+      check(queried.length && queried.every(pname => answered.has(pname)), 'a frame with viewmodel motion makes no synchronous GL queries');
+      check(gl.getParameter(gl.VERTEX_ARRAY_BINDING) === callerVao && gl.getParameter(gl.ARRAY_BUFFER_BINDING) === arrayBuffer &&
+        gl.getParameter(gl.ELEMENT_ARRAY_BUFFER_BINDING) === indexBuffer, 'the viewmodel pass leaves the caller\'s vertex array and buffers bound');
+      check(same(read(), moving, [-1, -1, 1, 1]), 'the same viewmodel motion composes the same frame');
+      const released = [8, 9, 10, 11, 12, 13, 14].every(unit => {
+        gl.activeTexture(gl.TEXTURE0 + unit);
+        return gl.getParameter(gl.TEXTURE_BINDING_2D) === null;
+      });
+      check(released, 'a frame with viewmodel motion releases every post texture unit');
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindVertexArray(null);
+      gl.deleteVertexArray(callerVao); gl.deleteBuffer(arrayBuffer); gl.deleteBuffer(indexBuffer);
+    }
 
     // Production state is restored exactly, including the cached WebGL entry points.
     check(bind(gl, Module, HEAPF32, W, H, 4) === 1, 'rebind without reallocating');
@@ -283,7 +401,7 @@ try {
       'composite writes every channel and leaves depth writes alone');
     check(caps.every(cap => gl.isEnabled(cap)), 'capabilities restored');
     check(gl.getParameter(gl.FRAMEBUFFER_BINDING) === null, 'later 2D draws reach the canvas');
-    for (let unit = 8; unit < 14; ++unit) {
+    for (let unit = 8; unit < 15; ++unit) {
       gl.activeTexture(gl.TEXTURE0 + unit);
       check(gl.getParameter(gl.TEXTURE_BINDING_2D) === null, 'post texture unit ' + unit + ' released');
     }

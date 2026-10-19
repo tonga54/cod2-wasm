@@ -42,15 +42,20 @@ void WebPointLights_SetScene(const GfxLight *lights, int count)
 
 EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShadowEnabled, int colorOrder,
                                   int normalMap, int specularMap, int detailMap, float detailX, float detailY,
-                                  int lightmapped, float specularScale, float sunShading, float sunVisibility), {
+                                  int lightmapped, float specularScale, float sunShading, float sunVisibility,
+                                  int camoMap, int camoMask, float camoTiles, float camoReference), {
     Module.cod2VertexColorOrder = colorOrder;
-    // The material's original maps, for the generated shaders' per-pixel pass.
+    // The material's original maps, for the generated shaders' per-pixel pass,
+    // and a camouflaged gun's pattern and paint mask.
     var material = Module.cod2Material;
     if (!material) material = Module.cod2Material = {
         surface: new Float32Array(4), detail: new Float32Array(4),
         sunEye: new Float32Array(3), skyEye: new Float32Array(3), sunColor: new Float32Array(4),
-        model: new Float32Array(4), view: new Float32Array(16),
-        bound: [null, null, null], present: [0, 0, 0], sunRevision: -1
+        model: new Float32Array(4), camo: new Float32Array(4), view: new Float32Array(16),
+        bound: [null, null, null, null, null], present: [0, 0, 0, 0, 0], sunRevision: -1,
+        // The detail, normal and specular maps, then the camouflage's pattern
+        // and mask past the units the scene compositor binds (web_scene_fx.c, 8-14).
+        units: [5, 6, 7, 16, 17]
     };
     // The engine sets sampler state only on the stages it binds itself:
     // without mipmaps these maps would sparkle wherever they minify.
@@ -63,16 +68,16 @@ EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShado
             GLctx.samplerParameteri(sampler, GLctx.TEXTURE_WRAP_T, GLctx.REPEAT);
             var anisotropic = GLctx.getExtension('EXT_texture_filter_anisotropic');
             if (anisotropic) GLctx.samplerParameterf(sampler, anisotropic.TEXTURE_MAX_ANISOTROPY_EXT, 4);
-            for (var samplerUnit = 5; samplerUnit < 8; ++samplerUnit) GLctx.bindSampler(samplerUnit, sampler);
+            for (var samplerUnit = 0; samplerUnit < 5; ++samplerUnit) GLctx.bindSampler(material.units[samplerUnit], sampler);
         }
     }
     // Compare texture objects: a deleted texture's name can return for another.
-    var maps = [detailMap, normalMap, specularMap], present = material.present, rebound = false;
-    for (var unit = 0; unit < 3; ++unit) {
+    var maps = [detailMap, normalMap, specularMap, camoMap, camoMask], present = material.present, rebound = false;
+    for (var unit = 0; unit < 5; ++unit) {
         var texture = maps[unit] ? GL.textures[maps[unit]] : null;
         present[unit] = texture ? 1 : 0;
         if (!texture || material.bound[unit] === texture) continue;
-        GLctx.activeTexture(GLctx.TEXTURE5 + unit);
+        GLctx.activeTexture(GLctx.TEXTURE0 + material.units[unit]);
         GLctx.bindTexture(GLctx.TEXTURE_2D, texture);
         material.bound[unit] = texture;
         rebound = true;
@@ -82,6 +87,8 @@ EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShado
     surface[0] = present[1]; surface[1] = present[2]; surface[2] = lightmapped ? 1 : 0; surface[3] = specularScale;
     detail[0] = present[0] ? detailX : 0; detail[1] = present[0] ? detailY : 0; detail[2] = present[0];
     material.model[0] = sunVisibility;
+    var camo = material.camo, painted = present[3] && present[4] ? 1 : 0;
+    camo[0] = painted; camo[1] = painted ? camoTiles : 0; camo[2] = painted ? camoReference : 0;
     var sun = Module.cod2Sun;
     if (view && sun) {
         var viewOffset = view >>> 2, viewChanged = false;

@@ -8,9 +8,13 @@ int CG_ScoreTableEnabled(void);
 /* While it shows, the scoreboard takes the place of the whole HUD. */
 int CG_ScoreTableHidesHud(void);
 /* Our server ends the scores command with the kills of the listed players;
- * without them the Kills column stays empty. */
+ * without them the Kills column stays empty. -1 for a player not listed. */
 void CG_ScoreTableClearKills(void);
 void CG_ScoreTableSetKills(int clientNum, int kills);
+int CG_ScoreTableKills(int clientNum);
+/* Then the receiver's own assists and headshots; -1 from a retail server. */
+void CG_ScoreTableSetOwnStats(int assists, int headshots);
+void CG_ScoreTableOwnStats(int *assists, int *headshots);
 /* Builds the team emblems for the current screen size; cheap once built. */
 void CG_ScoreTablePrepare(void);
 void CG_DrawScoreTable(float fade);
@@ -24,6 +28,9 @@ void CG_ScoreTableMapName(char *buf, int size);
 /* The kind of emblem a team has, -1 for none: the Allies' follows their
  * nation, the Axis have the iron cross. */
 int CG_ScoreTableEmblemKind(int team);
+/* The emblem of kind in one color: white texels whose alpha covers it, size a
+ * side with a texel of margin round it, rows stride bytes apart from bgra. */
+void CG_ScoreTableRasterizeEmblem(int kind, byte *bgra, int stride, int size);
 /* The emblem of kind as a lit medal: size BGRA texels a side, a texel of
  * margin round it, rows stride bytes apart from bgra. Only rows firstRow to
  * firstRow + rows are written, so the work can be spread over frames. */

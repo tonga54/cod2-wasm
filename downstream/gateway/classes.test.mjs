@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createGateway } from './server.mjs';
@@ -15,6 +16,10 @@ try {
   assert.deepEqual(normalizeClasses(defaultClasses()), defaultClasses());
   assert.equal(new Set([...classRules.primary, ...classRules.secondary, ...classRules.lethal,
     ...classRules.tactical]).size, 21 + 4 + 4 + 4);
+  // Ten camouflages and the guns' own finish, which every default keeps.
+  assert.equal(new Set(classRules.camos).size, 11);
+  assert.equal(classRules.camos[0], 'none');
+  for (const item of classRules.defaults) assert.deepEqual([item.primaryCamo, item.secondaryCamo], ['none', 'none']);
 
   // A gametag owns its classes, without color codes, case or spaces around it.
   assert.equal(playerKey('^1Chapu^754 '), 'chapu54');
@@ -25,8 +30,14 @@ try {
 
   const valid = defaultClasses();
   valid[1] = { name: '  Kar Rusher ', primary: 'kar98k_mp', secondary: 'TT30_mp',
-    lethal: 'frag_grenade_russian_mp', tactical: 'smoke_grenade_american_mp' };
+    lethal: 'frag_grenade_russian_mp', tactical: 'smoke_grenade_american_mp',
+    primaryCamo: 'frogskin', secondaryCamo: 'ember' };
   assert.equal(normalizeClasses(valid)[1].name, 'Kar Rusher');
+  assert.deepEqual([normalizeClasses(valid)[1].primaryCamo, normalizeClasses(valid)[1].secondaryCamo],
+    ['frogskin', 'ember']);
+  // A client built before camouflage sends none: the guns keep their finish.
+  const unpainted = defaultClasses().map(({ primaryCamo, secondaryCamo, ...item }) => item);
+  assert.deepEqual(normalizeClasses(unpainted), defaultClasses());
   const invalid = [
     [], defaultClasses().slice(0, 4), [...defaultClasses(), defaultClasses()[0]], null, 'x',
     ...[
@@ -34,7 +45,9 @@ try {
       { name: 'back\\slash' }, { name: 'per%cent' }, { name: '^1red' }, { name: 'ñandú' }, { name: 7 },
       { primary: 'colt_mp' }, { primary: 'mg42_bipod_stand_mp' }, { primary: 'kar98k_mp;quit' },
       { secondary: 'kar98k_mp' }, { secondary: 'tt30_mp' }, { lethal: 'smoke_grenade_german_mp' },
-      { tactical: 'frag_grenade_german_mp' }, { tactical: undefined }
+      { tactical: 'frag_grenade_german_mp' }, { tactical: undefined }, { primaryCamo: 'tiger' },
+      { primaryCamo: 'Frogskin' }, { secondaryCamo: '' }, { secondaryCamo: 7 }, { primaryCamo: null },
+      { secondaryCamo: 'none;quit' }
     ].map(change => defaultClasses().map((item, index) => index === 2 ? { ...item, ...change } : item))
   ];
   for (const value of invalid) assert.throws(() => normalizeClasses(value), /class|classes/, JSON.stringify(value));
@@ -49,10 +62,36 @@ try {
   assert.deepEqual(store.get('chapu54'), normalizeClasses(valid));
   assert.deepEqual(store.get('other'), defaultClasses());
   const edited = normalizeClasses(valid);
-  edited[4] = { ...edited[4], name: 'Shotty', primary: 'ppsh_mp' };
+  edited[4] = { ...edited[4], name: 'Shotty', primary: 'ppsh_mp', secondaryCamo: 'winter' };
   store.put('chapu54', edited, 2000);
   assert.deepEqual(store.get('chapu54'), edited);
   assert.deepEqual(store.get('other'), defaultClasses(), 'one player cannot change another');
+
+  // A store from before camouflage gains its columns; its rows keep their
+  // weapons, unpainted, and take camouflage from then on.
+  {
+    const legacyPath = join(directory, 'legacy.sqlite');
+    const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
+    const legacy = new DatabaseSync(legacyPath);
+    legacy.exec(`CREATE TABLE classes (player TEXT NOT NULL, slot INTEGER NOT NULL CHECK (slot BETWEEN 1 AND 5),
+      name TEXT NOT NULL, primary_weapon TEXT NOT NULL, secondary_weapon TEXT NOT NULL, lethal TEXT NOT NULL,
+      tactical TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (player, slot)) WITHOUT ROWID;
+      INSERT INTO classes VALUES ('veteran', 2, 'Old Kar', 'kar98k_mp', 'luger_mp', 'frag_grenade_german_mp',
+      'smoke_grenade_german_mp', 500);`);
+    legacy.close();
+    let migrated = createClassStore(legacyPath);
+    const veteran = migrated.get('veteran');
+    assert.deepEqual(veteran[1], { name: 'Old Kar', primary: 'kar98k_mp', secondary: 'luger_mp',
+      lethal: 'frag_grenade_german_mp', tactical: 'smoke_grenade_german_mp', primaryCamo: 'none',
+      secondaryCamo: 'none' });
+    assert.deepEqual(veteran[0], defaultClasses()[0]);
+    veteran[1] = { ...veteran[1], primaryCamo: 'splinter' };
+    migrated.put('veteran', veteran, 600);
+    migrated.close();
+    migrated = createClassStore(legacyPath);
+    assert.equal(migrated.get('veteran')[1].primaryCamo, 'splinter', 'reopening keeps the new columns');
+    migrated.close();
+  }
 
   // HTTP: reads by gametag; same-origin, bounded, validated writes.
   const gateway = createGateway({ classStore: store });
@@ -74,6 +113,8 @@ try {
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { classes: normalizeClasses(valid), saved: true });
     assert.deepEqual(store.get('newcomer'), normalizeClasses(valid));
+    response = await fetch(origin + '/classes?player=Newcomer');
+    assert.deepEqual((await response.json()).classes[1], normalizeClasses(valid)[1], 'a read returns the camouflage');
 
     const before = store.get('newcomer');
     assert.equal((await put({ player: 'Newcomer', classes: defaultClasses() }, { Origin: 'http://evil.invalid' })).status, 403);
@@ -98,7 +139,8 @@ try {
     await gateway.close();
     store.close();
   }
-  console.log('PASS: classes keyed by gametag, five validated slots, persisted across reopen, same-origin bounded writes');
+  console.log('PASS: classes keyed by gametag, five validated slots and two camouflages, persisted across reopen ' +
+    'and a migration from the store before camouflage, same-origin bounded writes');
 } finally {
   rmSync(directory, { recursive: true, force: true });
 }

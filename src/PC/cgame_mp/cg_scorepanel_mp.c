@@ -463,6 +463,28 @@ int CG_ScorePanelHidesHudElem(const hudelem_t *elem)
     return CG_ScorePanelActiveGametype() >= 0 && CG_ScorePanelRetailElem(elem) != SCORE_PANEL_ELEM_NONE;
 }
 
+int CG_ScorePanelMatch(int *topScore, int *bottomScore, int *limit, int *standing)
+{
+    CG_ScorePanelView view;
+    int gametype = CG_ScorePanelGametype(cgs->gametype);
+    int viewClient;
+
+    if (gametype < 0 || !cg->snap)
+        return 0;
+    viewClient = cg->snap->ps.clientNum;
+    if ((unsigned)viewClient >= SCORE_PANEL_MAX_CLIENTS)
+        return 0;
+    CG_ScorePanelGetView(&s_scorePanel, gametype, viewClient, &view);
+    *topScore = view.topScore;
+    *bottomScore = view.bottomScore;
+    *limit = view.limit;
+    *standing = view.standing == SCORE_PANEL_NEUTRAL ? CG_SCORE_PANEL_NEUTRAL
+                : view.standing == SCORE_PANEL_WINNING ? 1
+                : view.standing == SCORE_PANEL_LOSING ? -1
+                                                       : 0;
+    return 1;
+}
+
 const char *CG_ScorePanelClock(vec4_t color)
 {
     CG_ScorePanelRetail retail;

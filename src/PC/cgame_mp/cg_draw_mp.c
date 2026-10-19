@@ -13,6 +13,7 @@
 #include "headers/PC/cgame_mp/cg_scorepopup.h"
 #include "headers/PC/cgame_mp/cg_killcam.h"
 #include "headers/PC/cgame_mp/cg_killfeed.h"
+#include "headers/PC/cgame_mp/cg_prematch.h"
 #include "headers/PC/cgame_mp/cg_scorepanel.h"
 #include "headers/PC/cgame_mp/cg_scoretable.h"
 #include "headers/PC/cgame_mp/cg_playernames.h"
@@ -1782,7 +1783,8 @@ unsigned int CG_DrawCrosshair(void)
     weapDef = (WeaponDef *)BG_GetWeaponDef(weapIndex);
     reticleVisibility = CG_DrawWeapReticle();
 
-    if (!drawHudMenus)
+    /* A scope still shows its overlay while the countdown holds its fire. */
+    if (!drawHudMenus || CG_PrematchActive())
         return 0;
 
     /* Teammates turn the crosshair the color of their labels, the stock green
@@ -1938,12 +1940,14 @@ unsigned int CG_Draw2D(void)
     qboolean drewScoreboard;
     int hudCovered;
     int killcam;
+    int prematch;
     float debugY = 0.0f;
     int pm_type;
     byte *cls = (byte *)imp_cls;
     float screenWidth = (float)((clientStatic_t *)cls)->vidConfig.width;
     float screenHeight = (float)((clientStatic_t *)cls)->vidConfig.height;
 
+    CG_PrematchFrame();
     CG_EndgameFrame(cg->nextSnap && cg->nextSnap->ps.pm_type == 5);
     if (cg->cubemapShot)
         return 0;
@@ -2004,14 +2008,23 @@ unsigned int CG_Draw2D(void)
         drawHudMenus = 0;
         drawHudElems = 0;
     }
+    /* So does a class screen over the match, as WWII's Select Division: it
+     * asked for the gray backdrop this frame takes. */
+    if (g_webBackdropGray > 0.0f) {
+        hudCovered = 1;
+        drawHudMenus = 0;
+        drawHudElems = 0;
+    }
 
     pm_type = cg->nextSnap->ps.pm_type;
     /* Over a replay the WWII killcam keeps the killer's crosshair, names and
      * script elements and stands in for the rest of the HUD. */
     killcam = drawHudElems && CG_KillcamActive();
+    /* Before a match the WWII countdown stands in for the HUD, crosshair too. */
+    prematch = CG_PrematchActive();
     /* The compass menu, and with it the minimap, is painted for players, not
      * for free spectators or at intermission. */
-    CG_MinimapSetHudVisible(drawHudMenus && pm_type != 4 && pm_type != 5 && !killcam);
+    CG_MinimapSetHudVisible(drawHudMenus && pm_type != 4 && pm_type != 5 && !killcam && !prematch);
     if (pm_type == 5) {
         CL_CloseAllMenus();
         if (!cg->showScores) {
@@ -2062,11 +2075,13 @@ unsigned int CG_Draw2D(void)
             CG_Draw2dHudElems(0);
         if (killcam)
             drawHudMenus = 0;
-        if (drawHudMenus)
+        if (drawHudMenus && !prematch)
             Menu_PaintAll((void *)imp_cgDC);
         if (!hudCovered)
             CG_Draw2dHudElems(1);
-        if (drawHudMenus) {
+        if (drawHudMenus && prematch) {
+            CG_DrawPrematch();
+        } else if (drawHudMenus) {
             CG_DrawScorePanel();
             CG_DrawKillFeed();
             CG_DrawAmmoCounter();

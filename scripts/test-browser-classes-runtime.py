@@ -4,6 +4,8 @@
 Requires Docker, the native server image and the private browser archives;
 no network. Test clients answer the class menu as the browser does, through
 the gametype's own menu handler, and the loadouts are read back after spawn.
+Clients that have just joined answer it before choosing a team, as a player
+does when the class menu opens first, and get a team from the gametype.
 """
 import argparse
 from pathlib import Path
@@ -36,6 +38,11 @@ loadout(p)
 		" secondary=" + p getWeaponSlotWeapon("primaryb");
 }
 
+onTeam(p)
+{
+	return isDefined(p.pers["team"]) && (p.pers["team"] == "allies" || p.pers["team"] == "axis");
+}
+
 // What _menus.gsc does with a response from the faction's weapon menu, the
 // class menu once browser_classes.gsc took its place. (This VM delivers a
 // script notify's arguments to waittill in reverse, so the response is not
@@ -51,7 +58,7 @@ run()
 {
 	wait 2;
 	players = [];
-	for(i = 0; i < 4; i++)
+	for(i = 0; i < 9; i++)
 	{
 		players[i] = addTestClient();
 		wait .5;
@@ -59,6 +66,8 @@ run()
 	wait 2;
 	check("class-menu-replaces-weapon-menus", game["menu_weapon_allies"] == "browser_class" &&
 		game["menu_weapon_axis"] == "browser_class", game["menu_weapon_allies"] + " " + game["menu_weapon_axis"]);
+	// The connect callback opens it for a player without a team, first.
+	check("connect-opens-the-class-menu", game["menu_serverinfo"] == "browser_class", game["menu_serverinfo"]);
 	players[0] [[level.allies]]();
 	players[1] [[level.axis]]();
 	players[2] [[level.allies]]();
@@ -89,9 +98,47 @@ run()
 		p getWeaponSlotWeapon("primaryb") == "luger_mp" && p getAmmoCount("frag_grenade_german_mp") == 1 &&
 		!isDefined(p.pers["browser_class"]), loadout(p));
 
+	// Players who have just joined choose a class before any team: the
+	// gametype's auto-assign gives each the smaller team, then the class.
+	p = players[4];
+	check("joined-without-a-team", p.pers["team"] == "spectator" && !isAlive(p), loadout(p));
+	answer(p, "class,ppsh_mp,luger_mp,frag_grenade_german_mp,smoke_grenade_american_mp");
+	answer(players[5], "class,thompson_mp,TT30_mp,frag_grenade_russian_mp,smoke_grenade_german_mp,frogskin,ember");
+	answer(players[6], "class,bren_mp,webley_mp,frag_grenade_american_mp,smoke_grenade_british_mp");
+	// An invalid class leaves a player without a team, an unknown camouflage too.
+	answer(players[7], "class,ppsh_mp,luger_mp,frag_grenade_german_mp,mg42_bipod_stand_mp");
+	answer(players[8], "class,ppsh_mp,luger_mp,frag_grenade_german_mp,smoke_grenade_american_mp,Frogskin,none");
+	wait 1;
+	check("class-first-assigns-a-team", onTeam(p) && isAlive(p) && p getWeaponSlotWeapon("primary") == "ppsh_mp" &&
+		p getWeaponSlotWeapon("primaryb") == "luger_mp" && p getAmmoCount("smoke_grenade_american_mp") == 1 &&
+		p getAmmoCount("frag_grenade_german_mp") == maps\mp\gametypes\_weapons::getWeaponBasedGrenadeCount("ppsh_mp"),
+		loadout(p));
+	counts["allies"] = 0;
+	counts["axis"] = 0;
+	for(i = 0; i < 7; i++)
+		if(onTeam(players[i]))
+			counts[players[i].pers["team"]]++;
+	check("class-first-balances-the-teams", counts["allies"] + counts["axis"] == 7 &&
+		counts["allies"] - counts["axis"] <= 1 && counts["axis"] - counts["allies"] <= 1 &&
+		isAlive(players[5]) && isAlive(players[6]), "allies=" + counts["allies"] + " axis=" + counts["axis"]);
+	p = players[7];
+	check("class-first-invalid-keeps-no-team", p.pers["team"] == "spectator" && !isAlive(p) &&
+		!isDefined(p.pers["browser_class"]), loadout(p));
+	// The camouflage rides with the class; a client from before it paints nothing.
+	p = players[5];
+	check("class-keeps-its-camouflage", isAlive(p) && p getWeaponSlotWeapon("primary") == "thompson_mp" &&
+		p getWeaponSlotWeapon("primaryb") == "TT30_mp" && p.pers["browser_class"].size == 6 &&
+		p.pers["browser_class"][4] == "frogskin" && p.pers["browser_class"][5] == "ember", loadout(p));
+	p = players[4];
+	check("class-without-camouflage-paints-none", isAlive(p) && p.pers["browser_class"].size == 6 &&
+		p.pers["browser_class"][4] == "none" && p.pers["browser_class"][5] == "none", loadout(p));
+	p = players[8];
+	check("unknown-camouflage-rejected", p.pers["team"] == "spectator" && !isAlive(p) &&
+		!isDefined(p.pers["browser_class"]), loadout(p));
+
 	// A class chosen while alive waits for the next spawn.
 	p = players[0];
-	answer(p, "class,thompson_mp,webley_mp,frag_grenade_british_mp,smoke_grenade_german_mp");
+	answer(p, "class,thompson_mp,webley_mp,frag_grenade_british_mp,smoke_grenade_german_mp,winter,none");
 	wait .5;
 	check("alive-change-waits-for-spawn", p getWeaponSlotWeapon("primary") == "kar98k_mp" &&
 		p getWeaponSlotWeapon("primaryb") == "luger_mp", loadout(p));
@@ -103,7 +150,8 @@ run()
 	wait 6;
 	check("respawn-applies-the-new-class", isAlive(p) && p getWeaponSlotWeapon("primary") == "thompson_mp" &&
 		p getWeaponSlotWeapon("primaryb") == "webley_mp" && p getAmmoCount("frag_grenade_british_mp") == 1 &&
-		p getAmmoCount("smoke_grenade_german_mp") == 1 && p getAmmoCount("frag_grenade_german_mp") == 0, loadout(p));
+		p getAmmoCount("smoke_grenade_german_mp") == 1 && p getAmmoCount("frag_grenade_german_mp") == 0 &&
+		p.pers["browser_class"][4] == "winter" && p.pers["browser_class"][5] == "none", loadout(p));
 	p = players[3];
 	check("restricted-primary-keeps-the-previous-weapon", isAlive(p) && p getWeaponSlotWeapon("primary") == "mp40_mp" &&
 		p getWeaponSlotWeapon("primaryb") == "luger_mp" && p getAmmoCount("frag_grenade_american_mp") == 0, loadout(p));
@@ -118,10 +166,11 @@ run()
 	wait 2;
 	p = addTestClient();
 	wait 2;
-	p [[level.allies]]();
-	wait .5;
+	check("sd-connect-opens-the-class-menu", game["menu_serverinfo"] == "browser_class", game["menu_serverinfo"]);
+	// Chosen before any team, as a player who has just joined does.
 	answer(p, "class,kar98k_mp,TT30_mp,frag_grenade_russian_mp,smoke_grenade_german_mp");
 	wait 1;
+	check("sd-class-first-assigns-a-team", onTeam(p), loadout(p));
 	check("sd-spawn-applies-the-class", isAlive(p) && p getWeaponSlotWeapon("primary") == "kar98k_mp" &&
 		p getWeaponSlotWeapon("primaryb") == "TT30_mp" && p getAmmoCount("smoke_grenade_german_mp") == 1 &&
 		p getAmmoCount("frag_grenade_russian_mp") == maps\mp\gametypes\_weapons::getWeaponBasedGrenadeCount("kar98k_mp"),
@@ -138,10 +187,10 @@ run()
 }
 '''
 GAMETYPES = {
-    'tdm': (CHECKS, 8, '+set scr_bot_count 1 +set scr_forcerespawn 1 +set scr_tdm_timelimit 0 '
-                       '+set scr_tdm_scorelimit 0 +set g_gametype tdm'),
+    'tdm': (CHECKS, 16, '+set scr_bot_count 1 +set scr_forcerespawn 1 +set scr_tdm_timelimit 0 '
+                        '+set scr_tdm_scorelimit 0 +set g_gametype tdm'),
     # A bot count only loads the checks in place of the bot script.
-    'sd': (CHECKS_SD, 2, '+set scr_bot_count 1 +set g_gametype sd'),
+    'sd': (CHECKS_SD, 4, '+set scr_bot_count 1 +set g_gametype sd'),
 }
 
 
@@ -194,11 +243,14 @@ def main():
     if errors or failures or len(passes) != expected:
         raise SystemExit('\n'.join(errors + failures) + f'\n{len(passes)}/{expected} passed; log: {args.log}')
     if args.gametype == 'sd':
-        print(f'PASS: {expected} S&D class choices on {args.map} through the dedicated server: the class at spawn, '
-              'then whole before the match instead of the team\'s pistol and frags')
+        print(f'PASS: {expected} S&D class checks on {args.map} through the dedicated server: the class menu first, '
+              'a team assigned with the class, the class at spawn, then whole before the match instead of the team\'s '
+              'pistol and frags')
     else:
-        print(f'PASS: {expected} class choices on {args.map} through the dedicated server: any faction\'s weapons for '
-              'either team, invalid classes rejected, bare weapons and restrictions kept, changes applied at respawn')
+        print(f'PASS: {expected} class checks on {args.map} through the dedicated server: the class menu first, a '
+              'class chosen without a team assigning the smaller one, any faction\'s weapons for either team, invalid '
+              'classes and camouflage rejected, camouflage kept with its class, bare weapons and restrictions kept, '
+              'changes applied at respawn')
 
 
 if __name__ == '__main__':

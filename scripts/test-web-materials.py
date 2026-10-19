@@ -15,9 +15,18 @@ assert 'int materialLighting = pointLight && r_materialLighting && r_materialLig
 assert ('!r_normalMap || r_normalMap->current.integer == 0,\n'
         '                                    !r_specularMap || r_specularMap->current.integer != 2, &maps);') in device
 assert 'detailScale[0], detailScale[1], materialLighting && stage1Bound == 1,' in device
-assert 'materialLighting && dev->lighting ? g_webEntitySunVisibility : 0.0f);' in device
+assert ('materialLighting && dev->lighting ? g_webEntitySunVisibility : 0.0f,\n'
+        '                (int)camoMap, (int)camoMask, camoTiles, camoReference);') in device
 draw = device.index('WebMaterials_Select(((materialCommands_t *)imp_tess)->material,')
 assert device.index('stage1Bound = 1;') < draw < device.index('WebPointLights_Draw(pointLightViewValid', draw)
+# A camouflaged gun is a lit model draw of the frame's painted entity and
+# material, whatever r_materialLighting says; its maps pass by GL name.
+camo = device.index('R_GetDrawWeaponCamo(backEndState->currentEntity, ((materialCommands_t *)imp_tess)->material, &camo)')
+assert device.rindex('if (pointLight && dev->lighting &&', 0, camo) > device.rindex('int pointLight =', 0, camo)
+assert camo < device.index('camoMap = CDirect3DDevice_GetImageGLId(camo.pattern);', camo) < \
+    device.index('camoMask = CDirect3DDevice_GetImageGLId(camo.mask);', camo) < \
+    device.index('WebPointLights_Draw(pointLightViewValid', camo)
+assert 'unsigned int normalMap = 0, specularMap = 0, detailMap = 0, camoMap = 0, camoMask = 0;' in device
 assert '"${CMAKE_CURRENT_LIST_DIR}/web_materials.c"' in (root / 'downstream/wasm/CMakeLists.txt').read_text()
 dvars = (root / 'src/PC/gfx_d3d/r_dvars.c').read_text()
 for registration in ('r_materialLighting = ri.Dvar_RegisterBool("r_materialLighting", 1, 0x2001);',

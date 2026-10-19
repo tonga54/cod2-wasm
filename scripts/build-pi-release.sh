@@ -41,7 +41,7 @@ npm test --prefix downstream/gateway
 for script in test-update-notifier test-fullscreen-control test-web-shell test-engine-version test-input-capture test-web-room-create; do
   node "scripts/${script}.cjs"
 done
-for script in test-client-update-menu test-native-fullscreen test-respawn-fall-jump test-script-vector-order test-script-native-callbacks test-player-lean test-corner-movement test-reload-cancel test-grenade-lifecycle test-mantle-movement test-mantle-hint test-mantle-view test-usercmd-delta test-hud-rotation test-server-frame-wait test-room-maps; do
+for script in test-client-update-menu test-browser-main-menu test-respawn-fall-jump test-script-vector-order test-script-native-callbacks test-player-lean test-corner-movement test-reload-cancel test-grenade-lifecycle test-mantle-movement test-mantle-hint test-mantle-view test-usercmd-delta test-hud-rotation test-server-frame-wait test-room-maps; do
   python3 "scripts/${script}.py"
 done
 mkdir -p out/pi-release

@@ -1,0 +1,20 @@
+// The menu Escape opens in a match, in place of the retail one and its
+// leave confirmation. The UI's native pause menu paints and takes every key
+// here; the view behind it blurs.
+{
+	menuDef
+	{
+		name			"ingame"
+		rect			0 0 640 480
+		style			0
+		blurWorld		5.0
+		onOpen
+		{
+			uiScript pauseMenuOpen;
+		}
+		onEsc
+		{
+			close ingame;
+		}
+	}
+}

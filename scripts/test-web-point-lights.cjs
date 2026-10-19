@@ -28,7 +28,8 @@ function emjs(name, args, source = bridge) {
 const set = emjs('WebPointLights_Set', ['packed', 'count']);
 // The device hands each draw's material maps over with its lights and shadows.
 const drawParams = ['view', 'enabled', 'worldShadowEnabled', 'colorOrder', 'normalMap', 'specularMap', 'detailMap',
-  'detailX', 'detailY', 'lightmapped', 'specularScale', 'sunShading', 'sunVisibility'];
+  'detailX', 'detailY', 'lightmapped', 'specularScale', 'sunShading', 'sunVisibility', 'camoMap', 'camoMask', 'camoTiles',
+  'camoReference'];
 const drawHead = 'EM_JS(void, WebPointLights_Draw, (';
 const drawSignature = bridge.slice(bridge.indexOf(drawHead) + drawHead.length, bridge.indexOf('), {', bridge.indexOf(drawHead)));
 assert.deepEqual(drawSignature.split(',').map(param => param.trim().split(/[\s*]+/).pop()), drawParams);
@@ -37,7 +38,7 @@ const externHead = 'extern void WebPointLights_Draw(';
 const externSignature = device.slice(device.indexOf(externHead) + externHead.length, device.indexOf(');', device.indexOf(externHead)));
 assert.equal(externSignature.replace(/\s+/g, ' '), drawSignature.replace(/\s+/g, ' '), 'the device declares the bridge it calls');
 const drawFloats = drawSignature.split(',').map(param => /^\s*float\s+\w+\s*$/.test(param));
-assert.equal(drawFloats.filter(Boolean).length, 5);
+assert.equal(drawFloats.filter(Boolean).length, 7);
 const drawJs = emjs('WebPointLights_Draw', drawParams);
 // The engine passes C floats.
 const drawScene = (...args) => drawJs(...args.map((value, i) => drawFloats[i] && typeof value === 'number' ? Math.fround(value) : value));
@@ -149,11 +150,25 @@ assert.equal(lights.shadowDrawCount, 0);
 const modelShader = generate.call({usedTexUnitList:[0]}, {useTextureMatrix:false,TexEnvJIT:{getTexUnitType:()=>0x0DE1}}, {lightingEnabled:true}, 'gl_FragColor = texture2D(u_texUnit0, v_texCoord0.xy) * v_color;');
 assert(!modelShader.pointDefs.includes('u_cod2WeaponBlur'), 'ADS does not add a texture-blur uniform');
 assert.equal(modelShader.fsTexEnvPass,
-  'vec4 cod2BaseTexel = texture2D(u_texUnit0, v_texCoord0.xy);\ngl_FragColor = cod2BaseTexel * v_color;',
-  'weapons keep the original texture footprint and vertex lighting');
+  'vec4 cod2BaseTexel = texture2D(u_texUnit0, v_texCoord0.xy);\nfloat cod2Paint = 0.0;\n' +
+  'if (u_cod2Camo.x > 0.5) cod2BaseTexel.rgb = cod2Camouflage(cod2BaseTexel.rgb, v_texCoord0.xy, cod2Paint);\n' +
+  'gl_FragColor = cod2BaseTexel * v_color;',
+  'weapons keep the original texture footprint and vertex lighting; a camouflaged gun paints its texel before both');
 assert.equal((modelShader.fsTexEnvPass.match(/texture(?:2D)?\(/g) || []).length, 1,
   'weapons and flashes share one unbiased sample without extra passes');
+// The pattern repeats over the gun's own UVs where the mask paints, as bright
+// as the texel under it against the painted median; paint dulls highlights.
+assert(modelShader.pointDefs.includes('uniform sampler2D u_cod2CamoMap; uniform sampler2D u_cod2CamoMask; uniform vec4 u_cod2Camo;\n'));
+assert(modelShader.pointDefs.includes('vec3 cod2Camouflage(vec3 base, highp vec2 uv, out float paint) {\n' +
+  '  paint = texture2D(u_cod2CamoMask, uv).r;\n  vec3 camo = texture2D(u_cod2CamoMap, uv * u_cod2Camo.y).rgb;\n' +
+  '  float wear = clamp(dot(base, vec3(0.299, 0.587, 0.114)) / u_cod2Camo.z, 0.5, 1.5);\n' +
+  '  return mix(base, camo * (1.0 + 0.4 * (wear - 1.0)), paint);\n}\n'));
+const specularLine = 'vec4 cod2S = u_cod2Surface.y > 0.5 ? texture2D(u_cod2SpecMap, v_texCoord0.xy) : vec4(0.0);\n';
+assert(modelShader.pointPass.includes(specularLine + 'cod2S.rgb *= 1.0 - 0.5 * cod2Paint;\n'));
 const worldShader = generate.call({usedTexUnitList:[0]}, {useTextureMatrix:false,TexEnvJIT:{getTexUnitType:()=>0x0DE1}}, {lightingEnabled:false}, 'gl_FragColor = texture2D(u_texUnit0, v_texCoord0.xy) * v_color;');
+for (const code of [worldShader.pointDefs + worldShader.fsTexEnvPass + worldShader.pointPass,
+                    noSample.pointDefs + noSample.fsTexEnvPass + noSample.pointPass])
+  assert(!/cod2Camo|cod2Paint/.test(code), 'the world and materials without a base texel are never painted');
 assert(worldShader.pointDefs.includes('uniform int u_cod2ShadowCount; uniform highp vec4 u_cod2ShadowEye[4];'));
 assert(worldShader.pointPass.includes('if (u_cod2ShadowCount > 0)'));
 assert(worldShader.pointPass.includes('gl_FragColor.rgb *= cod2Shadow;'));
@@ -215,7 +230,8 @@ for (const shader of [modelShader, worldShader]) {
     assert(!code.includes(name), name + ' is not compiled into material shaders');
   assert.equal(code.match(/texture2D\(u_texUnit0/g).length, 1, 'one base texture lookup per material sample');
   for (const lookup of code.match(/texture(?:2D|Cube)?\(\w+/g))
-    assert(['texture2D(u_texUnit0', 'texture2D(u_cod2DetailMap', 'texture2D(u_cod2NormalMap', 'texture2D(u_cod2SpecMap'].includes(lookup), lookup);
+    assert(['texture2D(u_texUnit0', 'texture2D(u_cod2DetailMap', 'texture2D(u_cod2NormalMap', 'texture2D(u_cod2SpecMap',
+      'texture2D(u_cod2CamoMask', 'texture2D(u_cod2CamoMap'].includes(lookup), lookup);
   assert(!/\bcod2Spec\b/.test(code) || code.includes('u_cod2Surface.y > 0.5 ? texture2D(u_cod2SpecMap'),
     'highlights are scaled by the specular map, which only a material with one samples');
 }
@@ -240,13 +256,27 @@ assert.equal(Module.cod2Sun, sun); assert.equal(sun.revision, 2);
 setSun(0.6, 0, 0.8, 0.5, 0.4, 0.3);
 assert.equal(sun.revision, 3);
 
-// Maps bind on units 5-7 through one sampler with mipmaps, repeat and 4x
-// anisotropy: the engine sets sampler state only on the stages it binds.
+// Maps bind on units 5-7 and 16-17 through one sampler with mipmaps, repeat
+// and 4x anisotropy: the engine sets sampler state only on the stages it binds.
 const material = Module.cod2Material;
 assert.deepEqual(glCalls.splice(0), [['createSampler'], ['samplerParameteri', 0x2801, 0x2703],
   ['samplerParameteri', 0x2800, 0x2601], ['samplerParameteri', 0x2802, 0x2901], ['samplerParameteri', 0x2803, 0x2901],
-  ['samplerParameterf', 0x84FE, 4], ['bindSampler', 5], ['bindSampler', 6], ['bindSampler', 7]],
+  ['samplerParameterf', 0x84FE, 4], ['bindSampler', 5], ['bindSampler', 6], ['bindSampler', 7], ['bindSampler', 16],
+  ['bindSampler', 17]],
   'one sampler across every earlier draw');
+// The scene compositor binds its passes' sources from unit 8 and unbinds
+// them every frame: the maps' units, whose bindings are kept across frames,
+// and their sampler stay clear of them, within WebGL2's 32 combined units.
+{
+  const sceneFx = fs.readFileSync('downstream/wasm/web_scene_fx.c', 'utf8');
+  assert.deepEqual([...new Set(sceneFx.match(/gl\.TEXTURE\d+/g))], ['gl.TEXTURE8'], 'the compositor binds from unit 8');
+  assert(sceneFx.includes('gl.activeTexture(gl.TEXTURE8 + unit);'));
+  const sources = sceneFx.match(/var sources = \[(.*)\];/);
+  assert(sources, 'the compositor names its sources');
+  const fxUnits = sources[1].split(',').map((_, i) => 8 + i);
+  assert.deepEqual(material.units, [5, 6, 7, 16, 17]);
+  for (const unit of material.units) assert(!fxUnits.includes(unit) && unit < 32, `unit ${unit}`);
+}
 GL.textures[21] = {name: 'detail'}; GL.textures[22] = {name: 'normal'}; GL.textures[23] = {name: 'specular'};
 GL.textures[24] = {name: 'other'};
 const rotation = (yaw, pitch) => {
@@ -281,7 +311,26 @@ delete GL.textures[24];
 drawScene(256, 1, 1, 0, 24, 0, 0, 8, 6, 1, 1, 0.65, 0);
 assert.deepEqual(glCalls, []);
 assert.deepEqual([...material.surface], [0, 0, 1, 1]);
-console.log('PASS: one mipmapped, repeating, anisotropic sampler for units 5-7; maps rebound only when a unit\'s texture changes; flags follow the textures that exist');
+// A camouflaged gun's pattern and mask bind on units 16 and 17; it is
+// painted only with both, and the next gun without paint turns it off.
+GL.textures[25] = {name: 'pattern'}; GL.textures[26] = {name: 'mask'};
+const painted = [22, 23, 21, 8, 6, 1, 1.5, 0.65, 0.25, 25, 26, 2.5, 0.37];
+drawScene(256, 1, 1, 0, ...painted);
+assert.deepEqual(glCalls.splice(0), [['activeTexture', 6], ['bindTexture', 'normal'], ['activeTexture', 16],
+  ['bindTexture', 'pattern'], ['activeTexture', 17], ['bindTexture', 'mask'], ['activeTexture', 1]]);
+assert.deepEqual([...material.camo], [1, 2.5, Math.fround(0.37), 0]);
+for (let i = 0; i < 1000; ++i) drawScene(256, 1, 1, 0, ...painted);
+assert.deepEqual(glCalls, [], '1000 draws of one painted gun bind nothing more');
+drawScene(256, 1, 1, 0, 22, 23, 21, 8, 6, 1, 1.5, 0.65, 0.25);
+assert.deepEqual([...material.camo], [0, 0, 0, 0]);
+delete GL.textures[26];
+drawScene(256, 1, 1, 0, ...painted);
+assert.deepEqual([...material.camo], [0, 0, 0, 0], 'a pattern without its mask paints nothing');
+GL.textures[26] = {name: 'mask'};
+drawScene(256, 1, 1, 0, ...painted);
+assert.deepEqual(glCalls.splice(0), [['activeTexture', 17], ['bindTexture', 'mask'], ['activeTexture', 1]]);
+assert.equal(material.camo[0], 1);
+console.log('PASS: one mipmapped, repeating, anisotropic sampler for units 5-7 and 16-17, clear of the scene compositor\'s; maps rebound only when a unit\'s texture changes; flags follow the textures that exist; camouflage only with its pattern and mask');
 
 // The sun's direction and the sky's (world up) in eye space, transformed
 // again only when the view, the sun or r_sunShading changes.
@@ -352,7 +401,21 @@ assert.deepEqual(materialUploads.splice(0), all(['surface', 'detail', 'model']))
 // Programs that only apply the detail map still receive it.
 upload.call(detailProgram, Module, materialGL);
 assert.deepEqual(materialUploads.splice(0), [...samplers, ...all(['detail'])]);
-console.log('PASS: material uniforms upload once per program and value across 2000 alternating world/model draws; detail-only programs');
+// A lit model program takes the camouflage's units and flag; the others never do.
+const camoProgram = materialProgram({cod2ModelLocation: 'model', cod2CamoLocation: 'camo',
+  cod2CamoMapLocation: 'camoMap', cod2CamoMaskLocation: 'camoMask'});
+drawScene(256, 1, 1, 0, 22, 23, 21, 8, 6, 1, 1.5, 0.65, 0.25, 25, 26, 2.5, 0.37);
+upload.call(camoProgram, Module, materialGL);
+assert.deepEqual(materialUploads.splice(0), [...samplers, ['1i', 'camoMap', 16], ['1i', 'camoMask', 17],
+  ...all(['surface', 'detail', 'sunEye', 'sunColor', 'skyEye', 'model', 'camo'])]);
+upload.call(modelProgram, Module, materialGL);
+assert(!materialUploads.splice(0).some(([, location]) => /^camo/.test(location)), 'programs without camouflage ignore its values');
+for (let i = 0; i < 1000; ++i) upload.call(camoProgram, Module, materialGL);
+assert.deepEqual(materialUploads, []);
+drawScene(256, 1, 1, 0, 22, 23, 21, 8, 6, 1, 1.5, 0.65, 0.25);
+upload.call(camoProgram, Module, materialGL);
+assert.deepEqual(materialUploads.splice(0), all(['camo']), 'an unpainted gun turns the paint off');
+console.log('PASS: material uniforms upload once per program and value across 2000 alternating world/model draws; detail-only programs; camouflage on lit model programs only');
 
 // The generated passes: a lightmapped world variant and a lit model with
 // three of the eight fixed-function lights.
