@@ -175,10 +175,21 @@ extern void Web_ClassesSave(const char *player, const char *lines, int generatio
 #define CAC_ATTACHMENT_BOX_HEIGHT 20.0f
 #define CAC_ATTACHMENT_BOX_GAP 4.0f
 #define CAC_ATTACHMENT_COLUMNS 3
-#define CAC_ATTACHMENT_TILE_WIDTH 62.0f
-#define CAC_ATTACHMENT_TILE_HEIGHT 32.0f
+#define CAC_ATTACHMENT_TILE_WIDTH 50.0f
+#define CAC_ATTACHMENT_TILE_HEIGHT 50.0f
 #define CAC_ATTACHMENT_TILE_GAP 3.0f
 #define CAC_EFFECT_LINES 6
+
+/* The pictures render-class-pictures.py lays on a gun's canvas, in drawing order: its longer
+ * magazine in place of its own, then what sits on it. */
+static const struct {
+    int attachment;
+    const char *suffix;
+} s_cacLayers[] = {
+    { ATT_EXTMAG, "extmag" }, { ATT_SUPPRESSOR, "suppressor" }, { ATT_REFLEX, "reflex" },
+    { ATT_LENS, "lens" },     { ATT_OPTIC4X, "optic4x" },
+};
+#define CAC_LAYER_COUNT ((int)(sizeof(s_cacLayers) / sizeof(s_cacLayers[0])))
 
 enum {
     CAC_SCREEN_LIST, CAC_SCREEN_EDIT, CAC_SCREEN_WEAPONS, CAC_SCREEN_EQUIPMENT, CAC_SCREEN_CAMO,
@@ -249,6 +260,15 @@ static struct {
     float st[64][4];
     /* Drawn in their own colors. */
     int pictures[64];
+    /* Each gun's attachment layers on its picture's canvas and each attachment's icon, read once
+     * an image generation. */
+    MaterialHandle layers[64][CAC_LAYER_COUNT];
+    float layerSt[64][CAC_LAYER_COUNT][4];
+    unsigned char layerRead[64][CAC_LAYER_COUNT];
+    MaterialHandle icons[ATT_COUNT];
+    float iconSt[ATT_COUNT][4];
+    float iconAspects[ATT_COUNT];
+    unsigned char iconRead[ATT_COUNT];
 } s_cac;
 
 static const char *const s_cacGroups[] = {
@@ -282,6 +302,9 @@ static const vec4_t s_cacBetter = { 0.45f, 0.76f, 0.38f, 1.0f };
 static const vec4_t s_cacWorse = { 0.82f, 0.33f, 0.27f, 1.0f };
 static const vec4_t s_cacWarning = { 0.91f, 0.76f, 0.27f, 1.0f };
 static const vec4_t s_cacDisabled = { 0.70f, 0.70f, 0.68f, 0.35f };
+static const vec4_t s_cacIconBlocked = { 1.0f, 1.0f, 1.0f, 0.3f };
+/* The attachment grid's tiles, the capture's warm dark gray behind WWII's icons. */
+static const vec4_t s_cacAttachTile = { 0.15f, 0.14f, 0.125f, 0.9f };
 
 static int Cac_Ready(void)
 {
@@ -433,15 +456,23 @@ static float Cac_Wrapped(const char *text, float x, float baseline, int horz, fl
     return baseline;
 }
 
+/* Pictures read before the renderer last restarted are gone. */
+static void Cac_ImagesFresh(void)
+{
+    if (s_cac.imageGeneration != R_GetHudImageGeneration()) {
+        s_cac.imageGeneration = R_GetHudImageGeneration();
+        memset(s_cac.images, 0, sizeof(s_cac.images));
+        memset(s_cac.layerRead, 0, sizeof(s_cac.layerRead));
+        memset(s_cac.iconRead, 0, sizeof(s_cac.iconRead));
+    }
+}
+
 /* A weapon's picture, its texture coordinates and its width over height: the
  * owner's picture of the weapon when there is one, else the retail menu image
  * for a primary, else the HUD icon's silhouette, cropped to its pixels. */
 static MaterialHandle Cac_Image(int index, float *aspect, const float **st)
 {
-    if (s_cac.imageGeneration != R_GetHudImageGeneration()) {
-        s_cac.imageGeneration = R_GetHudImageGeneration();
-        memset(s_cac.images, 0, sizeof(s_cac.images));
-    }
+    Cac_ImagesFresh();
     if (index < 0 || index >= g_classWeaponCount || index >= (int)(sizeof(s_cac.images) / sizeof(s_cac.images[0])))
         return NULL;
     if (!s_cac.images[index]) {
@@ -503,11 +534,146 @@ static void Cac_Picture(int index, const CacRect *box, const vec_t *color)
                       image);
 }
 
-/* A gun's picture wearing a camouflage, placed as Cac_Picture places it: the
- * owner's picture or the retail image painted, or the HUD icon's silhouette
- * filled with the pattern, in their colors. Without the camouflage, or until
- * it can be painted, the plain picture. */
-static void Cac_GunPicture(int index, int camo, const CacRect *box, const vec_t *color)
+/* A picture by name under browser_class/, lowercased, its visible texels' coordinates in st. */
+static MaterialHandle Cac_ClassPicture(const char *name, float *st, float *aspect)
+{
+    char path[96];
+    int i;
+
+    snprintf(path, sizeof(path), "browser_class/%s", name);
+    for (i = 0; path[i]; i++)
+        path[i] = (char)(path[i] >= 'A' && path[i] <= 'Z' ? path[i] + 32 : path[i]);
+    return R_GetHudPictureMaterial(path, st, aspect);
+}
+
+/* A gun's layer on the canvas of its picture, which Cac_Image read first. */
+static MaterialHandle Cac_Layer(int index, int layer, const float **st)
+{
+    if (!s_cac.layerRead[index][layer]) {
+        char name[80];
+        float aspect = 0.0f;
+
+        s_cac.layerRead[index][layer] = 1;
+        snprintf(name, sizeof(name), "%s__%s", g_classWeapons[index].weapon, s_cacLayers[layer].suffix);
+        s_cac.layers[index][layer] = Cac_ClassPicture(name, s_cac.layerSt[index][layer], &aspect);
+    }
+    *st = s_cac.layerSt[index][layer];
+    return s_cac.layers[index][layer];
+}
+
+/* An attachment's icon, WWII's cut from the owner's captures; NULL without one. */
+static MaterialHandle Cac_AttachmentIcon(int attachment, const float **st, float *aspect)
+{
+    Cac_ImagesFresh();
+    if (attachment < 0 || attachment >= ATT_COUNT)
+        return NULL;
+    if (!s_cac.iconRead[attachment]) {
+        char name[64];
+
+        s_cac.iconRead[attachment] = 1;
+        snprintf(name, sizeof(name), "attachment__%s", g_attachments[attachment].name);
+        s_cac.icons[attachment] = Cac_ClassPicture(name, s_cac.iconSt[attachment], &s_cac.iconAspects[attachment]);
+    }
+    *st = s_cac.iconSt[attachment];
+    *aspect = s_cac.iconAspects[attachment];
+    return s_cac.icons[attachment];
+}
+
+/* The icon as large as it fits in box scaled by fill, centered, in color. */
+static int Cac_DrawIcon(int attachment, const CacRect *box, float fill, const vec_t *color)
+{
+    float aspect = 0.0f, w, h;
+    const float *st = NULL;
+    MaterialHandle icon = Cac_AttachmentIcon(attachment, &st, &aspect);
+
+    if (!icon || aspect <= 0.0f)
+        return 0;
+    w = box->w * fill;
+    h = w / aspect;
+    if (h > box->h * fill) {
+        h = box->h * fill;
+        w = h * aspect;
+    }
+    CL_DrawStretchPic(box->x + 0.5f * (box->w - w), box->y + 0.5f * (box->h - h), w, h, box->horz, CAC_ALIGN_TOP,
+                      st[0], st[1], st[2], st[3], color, icon);
+    return 1;
+}
+
+/* A gun with its attachments, from the owner's picture and the layers on its canvas: the gun, or
+ * its longer magazine's picture in its place, painted in the camouflage; then each attachment over
+ * it; what is drawn framed as large as it fits in the box. 0 when the gun shows none of them. */
+static int Cac_LayeredPicture(int index, int camo, unsigned attachments, MaterialHandle image, float aspect,
+                              const float *st, const CacRect *box)
+{
+    MaterialHandle drawn[CAC_LAYER_COUNT + 1];
+    const float *sts[CAC_LAYER_COUNT + 1];
+    const WeaponCamoGun *gun;
+    float span[4], canvas, wide, w, h, x, y;
+    int count = 1, layer, i;
+
+    drawn[0] = image;
+    sts[0] = st;
+    for (layer = 0; layer < CAC_LAYER_COUNT; layer++) {
+        const float *at;
+        MaterialHandle picture;
+
+        if (!(attachments & ATT_BIT(s_cacLayers[layer].attachment)))
+            continue;
+        picture = Cac_Layer(index, layer, &at);
+        if (!picture)
+            continue;
+        if (s_cacLayers[layer].attachment == ATT_EXTMAG) {
+            drawn[0] = picture;
+            sts[0] = at;
+        } else {
+            drawn[count] = picture;
+            sts[count++] = at;
+        }
+    }
+    if (drawn[0] == image && count == 1)
+        return 0;
+    gun = camo > WEAPON_CAMO_NONE ? BG_WeaponCamo_Gun(g_classWeapons[index].weapon) : NULL;
+    if (gun) {
+        float painted = 0.0f;
+        MaterialHandle picture = R_GetWeaponCamoPicture(drawn[0], 0, camo, gun->style, &painted);
+
+        if (picture && painted > 0.0f)
+            drawn[0] = picture;
+    }
+    memcpy(span, sts[0], sizeof(span));
+    for (i = 1; i < count; i++) {
+        span[0] = sts[i][0] < span[0] ? sts[i][0] : span[0];
+        span[1] = sts[i][1] < span[1] ? sts[i][1] : span[1];
+        span[2] = sts[i][2] > span[2] ? sts[i][2] : span[2];
+        span[3] = sts[i][3] > span[3] ? sts[i][3] : span[3];
+    }
+    /* The canvas's width over its height, from the gun's visible texels. */
+    canvas = aspect * (st[3] - st[1]) / (st[2] - st[0]);
+    wide = canvas * (span[2] - span[0]) / (span[3] - span[1]);
+    w = box->w;
+    h = w / wide;
+    if (h > box->h) {
+        h = box->h;
+        w = h * wide;
+    }
+    x = box->x + 0.5f * (box->w - w);
+    y = box->y + 0.5f * (box->h - h);
+    for (i = 0; i < count; i++) {
+        float fx = w / (span[2] - span[0]), fy = h / (span[3] - span[1]);
+
+        CL_DrawStretchPic(x + (sts[i][0] - span[0]) * fx, y + (sts[i][1] - span[1]) * fy,
+                          (sts[i][2] - sts[i][0]) * fx, (sts[i][3] - sts[i][1]) * fy, box->horz, CAC_ALIGN_TOP,
+                          sts[i][0], sts[i][1], sts[i][2], sts[i][3], UI_WWIIMenu_Color(WWII_COLOR_WHITE), drawn[i]);
+    }
+    return 1;
+}
+
+/* A gun's picture wearing a camouflage and the attachments that show on it,
+ * placed as Cac_Picture places it: the owner's picture or the retail image
+ * painted, or the HUD icon's silhouette filled with the pattern, in their
+ * colors. Without the camouflage, or until it can be painted, the plain
+ * picture; attachments need the owner's picture and its layers. */
+static void Cac_GunPicture(int index, int camo, unsigned attachments, const CacRect *box, const vec_t *color)
 {
     float aspect = 1.0f, painted = 0.0f, w, h;
     const float *st = NULL;
@@ -515,6 +681,10 @@ static void Cac_GunPicture(int index, int camo, const CacRect *box, const vec_t 
     const WeaponCamoGun *gun = NULL;
     int silhouette = 0;
 
+    if (image && aspect > 0.0f && attachments && s_cac.pictures[index] &&
+        g_classWeapons[index].slot <= CLASS_SLOT_SECONDARY &&
+        Cac_LayeredPicture(index, camo, attachments, image, aspect, st, box))
+        return;
     if (image && aspect > 0.0f && camo > WEAPON_CAMO_NONE && g_classWeapons[index].slot <= CLASS_SLOT_SECONDARY)
         gun = BG_WeaponCamo_Gun(g_classWeapons[index].weapon);
     if (gun && s_cac.pictures[index]) {
@@ -677,12 +847,17 @@ static int Cac_SlotCandidates(int slot, int *indexes)
 /* The attachments the class's gun in the slot takes, in table order. */
 static int Cac_AttachmentCandidates(const ClassLoadout *loadout, int slot, int *attachments)
 {
+    /* WWII's grid order: its SMG's and its sniper's captures both follow it. */
+    static const int order[ATT_COUNT] = {
+        ATT_LENS, ATT_QUICKDRAW, ATT_REFLEX, ATT_OPTIC4X, ATT_CALIBRATION, ATT_GRIP, ATT_STEADYAIM,
+        ATT_FMJ, ATT_HIGHCAL, ATT_RIFLING, ATT_EXTMAG, ATT_RAPIDFIRE, ATT_SUPPRESSOR,
+    };
     unsigned allowed = loadout->weapon[slot] >= 0 ? BG_AttachmentsAllowed(g_classWeapons[loadout->weapon[slot]].weapon) : 0;
     int count = 0, i;
 
     for (i = 0; i < ATT_COUNT; i++) {
-        if (allowed & ATT_BIT(i))
-            attachments[count++] = i;
+        if (allowed & ATT_BIT(order[i]))
+            attachments[count++] = order[i];
     }
     return count;
 }
@@ -1194,7 +1369,7 @@ static void Cac_StatusNote(float baseline)
 
 /* A slot's caption, the weapon's name above the tile, the tile and its
  * picture, a gun's in its camouflage; gold edges when focused. */
-static void Cac_Tile(const CacRect *tile, int slot, int weapon, int camo, int focused)
+static void Cac_Tile(const CacRect *tile, int slot, int weapon, int camo, unsigned attachments, int focused)
 {
     const vec_t *edge = focused ? UI_WWIIMenu_Color(WWII_COLOR_GOLD) : s_cacEdge;
     CacRect box = *tile;
@@ -1208,13 +1383,19 @@ static void Cac_Tile(const CacRect *tile, int slot, int weapon, int camo, int fo
     box.y += 0.1f * tile->h;
     box.w *= 0.84f;
     box.h *= 0.8f;
-    Cac_GunPicture(weapon, camo, &box, UI_WWIIMenu_Color(WWII_COLOR_WHITE));
+    Cac_GunPicture(weapon, camo, attachments, &box, UI_WWIIMenu_Color(WWII_COLOR_WHITE));
 }
 
 /* The slot's camouflage, as the class keeps it. */
 static int Cac_SlotCamo(const ClassLoadout *loadout, int slot)
 {
     return slot < CLASS_CAMO_SLOTS ? loadout->camo[slot] : WEAPON_CAMO_NONE;
+}
+
+/* The slot's attachments, as the class keeps them; grenades take none. */
+static unsigned Cac_SlotAttachments(const ClassLoadout *loadout, int slot)
+{
+    return slot <= CLASS_SLOT_SECONDARY ? ClassData_AttachmentMask(loadout, slot) : 0;
 }
 
 /* A bar's filled fraction: the rating before rounding. */
@@ -1409,7 +1590,8 @@ static void Cac_PaintList(displayContextDef_t *dc)
         CacRect tile = Cac_Rect(-(CAC_SIDE_RIGHT + CAC_SIDE_WIDTH), rowTop, slot ? 96.0f : CAC_SIDE_WIDTH, height,
                                 CAC_ALIGN_RIGHT);
 
-        Cac_Tile(&tile, slot, focused->weapon[slot], Cac_SlotCamo(focused, slot), 0);
+        Cac_Tile(&tile, slot, focused->weapon[slot], Cac_SlotCamo(focused, slot), Cac_SlotAttachments(focused, slot),
+                 0);
         if (slot == CLASS_SLOT_PRIMARY)
             Cac_AttachmentList(focused, slot, &tile);
     }
@@ -1443,10 +1625,19 @@ static void Cac_AttachmentBox(const CacRect *box, const ClassLoadout *loadout, i
 
     Cac_Fill(box, focused ? s_cacRowFocus : s_cacTile);
     Cac_Frame(box, focused ? UI_WWIIMenu_Color(WWII_COLOR_GOLD) : s_cacEdge);
-    if (position < count)
-        Cac_AttachmentName(g_attachments[loadout->attachment[slot][position]].displayName, box, 3.4f,
+    if (position < count) {
+        int attachment = loadout->attachment[slot][position];
+        CacRect icon = Cac_Rect(box->x + 1.0f, box->y + 1.0f, box->h - 2.0f, box->h - 2.0f, box->horz);
+        CacRect name = *box;
+
+        /* The icon at the left, the name beside it. */
+        if (Cac_DrawIcon(attachment, &icon, 0.95f, UI_WWIIMenu_Color(WWII_COLOR_WHITE))) {
+            name.x += box->h - 2.0f;
+            name.w -= box->h - 2.0f;
+        }
+        Cac_AttachmentName(g_attachments[attachment].displayName, &name, 3.4f,
                            UI_WWIIMenu_Color(focused ? WWII_COLOR_GOLD : WWII_COLOR_WHITE));
-    else if (position == count)
+    } else if (position == count)
         Cac_Text("+", 1, box->x + 0.5f * box->w - 2.0f, box->y + 0.5f * box->h + 3.5f, box->horz, 7.0f, 0.0f,
                  focused ? UI_WWIIMenu_Color(WWII_COLOR_GOLD) : s_cacNote);
 }
@@ -1468,7 +1659,7 @@ static void Cac_PaintEdit(displayContextDef_t *dc)
             Cac_AttachmentBox(&tiles[focus], loadout, slot, position, focus == s_cac.slotFocus);
         else
             Cac_Tile(&tiles[focus], focus, loadout->weapon[focus], Cac_SlotCamo(loadout, focus),
-                     focus == s_cac.slotFocus);
+                     Cac_SlotAttachments(loadout, focus), focus == s_cac.slotFocus);
     }
     /* Under each gun, its camouflage: a click, F2 or Y opens the picker. */
     for (slot = 0; slot < CLASS_CAMO_SLOTS; slot++) {
@@ -1516,7 +1707,7 @@ static void Cac_PaintAttachments(displayContextDef_t *dc)
     const ClassLoadout *loadout = &s_cac.classes[s_cac.classFocus];
     int slot = s_cac.attachSlot, weapon = loadout->weapon[slot];
     int attachments[ATT_COUNT], count = Cac_AttachmentCandidates(loadout, slot, attachments), i;
-    unsigned mask = ClassData_AttachmentMask(loadout, slot), others = mask;
+    unsigned mask = ClassData_AttachmentMask(loadout, slot), others = mask, preview;
     int current = s_cac.attachPosition < ClassData_AttachmentCount(loadout, slot)
                       ? loadout->attachment[slot][s_cac.attachPosition]
                       : -1;
@@ -1542,12 +1733,13 @@ static void Cac_PaintAttachments(displayContextDef_t *dc)
 
         if (Cac_Hover(dc, &tile))
             s_cac.hover = i;
-        Cac_Fill(&tile, isFocus ? s_cacRowFocus : s_cacTile);
+        Cac_Fill(&tile, isFocus ? s_cacRowFocus : s_cacAttachTile);
         Cac_Frame(&tile, isFocus ? UI_WWIIMenu_Color(WWII_COLOR_GOLD) : here ? s_cacNote : s_cacEdge);
-        Cac_AttachmentName(g_attachments[attachments[i]].displayName, &tile, 3.8f,
-                           blocked ? s_cacDisabled
-                           : here  ? UI_WWIIMenu_Color(WWII_COLOR_GOLD)
-                                   : UI_WWIIMenu_Color(isFocus ? WWII_COLOR_WHITE : WWII_COLOR_IDLE));
+        if (!Cac_DrawIcon(attachments[i], &tile, 0.86f, blocked ? s_cacIconBlocked : UI_WWIIMenu_Color(WWII_COLOR_WHITE)))
+            Cac_AttachmentName(g_attachments[attachments[i]].displayName, &tile, 3.8f,
+                               blocked ? s_cacDisabled
+                               : here  ? UI_WWIIMenu_Color(WWII_COLOR_GOLD)
+                                       : UI_WWIIMenu_Color(isFocus ? WWII_COLOR_WHITE : WWII_COLOR_IDLE));
         /* The others on the gun keep a mark, as WWII's tiles do. */
         if (mask & ATT_BIT(attachments[i])) {
             CacRect mark = Cac_Rect(tile.x, tile.y, 1.5f, tile.h, CAC_ALIGN_LEFT);
@@ -1571,8 +1763,9 @@ static void Cac_PaintAttachments(displayContextDef_t *dc)
     }
     box = Cac_Rect(-150.0f, 200.0f, 300.0f, 160.0f, CAC_ALIGN_CENTER);
     box.x += 60.0f;
-    Cac_GunPicture(weapon, Cac_SlotCamo(loadout, slot), &box, UI_WWIIMenu_Color(WWII_COLOR_WHITE));
-    Cac_Stats(weapon, mask, blocker >= 0 ? mask : others | ATT_BIT(focused));
+    preview = blocker >= 0 ? mask : others | ATT_BIT(focused);
+    Cac_GunPicture(weapon, Cac_SlotCamo(loadout, slot), preview, &box, UI_WWIIMenu_Color(WWII_COLOR_WHITE));
+    Cac_Stats(weapon, mask, preview);
 }
 
 static void Cac_PaintWeapons(displayContextDef_t *dc)
@@ -1615,7 +1808,7 @@ static void Cac_PaintWeapons(displayContextDef_t *dc)
     Cac_Detail(indexes[s_cac.pickFocus], CAC_DETAIL_LEFT, 135.0f, CAC_ALIGN_LEFT, CAC_DETAIL_WIDTH);
     box = Cac_Rect(-150.0f, 200.0f, 300.0f, 160.0f, CAC_ALIGN_CENTER);
     box.x += 60.0f;
-    Cac_GunPicture(indexes[s_cac.pickFocus], Cac_SlotCamo(loadout, s_cac.pickSlot), &box,
+    Cac_GunPicture(indexes[s_cac.pickFocus], Cac_SlotCamo(loadout, s_cac.pickSlot), 0, &box,
                    UI_WWIIMenu_Color(WWII_COLOR_WHITE));
     /* The equipped gun keeps its attachments; another starts without. */
     {
@@ -1682,7 +1875,8 @@ static void Cac_PaintCamo(displayContextDef_t *dc)
     Cac_Caps(Cac_WeaponName(weapon), 0, -150.0f + 60.0f, 190.0f, CAC_ALIGN_CENTER, 4.6f, 0.14f, s_cacNote);
     box = Cac_Rect(-150.0f, 200.0f, 300.0f, 160.0f, CAC_ALIGN_CENTER);
     box.x += 60.0f;
-    Cac_GunPicture(weapon, s_cac.camoFocus, &box, UI_WWIIMenu_Color(WWII_COLOR_WHITE));
+    Cac_GunPicture(weapon, s_cac.camoFocus, Cac_SlotAttachments(loadout, s_cac.camoSlot), &box,
+                   UI_WWIIMenu_Color(WWII_COLOR_WHITE));
 }
 
 static void Cac_PaintEquipment(displayContextDef_t *dc)
@@ -1797,7 +1991,8 @@ static void Cac_SelectTile(float x, float top, float size, int slot, int weapon)
     box.x += 0.08f * size;
     box.y += 0.08f * size;
     box.w = box.h = 0.84f * size;
-    Cac_GunPicture(weapon, Cac_SlotCamo(&Cac_Listed()[s_cac.classFocus], slot), &box,
+    Cac_GunPicture(weapon, Cac_SlotCamo(&Cac_Listed()[s_cac.classFocus], slot),
+                   Cac_SlotAttachments(&Cac_Listed()[s_cac.classFocus], slot), &box,
                    UI_WWIIMenu_Color(WWII_COLOR_WHITE));
 }
 
@@ -1996,7 +2191,8 @@ void UI_ClassMenu_DrawWeapon(const ClassLoadout *loadout, int slot, float x, flo
 {
     CacRect box = Cac_Rect(x, y, w, h, horzAlign);
 
-    Cac_GunPicture(loadout->weapon[slot], Cac_SlotCamo(loadout, slot), &box, color);
+    Cac_GunPicture(loadout->weapon[slot], Cac_SlotCamo(loadout, slot), Cac_SlotAttachments(loadout, slot), &box,
+                   color);
 }
 
 int UI_ClassMenu_Choose(int standard, int index)

@@ -59,7 +59,7 @@ MaterialHandle R_GetHudSilhouetteMaterial(MaterialHandle icon, float *aspect);
 MaterialHandle R_GetHudEmblemMaterial(MaterialHandle icon);
 
 /* Pictures in their own colors that the menus draw; each name is read once. */
-#define R_HUD_PICTURE_COUNT 64
+#define R_HUD_PICTURE_COUNT 256
 #define R_HUD_PICTURE_MAX_SIZE 1024
 /* An A8R8G8B8 IWi with no picmip, sides of powers of two up to
  * R_HUD_PICTURE_MAX_SIZE and every mip down to 1 x 1, smallest first: 1 with

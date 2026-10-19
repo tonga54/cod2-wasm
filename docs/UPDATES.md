@@ -258,7 +258,8 @@ needs a byte-identical copy (`data/main/owner_class_pictures/` and
 asset version.
 
 Each file is named after a class weapon in `downstream/gateway/classes.json`,
-in any case: `frag_grenade_american_mp.png`, `TT30_mp.png`. It must be an 8-bit
+in any case: `frag_grenade_american_mp.png`, `TT30_mp.png`; attachments' files
+are described below. It must be an 8-bit
 RGBA PNG without interlacing, each side a power of two up to 1024 texels, with
 something visible (alpha above 16). The screens crop it to its visible texels
 and fit it to each tile, so the margins around the object do not matter.
@@ -294,6 +295,22 @@ to the generator on the build machine.
 On October 19, with the S-Mine 44 a class weapon, the owner's cut-out of it
 from the same captures (256 × 512) joined them as `mine_mp.png`, adding
 0.16 MB. The C4 keeps its generated icon.
+
+A gun's attachments take two more kinds of file, under the same rules:
+
+- `<weapon>__<layer>.png`, for `extmag`, `suppressor`, `reflex`, `lens` or
+  `optic4x`: the gun on its own picture's canvas with its longer magazine, or
+  that attachment alone where it sits on the gun, so the screens lay it over
+  the gun picture texel for texel. `scripts/render-class-pictures.py` makes
+  them with the gun, from the private archives (see
+  [docs/CLASSES.md](CLASSES.md#pictures)).
+- `attachment__<attachment>.png`, for one of the attachments in
+  `classes.json`: its icon in Modify Attachment and the editor's boxes.
+
+Later the same day the 25 guns were rendered again from their first-person
+guns with the attachment models, with 59 layers, and 12 icons were cut out of
+CoD WWII's Modify Attachment captures, with High Caliber's rendered as a
+cartridge: 106 pictures, 9.73 MB in the renderer archive.
 
 ## Version checks
 

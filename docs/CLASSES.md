@@ -163,6 +163,38 @@ Steady Aim.
 
 The default classes keep their guns' own finish.
 
+### On the gun
+
+The first-person gun wears the attachments WWII shows on it. When the private
+archives are prepared, `scripts/browser_attachment_models.py` builds their
+models from each class weapon's retail first-person gun and numbers; the
+repository holds none of their data.
+
+| Attachment | Model | Rides | Guns |
+| --- | --- | --- | --- |
+| Suppressor | A can with a knurled collar over the muzzle, 8.5 long on SMGs and 5.5 on pistols, its radius by the barrel's | `tag_flash` | The six SMGs and four pistols |
+| Reflex Sight | A ring on a post and base | `j_gun` | Every gun that takes it |
+| Lens Sight | An open housing with a brass objective ring, on a low mount | `j_gun` | Every gun that takes it |
+| 4x Optic | A scope with turret, glass and two rings | `j_gun` | The rifles, BAR, Bren and the iron-sighted bolt-actions; the scoped rifles keep their own |
+| Extended Mag | The gun's own magazine, its lower part stretched to 1.5 times the length, in the gun's material, so it takes the camouflage | `j_clip` | The guns with a box magazine: not the PPSh's drum, the Garand's en-bloc clip, the bolt-actions' stripper clips, the Trench Gun's tube or the Webley |
+
+- The sights are centred on the line of sight the gun's ADS up anim gives the
+  eye on its last frame, a set distance ahead of the eye, so the reticle drawn
+  at the screen's centre sits in the ring. The 4x Optic shows at the hip and
+  while raising; at full zoom the scope's overlay takes over, as the rule
+  above says.
+- Under an Extended Mag the game draws `xmodel/<gun>__nomag`, the gun without
+  the triangles on `j_clip`, so the original magazine does not show through.
+- The parts take six finishes, blued, parkerized, worn, brass, glass and black:
+  128 × 128 textures made from noise, in materials laid out as the Mk 2
+  grenade's.
+- Floats are rounded to a millionth, so the Raspberry Pi writes the same bytes.
+- `cg_attachmodels_mp.c` puts each model on its bone after the hands and the
+  gun, looking it up once a weapon registration: a missing model would load a
+  fresh default each time it is registered. `cg_weapons.c` rebuilds the view
+  weapon's models when its visible attachments change, and keeps them through
+  new hands.
+
 ## Storage
 
 The gateway keeps the classes in SQLite at `/data/classes.sqlite`, in the
@@ -351,8 +383,10 @@ The Soviet weapons now ship with every map. They add 3.87 MB to the renderer
 archive and 1.60 MB to the audio archive, taking the four prepared archives
 from 324.1 MB to 329.6 MB. The S-Mine 44 and C4 add 0.41 MB to the renderer
 archive and 2.90 MB to the audio archive, nearly all of it the development
-host's 22 owner sounds for them, for 332.9 MB. The development host's 34 class
-pictures add 8.34 MB to the renderer archive, for 341.2 MB.
+host's 22 owner sounds for them, for 332.9 MB. The development host's 106
+class pictures add 9.73 MB to the renderer archive, the 34 weapons' 6.16 MB
+of it, and the 73 attachment models with their six finishes 1.58 MB, for
+344.2 MB.
 
 Toujane TDM was measured in Chrome at 1280×800, two runs each with the same
 build, against a room whose class script was empty:
@@ -402,7 +436,8 @@ From the WWII capture, the screens take the layout and flow:
 - pill-shaped key prompts.
 
 The repository holds no WWII logos, artwork, fonts, character or weapon
-renders: the attachment tiles show their names, not WWII's icons. Nor do the
+renders: the attachment tiles show WWII's icons only from the owner's own
+pictures, and their names otherwise. Nor do the
 screens add things this game lacks: divisions, basic training, weapon levels,
 unlocks, locks, the store or its currency. Select Class leaves out the capture's
 Division and Basic Training panels and its four attachment tiles, and shows
@@ -426,7 +461,20 @@ the stock image, tinted as before. Nothing outside the class screens
 changes: the HUD's offhand icons, the kill feed and the ammo counter stay
 white.
 
-The development host's pictures cover 34 of the 35 class weapons, all but the C4:
+A gun's attachments show on its picture from more of the owner's pictures, on
+the gun picture's canvas: `<weapon>__<layer>.png` for the layers `extmag`
+(the gun with its longer magazine, drawn in place of the plain one),
+`suppressor`, `reflex`, `lens` and `optic4x` (each alone, drawn over the
+gun). Every class screen lays them as the class has them: the list's loadout,
+the editor's tiles, Modify Attachment's preview with the focused attachment
+on, the camouflage preview, Select Class and the pause menu's Class tab.
+The gun, or its longer magazine, takes the camouflage; what sits on it keeps
+its finish. The whole is framed as one picture. `attachment__<attachment>.png`
+is that attachment's icon, drawn in Modify Attachment's grid and the editor's
+attachment boxes; an attachment without one shows its name.
+
+The development host's pictures cover 34 of the 35 class weapons, all but the
+C4, with 59 attachment layers and the 13 attachments' icons:
 
 | Weapons | Picture |
 | --- | --- |
@@ -434,7 +482,15 @@ The development host's pictures cover 34 of the 35 class weapons, all but the C4
 | All four smoke grenades | CoD WWII's smoke canister, cut out of the owner's capture; in CoD2 every smoke grenade is the American canister |
 | British frag (MK1), RGD-33, Stielhandgranate | Rendered from CoD2's world model of each, lit like the captures |
 | S-Mine 44 | CoD WWII's S-Mine 44, cut out of the owner's capture |
-| The 21 primaries and four pistols | Rendered from their world models the same way, muzzle to the left as the retail menu images have it |
+| The 21 primaries and four pistols | Rendered from their first-person guns with the attachment models above, muzzle to the left as the retail menu images have it, on 1024 × 256 canvases (512 × 256 for pistols) |
+| The 13 attachments' icons | CoD WWII's, cut out of the owner's captures of Modify Attachment; High Caliber's, which the captures lack, a rifle cartridge the render script models and renders |
+
+`scripts/render-class-pictures.py` renders the guns and their layers from the
+private archives: run `/usr/bin/python3 scripts/render-class-pictures.py`, or
+`--only <weapon> ...`, with NumPy, SciPy and Pillow installed. It writes into
+`data/main/owner_class_pictures/`, about 33 seconds for all of them; the
+reload parts some first-person guns carry beside the gun (the Lee-Enfield's
+and Mosin-Nagant's stripper clips, the Webley's speedloader) are left out.
 
 The owner's other captures (the Signal Flare, Mk V gas grenade, No. 69,
 throwing knife, satchel charge and No. 74 ST) show equipment this game does
@@ -448,9 +504,13 @@ on canvases the generator accepts, for the day a class weapon matches one.
   highlight the last choice until the page reloads.
 - The Grease Gun, PPS-42, SVT-40, G43 and Trench Gun have no retail menu
   description, so their lists show only the kind and the country.
-- CoD2 has no attachment models: a gun looks the same with any of them. The
-  Reflex and Lens Sights are reticles drawn over the iron sights, and the 4x
-  Optic borrows a sniper rifle's scope image.
+- Only the player's own first-person gun shows its attachments. Other players'
+  guns, and every gun in third person, look the same with any of them: the
+  attachments travel in the player state, which only its player receives.
+  The 4x Optic at full zoom borrows a sniper rifle's scope image.
+- The attachment models are this port's, made from simple shapes; a gun's
+  attachments that change nothing visible (Grip, Quickdraw, FMJ and the
+  others) show nothing, as in WWII.
 - A suppressed shot is the gun's own sound made quieter, not a suppressed
   recording; the Suppressor cannot be taken off in a match as WWII's D-pad does.
 - Attachments belong to the class's guns. A weapon picked up from the ground,
@@ -482,10 +542,27 @@ on canvases the generator accepts, for the day a class weapon matches one.
   attachments included.
 - `python3 scripts/test-owner-class-pictures.py` covers the pictures: the PNGs
   the generator accepts and refuses, the IWis it writes against a reference of
-  every mip, the folder's names, and the checker. Under ASan/UBSan it loads the
-  generator's files through the engine's loader against a recording backend,
-  and runs the menus' choice between a picture, a retail image and a silhouette.
-  It rejects 30 Python, 17 loader and 7 menu mutations.
+  every mip, the folder's names with the layers and icons, and the checker.
+  Under ASan/UBSan it loads the generator's files through the engine's loader
+  against a recording backend, and runs the menus' choice between a picture, a
+  retail image and a silhouette, a gun's layers on one canvas (the longer
+  magazine in place of the gun's own, the camouflage on the gun, framed whole,
+  read once an image generation, only on an owner's primary or pistol) and the
+  icons. It rejects 34 Python, 17 loader and 21 menu mutations.
+- `python3 scripts/test-browser-attachment-models.py` runs the attachment model
+  generator on made-up guns: which models each weapon gets and the bone each
+  rides, the sights on the line of sight of the ADS up anim's last frame, the
+  can along the muzzle, the longer magazine and the gun without its own, the
+  retail winding, unit normals, canonical floats, the same bytes twice, and the
+  finishes. It rejects 9 mutations.
+- `python3 scripts/test-view-attachments.py` compiles `cg_attachmodels_mp.c`
+  with sanitizers: each model on its bone, the gun without its magazine under
+  the longer one, each model looked up once, a missing or broken one left off,
+  the view DObj's room kept; and that `cg_weapons.c` rebuilds the view weapon
+  when its visible attachments change. It rejects 11 mutations.
+- `python3 scripts/test-xanim-final-frame.py` checks that a finished anim holds
+  its last key, over every key table, which is what puts an aimed gun's sights
+  on the view axis. It rejects the frame-short mutation.
 - `python3 scripts/test-attachments.py` compiles the attachment rules, the
   attachment masks in the player state and the production weapon code with
   sanitizers. It covers every weapon's list, the limits and the one-optic rule,
@@ -599,3 +676,12 @@ on canvases the generator accepts, for the day a class weapon matches one.
     aimed through the German scope with the Hold Breath prompt. The suppressed
     shot and the Reflex and Lens reticles were not checked on screen; the tests
     above cover them.
+  - With the attachment models, on Carentan: the Thompson's can, Reflex Sight
+    and longer magazine (30 | 270), the red dot in the ring over the iron
+    sights; the Grease Gun's can, Lens Sight and longer magazine (48 | 288),
+    the amber reticle centred in the housing, the longer magazine through the
+    reload and 48 again after it; the Kar98k's 4x Optic, painted Ember, at the
+    hip and through its scope; the Colt's and Webley's cans; the scoped
+    Kar98k's WWII scope centred. The class list, the editor's tiles and boxes,
+    Modify Attachment's grid of icons and its preview, Select Class and the
+    pause menu's Class tab showed each gun with its attachments.

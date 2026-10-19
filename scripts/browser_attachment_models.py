@@ -36,7 +36,7 @@ MAGAZINES = ('thompson_mp', 'greasegun_mp', 'sten_mp', 'PPS42_mp', 'mp40_mp', 'm
 OPTIC_AHEAD = {
     'thompson_mp': 8.0, 'greasegun_mp': 9.5, 'sten_mp': 8.5, 'PPS42_mp': 9.0, 'ppsh_mp': 8.0,
     'mp40_mp': 8.5, 'm1garand_mp': 8.0, 'm1carbine_mp': 7.5, 'SVT40_mp': 8.0, 'g43_mp': 8.0,
-    'bar_mp': 9.0, 'bren_mp': 10.0, 'mp44_mp': 3.5, 'shotgun_mp': 7.0, 'enfield_mp': 7.5,
+    'bar_mp': 9.0, 'bren_mp': 10.0, 'mp44_mp': 8.0, 'shotgun_mp': 7.0, 'enfield_mp': 7.5,
     'mosin_nagant_mp': 6.5, 'kar98k_mp': 7.5,
 }
 # A WWII can: SMGs' 8.5 long, pistols' 5.5; radius by the barrel it slips over.
@@ -246,8 +246,15 @@ class Mesh:
                 tangent = S._cross(normal, (1.0, 0.0, 0.0))
             tangent = S._normalise(tangent)
             binormal = S._cross(normal, tangent)
-            out.append((normal, b'\xff\xff\xff\xff', uv, binormal, tangent, position))
+            out.append((canonical(normal), b'\xff\xff\xff\xff', canonical(uv), canonical(binormal),
+                        canonical(tangent), canonical(position)))
         return out
+
+
+def canonical(values):
+    """Floats as the build machine and the Pi both write them: their libm leave different last bits
+    in trigonometry and cancellation, so values round to a millionth and residues to zero."""
+    return tuple(0.0 if abs(value) < 1e-9 else round(value, 6) for value in values)
 
 
 def lathe(mesh, profile, segments=24):
@@ -375,27 +382,33 @@ def _on_sight_line(gun, meshes, ahead_by):
 
 def reflex(gun):
     ahead = OPTIC_AHEAD.get(gun.weapon, 7.5)
-    ring_outer, ring_inner, depth = 0.95, 0.80, 0.26
+    ring_outer, ring_inner, depth = 1.15, 0.98, 0.3
     ring = lathe(Mesh('blued'), [(-depth, ring_inner), (-depth, ring_outer), (depth, ring_outer),
-                                 (depth, ring_inner), (-depth, ring_inner)], segments=32)
-    meshes, centre = _on_sight_line(gun, [ring], ahead)
+                                 (depth, ring_inner), (-depth, ring_inner)], segments=36)
+    lip = lathe(Mesh('worn'), [(depth, ring_outer * 0.995), (depth + 0.05, ring_outer * 0.97),
+                               (depth + 0.05, ring_inner * 1.03), (depth, ring_inner * 1.005)], segments=36)
+    meshes, centre = _on_sight_line(gun, [ring, lip], ahead)
     top = receiver_top(gun, centre[0])
-    post = box(Mesh('blued'), (centre[0] - 0.22, centre[1] - 0.2, top + 0.3),
-               (centre[0] + 0.22, centre[1] + 0.2, centre[2] - ring_outer + 0.04))
-    base = box(Mesh('parkerized'), (centre[0] - 1.4, centre[1] - 0.5, top - 0.05),
-               (centre[0] + 0.9, centre[1] + 0.5, top + 0.36))
+    post = box(Mesh('blued'), (centre[0] - 0.26, centre[1] - 0.24, top + 0.3),
+               (centre[0] + 0.26, centre[1] + 0.24, centre[2] - ring_outer + 0.05))
+    base = box(Mesh('parkerized'), (centre[0] - 1.5, centre[1] - 0.55, top - 0.05),
+               (centre[0] + 1.0, centre[1] + 0.55, top + 0.38))
     return meshes + [post, base]
 
 
 def lens(gun):
+    """A lens sight's housing: a short thin-walled ring on the line of sight with a brass objective
+    ring, open so the eye sees through it to the reticle the game draws, on a low mount."""
     ahead = OPTIC_AHEAD.get(gun.weapon, 7.5)
-    tube = lathe(Mesh('blued'), [(-0.9, 0.42), (-0.9, 0.52), (0.7, 0.52), (0.85, 0.58)], segments=28)
-    rim = lathe(Mesh('brass'), [(0.7, 0.58), (0.95, 0.64), (1.1, 0.58), (1.1, 0.44)], segments=28)
-    glass = lathe(Mesh('glass'), [(1.02, 0.44), (1.02, 0.0)], segments=24)
-    meshes, centre = _on_sight_line(gun, [tube, rim, glass], ahead)
+    inner, outer, back, front = 0.66, 0.78, -0.45, 0.3
+    housing = lathe(Mesh('blued'), [(back, inner), (back, outer), (front, outer), (front, inner), (back, inner)],
+                    segments=36)
+    rim = lathe(Mesh('brass'), [(front, inner * 0.99), (front, outer * 1.04), (front + 0.16, outer * 1.04),
+                                (front + 0.16, inner * 0.99), (front, inner * 0.99)], segments=36)
+    meshes, centre = _on_sight_line(gun, [housing, rim], ahead)
     top = receiver_top(gun, centre[0], reach=1.0)
-    mount = box(Mesh('parkerized'), (centre[0] - 0.7, centre[1] - 0.3, top - 0.05),
-                (centre[0] + 0.5, centre[1] + 0.3, centre[2] - 0.42))
+    mount = box(Mesh('parkerized'), (centre[0] - 0.55, centre[1] - 0.26, top - 0.05),
+                (centre[0] + 0.4, centre[1] + 0.26, centre[2] - outer + 0.05))
     return meshes + [mount]
 
 
@@ -461,7 +474,7 @@ def extended_magazine(gun):
             if abs(s - well) > MAG_KEEP * length:
                 on_line = S._add(keep_at, S._scale(S._sub(on_line, keep_at), stretch))
             vertices.append((vertex['normal'], vertex['colour'], vertex['uv'], vertex['binormal'], vertex['tangent'],
-                             S._add(on_line, offset)))
+                             canonical(S._add(on_line, offset))))
         out.append((index, vertices, [remap[v] for tri in kept for v in tri]))
     return out
 

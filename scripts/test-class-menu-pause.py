@@ -235,8 +235,8 @@ mutants = [
     ('    s_cac.screen = CAC_SCREEN_EDIT;\n    s_cac.fromPause = 1;', '    s_cac.fromPause = 1;'),
     ('    s_cac.tab = CAC_TAB_CUSTOM;\n    s_cac.classFocus = index;', '    s_cac.classFocus = index;'),
     ('        return "The last change was not saved.";', '        return NULL;'),
-    ('    Cac_GunPicture(loadout->weapon[slot], Cac_SlotCamo(loadout, slot), &box, color);',
-     '    Cac_GunPicture(loadout->weapon[slot], WEAPON_CAMO_NONE, &box, color);'),
+    ('    Cac_GunPicture(loadout->weapon[slot], Cac_SlotCamo(loadout, slot), Cac_SlotAttachments(loadout, slot), &box,',
+     '    Cac_GunPicture(loadout->weapon[slot], WEAPON_CAMO_NONE, Cac_SlotAttachments(loadout, slot), &box,'),
     ('    s_cac.hover = -1;\n    s_cac.cursorX = dc->cursorx;\n    s_cac.cursorY = dc->cursory;\n    if (choose',
      '    s_cac.hover = -1;\n    if (choose'),
 ]

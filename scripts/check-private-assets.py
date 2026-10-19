@@ -154,7 +154,8 @@ try:
     for name in class_menus():
         assert name in entries, "Missing class menu: " + name
     owner_pictures = load_owner_pictures(root / "data/main" / OWNER_PICTURES_DIR, classes["primary"] +
-                                         classes["secondary"] + classes["lethal"] + classes["tactical"])
+                                         classes["secondary"] + classes["lethal"] + classes["tactical"],
+                                         classes["attachments"])
     verify_owner_pictures(entries, owner_pictures)
     for name in list(explosives) + ["weapons/mp/" + weapon for weapon in EXPLOSIVE_WEAPONS]:
         assert name in entries, "Missing explosive resource: " + name

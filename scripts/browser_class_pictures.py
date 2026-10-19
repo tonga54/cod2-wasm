@@ -11,6 +11,8 @@ PICTURE_FOLDER = 'images/browser_class/'
 # texels above HUD_SILHOUETTE_ALPHA_MIN visible.
 PICTURE_MAX_SIZE = 1024
 PICTURE_ALPHA_MIN = 16
+# A gun's pictures with each attachment the menus lay over it, or its longer magazine in place.
+ATTACHMENT_LAYERS = ('extmag', 'suppressor', 'reflex', 'lens', 'optic4x')
 IWI_HEADER = struct.Struct('<3sBBBHHH4i')
 IWI_ARGB32 = 1
 IWI_NOPICMIP = 1
@@ -120,13 +122,17 @@ def package_picture(data, name):
     return IWI_HEADER.pack(b'IWi', 5, IWI_ARGB32, IWI_NOPICMIP, width, height, 1, *sizes) + b''.join(mips)
 
 
-def load_owner_pictures(folder, weapons):
+def load_owner_pictures(folder, weapons, attachments=()):
     """The owner's pictures in folder by the archive name each takes, or None without the folder.
 
-    Each file is <weapon>.png for one of the class weapons, in any case."""
+    Each file is, in any case, <weapon>.png for one of the class weapons; <weapon>__<layer>.png for
+    one of a gun's attachment layers (render-class-pictures.py draws them on the gun's canvas); or
+    attachment__<attachment>.png for an attachment's icon."""
     if not folder.is_dir():
         return None
     names = {weapon.lower(): weapon for weapon in weapons}
+    names.update({f'{weapon.lower()}__{layer}': weapon for weapon in weapons for layer in ATTACHMENT_LAYERS})
+    names.update({f'attachment__{attachment}': attachment for attachment in attachments})
     pictures = {}
     for path in sorted(folder.iterdir()):
         if path.name.startswith('.'):
@@ -134,7 +140,8 @@ def load_owner_pictures(folder, weapons):
         stem = path.name[:-4].lower() if path.name.lower().endswith('.png') else None
         if not path.is_file() or stem not in names:
             raise ValueError(f'{OWNER_PICTURES_DIR}/{path.name}: name it <weapon>.png after a class weapon, '
-                             'such as frag_grenade_american_mp.png')
+                             'such as frag_grenade_american_mp.png, <weapon>__<layer>.png for one of '
+                             f'{", ".join(ATTACHMENT_LAYERS)} or attachment__<attachment>.png')
         if PICTURE_FOLDER + stem + '.iwi' in pictures:
             raise ValueError(f'{OWNER_PICTURES_DIR}/{path.name}: {names[stem]} has two pictures')
         pictures[PICTURE_FOLDER + stem + '.iwi'] = package_picture(path.read_bytes(), path.name)

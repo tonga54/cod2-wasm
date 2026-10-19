@@ -331,7 +331,7 @@ try:
                            if candidate in asset_index and candidate not in renderer)
     classes = json.loads((root / "downstream/gateway/classes.json").read_text())
     pictures = load_owner_pictures(root / "data/main" / OWNER_PICTURES_DIR, classes["primary"] + classes["secondary"]
-                                   + classes["lethal"] + classes["tactical"])
+                                   + classes["lethal"] + classes["tactical"], classes["attachments"])
     if pictures:
         renderer.update(pictures)
         print(f"Class pictures: the owner's {len(pictures)} pictures replace those weapons' class menu icons")

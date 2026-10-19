@@ -16,6 +16,7 @@ hud2d = (root / 'src/PC/gfx_d3d/r_hud2d.c').read_text()
 hud2d_header = (root / 'src/headers/PC/gfx_d3d/r_hud2d.h').read_text()
 menu = (root / 'src/PC/ui_mp/ui_class_menu.c').read_text()
 class_header = (root / 'src/headers/PC/ui_mp/ui_class_data.h').read_text()
+rules = (root / 'src/PC/bgame/bg_attachment_rules.c').read_text()
 COUNTS = {}
 
 
@@ -156,6 +157,7 @@ def write_folder(folder, files):
 
 
 WEAPONS = ['thompson_mp', 'TT30_mp', 'frag_grenade_american_mp', 'smoke_grenade_german_mp']
+ATTACHMENTS = ['reflex', 'grip', 'suppressor']
 
 
 def checks(m, folder):
@@ -199,6 +201,21 @@ def checks(m, folder):
     twice = write_folder(folder / 'twice', {'tt30_mp.png': A, 'TT30_mp.png': A})
     if len(list(twice.iterdir())) == 2:
         raises(lambda: m.load_owner_pictures(twice, WEAPONS), 'TT30_mp has two pictures')
+
+    # A gun's attachment layers and the attachments' icons, for the attachments named.
+    layered = write_folder(folder / 'layered', {'TT30_mp__Suppressor.png': ACCEPTED['16x8'],
+                                                'thompson_mp__extmag.png': ACCEPTED['4x4'],
+                                                'attachment__reflex.png': ACCEPTED['1x1']})
+    assert m.load_owner_pictures(layered, WEAPONS, ATTACHMENTS) == {
+        'images/browser_class/tt30_mp__suppressor.iwi': m.package_picture(ACCEPTED['16x8'], 'x'),
+        'images/browser_class/thompson_mp__extmag.iwi': m.package_picture(ACCEPTED['4x4'], 'x'),
+        'images/browser_class/attachment__reflex.iwi': m.package_picture(ACCEPTED['1x1'], 'x')}
+    raises(lambda: m.load_owner_pictures(layered, WEAPONS), 'attachment__reflex.png: name it')
+    for case, name in (('grip layer', 'tt30_mp__grip.png'), ('other gun', 'mine_mp__suppressor.png'),
+                       ('other icon', 'attachment__laser.png'), ('bare layer', 'tt30_mp__.png'),
+                       ('layer of a layer', 'tt30_mp__extmag__lens.png')):
+        raises(lambda: m.load_owner_pictures(write_folder(folder / case, {name: A}), WEAPONS, ATTACHMENTS),
+               name + ': name it')
 
     # The checker accepts the pictures the generator makes, and only them.
     owner = m.load_owner_pictures(good, WEAPONS)
@@ -266,6 +283,12 @@ with tempfile.TemporaryDirectory(prefix='cod2-class-pictures-') as directory:
         ("    assert packaged == (owner or {}), 'Packaged class pictures differ from the owner\\'s'",
          "    assert set(packaged) == set(owner or {}), 'Packaged class pictures differ from the owner\\'s'"),
         ("    if not folder.is_dir():\n        return None\n", "    if not folder.is_dir():\n        return {}\n"),
+        ("    names.update({f'{weapon.lower()}__{layer}': weapon for weapon in weapons for layer in ATTACHMENT_LAYERS})\n",
+         ''),
+        ("    names.update({f'attachment__{attachment}': attachment for attachment in attachments})\n", ''),
+        ("ATTACHMENT_LAYERS = ('extmag', 'suppressor', 'reflex', 'lens', 'optic4x')",
+         "ATTACHMENT_LAYERS = ('extmag', 'suppressor', 'reflex', 'lens', 'optic4x', 'grip')"),
+        ("f'{weapon.lower()}__{layer}'", "f'{weapon}__{layer}'"),
     ]
     if len(list((folder / 'live' / 'twice').iterdir())) == 2:
         mutants.append(("        if PICTURE_FOLDER + stem + '.iwi' in pictures:\n", '        if False:\n'))
@@ -479,7 +502,7 @@ int main(int argc, char **argv) {
         assert(!R_GetHudPictureMaterial(names[i], st, &aspect));
     }
     int full = reads;
-    assert(!R_GetHudPictureMaterial("browser_class/n99", st, &aspect) && reads == full);
+    assert(!R_GetHudPictureMaterial("browser_class/past", st, &aspect) && reads == full);
     assert(R_GetHudPictureMaterial("browser_class/16x8", st, &aspect) == a && reads == full);
 
     /* Shutdown releases each live picture once and empties the cache. */
@@ -555,42 +578,79 @@ def function(source, name):
 
 
 # The class menus' pictures: an owner's in its colors, else the retail image or the silhouette, tinted.
-menu_code = function(menu, 'Cac_Image') + function(menu, 'Cac_Picture')
+menu_code = ''.join(function(menu, name) for name in (
+    'Cac_ImagesFresh', 'Cac_Image', 'Cac_Picture', 'Cac_ClassPicture', 'Cac_Layer', 'Cac_AttachmentIcon',
+    'Cac_DrawIcon', 'Cac_LayeredPicture', 'Cac_GunPicture'))
+layers = re.search(r'^static const struct \{\n    int attachment;\n    const char \*suffix;\n\} s_cacLayers\[\] = '
+                   r'\{.*?^#define CAC_LAYER_COUNT [^\n]+\n', menu, re.M | re.S)[0]
 menu_support = r'''
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include "headers/PC/bgame/bg_weapon_camo.h"
 typedef float vec_t; typedef vec_t vec4_t[4];
 typedef struct Material { int id; } Material;
 typedef Material *MaterialHandle;
-''' + class_header + r'''
+''' + class_header + rules + layers + r'''
 #define CAC_ALIGN_TOP 1
 #define CAC_RETAIL_IMAGE_ASPECT (199.0f / 112.0f)
 enum { WWII_COLOR_WHITE = 4 };
 typedef struct { float x, y, w, h; int horz; } CacRect;
-static struct { int imageGeneration; MaterialHandle images[64]; float aspects[64]; float st[64][4]; int pictures[64]; } s_cac;
+static struct {
+    int imageGeneration; MaterialHandle images[64]; float aspects[64]; float st[64][4]; int pictures[64];
+    MaterialHandle layers[64][CAC_LAYER_COUNT]; float layerSt[64][CAC_LAYER_COUNT][4];
+    unsigned char layerRead[64][CAC_LAYER_COUNT];
+    MaterialHandle icons[ATT_COUNT]; float iconSt[ATT_COUNT][4], iconAspects[ATT_COUNT]; unsigned char iconRead[ATT_COUNT];
+} s_cac;
 const ClassWeapon g_classWeapons[] = {
     { "thompson_mp", CLASS_SLOT_PRIMARY, 0, 0, NULL, NULL, "weapon_thompson" },
     { "TT30_mp", CLASS_SLOT_SECONDARY, 0, 0, NULL, NULL, "gfx/icons/hud@tt30.tga" },
     { "frag_grenade_american_mp", CLASS_SLOT_LETHAL, 0, 0, NULL, NULL, "gfx/icons/hud@us_grenade.tga" },
     { "smoke_grenade_german_mp", CLASS_SLOT_TACTICAL, 0, 0, NULL, NULL, "hud_us_smokegrenade" },
+    { "PPS42_mp", CLASS_SLOT_PRIMARY, 0, 0, NULL, NULL, "weapon_pps42" },
 };
-const int g_classWeaponCount = 4;
+const int g_classWeaponCount = 5;
 static Material picture = {1}, tt30 = {2}, retail = {3}, icon = {4}, silhouette = {5};
+static Material gun = {6}, can = {7}, longer = {8}, dot = {9}, reflexIcon = {10}, paintedGun = {11};
 static const vec4_t white = {1, 1, 1, 1}, tint = {0.7f, 0.7f, 0.68f, 1};
 static int generation, pictureCalls, registerCalls;
-static char asked[8][64];
+static char asked[64][64];
 static struct { float x, y, w, h, st[4]; const vec_t *color; MaterialHandle material; int draws; } drawn;
+static struct { float x, y, w, h, st[4]; const vec_t *color; MaterialHandle material; } logged[8];
+static int logCount, camoCalls, camoAsked;
+static MaterialHandle camoInput;
 static int R_GetHudImageGeneration(void) { return generation; }
 static MaterialHandle R_GetHudPictureMaterial(const char *name, float *st, float *aspect) {
-    assert(pictureCalls < 8);
+    assert(pictureCalls < 64);
     snprintf(asked[pictureCalls++], 64, "%s", name);
     *aspect = 0.0f;
     if (!strcmp(name, "browser_class/frag_grenade_american_mp")) {
         st[0] = 0.25f; st[1] = 0.125f; st[2] = 0.75f; st[3] = 0.875f; *aspect = 0.5f; return &picture;
     }
     if (!strcmp(name, "browser_class/tt30_mp")) { st[0] = st[1] = 0; st[2] = st[3] = 0.5f; *aspect = 2.0f; return &tt30; }
+    /* A gun on a 4:1 canvas, its can reaching past the muzzle, its longer magazine lower, a sight above. */
+    static const struct { const char *name; float st[4], aspect; Material *material; } layered[] = {
+        { "browser_class/pps42_mp", { 0.1f, 0.4f, 0.9f, 0.7f }, 32.0f / 3.0f, &gun },
+        { "browser_class/pps42_mp__suppressor", { 0.05f, 0.45f, 0.3f, 0.55f }, 10.0f, &can },
+        { "browser_class/pps42_mp__extmag", { 0.1f, 0.4f, 0.9f, 0.85f }, 7.1f, &longer },
+        { "browser_class/pps42_mp__reflex", { 0.5f, 0.3f, 0.6f, 0.45f }, 2.7f, &dot },
+        { "browser_class/attachment__reflex", { 0.0f, 0.25f, 1.0f, 0.75f }, 2.0f, &reflexIcon },
+    };
+    for (unsigned i = 0; i < sizeof(layered) / sizeof(layered[0]); i++)
+        if (!strcmp(name, layered[i].name)) {
+            memcpy(st, layered[i].st, sizeof(layered[i].st));
+            *aspect = layered[i].aspect;
+            return layered[i].material;
+        }
     return NULL;
+}
+static const WeaponCamoGun ppsCamo = { "PPS42_mp", "mtl_weapon_pps42", WEAPON_CAMO_BODY };
+const WeaponCamoGun *BG_WeaponCamo_Gun(const char *weapon) { return !strcmp(weapon, "PPS42_mp") ? &ppsCamo : NULL; }
+static MaterialHandle R_GetWeaponCamoPicture(MaterialHandle image, int silhouette, int camo, int style, float *aspect) {
+    assert(!silhouette && style == WEAPON_CAMO_BODY);
+    camoCalls++; camoInput = image; camoAsked = camo; *aspect = 1.0f;
+    return &paintedGun;
 }
 static MaterialHandle CL_RegisterMaterialNoMip(const char *name, int track) {
     assert(track == 3); registerCalls++;
@@ -605,9 +665,44 @@ static void CL_DrawStretchPic(float x, float y, float w, float h, int horz, int 
     assert(horz == 2 && vert == CAC_ALIGN_TOP);
     drawn.x = x; drawn.y = y; drawn.w = w; drawn.h = h; drawn.st[0] = s1; drawn.st[1] = t1; drawn.st[2] = s2;
     drawn.st[3] = t2; drawn.color = color; drawn.material = material; drawn.draws++;
+    assert(logCount < 8);
+    logged[logCount].x = x; logged[logCount].y = y; logged[logCount].w = w; logged[logCount].h = h;
+    logged[logCount].st[0] = s1; logged[logCount].st[1] = t1; logged[logCount].st[2] = s2; logged[logCount].st[3] = t2;
+    logged[logCount].color = color; logged[logCount].material = material; logCount++;
 }
 '''
 menu_checks = r'''
+static int near(float a, float b) { return fabsf(a - b) < 1e-3f; }
+static int askedFor(const char *name) {
+    int count = 0;
+    for (int i = 0; i < pictureCalls; i++)
+        count += !strcmp(asked[i], name);
+    return count;
+}
+static void gunPicture(int weapon, int camo, unsigned attachments) {
+    CacRect box = { 10, 20, 200, 50, 2 };
+    logCount = 0;
+    camoCalls = 0;
+    Cac_GunPicture(weapon, camo, attachments, &box, tint);
+}
+/* Every layer at one scale on the canvas, whose texels stay square on its 4:1, the whole framed in the box. */
+static void sameCanvas(void) {
+    float fx = logged[0].w / (logged[0].st[2] - logged[0].st[0]), fy = logged[0].h / (logged[0].st[3] - logged[0].st[1]);
+    float left = 1e9f, top = 1e9f, right = -1e9f, bottom = -1e9f;
+    for (int i = 0; i < logCount; i++) {
+        assert(near(logged[i].w, (logged[i].st[2] - logged[i].st[0]) * fx));
+        assert(near(logged[i].h, (logged[i].st[3] - logged[i].st[1]) * fy));
+        assert(near(logged[i].x - logged[0].x, (logged[i].st[0] - logged[0].st[0]) * fx));
+        assert(near(logged[i].y - logged[0].y, (logged[i].st[1] - logged[0].st[1]) * fy));
+        assert(logged[i].color == white);
+        left = fminf(left, logged[i].x);
+        top = fminf(top, logged[i].y);
+        right = fmaxf(right, logged[i].x + logged[i].w);
+        bottom = fmaxf(bottom, logged[i].y + logged[i].h);
+    }
+    assert(near(fx / fy, 4.0f) && near(left - 10, 210 - right) && near(top - 20, 70 - bottom));
+    assert(near(right - left, 200) || near(bottom - top, 50));
+}
 static void paint(int weapon) {
     CacRect box = {10, 20, 100, 50, 2};
     drawn.draws = 0;
@@ -637,19 +732,85 @@ int main(void) {
     generation++;
     paint(2);
     assert(pictureCalls == 5 && drawn.material == &picture && drawn.color == white);
-    paint(4); paint(-1);
+    paint(5); paint(-1);
     assert(drawn.draws == 0 && pictureCalls == 5);
+
+    /* A gun with the owner's picture wears its attachments' layers on its canvas, the longer magazine in place of
+     * its own, in layer order; another attachment adds nothing. */
+    gunPicture(4, WEAPON_CAMO_NONE, 0);
+    assert(logCount == 1 && logged[0].material == &gun && logged[0].color == white);
+    gunPicture(4, WEAPON_CAMO_NONE, ATT_BIT(ATT_SUPPRESSOR));
+    assert(logCount == 2 && logged[0].material == &gun && logged[1].material == &can);
+    sameCanvas();
+    assert(near(logged[1].x, 10.0f) && near(logged[0].w, 200.0f * 0.8f / 0.85f));
+    gunPicture(4, WEAPON_CAMO_NONE, ATT_BIT(ATT_EXTMAG));
+    assert(logCount == 1 && logged[0].material == &longer && logged[0].st[3] == 0.85f);
+    sameCanvas();
+    gunPicture(4, WEAPON_CAMO_NONE, ATT_BIT(ATT_GRIP) | ATT_BIT(ATT_REFLEX) | ATT_BIT(ATT_SUPPRESSOR) | ATT_BIT(ATT_EXTMAG));
+    assert(logCount == 3 && logged[0].material == &longer && logged[1].material == &can && logged[2].material == &dot);
+    sameCanvas();
+    /* A layer the owner did not make leaves the plain picture. */
+    gunPicture(4, WEAPON_CAMO_NONE, ATT_BIT(ATT_LENS));
+    assert(logCount == 1 && logged[0].material == &gun && near(logged[0].w, 200.0f));
+    /* Painted, the gun or its longer magazine takes the camouflage; what sits on it keeps its finish. */
+    gunPicture(4, 3, ATT_BIT(ATT_EXTMAG) | ATT_BIT(ATT_SUPPRESSOR));
+    assert(camoCalls == 1 && camoInput == &longer && camoAsked == 3);
+    assert(logCount == 2 && logged[0].material == &paintedGun && logged[1].material == &can);
+    /* Layers are read once an image generation. */
+    assert(askedFor("browser_class/pps42_mp__suppressor") == 1 && askedFor("browser_class/pps42_mp__lens") == 1);
+    generation++;
+    gunPicture(4, WEAPON_CAMO_NONE, ATT_BIT(ATT_SUPPRESSOR));
+    assert(logCount == 2 && askedFor("browser_class/pps42_mp__suppressor") == 2);
+    /* Only an owner's picture of a primary or a pistol takes layers. */
+    int before = pictureCalls;
+    gunPicture(0, WEAPON_CAMO_NONE, ATT_BIT(ATT_SUPPRESSOR));
+    assert(logCount == 1 && logged[0].material == &retail);
+    gunPicture(2, WEAPON_CAMO_NONE, ATT_BIT(ATT_SUPPRESSOR));
+    assert(logCount == 1 && logged[0].material == &picture);
+    for (int i = before; i < pictureCalls; i++)
+        assert(!strstr(asked[i], "__"));
+
+    /* An attachment's icon, fit in its share of the box, in the color asked; none without the owner's. */
+    CacRect cell = { 0, 0, 40, 40, 2 };
+    logCount = 0;
+    assert(Cac_DrawIcon(ATT_REFLEX, &cell, 0.5f, tint) && logCount == 1 && logged[0].material == &reflexIcon);
+    assert(logged[0].color == tint && near(logged[0].w, 20) && near(logged[0].h, 10) && near(logged[0].x, 10));
+    assert(near(logged[0].y, 15) && logged[0].st[1] == 0.25f && logged[0].st[3] == 0.75f);
+    assert(!Cac_DrawIcon(ATT_GRIP, &cell, 0.5f, tint) && logCount == 1);
+    Cac_DrawIcon(ATT_REFLEX, &cell, 0.5f, tint);
+    Cac_DrawIcon(ATT_GRIP, &cell, 0.5f, tint);
+    assert(askedFor("browser_class/attachment__reflex") == 1 && askedFor("browser_class/attachment__grip") == 1);
+    generation++;
+    Cac_DrawIcon(ATT_REFLEX, &cell, 0.5f, tint);
+    assert(askedFor("browser_class/attachment__reflex") == 2);
+    assert(!Cac_DrawIcon(ATT_COUNT, &cell, 0.5f, tint) && !Cac_DrawIcon(-1, &cell, 0.5f, tint));
     return 0;
 }
 '''
 menu_mutants = [
     ('            name[i] = (char)(name[i] >= \'A\' && name[i] <= \'Z\' ? name[i] + 32 : name[i]);', '            ;'),
-    ('"browser_class/%s"', '"%s"'),
+    ('"browser_class/%s", g_classWeapons[index].weapon', '"%s", g_classWeapons[index].weapon'),
     ('s_cac.pictures[index] ? UI_WWIIMenu_Color(WWII_COLOR_WHITE) : color', 'color'),
-    ('                      st[0], st[1], st[2], st[3],', '                      0.0f, 0.0f, 1.0f, 1.0f,'),
+    ('st[0], st[1], st[2], st[3], s_cac.pictures[index]', '0.0f, 0.0f, 1.0f, 1.0f, s_cac.pictures[index]'),
     ('        s_cac.pictures[index] = image != NULL;\n', ''),
     ('        s_cac.st[index][2] = s_cac.st[index][3] = 1.0f;\n', ''),
     ('            s_cac.images[index] = image;\n            *aspect', '            *aspect'),
+    ('        if (s_cacLayers[layer].attachment == ATT_EXTMAG) {', '        if (0) {'),
+    ('        span[0] = sts[i][0] < span[0] ? sts[i][0] : span[0];\n', ''),
+    ('    canvas = aspect * (st[3] - st[1]) / (st[2] - st[0]);', '    canvas = aspect;'),
+    ('        if (picture && painted > 0.0f)\n            drawn[0] = picture;\n', ''),
+    ('        s_cac.layerRead[index][layer] = 1;\n', ''),
+    ('    if (image && aspect > 0.0f && attachments && s_cac.pictures[index] &&',
+     '    if (image && aspect > 0.0f && attachments &&'),
+    ('        g_classWeapons[index].slot <= CLASS_SLOT_SECONDARY &&\n        Cac_LayeredPicture', '        Cac_LayeredPicture'),
+    ('"attachment__%s"', '"%s"'),
+    ('"%s__%s", g_classWeapons[index].weapon', '"%s_%s", g_classWeapons[index].weapon'),
+    ('        path[i] = (char)(path[i] >= \'A\' && path[i] <= \'Z\' ? path[i] + 32 : path[i]);', '        ;'),
+    ('        memset(s_cac.layerRead, 0, sizeof(s_cac.layerRead));\n', ''),
+    ('        memset(s_cac.iconRead, 0, sizeof(s_cac.iconRead));\n', ''),
+    ('st[0], st[1], st[2], st[3], color, icon);', '0.0f, 0.0f, 1.0f, 1.0f, color, icon);'),
+    ('                          sts[i][0], sts[i][1], sts[i][2], sts[i][3], UI_WWIIMenu_Color(WWII_COLOR_WHITE), drawn[i]);',
+     '                          0.0f, 0.0f, 1.0f, 1.0f, UI_WWIIMenu_Color(WWII_COLOR_WHITE), drawn[i]);'),
 ]
 with tempfile.TemporaryDirectory(prefix='cod2-class-pictures-menu-') as directory:
     for number, variant in enumerate([menu_code] + [mutate(menu_code, old, new) for old, new in menu_mutants]):
@@ -665,14 +826,19 @@ with tempfile.TemporaryDirectory(prefix='cod2-class-pictures-menu-') as director
 generator = (root / 'scripts/prepare-browser-bootstrap.py').read_text()
 checker = (root / 'scripts/check-private-assets.py').read_text()
 assert 'load_owner_pictures(root / "data/main" / OWNER_PICTURES_DIR, classes["primary"] + classes["secondary"]' in generator
+assert re.search(r'load_owner_pictures\([^)]*classes\["tactical"\], classes\["attachments"\]\)', generator)
+assert re.search(r'load_owner_pictures\([^)]*classes\["tactical"\],\s*classes\["attachments"\]\)', checker)
 assert 'renderer.update(pictures)' in generator and generator.index('renderer.update(pictures)') < generator.index(
     'archives["cod2_browser_renderer.iwd"] = renderer')
 assert 'PICTURE_FOLDER)):\n                    continue' in checker and 'verify_owner_pictures(entries, owner_pictures)' in checker
 
 print(f'PASS: {len(ACCEPTED)} accepted and {len(REJECTED)} rejected PNGs; the IWis hold every mip from 1 x 1, '
-      f'alpha-weighted, as BGRA after the header the engine reads; the folder takes <weapon>.png in any case for class '
-      f'weapons only; the checker rejects {COUNTS["packages"]} altered packages; under ASan/UBSan the loader reads the '
-      f'generator\'s files, uploads each mip smallest first, crops to the visible texels plus one, filters across '
-      f'mips through $raw, remembers failures, caps its cache and releases on shutdown; the class menus ask for '
-      f'browser_class/<weapon>, draw a picture untinted and fall back to retail images and silhouettes; '
+      f'alpha-weighted, as BGRA after the header the engine reads; the folder takes <weapon>.png, '
+      f'<weapon>__<layer>.png for the five attachment layers and attachment__<attachment>.png in any case for class '
+      f'weapons and attachments only; the checker rejects {COUNTS["packages"]} altered packages; under ASan/UBSan the '
+      f'loader reads the generator\'s files, uploads each mip smallest first, crops to the visible texels plus one, '
+      f'filters across mips through $raw, remembers failures, caps its cache and releases on shutdown; the class menus '
+      f'ask for browser_class/<weapon>, draw a picture untinted and fall back to retail images and silhouettes, lay '
+      f'an owner\'s gun\'s attachment layers on its canvas with the longer magazine in place and the camouflage on the '
+      f'gun, and draw the attachments\' icons, each read once an image generation; '
       f'{COUNTS["python"]} Python, {COUNTS["loader"]} loader and {COUNTS["menu"]} menu mutants fail')
