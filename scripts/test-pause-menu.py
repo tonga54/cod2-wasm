@@ -217,6 +217,7 @@ static int count(int kind) { int n = 0; for (int i = 0; i < drawCount; i++) n +=
 static void paint(void) { drawCount = 0; UI_PauseMenu_Paint(&dc, &ingame); }
 static void key(int k) { assert(UI_PauseMenu_KeyEvent(&dc, &ingame, k, 1)); assert(UI_PauseMenu_KeyEvent(&dc, &ingame, k, 0)); }
 static int logged(const char *entry) { for (int i = 0; i < menuLogCount; i++) if (!strcmp(menuLog[i], entry)) return 1; return 0; }
+static int opened(void) { int n = 0; for (int i = 0; i < menuLogCount; i++) n += menuLog[i][0] == '+'; return n; }
 static void clearLogs(void) { menuLogCount = commandCount = 0; }
 /* The cursor over a point in units from the left edge. */
 static void point(float x, float y) { dc.cursorx = (int)lroundf(x * 1.5f / 2.0f); dc.cursory = (int)lroundf(y); }
@@ -326,15 +327,17 @@ int main(void) {
     key(0x9a); clearLogs(); key(0xbf);
     assert(commandCount == 1 && !strcmp(commands[0], "disconnect\n") && logged("-ingame"));
 
-    /* Settings: each row opens its retail page with the options menu; the page
-     * goes back to the pause menu, on this tab, where it would open the main
-     * menu, until the pause menu has a key again. */
+    /* Settings: Controls opens the options menu, whose categories hold every
+     * control page, and each other row its retail page over it; either goes
+     * back to the pause menu, on this tab, where it would open the main menu,
+     * until the pause menu has a key again. */
     {
-        static const char *const pages[] = { "+options_look", "+options_graphics", "+options_sound", "+options_game" };
+        static const char *const pages[] = { NULL, "+options_graphics", "+options_sound", "+options_game" };
         for (i = 0; i < 4; i++) {
             UI_PauseMenu_Open(&dc); s_pause.tab = PAUSE_TAB_SETTINGS; s_pause.settingsFocus = i;
             clearLogs(); key(0x0d);
-            assert(logged("+options_menu") && logged(pages[i]) && logged("-ingame") && !s_pause.open);
+            assert(logged("+options_menu") && logged("-ingame") && !s_pause.open);
+            assert(pages[i] ? logged(pages[i]) && opened() == 2 : opened() == 1);
             assert(!strcmp(UI_PauseMenu_Redirect("options_menu"), "options_menu") && !UI_PauseMenu_Redirect(NULL));
             /* The page's Escape opens the main menu, then closing it opens it again. */
             assert(!strcmp(UI_PauseMenu_Redirect("main_text"), "ingame"));
@@ -632,6 +635,10 @@ mutants = [
     ('#define PAUSE_STAT_PITCH 57.1f', '#define PAUSE_STAT_PITCH 50.0f'),
     ('        if (prefix ? !strncmp(menu, menuName, strlen(menuName)) : !I_stricmp(menu, menuName)) {',
      '        if (!I_stricmp(menu, menuName)) {'),
+    ('    { "CONTROLS", "Set up your control scheme to match your style of play", NULL },',
+     '    { "CONTROLS", "Set up your control scheme to match your style of play", "options_look" },'),
+    ('    if (s_pauseSettings[page].page)\n        Menus_OpenByName(dc, s_pauseSettings[page].page);',
+     '    Menus_OpenByName(dc, s_pauseSettings[page].page ? s_pauseSettings[page].page : "options_menu");'),
 ]
 
 with tempfile.TemporaryDirectory(prefix='cod2-pause-menu-') as tmp:
@@ -653,6 +660,7 @@ with tempfile.TemporaryDirectory(prefix='cod2-pause-menu-') as tmp:
 print('PASS: Escape opens the pause menu over the blurred view on the Class tab at the class chosen last; Q/E, the '
       'bumpers or Tab page through Class, Overview, Change Team (not in deathmatch), Leave Game and Settings; '
       'classes choose from either list, F1 edits the player\'s own; teams send the team menu\'s response, an '
-      'auto-assign from a side only balances; leaving disconnects; settings pages return to the tab; the tab bar, '
+      'auto-assign from a side only balances; leaving disconnects; Controls opens the settings list and the other '
+      'settings rows their page, each returning to the tab; the tab bar, '
       'prompts, lists, tiles, overview and pointer follow the captures\' layout; the hooks and menu file are wired; '
       f'{len(mutants)} failing regression mutants')

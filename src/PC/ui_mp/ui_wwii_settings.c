@@ -360,6 +360,8 @@ static struct {
     SettingsPage pages[SET_MAX_PAGES];
     int pageCount;
     SettingsPage *shown;
+    /* The list has been on screen since Options opened: pages go back to it. */
+    int listShown;
     int cursorX;
     int cursorY;
     /* The row under the pointer and the part of it, as last painted. */
@@ -903,6 +905,8 @@ static void Settings_Show(const displayContextDef_t *dc, SettingsPage *page)
         page->rows[i].time = 0;
     }
     s_settings.shown = page;
+    if (page->list)
+        s_settings.listShown = 1;
     s_settings.hoverPage = NULL;
     s_settings.hoverRow = -1;
     s_settings.dragRow = -1;
@@ -993,7 +997,9 @@ static void Settings_Activate(displayContextDef_t *dc, SettingsPage *page)
 }
 
 /* Escape: the list closes as the menu's own Escape does; a page runs its Back
- * button, else closes, back to the list. */
+ * button, else closes, back to the list. A page opened while the list was
+ * never shown, as the pause menu opens one, runs its own Escape, which closes
+ * Options back to where they were opened. */
 static void Settings_Back(displayContextDef_t *dc, SettingsPage *page)
 {
     menuDef_t *menu = page->menu;
@@ -1003,6 +1009,8 @@ static void Settings_Back(displayContextDef_t *dc, SettingsPage *page)
             Item_RunScript(dc, menu->items[0], menu->onESC);
     } else if (page->back && Settings_Shown(page->back) && page->back->action) {
         Item_RunScript(dc, page->back, page->back->action);
+    } else if (!s_settings.listShown && menu->onESC && menu->itemCount > 0) {
+        Item_RunScript(dc, menu->items[0], menu->onESC);
     } else {
         Menus_CloseByName(dc, menu->window.name);
     }
@@ -1632,6 +1640,7 @@ void UI_WWIISettings_Update(const displayContextDef_t *dc)
         return;
     /* Options closed: it opens again at its first category. */
     s_settings.shown = NULL;
+    s_settings.listShown = 0;
     s_settings.dragRow = -1;
     s_settings.bindItem = NULL;
     for (i = 0; i < s_settings.pageCount; i++) {

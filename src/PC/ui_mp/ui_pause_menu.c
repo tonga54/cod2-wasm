@@ -214,10 +214,11 @@ static const char *const s_pauseLeave[PAUSE_LEAVE_COUNT] = { "RETURN TO MATCH", 
 static const struct {
     const char *name;
     const char *note;
-    /* The retail options page it opens. */
+    /* The retail options page it opens over the options list; Controls opens
+     * the list itself, whose categories hold every control page. */
     const char *page;
 } s_pauseSettings[PAUSE_SETTINGS_COUNT] = {
-    { "CONTROLS", "Set up your control scheme to match your style of play", "options_look" },
+    { "CONTROLS", "Set up your control scheme to match your style of play", NULL },
     { "GRAPHICS", "Adjust the picture: resolution, detail and effects", "options_graphics" },
     { "AUDIO", "Set the volume of the game's sound and music", "options_sound" },
     { "GAME", "Change your gametag and how the game behaves", "options_game" },
@@ -495,7 +496,8 @@ static void Pause_OpenSettings(displayContextDef_t *dc, int page)
 {
     if (!Menus_OpenByName(dc, "options_menu"))
         return;
-    Menus_OpenByName(dc, s_pauseSettings[page].page);
+    if (s_pauseSettings[page].page)
+        Menus_OpenByName(dc, s_pauseSettings[page].page);
     s_pause.keepTab = 1;
     s_pause.settingsPage = 1;
     s_pause.open = 0;

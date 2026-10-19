@@ -772,6 +772,37 @@ int main(void) {
     assert(Settings_Page(&menus[LOOK])->focus == 0);
     cases += 2;
 
+    /* A page opened over the list while it never showed, as the pause menu
+     * opens one, runs its own Escape, which closes Options back to where
+     * they were opened. Once the list has shown, its pages close back to it,
+     * even one reached from another page; Options closed, a page opened that
+     * way runs its own Escape again. */
+    reload();
+    menus[GRAPHICS].onESC = "close options_menu;";
+    openOnly(GRAPHICS);
+    paint(GRAPHICS);
+    scriptCount = 0;
+    closes = 0;
+    assert(key(GRAPHICS, 0x1b) == 1 && lastScript("close options_menu;", lists[GRAPHICS][0]) && closes == 0);
+    uiDc.openMenuCount = 0;
+    UI_WWIISettings_Update(&uiDc);
+    openOnly(LIST);
+    paint(LIST);
+    open(MOVE);
+    paint(MOVE);
+    open(GRAPHICS);
+    paint(GRAPHICS);
+    scriptCount = 0;
+    closes = 0;
+    assert(key(GRAPHICS, 0x1b) == 1 && closes == 1 && !strcmp(closed, "options_graphics") && scriptCount == 0);
+    uiDc.openMenuCount = 0;
+    UI_WWIISettings_Update(&uiDc);
+    openOnly(GRAPHICS);
+    paint(GRAPHICS);
+    closes = 0;
+    assert(key(GRAPHICS, 0x1b) == 1 && lastScript("close options_menu;", lists[GRAPHICS][0]) && closes == 0);
+    cases += 3;
+
     /* A page over an 88% shade, titled SETTINGS // its heading: a name and
      * its value in gray centred on 310.8, a key, a slider's groove and bar
      * with its value field, the focused row's arrows 6 wide outside the bar
@@ -1165,6 +1196,9 @@ mutants = [
     [('#define SET_PANEL_X 410.5f', '#define SET_PANEL_X 400.0f')],
     [('#define SET_ROUNDEL_STEP 74.15f', '#define SET_ROUNDEL_STEP 70.0f')],
     [('#define SET_ROWS_SHOWN 11', '#define SET_ROWS_SHOWN 12')],
+    [('    } else if (!s_settings.listShown && menu->onESC && menu->itemCount > 0) {', '    } else if (0) {')],
+    [('    if (page->list)\n        s_settings.listShown = 1;\n', '')],
+    [('    s_settings.listShown = 0;\n', '')],
 ]
 
 
@@ -1204,6 +1238,7 @@ print('PASS: with ui_wwiiMainMenu on, Options\' buttons make a list of categorie
       'value, slider, keys or field, in the settings captures\' gold, grays, rows and frame, the focused row explained '
       'at the right with its notes and brightness\'s roundels, eleven rows at a time with a scrollbar; keys, pointer, '
       'wheel and right button drive the retail items through the menus\' own handling, keys wait as the menus\' binds '
-      'do and the gametag edits as their fields do; Escape goes back to the list, and switched off the menus keep it '
+      'do and the gametag edits as their fields do; Escape goes back to the list, or from a page opened without it '
+      'runs the page\'s own Escape, and switched off the menus keep it '
       f'all; {cases} cases; the layout\'s numbers within the captures\' measurements; {rejected} failing regression '
       'mutants')
