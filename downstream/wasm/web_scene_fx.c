@@ -8,6 +8,10 @@
  * into the canvas: CoD2's DX9 glow (r_glow*), WWII-style camera motion blur
  * (r_motionBlur), a CoD4-style depth of field on the viewmodel and the near
  * world while aiming, contrast adaptive sharpening and a light film grade.
+ * A raised WWII scope (cg_wwiiscope_mp.c) turns its glass into a window: the
+ * rifle is drawn with its own projection and near clip and kept off the glass
+ * by the stencil, so the magnified world shows through, and the world around
+ * the eyepiece blurs, or blacks out while the breath is held.
  * The HUD and any later view draw straight into the canvas. A canvas taller
  * than r_sceneHeight lines renders that 3D view at r_sceneHeight and scales
  * it up as it composes, so the HUD gets the canvas's resolution for the
@@ -55,8 +59,22 @@ enum {
     SCENE_FX_MOTION_PROJECTION = SCENE_FX_MOTION_MOVE + 3,
     /* How much of the whole view blurs behind a screen-filling menu. */
     SCENE_FX_BACKDROP = SCENE_FX_MOTION_PROJECTION + 2,
+    /* A scope's glass as a window onto the world (CgWwiiScopeLens): its
+     * centre and half-axes in normalized device coordinates, how present and
+     * how open the window is, how much of the world around it blurs and
+     * darkens, and the rifle's own projection scales and near clip. */
+    SCENE_FX_SCOPE,
+    SCENE_FX_SCOPE_AXES = SCENE_FX_SCOPE + 2,
+    SCENE_FX_SCOPE_PRESENCE = SCENE_FX_SCOPE_AXES + 4,
+    SCENE_FX_SCOPE_OPEN,
+    SCENE_FX_SCOPE_BLUR,
+    SCENE_FX_SCOPE_DARK,
+    SCENE_FX_SCOPE_PROJECTION,
+    SCENE_FX_SCOPE_NEAR_CLIP = SCENE_FX_SCOPE_PROJECTION + 2,
     SCENE_FX_PARAM_COUNT
 };
+
+#define SCENE_FX_SCOPE_FLOATS (SCENE_FX_PARAM_COUNT - SCENE_FX_SCOPE)
 
 /* InfinitePerspectiveMatrix's depth scale times the default r_znear of 4. */
 #define SCENE_FX_DEFAULT_WORLD_NEAR_CLIP (0.9995002746582031f * 4.0f)
@@ -92,6 +110,13 @@ static float s_motionRotation[9];
 static float s_motionMove[3];
 static float s_motionProjection[2];
 static float s_backdropFrac;
+static float s_scope[SCENE_FX_SCOPE_FLOATS];
+/* The window's stencil is drawn once per view, before the rifle's first draw. */
+static int s_scopeStencil;
+static int s_scopeMasking;
+/* Set when the last full view could not compose, so the cgame keeps the
+ * stock overlay: the window needs the scene's own depth and stencil. */
+static int s_scopeUnavailable;
 
 EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth, int screenHeight), {
     if (typeof GLctx === "undefined" || !GLctx || !GLctx.blitFramebuffer) return 0;
@@ -209,11 +234,21 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "uniform highp vec4 u_px;\nuniform vec4 u_glow;\nuniform highp vec4 u_dof;\nuniform vec4 u_dof2;\nuniform vec4 u_film;\n" +
                 "uniform highp vec4 u_near;\nuniform vec2 u_tier;\n" +
                 "uniform highp vec4 u_motion;\nuniform highp mat3 u_motionRotation;\nuniform highp vec3 u_motionMove;\n" +
+                "uniform highp vec4 u_lens;\nuniform highp vec4 u_lensInv;\nuniform vec4 u_lensFx;\n" +
                 coc + nearWorld +
                 "void main() {\n" +
                 "  vec3 c = texture(u_scene, v_uv).rgb;\n" +
                 "  vec3 col = c;\n" +
                 "  bool smeared = false;\n" +
+                /* Inside the scope's glass: 1 within its outline, which the
+                 * stencil kept clear of the rifle, fading over a pixel. */
+                "  float lensIn = 0.0;\n" +
+                "  highp float lensR = 2.0;\n" +
+                "  if (u_lens.z > 0.0) {\n" +
+                "    highp vec2 dp = gl_FragCoord.xy - u_lens.xy;\n" +
+                "    lensR = length(vec2(dot(u_lensInv.xy, dp), dot(u_lensInv.zw, dp)));\n" +
+                "    lensIn = 1.0 - smoothstep(1.0 - u_lensFx.z, 1.0, lensR);\n" +
+                "  }\n" +
                 /* Each world pixel goes back to where the last frame's camera saw
                  * it, and the scene is averaged along that path. The viewmodel
                  * moves with the camera: it stays sharp and stays out of the
@@ -257,7 +292,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "    vec3 wt = -u_film.x * sqrt(clamp(min(lo, 1.0 - hi) / max(hi, vec3(0.0001)), 0.0, 1.0));\n" +
                 "    col = clamp((c + (n + s + e + w) * wt) / (1.0 + 4.0 * wt), 0.0, 1.0);\n" +
                 "  }\n" +
-                "  if (u_dof2.x > 0.0 || u_dof2.w > 0.0) {\n" +
+                "  if (u_dof2.x > 0.0 || u_dof2.w > 0.0 || u_lens.z > 0.0) {\n" +
                 "    highp float depth = texelFetch(u_depth, ivec2(gl_FragCoord.xy), 0).r;\n" +
                 "    vec4 large = texture(u_dofLarge, v_uv);\n" +
                 "    float k;\n" +
@@ -269,6 +304,13 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "        clamp(2.0 * large.a, 0.0, 1.0) * smoothstep(u_dof2.y, u_dof2.z, length(centered)));\n" +
                 "    }\n" +
                 "    k = max(k * u_dof2.x, u_dof2.w);\n" +
+                /* Through an open scope the world is sharp and the eyepiece is
+                 * in focus; around it the magnified world is thrown out of
+                 * focus, as WWII's scopes do. */
+                "    if (u_lens.z > 0.0) {\n" +
+                "      if (depth < 0.2) k *= 1.0 - u_lens.w;\n" +
+                "      else k = max(k * (1.0 - lensIn * u_lens.w), u_lensFx.x * smoothstep(1.0, 1.2, lensR));\n" +
+                "    }\n" +
                 "    if (k > 0.003) {\n" +
                 "      vec3 small = 0.25 * (texture(u_scene, v_uv + u_px.xy * vec2(0.5, 1.5)).rgb +\n" +
                 "        texture(u_scene, v_uv + u_px.xy * vec2(-1.5, 0.5)).rgb +\n" +
@@ -280,6 +322,14 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "          mix(med, large.rgb, (k - u_tier.y) / (1.0 - u_tier.y)));\n" +
                 "    }\n" +
                 "  }\n" +
+                /* Until the scope is at the eye its glass shows a dim, curved
+                 * reflection of the world. */
+                "  if (lensIn > 0.0 && u_lens.w < 1.0) {\n" +
+                "    highp vec2 lc = u_lens.xy * u_px.xy;\n" +
+                "    vec3 glass = texture(u_dofLarge, clamp(lc + (v_uv - lc) * 1.8, 0.0, 1.0)).rgb;\n" +
+                "    glass = glass * (0.16 + 0.3 * (1.0 - lensR * lensR)) + vec3(0.012, 0.016, 0.024);\n" +
+                "    col = mix(col, glass, lensIn * (1.0 - u_lens.w));\n" +
+                "  }\n" +
                 "  if (u_glow.x > 0.0)\n" +
                 "    col = 1.0 - (1.0 - col) * (1.0 - min(texture(u_bloom, v_uv).rgb, vec3(1.0)));\n" +
                 "  if (u_film.w > 0.0) {\n" +
@@ -288,10 +338,14 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "    col = clamp(col * mix(vec3(0.975, 0.99, 1.03), vec3(1.025, 1.005, 0.965), smoothstep(0.05, 0.75, l)), 0.0, 1.0);\n" +
                 "    col += u_film.z * col * (1.0 - col) * (col - 0.35) * 1.5384615;\n" +
                 "  }\n" +
+                /* Holding the breath blacks out everything around the glass,
+                 * the rifle's glow included. */
+                "  if (u_lens.z > 0.0)\n" +
+                "    col *= 1.0 - u_lensFx.y * (1.0 - lensIn);\n" +
                 "  o = vec4(col, 1.0);\n}\n",
                 ["u_scene", "u_bloom", "u_depth", "u_dofMed", "u_dofLarge"],
                 ["u_px", "u_glow", "u_dof", "u_dof2", "u_film", "u_near", "u_tier",
-                 "u_motion", "u_motionRotation", "u_motionMove"]);
+                 "u_motion", "u_motionRotation", "u_motionMove", "u_lens", "u_lensInv", "u_lensFx"]);
             /* A scene smaller than the canvas, filtered up to it with Catmull-Rom
              * in five bilinear taps (the corner taps weigh under 0.5%), as the
              * page scales the canvas again with its own bilinear filter. */
@@ -314,6 +368,30 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "  float total = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;\n" +
                 "  o = vec4(clamp(c / total, 0.0, 1.0), 1.0);\n}\n",
                 ["u_src"], ["u_size"]);
+            /* The scope's glass outline as a 64-sided fan in normalized device
+             * coordinates, for the stencil that keeps the rifle out of it. */
+            var lensVs = gl.createShader(gl.VERTEX_SHADER);
+            gl.shaderSource(lensVs, "#version 300 es\nuniform highp vec2 u_center;\nuniform highp mat2 u_axes;\n" +
+                "void main() {\n" +
+                "  float a = float(gl_VertexID - 1) * 0.09817477042;\n" +
+                "  vec2 rim = gl_VertexID == 0 ? vec2(0.0) : u_axes * vec2(cos(a), sin(a));\n" +
+                "  gl_Position = vec4(u_center + rim, 0.0, 1.0);\n}\n");
+            gl.compileShader(lensVs);
+            var lensFs = gl.createShader(gl.FRAGMENT_SHADER);
+            gl.shaderSource(lensFs, "#version 300 es\nprecision mediump float;\nout vec4 o;\nvoid main() { o = vec4(0.0); }\n");
+            gl.compileShader(lensFs);
+            var lens = gl.createProgram();
+            gl.attachShader(lens, lensVs);
+            gl.attachShader(lens, lensFs);
+            gl.linkProgram(lens);
+            if (gl.getProgramParameter(lens, gl.LINK_STATUS)) {
+                programs.lens = { program: lens, u_center: gl.getUniformLocation(lens, "u_center"),
+                    u_axes: gl.getUniformLocation(lens, "u_axes") };
+            } else {
+                console.warn("[scene-fx] lens failed: " + gl.getProgramInfoLog(lens) + " " +
+                    gl.getShaderInfoLog(lensVs) + " " + gl.getShaderInfoLog(lensFs));
+                ok = false;
+            }
             gl.useProgram(previous);
             if (!ok) return false;
             fx.programs = programs;
@@ -457,7 +535,10 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             if (!t || !P) return;
             var w = fx.width, h = fx.height, qw = t.qw, qh = t.qh, ew = t.ew, eh = t.eh;
             var glow0 = H[o], glow1 = H[o + 1], ads = H[o + 6], motion = H[o + 18], backdrop = H[o + 33];
-            var glow = glow0 > 0 || glow1 > 0, blurBehind = backdrop > 0.004, dof = ads > 0.004 || blurBehind;
+            var lensPresence = H[o + 40], lensBlur = H[o + 42];
+            /* Any window the stencil cut also needs its glass. */
+            var lens = lensPresence > 0, scopeBlur = lens && lensBlur > 0.004;
+            var glow = glow0 > 0 || glow1 > 0, blurBehind = backdrop > 0.004, dof = ads > 0.004 || blurBehind || lens;
             var lines = h / 480;
             var program = gl.getParameter(gl.CURRENT_PROGRAM);
             var vao = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
@@ -520,9 +601,11 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 fx.pass(P.dof, t.qFbo[0], qw, qh);
                 /* Behind a menu, two wider passes take the quarter image back
                  * and forth to a deviation of 13 pixels at 480 lines; each
-                 * pass's nearer taps stay within twice the blur already there. */
+                 * pass's nearer taps stay within twice the blur already there.
+                 * Around an open scope two wider passes reach about 9 pixels. */
                 var b = lines / 1.5;
-                var steps = blurBehind ? [Math.max(near, 0.8 * b), 1.6 * b, 3.2 * b] : [near];
+                var steps = blurBehind ? [Math.max(near, 0.8 * b), 1.6 * b, 3.2 * b] :
+                    (scopeBlur ? [Math.max(near, 0.8 * b), 1.4 * b, 2.2 * b] : [near]);
                 gl.useProgram(P.dofBlur.program);
                 for (var p = 0; p < steps.length; ++p) {
                     gl.uniform2f(P.dofBlur.u_step, steps[p] / qw, steps[p] / qh);
@@ -545,6 +628,18 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             if (motion > 0) {
                 gl.uniformMatrix3fv(C.u_motionRotation, false, H, o + 19, 9);
                 gl.uniform3f(C.u_motionMove, H[o + 28], H[o + 29], H[o + 30]);
+            }
+            /* The glass's outline takes a pixel offset from its centre to the
+             * unit circle: the inverse of its half-axes, per pixel. */
+            var ax = H[o + 36], ay = H[o + 37], bx = H[o + 38], by = H[o + 39];
+            var det = ax * by - bx * ay;
+            if (lens && Math.abs(det) > 1e-6) {
+                var radius = 0.5 * Math.min(Math.hypot(ax * w, ay * h), Math.hypot(bx * w, by * h));
+                gl.uniform4f(C.u_lens, (H[o + 34] + 1) * 0.5 * w, (H[o + 35] + 1) * 0.5 * h, lensPresence, H[o + 41]);
+                gl.uniform4f(C.u_lensInv, 2 * by / (det * w), -2 * bx / (det * h), -2 * ay / (det * w), 2 * ax / (det * h));
+                gl.uniform4f(C.u_lensFx, lensBlur, H[o + 43], Math.min(1.5 / Math.max(radius, 1), 0.5), 0);
+            } else {
+                gl.uniform4f(C.u_lens, 0, 0, 0, 0);
             }
             var sources = [t.color, t.e[1], t.depth, t.q[0], t.q[1]];
             for (var s = 0; s < sources.length; ++s) fx.texture(s, sources[s]);
@@ -587,6 +682,56 @@ EM_JS(void, WebSceneFx_Compose, (const float *params), {
     var fx = Module.cod2SceneFx;
     if (fx && fx.t) fx.compose(params >>> 2);
     else if (fx) fx.unscale();
+});
+
+/* Marks the scope's glass in the scene's stencil, bit 0x80, before the
+ * rifle's first draw. The D3D9 device never uses the stencil; it sets both
+ * write masks again for every draw, and the depth mask too. */
+EM_JS(void, WebSceneFx_ScopeStencil, (const float *scope), {
+    var fx = Module.cod2SceneFx;
+    if (!fx || !fx.t || !fx.programs || !fx.programs.lens) return;
+    var gl = fx.gl, o = scope >>> 2, L = fx.programs.lens;
+    var program = gl.getParameter(gl.CURRENT_PROGRAM);
+    var vao = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
+    var caps = [gl.SCISSOR_TEST, gl.BLEND, gl.DEPTH_TEST, gl.CULL_FACE, gl.POLYGON_OFFSET_FILL];
+    var enabled = [];
+    for (var c = 0; c < caps.length; ++c) {
+        enabled.push(gl.isEnabled(caps[c]));
+        gl.disable(caps[c]);
+    }
+    gl.enable(gl.STENCIL_TEST);
+    gl.stencilMask(0x80);
+    gl.stencilFunc(gl.ALWAYS, 0x80, 0x80);
+    gl.stencilOp(gl.KEEP, gl.KEEP, gl.REPLACE);
+    gl.colorMask(false, false, false, false);
+    gl.depthMask(false);
+    gl.useProgram(L.program);
+    gl.uniform2f(L.u_center, HEAPF32[o], HEAPF32[o + 1]);
+    gl.uniformMatrix2fv(L.u_axes, false, HEAPF32.subarray(o + 2, o + 6));
+    gl.bindVertexArray(fx.vao);
+    gl.drawArrays(gl.TRIANGLE_FAN, 0, 66);
+    gl.stencilMask(0);
+    gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+    gl.colorMask(true, true, true, true);
+    gl.bindVertexArray(vao);
+    gl.useProgram(program);
+    for (var r = 0; r < caps.length; ++r)
+        if (enabled[r]) gl.enable(caps[r]);
+});
+
+/* While the rifle draws, nothing of it lands on the glass. */
+EM_JS(void, WebSceneFx_ScopeMask, (int on), {
+    var fx = Module.cod2SceneFx;
+    if (!fx) return;
+    var gl = fx.gl;
+    if (on) {
+        gl.enable(gl.STENCIL_TEST);
+        gl.stencilFunc(gl.NOTEQUAL, 0x80, 0x80);
+        gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+        gl.stencilMask(0);
+    } else {
+        gl.disable(gl.STENCIL_TEST);
+    }
 });
 
 static float WebSceneFx_Clamp(float value, float lo, float hi)
@@ -644,6 +789,87 @@ void WebSceneFx_SetAim(float aimFrac)
 void WebSceneFx_SetBackdrop(float backdropFrac)
 {
     s_backdropFrac = WebSceneFx_Clamp(backdropFrac, 0.0f, 1.0f);
+}
+
+/* The cgame's scope window for the scene about to render, as the floats of a
+ * CgWwiiScopeLens; NULL closes it. A window without a usable outline, or a
+ * rifle projection with a non-positive scale, is dropped; the rifle's near
+ * clip is kept within the depth hack's range. */
+void WebSceneFx_SetScope(const float *scope)
+{
+    float *axes = s_scope + (SCENE_FX_SCOPE_AXES - SCENE_FX_SCOPE);
+    float *projection = s_scope + (SCENE_FX_SCOPE_PROJECTION - SCENE_FX_SCOPE);
+    float *nearClip = s_scope + (SCENE_FX_SCOPE_NEAR_CLIP - SCENE_FX_SCOPE);
+    int i;
+
+    memset(s_scope, 0, sizeof(s_scope));
+    if (!scope)
+        return;
+    for (i = 0; i < SCENE_FX_SCOPE_FLOATS; ++i)
+        s_scope[i] = isfinite(scope[i]) ? scope[i] : 0.0f;
+    for (i = SCENE_FX_SCOPE_PRESENCE; i <= SCENE_FX_SCOPE_DARK; ++i)
+        s_scope[i - SCENE_FX_SCOPE] = WebSceneFx_Clamp(s_scope[i - SCENE_FX_SCOPE], 0.0f, 1.0f);
+    if (!(fabsf(axes[0] * axes[3] - axes[2] * axes[1]) > 1e-6f))
+        s_scope[SCENE_FX_SCOPE_PRESENCE - SCENE_FX_SCOPE] = 0.0f;
+    if (!(projection[0] > 0.0f) || !(projection[1] > 0.0f))
+        projection[0] = projection[1] = 0.0f;
+    *nearClip = WebSceneFx_Clamp(*nearClip, 0.0f, 16.0f);
+}
+
+int WebSceneFx_ScopeAvailable(void)
+{
+    return !s_scopeUnavailable;
+}
+
+static int WebSceneFx_ScopeRequested(void)
+{
+    return s_scope[SCENE_FX_SCOPE_PRESENCE - SCENE_FX_SCOPE] > 0.0f ||
+           s_scope[SCENE_FX_SCOPE_PROJECTION - SCENE_FX_SCOPE] > 0.0f;
+}
+
+/* The rifle's projection scales while the composed view draws it, or NULL
+ * for the view's own. */
+const float *WebSceneFx_ViewmodelProjection(void)
+{
+    const float *projection = s_scope + (SCENE_FX_SCOPE_PROJECTION - SCENE_FX_SCOPE);
+
+    return s_active && projection[0] > 0.0f ? projection : NULL;
+}
+
+static float WebSceneFx_ScopeNearClip(float nearClip)
+{
+    float scope = s_scope[SCENE_FX_SCOPE_NEAR_CLIP - SCENE_FX_SCOPE];
+
+    return scope > nearClip ? scope : nearClip;
+}
+
+/* The rifle's near clip while the composed view draws it: the depth hack's
+ * nearClip, or the window's when that is further. */
+float WebSceneFx_ViewmodelNearClip(float nearClip)
+{
+    return s_active ? WebSceneFx_ScopeNearClip(nearClip) : nearClip;
+}
+
+/* Around the rifle's draws in the composed view: the stencil keeps every
+ * part of it off the glass, so the world shows through. */
+void WebSceneFx_BeginViewmodel(void)
+{
+    if (!s_active || !(s_scope[SCENE_FX_SCOPE_PRESENCE - SCENE_FX_SCOPE] > 0.0f))
+        return;
+    if (!s_scopeStencil) {
+        WebSceneFx_ScopeStencil(s_scope);
+        s_scopeStencil = 1;
+    }
+    WebSceneFx_ScopeMask(1);
+    s_scopeMasking = 1;
+}
+
+void WebSceneFx_EndViewmodel(void)
+{
+    if (!s_scopeMasking)
+        return;
+    WebSceneFx_ScopeMask(0);
+    s_scopeMasking = 0;
 }
 
 /* The D3D view and projection matrices of the view about to begin. */
@@ -743,7 +969,7 @@ static void WebSceneFx_FillParams(float *params)
     params[SCENE_FX_ADS] = dof ? s_adsFrac : 0.0f;
     params[SCENE_FX_VM_START] = s_vmStart;
     params[SCENE_FX_VM_END] = s_vmEnd;
-    params[SCENE_FX_NEAR_CLIP] = s_nearClip;
+    params[SCENE_FX_NEAR_CLIP] = WebSceneFx_ScopeNearClip(s_nearClip);
     params[SCENE_FX_NEAR_BLUR] = 3.0f;
     params[SCENE_FX_SHARPEN] = film ? 0.147f : 0.0f;
     params[SCENE_FX_SATURATION] = 0.96f;
@@ -758,12 +984,14 @@ static void WebSceneFx_FillParams(float *params)
     params[SCENE_FX_MOTION_PROJECTION] = s_motionProjection[0];
     params[SCENE_FX_MOTION_PROJECTION + 1] = s_motionProjection[1];
     params[SCENE_FX_BACKDROP] = s_backdropFrac;
+    memcpy(params + SCENE_FX_SCOPE, s_scope, sizeof(s_scope));
 }
 
 void WebSceneFx_EndView(void)
 {
     float params[SCENE_FX_PARAM_COUNT];
 
+    WebSceneFx_EndViewmodel();
     if (!s_active)
         return;
     s_active = 0;
@@ -783,19 +1011,24 @@ void WebSceneFx_BeginView(int x, int y, int width, int height, int screenWidth, 
     if (s_frameUsed || x || y || width != screenWidth || height != screenHeight || width <= 0 || height <= 0)
         return;
     s_frameUsed = 1;
+    s_scopeStencil = 0;
     WebSceneFx_TrackCamera();
     /* r_fullbright clears the frame buffer before it begins the view. */
-    if (WebSceneFx_Enabled(r_fullbright))
+    if (WebSceneFx_Enabled(r_fullbright)) {
+        s_scopeUnavailable = 1;
         return;
+    }
     samples = WebSceneFx_Samples();
     WebSceneFx_SceneSize(width, height, &sceneWidth, &sceneHeight);
     scaled = sceneWidth != width || sceneHeight != height;
     if (!scaled && !WebSceneFx_GlowEnabled() && !WebSceneFx_Enabled(r_filmTweakEnable) && samples <= 1 &&
-        !(WebSceneFx_Enabled(r_dof_enable) && s_adsFrac > 0.0f) && s_motionScale <= 0.0f && s_backdropFrac <= 0.0f)
+        !(WebSceneFx_Enabled(r_dof_enable) && s_adsFrac > 0.0f) && s_motionScale <= 0.0f && s_backdropFrac <= 0.0f &&
+        !WebSceneFx_ScopeRequested())
         return;
     s_nearClip = isfinite(depthHackNearClip) && depthHackNearClip > 0.0f ? depthHackNearClip : 0.1f;
     s_worldNearClip = isfinite(worldNearClip) && worldNearClip > 0.0f ? worldNearClip : SCENE_FX_DEFAULT_WORLD_NEAR_CLIP;
     s_active = WebSceneFx_Bind(sceneWidth, sceneHeight, samples, width, height);
+    s_scopeUnavailable = !s_active;
 }
 
 void WebSceneFx_EndFrame(void)

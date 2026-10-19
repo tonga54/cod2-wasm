@@ -601,6 +601,21 @@ void RB_SetDepthHackNearClip(float nearClip)
     }
 }
 
+#ifdef __EMSCRIPTEN__
+/* The depth hack's near clip, with the view weapon's own x and y projection
+ * scales, or the view's when scale is NULL. A scoped rifle keeps its size on
+ * screen while the world is magnified around it. */
+void RB_SetViewmodelProjection(float nearClip, const float *scale)
+{
+    const float *view = (const float *)&backEnd.viewParms->projectionMatrix;
+    D3DMATRIX *projection = &RB_GetActiveCodeMatrices()->projection.matrix[0];
+
+    projection->_11 = scale ? scale[0] : view[0];
+    projection->_22 = scale ? scale[1] : view[5];
+    RB_SetDepthHackNearClip(nearClip);
+}
+#endif
+
 void RB_SetShadowLookupMatrix(const D3DMATRIX *matrix)
 {
     r_backEndGlobals_t *be = &backEnd;

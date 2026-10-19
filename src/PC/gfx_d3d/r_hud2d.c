@@ -1,6 +1,7 @@
 #include "common_types.h"
 #include "imports.h"
 #include "headers/PC/gfx_d3d/r_hud2d.h"
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -44,6 +45,10 @@ static const char *const s_hudImageNames[R_HUD_IMAGE_COUNT] = {
     "*menu_shade",
     "*menu_pill",
     "*menu_cursor",
+    "*hud_scope_lens0",
+    "*hud_scope_lens1",
+    "*hud_scope_lens2",
+    "*hud_scope_lens3",
 };
 
 static GfxImage s_hudImages[R_HUD_IMAGE_COUNT];
@@ -345,6 +350,201 @@ MaterialHandle R_CreateHudGrayMaterial(int slot, MaterialHandle source, const by
     if (gray)
         *aspect = (float)width / (float)height;
     return gray;
+}
+
+/* Each texel of a color block as B, G, R. A DXT1 block whose first color is
+ * not above its second holds three colors and transparent black. */
+static void R_DecodeColorBlock(const byte *color, int dxt1, byte (*bgr)[3], byte *alpha)
+{
+    int palette[4][3];
+    int endpoints[2];
+    unsigned int bits;
+    int i, c;
+
+    for (i = 0; i < 2; i++) {
+        endpoints[i] = color[2 * i] | (color[2 * i + 1] << 8);
+        palette[i][0] = (endpoints[i] & 31) * 255 / 31;
+        palette[i][1] = ((endpoints[i] >> 5) & 63) * 255 / 63;
+        palette[i][2] = ((endpoints[i] >> 11) & 31) * 255 / 31;
+    }
+    for (c = 0; c < 3; c++) {
+        if (!dxt1 || endpoints[0] > endpoints[1]) {
+            palette[2][c] = (2 * palette[0][c] + palette[1][c]) / 3;
+            palette[3][c] = (palette[0][c] + 2 * palette[1][c]) / 3;
+        } else {
+            palette[2][c] = (palette[0][c] + palette[1][c]) / 2;
+            palette[3][c] = 0;
+        }
+    }
+    bits = (unsigned int)color[4] | ((unsigned int)color[5] << 8) | ((unsigned int)color[6] << 16) |
+           ((unsigned int)color[7] << 24);
+    for (i = 0; i < 16; i++) {
+        int index = (bits >> (2 * i)) & 3;
+
+        for (c = 0; c < 3; c++)
+            bgr[i][c] = (byte)palette[index][c];
+        if (dxt1)
+            alpha[i] = endpoints[0] <= endpoints[1] && index == 3 ? 0 : 255;
+    }
+}
+
+int R_DecodeLensImage(const byte *file, int fileLen, byte *bgra, int *width, int *height)
+{
+    const GfxImageFileHeader *header = (const GfxImageFileHeader *)file;
+    const byte *block;
+    byte *full;
+    int w, h, blockBytes, blocksW, blocksH, bx, by, i, shift, outW, outH, x, y;
+
+    if (!R_GetGrayImageSize(file, fileLen, &w, &h))
+        return 0;
+    blockBytes = R_GrayBlockBytes(header->format);
+    blocksW = (w + 3) / 4;
+    blocksH = (h + 3) / 4;
+    block = file + fileLen - blocksW * blocksH * blockBytes;
+    full = (byte *)malloc((size_t)w * h * 4);
+    if (!full)
+        return 0;
+
+    for (by = 0; by < blocksH; by++) {
+        for (bx = 0; bx < blocksW; bx++, block += blockBytes) {
+            byte bgr[16][3];
+            byte alpha[16];
+
+            if (blockBytes == DXT1_BLOCK_BYTES) {
+                R_DecodeColorBlock(block, 1, bgr, alpha);
+            } else {
+                R_DecodeBlockAlpha(block, header->format, alpha);
+                R_DecodeColorBlock(block + 8, 0, bgr, alpha);
+            }
+            for (i = 0; i < 16; i++) {
+                x = bx * 4 + (i & 3);
+                y = by * 4 + (i >> 2);
+                if (x < w && y < h) {
+                    byte *texel = full + (y * w + x) * 4;
+
+                    texel[0] = bgr[i][0];
+                    texel[1] = bgr[i][1];
+                    texel[2] = bgr[i][2];
+                    texel[3] = alpha[i];
+                }
+            }
+        }
+    }
+
+    /* Each halving averages 2x2 texels, their colors weighted by alpha so the
+     * reticle's edges do not take on the color of clear texels. */
+    for (shift = 0; (w >> shift) > R_HUD_LENS_MAX_SIZE || (h >> shift) > R_HUD_LENS_MAX_SIZE; shift++)
+        ;
+    outW = w >> shift > 0 ? w >> shift : 1;
+    outH = h >> shift > 0 ? h >> shift : 1;
+    for (y = 0; y < outH; y++) {
+        for (x = 0; x < outW; x++) {
+            unsigned int sum[4] = { 0, 0, 0, 0 }, plain[3] = { 0, 0, 0 };
+            int n = 0, sx, sy, c;
+            byte *out = bgra + (y * outW + x) * 4;
+
+            for (sy = y << shift; sy < ((y + 1) << shift) && sy < h; sy++) {
+                for (sx = x << shift; sx < ((x + 1) << shift) && sx < w; sx++) {
+                    const byte *texel = full + (sy * w + sx) * 4;
+
+                    for (c = 0; c < 3; c++) {
+                        sum[c] += texel[c] * texel[3];
+                        plain[c] += texel[c];
+                    }
+                    sum[3] += texel[3];
+                    n++;
+                }
+            }
+            for (c = 0; c < 3; c++)
+                out[c] = (byte)(sum[3] ? sum[c] / sum[3] : plain[c] / (unsigned int)n);
+            out[3] = (byte)(sum[3] / (unsigned int)n);
+        }
+    }
+    free(full);
+    *width = outW;
+    *height = outH;
+    return 1;
+}
+
+/* Fainter texels are still part of the clear lens or its darkening rim. */
+#define LENS_OPAQUE_ALPHA 230
+#define LENS_DIRECTIONS 16
+
+float R_ClearOutsideLens(byte *bgra, int width, int height)
+{
+    float half = 0.5f * (float)(width < height ? width : height);
+    float cx = 0.5f * (float)width, cy = 0.5f * (float)height;
+    float edges[LENS_DIRECTIONS], edge;
+    int found = 0, d, x, y;
+
+    /* Between the axes, clear of a reticle's posts and wires. */
+    for (d = 0; d < LENS_DIRECTIONS; d++) {
+        float angle = ((float)d + 0.5f) * (6.2831853f / LENS_DIRECTIONS);
+        float dx = cosf(angle), dy = sinf(angle), r;
+
+        for (r = 0.3f * half; r < half; r += 0.5f) {
+            int tx = (int)floorf(cx + dx * r), ty = (int)floorf(cy + dy * r);
+
+            if (tx < 0 || ty < 0 || tx >= width || ty >= height)
+                break;
+            if (bgra[(ty * width + tx) * 4 + 3] >= LENS_OPAQUE_ALPHA) {
+                int k = found++;
+
+                while (k > 0 && edges[k - 1] > r) {
+                    edges[k] = edges[k - 1];
+                    k--;
+                }
+                edges[k] = r;
+                break;
+            }
+        }
+    }
+    edge = found ? edges[found / 2] : half;
+    for (y = 0; y < height; y++) {
+        for (x = 0; x < width; x++) {
+            float fx = (float)x + 0.5f - cx, fy = (float)y + 0.5f - cy;
+            float cover = edge + 0.5f - sqrtf(fx * fx + fy * fy);
+            byte *alpha = bgra + (y * width + x) * 4 + 3;
+
+            if (cover <= 0.0f)
+                *alpha = 0;
+            else if (cover < 1.0f)
+                *alpha = (byte)((float)*alpha * cover + 0.5f);
+        }
+    }
+    return edge / half;
+}
+
+MaterialHandle R_CreateHudLensMaterial(int slot, MaterialHandle overlay, float *edge)
+{
+    const Material *material = (const Material *)overlay;
+    const GfxImage *image;
+    MaterialHandle lens = NULL;
+    char path[96];
+    void *file;
+    byte *bgra;
+    int fileLen, width, height;
+
+    *edge = 0.0f;
+    if (!material || material == rgp.defaultMaterial || material->textureCount < 1 || !material->textures)
+        return NULL;
+    image = material->textures[0].u.image;
+    if (!image || !image->name || Com_sprintf(path, sizeof(path), "images/%s.iwi", image->name) < 0)
+        return NULL;
+    fileLen = FS_ReadFile(path, &file);
+    if (fileLen < 0)
+        return NULL;
+    bgra = (byte *)malloc((size_t)R_HUD_LENS_MAX_SIZE * R_HUD_LENS_MAX_SIZE * 4);
+    if (bgra && R_DecodeLensImage((const byte *)file, fileLen, bgra, &width, &height)) {
+        float radius = R_ClearOutsideLens(bgra, width, height);
+
+        lens = R_CreateHudImageMaterial(slot, bgra, width, height);
+        if (lens)
+            *edge = radius;
+    }
+    free(bgra);
+    FS_FreeFile(file);
+    return lens;
 }
 
 /* Trims the transparent margin but one texel and packs the remaining rows at

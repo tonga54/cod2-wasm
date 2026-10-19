@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the production scene post-processing view/frame logic."""
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 
@@ -54,6 +55,44 @@ compositor = source.read_text()
 assert 'COLOR_WRITEMASK' not in compositor and 'DEPTH_WRITEMASK' not in compositor
 # The compositor reads the backdrop where the C side writes it.
 assert 'backdrop = H[o + 33];' in compositor
+# And the scope's window: centre 34-35, half-axes 36-39, presence 40, open 41,
+# blur 42, darkness 43.
+assert 'var lensPresence = H[o + 40], lensBlur = H[o + 42];' in compositor
+assert 'gl.uniform4f(C.u_lens, (H[o + 34] + 1) * 0.5 * w, (H[o + 35] + 1) * 0.5 * h, lensPresence, H[o + 41]);' in compositor
+assert 'var ax = H[o + 36], ay = H[o + 37], bx = H[o + 38], by = H[o + 39];' in compositor
+assert 'gl.uniform4f(C.u_lensFx, lensBlur, H[o + 43],' in compositor
+# The view weapon's draws, and only those, get its projection and the
+# stencil that keeps it off the glass; every way out of the depth hack
+# lifts the stencil, and only leaving for another entity restores the
+# projection by hand (popping the matrix stack restores it otherwise).
+rb_state = (root / 'src/PC/gfx_d3d/rb_state.c').read_text()
+assert ('    projection->_11 = scale ? scale[0] : view[0];\n    projection->_22 = scale ? scale[1] : view[5];\n'
+        '    RB_SetDepthHackNearClip(nearClip);\n') in rb_state
+enter = backend.index('            if (depthRange == 8) {\n')
+assert backend.index('RB_SetViewmodelProjection(WebSceneFx_ViewmodelNearClip(backEnd.viewParms->depthHackNearClip),\n'
+                     '                                          WebSceneFx_ViewmodelProjection());', enter) < \
+    backend.index('WebSceneFx_BeginViewmodel();', enter) < backend.index('RB_SetDepthRange(0.0f, 0.2f);', enter)
+assert backend.count('WebSceneFx_BeginViewmodel();') == 1
+assert backend.count('                WebSceneFx_EndViewmodel();\n                RB_SetViewmodelProjection(nc, NULL);\n') == 1
+assert backend.count('            WebSceneFx_EndViewmodel();\n            RB_SetViewmodelProjection(nc, NULL);\n') == 1
+world = backend.index('        if (!isWorldSpaceEntPrev)\n            RB_PopMatrixStack();\n        if (depthRangePrev) {\n')
+assert backend.index('            if (depthRangePrev == 8)\n                WebSceneFx_EndViewmodel();\n', world) < \
+    backend.index('            RB_SetDepthRange(0.0f, 1.0f);\n            depthRangePrev = 0;', world)
+assert 'WebSceneFx_SetScope(g_webScopeLens);' in scene and \
+    scene.index('WebSceneFx_SetBackdrop(g_webBackdropFrac);') < scene.index('WebSceneFx_SetScope(g_webScopeLens);')
+# The cgame's lens, the floats R_RenderScene hands over and the compositor's
+# scope floats are the same thirteen.
+lens_struct = (root / 'src/headers/PC/cgame_mp/cg_wwiiscope.h').read_text()
+lens_struct = lens_struct[lens_struct.index('typedef struct CgWwiiScopeLens {'):lens_struct.index('} CgWwiiScopeLens;')]
+lens_floats = 0
+for dims in re.findall(r'^\s+float \w+((?:\[\d+\])*);$', lens_struct, re.M):
+    count = 1
+    for dim in re.findall(r'\[(\d+)\]', dims):
+        count *= int(dim)
+    lens_floats += count
+assert lens_floats == 13, lens_floats
+assert 'extern float g_webScopeLens[13];' in scene
+assert 'float g_webScopeLens[13];' in (root / 'src/PC/cgame_mp/cg_wwiiscope_mp.c').read_text()
 
 emscripten = '#define EM_JS(ret, name, params, ...) ret name params;\ndouble emscripten_get_now(void);\n'
 common_types = r'''
@@ -96,6 +135,18 @@ void WebSceneFx_Compose(const float *params)
 {
     ++composes;
     memcpy(composed, params, sizeof(composed));
+}
+static int stencils, masks, maskOn;
+static float stenciled[SCENE_FX_SCOPE_FLOATS];
+void WebSceneFx_ScopeStencil(const float *scope)
+{
+    ++stencils;
+    memcpy(stenciled, scope, sizeof(stenciled));
+}
+void WebSceneFx_ScopeMask(int on)
+{
+    ++masks;
+    maskOn = on;
 }
 static void defaults(void)
 {
@@ -361,7 +412,7 @@ int main(void)
 
     /* A menu's blurred backdrop composes on its own, whatever the other
      * effects, and stays between none and all of it. */
-    assert(SCENE_FX_BACKDROP == 33 && SCENE_FX_PARAM_COUNT == 34);
+    assert(SCENE_FX_BACKDROP == 33 && SCENE_FX_PARAM_COUNT == 47);
     defaults();
     glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
     motion.current.enabled = 0;
@@ -420,7 +471,130 @@ int main(void)
     WebSceneFx_EndView();
     WebSceneFx_EndFrame();
     assert(!binds && !composes);
-    puts("PASS: 600 composed frames, single compose per frame before Present, partial/fullbright/disabled views drawn directly, bounded glow, viewmodel and near world focus parameters, camera motion reprojected over a 10 ms exposure with aim fade, cuts and still cameras, a bounded menu backdrop, scenes rendered at r_sceneHeight lines and the screen's aspect on taller screens");
+
+    /* A scope's window: CgWwiiScopeLens's thirteen floats after the backdrop. */
+    assert(SCENE_FX_SCOPE == 34 && SCENE_FX_SCOPE_AXES == 36 && SCENE_FX_SCOPE_PRESENCE == 40 &&
+           SCENE_FX_SCOPE_OPEN == 41 && SCENE_FX_SCOPE_BLUR == 42 && SCENE_FX_SCOPE_DARK == 43 &&
+           SCENE_FX_SCOPE_PROJECTION == 44 && SCENE_FX_SCOPE_NEAR_CLIP == 46 && SCENE_FX_SCOPE_FLOATS == 13);
+    {
+        const float lens[13] = {0.05f, -0.02f, 0.585f, -0.01f, 0.01f, 1.04f, 1, 0.5f, 0.5f, 0.25f, 1.7f, 3.0f, 0.8f};
+        float bad[13];
+        const float *projection;
+
+        defaults();
+        glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
+        motion.current.enabled = 0;
+        binds = composes = stencils = masks = 0;
+        frame(0, 1280, 0.1f);
+        assert(!binds && !composes);
+        /* With every other effect off a window composes, and its floats reach
+         * the compose pass. */
+        WebSceneFx_SetScope(lens);
+        WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 4.0f);
+        assert(binds == 1 && WebSceneFx_ScopeAvailable());
+        /* The rifle's projection while the composed view draws it, and its
+         * near clip: the window's, unless the depth hack's is further. */
+        projection = WebSceneFx_ViewmodelProjection();
+        assert(projection && projection[0] == 1.7f && projection[1] == 3.0f);
+        assert(WebSceneFx_ViewmodelNearClip(0.1f) == 0.8f && WebSceneFx_ViewmodelNearClip(2.0f) == 2.0f);
+        /* The stencil is drawn once per view, before the rifle's first draw;
+         * each of its draws is masked and unmasked. */
+        WebSceneFx_BeginViewmodel();
+        assert(stencils == 1 && masks == 1 && maskOn == 1 && !memcmp(stenciled, lens, sizeof(lens)));
+        WebSceneFx_EndViewmodel();
+        assert(masks == 2 && maskOn == 0);
+        WebSceneFx_EndViewmodel();
+        assert(masks == 2);
+        WebSceneFx_BeginViewmodel();
+        assert(stencils == 1 && masks == 3 && maskOn == 1);
+        /* A view that ends while the rifle draws still lifts the mask. */
+        WebSceneFx_EndView();
+        assert(masks == 4 && maskOn == 0 && composes == 1);
+        for (int i = 0; i < 13; ++i)
+            assert(composed[SCENE_FX_SCOPE + i] == lens[i]);
+        /* The rifle's depth is linearized with the near clip it was drawn with. */
+        assert(composed[SCENE_FX_NEAR_CLIP] == 0.8f);
+        WebSceneFx_EndFrame();
+        /* Outside a composed view the rifle keeps the view's projection and
+         * near clip and draws without the stencil. */
+        assert(!WebSceneFx_ViewmodelProjection());
+        assert(WebSceneFx_ViewmodelNearClip(0.1f) == 0.1f);
+        WebSceneFx_BeginViewmodel();
+        WebSceneFx_EndViewmodel();
+        assert(stencils == 1 && masks == 4);
+        WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 4.0f);
+        WebSceneFx_BeginViewmodel();
+        assert(stencils == 2);
+        WebSceneFx_EndFrame();
+        assert(maskOn == 0);
+        /* The rifle's projection alone composes, before its glass opens. */
+        memcpy(bad, lens, sizeof(bad));
+        bad[6] = 0;
+        WebSceneFx_SetScope(bad);
+        binds = composes = stencils = 0;
+        WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 4.0f);
+        WebSceneFx_BeginViewmodel();
+        assert(binds == 1 && WebSceneFx_ViewmodelProjection() && !stencils);
+        WebSceneFx_EndFrame();
+        /* Finite and bounded: the fractions clamp, an outline without area
+         * closes the window, a non-positive projection is dropped and the
+         * near clip stays within the depth hack's range. */
+        for (int i = 0; i < 13; ++i)
+            bad[i] = NAN;
+        WebSceneFx_SetScope(bad);
+        binds = 0;
+        frame(0, 1280, 0.1f);
+        assert(!binds);
+        memcpy(bad, lens, sizeof(bad));
+        bad[12] = 1e9f;
+        WebSceneFx_SetScope(bad);
+        frame(0, 1280, 0.1f);
+        assert(composed[SCENE_FX_SCOPE_NEAR_CLIP] == 16.0f && composed[SCENE_FX_NEAR_CLIP] == 16.0f);
+        bad[12] = -1;
+        WebSceneFx_SetScope(bad);
+        frame(0, 1280, 0.1f);
+        assert(composed[SCENE_FX_SCOPE_NEAR_CLIP] == 0 && composed[SCENE_FX_NEAR_CLIP] == 0.1f);
+        bad[12] = NAN;
+        WebSceneFx_SetScope(bad);
+        frame(0, 1280, 0.1f);
+        assert(composed[SCENE_FX_SCOPE_NEAR_CLIP] == 0 && composed[SCENE_FX_NEAR_CLIP] == 0.1f);
+        memcpy(bad, lens, sizeof(bad));
+        bad[6] = 3; bad[7] = -1; bad[8] = 2; bad[9] = INFINITY;
+        WebSceneFx_SetScope(bad);
+        frame(0, 1280, 0.1f);
+        assert(composed[SCENE_FX_SCOPE_PRESENCE] == 1 && composed[SCENE_FX_SCOPE_OPEN] == 0 &&
+               composed[SCENE_FX_SCOPE_BLUR] == 1 && composed[SCENE_FX_SCOPE_DARK] == 0);
+        memcpy(bad, lens, sizeof(bad));
+        bad[2] = bad[3] = 0;
+        WebSceneFx_SetScope(bad);
+        frame(0, 1280, 0.1f);
+        assert(composed[SCENE_FX_SCOPE_PRESENCE] == 0 && composed[SCENE_FX_SCOPE_PROJECTION] == 1.7f);
+        memcpy(bad, lens, sizeof(bad));
+        bad[11] = -3;
+        WebSceneFx_SetScope(bad);
+        frame(0, 1280, 0.1f);
+        assert(composed[SCENE_FX_SCOPE_PROJECTION] == 0 && composed[SCENE_FX_SCOPE_PROJECTION + 1] == 0);
+        /* Without a composed target, after a failed bind or under
+         * r_fullbright, the cgame keeps the stock overlay. */
+        WebSceneFx_SetScope(lens);
+        bindResult = 0;
+        frame(0, 1280, 0.1f);
+        assert(!WebSceneFx_ScopeAvailable());
+        bindResult = 1;
+        frame(0, 1280, 0.1f);
+        assert(WebSceneFx_ScopeAvailable());
+        fullbright.current.enabled = 1;
+        frame(0, 1280, 0.1f);
+        assert(!WebSceneFx_ScopeAvailable());
+        fullbright.current.enabled = 0;
+        frame(0, 1280, 0.1f);
+        assert(WebSceneFx_ScopeAvailable());
+        WebSceneFx_SetScope(NULL);
+        binds = 0;
+        frame(0, 1280, 0.1f);
+        assert(!binds);
+    }
+    puts("PASS: 600 composed frames, single compose per frame before Present, partial/fullbright/disabled views drawn directly, bounded glow, viewmodel and near world focus parameters, camera motion reprojected over a 10 ms exposure with aim fade, cuts and still cameras, a bounded menu backdrop, scenes rendered at r_sceneHeight lines and the screen's aspect on taller screens, a scope window composed with its rifle projection and near clip and a stencil drawn once per view and lifted on every exit, bounded window floats and the stock overlay without a composed target");
     return 0;
 }
 '''
@@ -440,15 +614,36 @@ mutants = [
     ('s_lastViewValid = valid;', 's_lastViewValid = 1;'),
     ('WebSceneFx_Enabled(r_motionBlur) && ', ''),
     (' && s_motionScale <= 0.0f && ', ' && '),
-    (' && s_backdropFrac <= 0.0f)', ')'),
+    (' && s_backdropFrac <= 0.0f &&', ' &&'),
+    ('s_backdropFrac <= 0.0f &&\n        !WebSceneFx_ScopeRequested())', 's_backdropFrac <= 0.0f)'),
+    ('    s_scopeUnavailable = !s_active;\n', '    s_scopeUnavailable = 0;\n'),
+    ('        s_scopeUnavailable = 1;\n        return;', '        return;'),
+    ('    if (!s_scopeStencil) {', '    if (1) {'),
+    ('    s_scopeStencil = 0;\n    WebSceneFx_TrackCamera();', '    WebSceneFx_TrackCamera();'),
+    ('    WebSceneFx_ScopeMask(1);\n    s_scopeMasking = 1;', '    WebSceneFx_ScopeMask(1);'),
+    ('    WebSceneFx_EndViewmodel();\n    if (!s_active)\n        return;\n    s_active = 0;',
+     '    if (!s_active)\n        return;\n    s_active = 0;'),
+    ('    return s_active && projection[0] > 0.0f ? projection : NULL;',
+     '    return projection[0] > 0.0f ? projection : NULL;'),
+    ('    memcpy(params + SCENE_FX_SCOPE, s_scope, sizeof(s_scope));\n', ''),
+    ('        s_scope[i - SCENE_FX_SCOPE] = WebSceneFx_Clamp(s_scope[i - SCENE_FX_SCOPE], 0.0f, 1.0f);', '        (void)0;'),
+    ('    if (!(fabsf(axes[0] * axes[3] - axes[2] * axes[1]) > 1e-6f))\n'
+     '        s_scope[SCENE_FX_SCOPE_PRESENCE - SCENE_FX_SCOPE] = 0.0f;\n', ''),
+    ('    if (!(projection[0] > 0.0f) || !(projection[1] > 0.0f))\n        projection[0] = projection[1] = 0.0f;\n', ''),
+    ('    *nearClip = WebSceneFx_Clamp(*nearClip, 0.0f, 16.0f);\n', ''),
+    ('    return scope > nearClip ? scope : nearClip;', '    return scope;'),
+    ('    return s_active ? WebSceneFx_ScopeNearClip(nearClip) : nearClip;',
+     '    return WebSceneFx_ScopeNearClip(nearClip);'),
+    ('params[SCENE_FX_NEAR_CLIP] = WebSceneFx_ScopeNearClip(s_nearClip);', 'params[SCENE_FX_NEAR_CLIP] = s_nearClip;'),
     ('params[SCENE_FX_BACKDROP] = s_backdropFrac;', 'params[SCENE_FX_BACKDROP] = 0.0f;'),
     ('s_backdropFrac = WebSceneFx_Clamp(backdropFrac, 0.0f, 1.0f);', 's_backdropFrac = backdropFrac;'),
     ('params[SCENE_FX_MOTION_PROJECTION + 1] = s_motionProjection[1];',
      'params[SCENE_FX_MOTION_PROJECTION + 1] = s_motionProjection[0];'),
     ('    WebSceneFx_TrackCamera();\n    /* r_fullbright clears the frame buffer before it begins the view. */\n'
-     '    if (WebSceneFx_Enabled(r_fullbright))\n        return;\n',
+     '    if (WebSceneFx_Enabled(r_fullbright)) {\n        s_scopeUnavailable = 1;\n        return;\n    }\n',
      '    /* r_fullbright clears the frame buffer before it begins the view. */\n'
-     '    if (WebSceneFx_Enabled(r_fullbright))\n        return;\n    WebSceneFx_TrackCamera();\n'),
+     '    if (WebSceneFx_Enabled(r_fullbright)) {\n        s_scopeUnavailable = 1;\n        return;\n    }\n'
+     '    WebSceneFx_TrackCamera();\n'),
     ('    if (lines > 0 && lines < height) {', '    if (lines > 0) {'),
     ('(float)lines / (float)height + 0.5f);', '(float)lines / (float)height);'),
     ('        if (*sceneWidth < 1)\n            *sceneWidth = 1;\n', ''),
@@ -476,4 +671,4 @@ with tempfile.TemporaryDirectory(prefix='cod2-scene-fx-') as tmp:
                         '-lm', '-o', str(path / f'mutant{index}')], check=True)
         result = subprocess.run([str(path / f'mutant{index}')], capture_output=True)
         assert result.returncode != 0, f'mutant survived: {after!r}'
-    print(f'PASS: {len(mutants)} motion blur, backdrop and scene size mutants fail')
+    print(f'PASS: {len(mutants)} motion blur, backdrop, scene size and scope window mutants fail')

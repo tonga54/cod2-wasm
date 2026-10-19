@@ -37,7 +37,8 @@ typedef struct {EffectTemplate *viewFlashEffect,*worldFlashEffect;} weaponInfo_t
 static struct {int cubemapShot;float viewModelOrigin[3];} cgStorage,*cg=&cgStorage;
 static EffectTemplate *muzzleLightEffects[128],*played;
 static unsigned short flashTag=7;static void *s_barrelTags[]={&flashTag};
-static int playedCount;
+static int playedCount,scopeLightsOnly;
+static int CG_WwiiScopeMuzzleLightsOnly(void){return scopeLightsOnly;}
 static int CG_WeaponDObjHandle(int weapon){return 100+weapon;}
 static int FX_GetBoneIndex(int handle,int tag){assert(tag==7);return 3;}
 static void FX_PlayEntityEffect(void *fx,const float *origin,int unused,int *bolt){assert(origin);assert(bolt[1]==3);played=fx;playedCount++;}
@@ -88,12 +89,15 @@ int main(void){
  assert(!memcmp(saved,primitives,sizeof(saved)));
  muzzleLightEffects[1]=lights;
  weaponInfo_t info={.viewFlashEffect=&fx,.worldFlashEffect=&fx};entityState_t ent={.number=2};
+ /* A raised WWII scope draws its rifle with its own projection: its flash
+  * keeps only the light, which a world-space sprite would not follow. */
+ for(int scope=0;scope<2;scope++)
  for(int view=0;view<2;view++)for(int local=0;local<2;local++)for(int gun=0;gun<2;gun++)for(int cube=0;cube<2;cube++) {
-  centity_t cent={.bMuzzleFlash=1};cg->cubemapShot=cube;playedCount=0;
+  centity_t cent={.bMuzzleFlash=1};cg->cubemapShot=cube;playedCount=0;scopeLightsOnly=scope;
   DrawMuzzle(&cent,&ent,&info,1,view,local,gun);
   int expected=(!local||view)&&(gun||(view&&!cube));
   assert(playedCount==expected);
-  if(expected)assert(played==(gun?&fx:lights));
+  if(expected)assert(played==(view?(gun&&!scope?&fx:lights):&fx));
   assert(cent.bMuzzleFlash==(local&&!view));
  }
  ClearHunk();
@@ -105,4 +109,4 @@ with tempfile.TemporaryDirectory(prefix='cod2-muzzle-appearance-') as tmp:
     p=Path(tmp);(p/'test.c').write_text(support+source[match.start():end]+source[light_match.start():light_end]+draw+checks)
     subprocess.run(['cc','-O1','-g','-fsanitize=address,undefined','-fno-sanitize-recover=all',str(p/'test.c'),'-lm','-o',str(p/'test')],check=True)
     subprocess.run([str(p/'test')],check=True)
-print('PASS: 60 full 24-primitive variants, scoped light-only FX and all 16 view/local/model/cubemap combinations under ASan/UBSan')
+print('PASS: 60 full 24-primitive variants, scoped light-only FX and all 32 view/local/model/cubemap/WWII-scope combinations under ASan/UBSan')

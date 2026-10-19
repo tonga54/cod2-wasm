@@ -39,6 +39,7 @@ body = (function(utils, 'R_ConvertColorToBytes') + function(commands, 'R_AddCmdD
 
 support = r'''
 #include <assert.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
