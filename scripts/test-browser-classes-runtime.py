@@ -75,7 +75,7 @@ run()
 	wait .5;
 	// A client from before camouflage and attachments ends after the tactical.
 	answer(players[0], "class,kar98k_mp,luger_mp,frag_grenade_german_mp,smoke_grenade_russian_mp");
-	answer(players[1], "class,ppsh_mp,colt_mp,frag_grenade_russian_mp,smoke_grenade_british_mp,none,none,"
+	answer(players[1], "class,ppsh_mp,colt_mp,frag_grenade_russian_mp,smoke_grenade_british_mp,none,none," +
 		"extmag+suppressor,suppressor");
 	answer(players[2], "class,mg42_bipod_stand_mp,colt_mp,frag_grenade_american_mp,smoke_grenade_american_mp");
 	answer(players[3], "mp40_mp");
@@ -103,7 +103,7 @@ run()
 		!isDefined(p.pers["browser_class"]), loadout(p));
 	answer(p, "class,m1garand_mp,colt_mp,frag_grenade_american_mp,smoke_grenade_american_mp,none,none,suppressor,none");
 	answer(p, "class,thompson_mp,colt_mp,frag_grenade_american_mp,smoke_grenade_american_mp,none,none,reflex+lens,none");
-	answer(p, "class,thompson_mp,colt_mp,frag_grenade_american_mp,smoke_grenade_american_mp,none,none,none,"
+	answer(p, "class,thompson_mp,colt_mp,frag_grenade_american_mp,smoke_grenade_american_mp,none,none,none," +
 		"suppressor+extmag");
 	wait .5;
 	check("invalid-attachments-rejected", !isAlive(p) && !isDefined(p.pers["browser_class"]), loadout(p));
@@ -160,7 +160,7 @@ run()
 
 	// A class chosen while alive waits for the next spawn.
 	p = players[0];
-	answer(p, "class,thompson_mp,webley_mp,frag_grenade_british_mp,smoke_grenade_german_mp,winter,none,"
+	answer(p, "class,thompson_mp,webley_mp,frag_grenade_british_mp,smoke_grenade_german_mp,winter,none," +
 		"extmag+rapidfire,quickdraw");
 	wait .5;
 	check("alive-change-waits-for-spawn", p getWeaponSlotWeapon("primary") == "kar98k_mp" &&
