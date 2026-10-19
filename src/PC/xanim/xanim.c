@@ -1630,9 +1630,11 @@ static void XAnimCalcMakeTimeLocal(const XAnimParts *parts, float time, XAnimTim
     animTime->frameFrac = (float)parts->numframes * time;
     animTime->frameIndex = (int)animTime->frameFrac;
 
+    /* At the end, the last pair of keys lerped all the way: the final key,
+     * which is the pose an anim that has finished holds. */
     if (animTime->frameIndex >= animTime->frameCount) {
         animTime->frameIndex = animTime->frameCount - 1;
-        animTime->frameFrac = (float)animTime->frameIndex;
+        animTime->frameFrac = (float)animTime->frameCount;
     }
     if (animTime->frameIndex < 0) {
         animTime->frameIndex = 0;

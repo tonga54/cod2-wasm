@@ -9,13 +9,13 @@
 /* Each scope's glass in the space of the gun's j_gun bone, read from the
  * sniper viewmodels' xmodelsurfs: the rim of the glass dome nearest the
  * muzzle (+x), centred on the scope's axis. The Mosin-Nagant's glass is the
- * inner disk within its brass ring. The eye positions and cants were measured
- * in a match with each rifle at full aim and at rest. */
+ * inner disk within its brass ring. The eye positions and cants are those of
+ * the last frame of each rifle's ADS up anim, the pose it holds at full aim. */
 const CgWwiiScopeGlass cg_wwiiScopeGlasses[CG_WWIISCOPE_GLASS_COUNT] = {
-    { "viewmodel_kar98_scope", { -6.116f, -0.057f, 2.996f }, 0.612f, { 1.778f, -0.044f, 0.017f }, 1.74f },
-    { "viewmodel_springfield", { -5.968f, 0.255f, 3.675f }, 0.578f, { 2.942f, 0.064f, -0.084f }, 0.0f },
-    { "viewmodel_enfield_scope", { -5.70f, 1.504f, 2.382f }, 0.635f, { 2.509f, 0.063f, -0.065f }, -0.39f },
-    { "viewmodel_mosinnagant_cloth", { -5.24f, -0.022f, 3.111f }, 0.265f, { 3.714f, -0.213f, 0.123f }, 0.0f },
+    { "viewmodel_kar98_scope", { -6.116f, -0.057f, 2.996f }, 0.612f, { 1.713f, 0.004f, 0.041f }, 1.72f },
+    { "viewmodel_springfield", { -5.968f, 0.255f, 3.675f }, 0.578f, { 2.706f, 0.147f, -0.171f }, 0.0f },
+    { "viewmodel_enfield_scope", { -5.70f, 1.504f, 2.382f }, 0.635f, { 2.003f, -0.010f, 0.019f }, 0.12f },
+    { "viewmodel_mosinnagant_cloth", { -5.24f, -0.022f, 3.111f }, 0.265f, { 3.434f, -0.130f, 0.123f }, 0.0f },
 };
 
 extern int I_stricmp(const char *s0, const char *s1);
