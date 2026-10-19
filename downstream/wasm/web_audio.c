@@ -39,6 +39,7 @@ EM_JS(void, web_audio_seek, (int id, int ms), { Module.cod2Audio.seek(id,ms); })
 EM_JS(void, web_audio_rate, (int id, float rate), { Module.cod2Audio.rate(id,rate); });
 EM_JS(void, web_audio_levels, (int id, float volume, float pan), { Module.cod2Audio.levels(id,volume,pan); });
 EM_JS(void, web_audio_loop, (int id, int count), { Module.cod2Audio.loop(id,count); });
+EM_JS(void, web_audio_effect, (int id, int effect), { Module.cod2Audio.effect(id,effect); });
 EM_JS(void, WebAudio_ClearCache, (), { if(Module.cod2Audio)Module.cod2Audio.clearCache(); });
 EM_JS(void, web_audio_shutdown, (), { if(Module.cod2Audio){Module.cod2Audio.shutdown();Module.cod2Audio=null;} });
 
@@ -123,6 +124,11 @@ static void web_levels(WebSound *s)
     web_audio_levels(s->id,maximum,maximum>0?(s->right-s->left)/maximum:0);
 }
 
+/* Set while the client starts a suppressed shot: the samples begun meanwhile
+ * play through the suppressor's filters (web_audio.js). */
+static int webSampleEffect;
+void WebAudio_SetSampleEffect(int effect){webSampleEffect=effect;}
+
 int AIL_startup(unsigned buses){(void)buses;return web_audio_init();}
 void AIL_shutdown(void){while(webSounds){WebSound *s=webSounds;webSounds=s->next;free(s);}web_audio_shutdown();}
 int AIL_set_preference(unsigned n,int value){(void)n;return value;}
@@ -132,7 +138,7 @@ char *AIL_set_redist_directory(const char *dir){return (char *)dir;}
 int AIL_digital_CPU_percent(void *driver){return 0;}
 void *AIL_allocate_sample_handle(void *driver){return web_new();}
 void AIL_release_sample_handle(WebSound *s){if(!s)return;WebSound **p=&webSounds;while(*p && *p!=s)p=&(*p)->next;if(*p){*p=s->next;web_audio_remove(s->id);free(s);}}
-void AIL_init_sample(WebSound *s){if(!s)return;web_audio_reset(s->id);s->data=NULL;s->bytes=0;s->duration=0;s->dirty=1;s->floating=0;s->baseRate=s->rate=0;s->loop=1;}
+void AIL_init_sample(WebSound *s){if(!s)return;web_audio_reset(s->id);web_audio_effect(s->id,webSampleEffect);s->data=NULL;s->bytes=0;s->duration=0;s->dirty=1;s->floating=0;s->baseRate=s->rate=0;s->loop=1;}
 void AIL_set_sample_adpcm_block_size(WebSound *s,unsigned size){(void)s;(void)size;}
 void AIL_set_sample_address(WebSound *s,const void *data,unsigned bytes){if(s){s->data=data;s->bytes=bytes;s->dirty=1;}}
 void AIL_set_sample_type(WebSound *s,int format,unsigned flags){if(s){s->bits=(format&8)?32:(format&1)?16:8;s->channels=(format&2)?2:1;s->dirty=1;}}

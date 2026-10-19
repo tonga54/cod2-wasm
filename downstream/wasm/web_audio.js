@@ -42,6 +42,36 @@ function createCod2Audio(getHeap, log, Context = globalThis.AudioContext) {
     if (buffer) { cache.delete(key); cache.set(key, buffer); }
     return buffer;
   }
+  function filter(type, frequency, q) {
+    const node = context.createBiquadFilter();
+    node.type = type; node.frequency.value = frequency; node.Q.value = q;
+    return node;
+  }
+  function envelope(param, at, level, hold, decay) {
+    param.setValueAtTime(level, at);
+    param.setValueAtTime(level, at + hold);
+    param.setTargetAtTime(0, at + hold, decay);
+  }
+  /* A suppressor's report made from the gun's own: its body with the boom and
+   * the crack filtered out, a short puff of gas and the click of the action,
+   * all of it gone within a third of a second. */
+  const SUPPRESSED_LENGTH = 0.32;
+  /* A lowpass or highpass Q is a resonance in dB: -3 dB keeps it flat. */
+  const FLAT = -3.01;
+  function suppressed(source, nodes, at) {
+    const body = filter('highpass', 140, FLAT), low = filter('lowpass', 1500, FLAT), lower = filter('lowpass', 1500, FLAT);
+    const puff = filter('bandpass', 3000, 1.2), click = filter('highpass', 4500, FLAT);
+    const bodyGain = context.createGain(), puffGain = context.createGain(), clickGain = context.createGain();
+    const mix = context.createGain();
+    source.connect(body); body.connect(low); low.connect(lower); lower.connect(bodyGain); bodyGain.connect(mix);
+    source.connect(puff); puff.connect(puffGain); puffGain.connect(mix);
+    source.connect(click); click.connect(clickGain); clickGain.connect(mix);
+    envelope(bodyGain.gain, at, 1.5, 0.012, 0.05);
+    envelope(puffGain.gain, at, 0.6, 0.002, 0.012);
+    envelope(clickGain.gain, at, 0.4, 0.001, 0.004);
+    nodes.push(body, low, lower, puff, click, bodyGain, puffGain, clickGain, mix);
+    return mix;
+  }
   function position(v) {
     let value = v.offset + (v.source ? (context.currentTime-v.started)*v.rate : 0);
     if (v.buffer && v.loop === 0) value %= v.buffer.duration;
@@ -55,7 +85,8 @@ function createCod2Audio(getHeap, log, Context = globalThis.AudioContext) {
       v.source.stop(); v.source.disconnect(); v.source = null;
     }
     v.gain?.disconnect(); v.panNode?.disconnect();
-    v.gain = v.panNode = null;
+    for (const node of v.effectNodes ?? []) node.disconnect();
+    v.gain = v.panNode = v.effectNodes = null;
     v.status = done ? 2 : 8;
   }
   function play(v) {
@@ -67,22 +98,26 @@ function createCod2Audio(getHeap, log, Context = globalThis.AudioContext) {
       else { v.status = 2; return; }
     }
     const source = context.createBufferSource();
-    const gain = context.createGain(), pan = context.createStereoPanner();
+    const gain = context.createGain(), pan = context.createStereoPanner(), nodes = [];
+    const at = context.currentTime;
     source.buffer = v.buffer; source.loop = v.loop === 0;
     source.playbackRate.value = v.rate;
     gain.gain.value = v.volume; pan.pan.value = v.pan;
-    source.connect(pan); pan.connect(gain); gain.connect(output);
-    v.source = source; v.gain = gain; v.panNode = pan; v.started = context.currentTime;
+    (v.effect === 1 ? suppressed(source, nodes, at) : source).connect(pan); pan.connect(gain); gain.connect(output);
+    v.source = source; v.gain = gain; v.panNode = pan; v.effectNodes = nodes; v.started = at;
     source.onended = () => {
       if (v.source !== source) return;
       source.disconnect(); gain.disconnect(); pan.disconnect();
-      v.source = v.gain = v.panNode = null;
+      for (const node of nodes) node.disconnect();
+      v.source = v.gain = v.panNode = v.effectNodes = null;
       v.status = 2; v.offset = v.buffer.duration;
     };
     source.start(0, v.offset); starts++;
+    if (v.effect === 1 && !source.loop) source.stop(at + SUPPRESSED_LENGTH);
   }
   return {
-    create() { const id = nextId++; voices.set(id, {status:2,offset:0,rate:1,volume:1,pan:0,loop:1,token:0}); return id; },
+    create() { const id = nextId++; voices.set(id, {status:2,offset:0,rate:1,volume:1,pan:0,loop:1,token:0,effect:0}); return id; },
+    effect(id, value) { const v=voices.get(id); if(v) v.effect=value|0; },
     reset(id) { const v=voices.get(id); if(!v)return; stop(v,true); v.token++; v.buffer=null; v.offset=0; v.rate=1; v.loop=1; },
     remove(id) { const v=voices.get(id); if(v){stop(v,true);v.token++;voices.delete(id);} },
     pcm(id, ptr, length, rate, bits, channels, floating) {

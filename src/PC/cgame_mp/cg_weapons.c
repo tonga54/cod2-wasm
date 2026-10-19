@@ -12,15 +12,19 @@ extern snd_alias_t *Com_PickSoundAliasFromList(snd_alias_list_t *aliasList);
 static EffectTemplate *muzzleLightEffects[128];
 
 /* A suppressed shot plays its weapon's own sound, quieter, heard from a third
- * of the distance and without the distant report. The channels keep the
- * alias while it plays, so each copy stays here; a copy follows its source
- * through reloads. */
+ * of the distance and without the distant report; the browser plays it
+ * through a suppressor's filters. The channels keep the alias while it plays,
+ * so each copy stays here; a copy follows its source through reloads. */
 #define CG_SUPPRESSED_ALIAS_COUNT 128
 static struct {
     snd_alias_t source;
     snd_alias_t quiet;
 } s_suppressedAliases[CG_SUPPRESSED_ALIAS_COUNT];
 static int s_suppressedAliasNext;
+#ifdef __EMSCRIPTEN__
+enum { WEB_AUDIO_EFFECT_NONE, WEB_AUDIO_EFFECT_SUPPRESSED };
+extern void WebAudio_SetSampleEffect(int effect);
+#endif
 
 static const snd_alias_t *CG_SuppressedAlias(const snd_alias_t *alias)
 {
@@ -796,8 +800,15 @@ void CG_FireWeapon(centity_t *cent, int event, int barrel)
         if (suppressed) {
             const snd_alias_t *alias = Com_PickSoundAliasFromList(fireSound);
 
-            if (alias)
+            if (alias) {
+#ifdef __EMSCRIPTEN__
+                WebAudio_SetSampleEffect(WEB_AUDIO_EFFECT_SUPPRESSED);
+#endif
                 SND_PlaySoundAlias(CG_SuppressedAlias(alias), ent->number, origin, 0, SASYS_CGAME);
+#ifdef __EMSCRIPTEN__
+                WebAudio_SetSampleEffect(WEB_AUDIO_EFFECT_NONE);
+#endif
+            }
         } else {
             duration = CG_PlaySoundAlias(ent->number, origin, fireSound);
             if (ent->eType == 1)

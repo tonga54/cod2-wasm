@@ -51,6 +51,10 @@ static weaponInfo_t weaponInfos[4], *weaponInfoTable = weaponInfos;
 static WeaponDef weaponDefs[4];
 static struct { int time, predictedPlayerState; vec3_t vGunSpeed, kickAVel; } cgStorage, *cg = &cgStorage;
 static int localNumber, recoils, effects, brass, loudPlays, quietPlays, pings, pingDuration;
+/* The browser's sample effect, as the client sets it, and at each play. */
+static int sampleEffect, quietEffect = -1, loudEffect = -1;
+int s_pendingLocalFireWeapon, s_pendingLocalFireBarrel, s_pendingLocalFireTime;
+void WebAudio_SetSampleEffect(int effect) { sampleEffect = effect; }
 static const snd_alias_list_t *loudList;
 static const snd_alias_t *quietAlias;
 
@@ -83,6 +87,7 @@ static int SND_PlaySoundAlias(const snd_alias_t *alias, int entnum, const vec_t 
 {
     assert(entnum == 5 && origin[0] == 1.0f && !timeshift && system == SASYS_CGAME);
     quietAlias = alias;
+    quietEffect = sampleEffect;
     quietPlays++;
     return 0;
 }
@@ -90,6 +95,7 @@ static int CG_PlaySoundAlias(int entnum, const vec_t *origin, snd_alias_list_t *
 {
     assert(entnum == 5 && origin[0] == 1.0f);
     loudList = list;
+    loudEffect = sampleEffect;
     loudPlays++;
     return 321;
 }
@@ -115,7 +121,9 @@ static centity_t Fire(int eType, int weapon, int event, int parm)
     recoils = effects = brass = loudPlays = quietPlays = pings = pingDuration = 0;
     loudList = NULL;
     quietAlias = NULL;
+    quietEffect = loudEffect = -1;
     CG_FireWeapon(&cent, event, 0);
+    assert(sampleEffect == 0);
     return cent;
 }
 
@@ -162,8 +170,9 @@ int main(void)
                             assert(NEAR(quietAlias->fDistMin, before.fDistMin * 0.33f) &&
                                    NEAR(quietAlias->fDistMax, before.fDistMax * 0.33f));
                             assert(quietAlias->flags == before.flags && quietAlias->priority == before.priority);
+                            assert(quietEffect == 1 && loudEffect == -1);
                         } else {
-                            assert(!quietPlays && loudPlays == 1 && loudList == expected);
+                            assert(!quietPlays && loudPlays == 1 && loudList == expected && loudEffect == 0);
                             assert(pings == (eType == 1) && pingDuration == (eType == 1 ? 321 : 0));
                         }
                     }
@@ -211,12 +220,22 @@ mutants = [
     ('SND_PlaySoundAlias(CG_SuppressedAlias(alias), ent->number, origin, 0, SASYS_CGAME);',
      'SND_PlaySoundAlias(CG_SuppressedAlias(alias), ent->number, origin, 0, SASYS_CGAME), '
      'CG_CompassAddWeaponPingInfo(cent, origin, 0);'),
+    ('                WebAudio_SetSampleEffect(WEB_AUDIO_EFFECT_SUPPRESSED);\n', ''),
+    ('                WebAudio_SetSampleEffect(WEB_AUDIO_EFFECT_NONE);\n', ''),
 ]
+
+# The browser driver gives every sample begun meanwhile the effect, as the 2D and 3D starts both initialise one.
+driver = (root / 'downstream/wasm/web_audio.c').read_text()
+assert 'void WebAudio_SetSampleEffect(int effect){webSampleEffect=effect;}' in driver
+assert 'void AIL_init_sample(WebSound *s){if(!s)return;web_audio_reset(s->id);web_audio_effect(s->id,webSampleEffect);' in driver
+assert 'int AIL_set_3D_sample_info(WebSound *s,const AILSOUNDINFO *info){if(!s||!info)return 0;AIL_init_sample(s);' in driver
+assert 'EM_JS(void, web_audio_effect, (int id, int effect), { Module.cod2Audio.effect(id,effect); });' in driver
 
 with tempfile.TemporaryDirectory(prefix='cod2-suppressed-shots-') as tmp:
     path = Path(tmp)
     source = weapons_path.read_text()
-    flags = ['-std=gnu99', '-fsanitize=address,undefined', '-fno-sanitize-recover=all']
+    # The browser build's path, with its sample effect.
+    flags = ['-std=gnu99', '-D__EMSCRIPTEN__', '-fsanitize=address,undefined', '-fno-sanitize-recover=all']
     (path / 'test.c').write_text(support + extract(source) + checks)
     subprocess.run(['cc', *flags, '-O1', '-g', '-Wall', '-Werror', str(path / 'test.c'), '-lm', '-o',
                     str(path / 'test')], check=True)
@@ -228,5 +247,6 @@ with tempfile.TemporaryDirectory(prefix='cod2-suppressed-shots-') as tmp:
                         str(path / f'mutant{index}')], check=True)
         result = subprocess.run([str(path / f'mutant{index}')], capture_output=True)
         assert result.returncode != 0, f'mutant survived: {after!r}'
-print(f'PASS: 120 fire events, the quiet copies and their cache in the real CG_FireWeapon; '
+print(f'PASS: 120 fire events, the quiet copies, their cache and the browser\'s suppressor effect around each '
+      f'quiet one in the real CG_FireWeapon; '
       f'{len(mutants)} mutants fail')

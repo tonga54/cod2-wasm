@@ -116,7 +116,12 @@ numbers are WWII's where they are published, otherwise this port's:
 
 A suppressed shot has no muzzle flash and does not show on the enemy minimap.
 CoD2 has no suppressed fire sounds, so it plays the weapon's own at 35% of its
-volume, heard from a third of the distance, without the distant report. A 4x
+volume, heard from a third of the distance, without the distant report. The
+browser plays it through a suppressor's filters, in first and third person: the
+crack cut out above 1.5 kHz into a low thump, a short puff of gas around 3 kHz
+and the action's click above 4.5 kHz, all over in a third of a second. As in
+WWII, only the Suppressor changes a shot's sound; Rapid Fire is heard in the
+faster shots, and the other attachments leave it as it is. A 4x
 Optic brings the sniper scope's rules: the gun hides at full zoom, the breath can
 be held and shots follow the scope's view. Two attachments that change the same
 value multiply: a Suppressor on Advanced Rifling leaves an SMG 9% short of its
@@ -542,8 +547,9 @@ on canvases the generator accepts, for the day a class weapon matches one.
   others) show nothing, as in WWII. The PPSh's drum and the Trench Gun's tube
   look the same with an Extended Mag, and a rifle with a box magazine still
   reloads through its stripper or en-bloc clip, as its retail animation does.
-- A suppressed shot is the gun's own sound made quieter, not a suppressed
-  recording; the Suppressor cannot be taken off in a match as WWII's D-pad does.
+- A suppressed shot is the gun's own sound through filters, not a suppressed
+  recording, and only in the browser; the Suppressor cannot be taken off in a
+  match as WWII's D-pad does.
 - A gun on the ground shows its camouflage but none of its attachments' models,
   as every gun in third person. Bots use none.
 - A script `notify("x", a, b)` reaches `waittill("x", p, q)` with the arguments
@@ -613,8 +619,12 @@ on canvases the generator accepts, for the day a class weapon matches one.
   28 mutations.
 - `python3 scripts/test-suppressed-shots.py` runs the client's `CG_FireWeapon`
   on 120 fire events. Only a player's shot marked suppressed loses its flash
-  and minimap ping and plays the quiet copy of its sound, one copy per sound.
-  It rejects 12 mutations.
+  and minimap ping and plays the quiet copy of its sound, one copy per sound,
+  through the browser's suppressor filters and no other shot. It rejects 14
+  mutations.
+- `node scripts/test-web-audio.cjs` runs the browser's sound mixer on a fake
+  WebAudio: a suppressed shot's filter chain, envelopes and cut-off, its nodes
+  freed when it ends or stops, and every other sound left unfiltered.
 - `python3 scripts/test-attachment-sight.py` draws the Reflex and Lens Sight
   reticles: when they show, their fade, placement, radii, feathering and
   meshes. It rejects 10 mutations.
@@ -741,5 +751,7 @@ on canvases the generator accepts, for the day a class weapon matches one.
     Kar98k's scope and box magazine, the Bren's scope beside its magazine and
     the MP44's two magazines, painted. In a match the MP44's Lens Sight put
     the amber reticle on its front sight, the Kar98k painted Ember carried its
-    scope with 7 rounds after a reload, and the Luger its can. Killed by its
-    own grenade, the player's Splinter MP44 lay painted on the ground.
+    scope with 7 rounds after a reload, and the Luger its can. Three shots of
+    the suppressed Luger went through the suppressor filters, five each, and
+    the Kar98k's shot through none. Killed by its own grenade, the player's
+    Splinter MP44 lay painted on the ground.

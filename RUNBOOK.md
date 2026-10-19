@@ -3769,3 +3769,20 @@ Validation:
   returns clear the paint, and fails without either.
 - In the browser on Carentan, the player's Splinter MP44 lay painted on the
   ground after they died.
+
+## Suppressed shots through a suppressor's filters — 2026-10-19
+
+CoD2 has no suppressed fire sounds, so a suppressed shot played the gun's own
+sound quieter, crack and all. The browser now plays it through filters: the
+crack cut out above 1.5 kHz into a low thump, a short puff of gas around 3 kHz
+and the action's click above 4.5 kHz, over in a third of a second. Only the
+Suppressor changes a shot's sound, as in WWII. `CG_FireWeapon` marks the quiet
+copy's sample, `web_audio.c` passes the mark to `web_audio.js`, which builds
+the chain on that sample alone and frees it when it ends.
+
+Validation:
+
+- `scripts/test-web-audio.cjs` on a fake WebAudio and
+  `scripts/test-suppressed-shots.py` (14 mutants).
+- In the browser, three shots of a suppressed Luger built five filters each
+  and a Kar98k's shot none.
