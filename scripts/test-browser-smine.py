@@ -15,6 +15,13 @@ import browser_smine as smine
 
 FRAMES = 18
 
+# Platform libm cancellation and signed zero must produce the same stored
+# tangent, while meaningful slopes remain intact.
+for residue in (0.0, -0.0, -3.7876272685280566e-17, 3.734084198349744e-17):
+    normal = smine._normalise((0.6, 0.8, residue))
+    assert struct.pack('<3f', *normal) == struct.pack('<3f', 0.6, 0.8, 0.0)
+assert smine._normalise((0.6, 0.8, 1e-6))[2] > 0.0
+
 
 def quat(axis, degrees):
     return smine._about(axis, degrees)

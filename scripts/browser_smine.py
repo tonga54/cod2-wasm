@@ -116,7 +116,11 @@ def _cross(a, b):
 
 def _normalise(a):
     length = math.sqrt(_dot(a, a))
-    return _scale(a, 1.0 / length) if length > 1e-12 else (0.0, 0.0, 1.0)
+    normal = _scale(a, 1.0 / length) if length > 1e-12 else (0.0, 0.0, 1.0)
+    # Darwin and Linux libm leave different cancellation residues in tangent
+    # components (around 1e-17). Canonical zero keeps generated model bytes and
+    # private archive hashes identical on the build machine and the Pi.
+    return tuple(0.0 if abs(value) < 1e-12 else value for value in normal)
 
 
 def _perpendicular(n):
