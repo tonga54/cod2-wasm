@@ -1585,12 +1585,23 @@ void Particle_CalcVelocityValue(const Particle *_this, float normTime, vec_t *ou
         vz = EvalCurve1(((char *)self + offsetof(Particle, velocityZChannelInstance.curveIterator.master)), normTime) * *(float *)(((char *)self + offsetof(Particle, velocityZChannelInstance.curveIterator.master)) + 8);
     }
 
-    if (!(*(byte *)(self + 0xaa) & 0x20)) {
-        AxisTransformVector(((char *)self + offsetof(Particle, displayAxis[0][0])), vx, vy, vz, outVector);
-    } else {
+    /* A bolted particle's origin is in its bolt's axes: its own velocity
+     * already is, and an absolute (world) velocity must be brought into them. */
+    if (*(byte *)(self + 0xaa) & 0x20) {
+        vec3_t worldVelocity = { vx, vy, vz };
+        if (or_) {
+            OrientationDirFromWorldDir((void *)or_, worldVelocity, outVector);
+        } else {
+            outVector[0] = vx;
+            outVector[1] = vy;
+            outVector[2] = vz;
+        }
+    } else if (or_) {
         outVector[0] = vx;
         outVector[1] = vy;
         outVector[2] = vz;
+    } else {
+        AxisTransformVector(((char *)self + offsetof(Particle, displayAxis[0][0])), vx, vy, vz, outVector);
     }
 }
 
@@ -2176,6 +2187,11 @@ Bool Tail_Update(const Tail *_this)
         }
     }
 
+    /* The tail trails the anchor: Tail_CalcNewEndpoint aims it back at the
+     * anchor's position before this step. */
+    (((Tail *)(self))->endpoint[0]) = PART_ANCHOR_X(self);
+    (((Tail *)(self))->endpoint[1]) = PART_ANCHOR_Y(self);
+    (((Tail *)(self))->endpoint[2]) = PART_ANCHOR_Z(self);
     if (!Particle_UpdateOrigin((const Particle *)_this, (const orientation_t *)orient))
         return 0;
 

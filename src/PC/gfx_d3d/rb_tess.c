@@ -1403,8 +1403,8 @@ void RB_TessEntity(const GfxEntity *re)
 
         {
             byte *texInfo = (*(byte **)&((GfxEntity *)ent)->customMaterial);
-            int cols = ((Material *)texInfo)->info.textureAtlasRowCount;
-            int rows = ((Material *)texInfo)->info.textureAtlasColumnCount;
+            int cols = ((Material *)texInfo)->info.textureAtlasColumnCount;
+            int rows = ((Material *)texInfo)->info.textureAtlasRowCount;
             int totalFrames = cols * rows;
 
             if (totalFrames <= 1) {
@@ -1440,8 +1440,8 @@ void RB_TessEntity(const GfxEntity *re)
 
         {
             byte *texInfo = (*(byte **)&((GfxEntity *)ent)->customMaterial);
-            int cols = ((Material *)texInfo)->info.textureAtlasRowCount;
-            int rows = ((Material *)texInfo)->info.textureAtlasColumnCount;
+            int cols = ((Material *)texInfo)->info.textureAtlasColumnCount;
+            int rows = ((Material *)texInfo)->info.textureAtlasRowCount;
             float s0, t0, s1, t1;
 
             if (cols * rows <= 1) {

@@ -197,7 +197,10 @@ retail CoD2:
   settings releases renderer resources with the correct WebAssembly signature
   and resizes the canvas, including while connected to a match.
 - **First-person weapon effects:** live players use the viewmodel muzzle for
-  flashes, brass and tracers. BAR muzzle tails transform to world space once;
+  flashes, brass and tracers. BAR muzzle tails transform to world space once.
+  Muzzle tails trail their own motion in the muzzle's axes, and the bolt-action
+  rifles' starburst streak draws one whole atlas frame, as in retail (see
+  [Kar98k muzzle flash](docs/GRAPHICS_2026-10-16.md#kar98k-muzzle-flash-october-18-2026));
   ADS raise/lower poses follow the predicted aiming fraction without an extra
   half-second crossfade that can leave sights tilted during transitions.
 - **Combat presentation within the existing render budget:** aiming preserves
