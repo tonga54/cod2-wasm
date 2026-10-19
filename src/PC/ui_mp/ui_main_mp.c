@@ -4,6 +4,7 @@
 #include "cod2_feature_config.h"
 #include "headers/PC/ui_mp/ui_class_menu.h"
 #include "headers/PC/ui_mp/ui_wwii_menu.h"
+#include "headers/PC/ui_mp/ui_wwii_settings.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -1390,6 +1391,8 @@ static inline __attribute__((always_inline)) void UI_KeyEvent_impl(int key, qboo
 
         if (UI_ClassMenu_KeyEvent((displayContextDef_t *)uiInfo, menu, key, down)) {
             /* The class screens take every key, characters included. */
+        } else if (UI_WWIISettings_KeyEvent((displayContextDef_t *)uiInfo, menu, key, down)) {
+            /* And Options' laid-out list and pages. */
         } else if (key == 0x1b && down && !Menus_AnyFullScreenVisible(uiInfo) && menu->onESC == 0) {
 
             Menus_CloseAll(uiInfo);

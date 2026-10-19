@@ -3,6 +3,7 @@
 #include "headers/PC/gfx_d3d/r_hud2d.h"
 #include "headers/PC/gfx_d3d/r_font_wwii.h"
 #include "headers/PC/ui_mp/ui_wwii_menu.h"
+#include "headers/PC/ui_mp/ui_wwii_settings.h"
 #include <math.h>
 #include <string.h>
 
@@ -767,6 +768,11 @@ void UI_WWIIMenu_RegisterDvars(void)
     s_wwiiMenu.enabled = Dvar_RegisterBool_mac("ui_wwiiMainMenu", 1, 0x1001);
 }
 
+int UI_WWIIMenu_LayoutOn(void)
+{
+    return s_wwiiMenu.enabled && s_wwiiMenu.enabled->current.enabled;
+}
+
 void UI_WWIIMenu_Reset(const displayContextDef_t *dc)
 {
     const dvar_t *enabled = s_wwiiMenu.enabled;
@@ -890,7 +896,7 @@ int UI_WWIIMenu_PaintItem(displayContextDef_t *dc, itemDef_t *item)
         return 0;
     if (item == s_wwiiMenu.bgImage)
         return UI_WWIIMenu_PaintBackdrop(dc, item);
-    return UI_WWIIMenu_MainOpen(dc) || UI_WWIIMenu_ClassPageOpen(dc);
+    return UI_WWIIMenu_MainOpen(dc) || UI_WWIIMenu_ClassPageOpen(dc) || UI_WWIISettings_Covers(dc);
 }
 
 static void UI_WWIIMenu_Animate(WWIIMenuItem *entry, int time, int focused)

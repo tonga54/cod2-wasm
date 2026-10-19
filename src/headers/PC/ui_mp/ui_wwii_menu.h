@@ -6,6 +6,8 @@
  * version and key prompts, and a gold cursor; the menu files stay as they
  * are. ui_wwiiMainMenu switches it while the menus are up. */
 void UI_WWIIMenu_RegisterDvars(void);
+/* Whether ui_wwiiMainMenu is on. */
+int UI_WWIIMenu_LayoutOn(void);
 /* Forgets the menus before dc loads a new set, when dc is the one main_text
  * and bg came from: cgame's HUD menus set up a context of their own. */
 void UI_WWIIMenu_Reset(const displayContextDef_t *dc);
