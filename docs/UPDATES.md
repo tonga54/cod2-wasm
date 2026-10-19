@@ -291,6 +291,10 @@ seen 12 degrees from above, under the grenades' lights. Together they added
 8.19 MB to the renderer archive (270.96 to 279.15 MB), and about 20 seconds
 to the generator on the build machine.
 
+On October 19, with the S-Mine 44 a class weapon, the owner's cut-out of it
+from the same captures (256 × 512) joined them as `mine_mp.png`, adding
+0.16 MB. The C4 keeps its generated icon.
+
 ## Version checks
 
 `/build-info.json` identifies the source revision, dirty status and build-content

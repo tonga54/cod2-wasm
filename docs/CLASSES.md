@@ -343,7 +343,8 @@ The Soviet weapons now ship with every map. They add 3.87 MB to the renderer
 archive and 1.60 MB to the audio archive, taking the four prepared archives
 from 324.1 MB to 329.6 MB. The S-Mine 44 and C4 add 0.41 MB to the renderer
 archive and 2.90 MB to the audio archive, nearly all of it the development
-host's 22 owner sounds for them, for 332.9 MB.
+host's 22 owner sounds for them, for 332.9 MB. The development host's 34 class
+pictures add 8.34 MB to the renderer archive, for 341.2 MB.
 
 Toujane TDM was measured in Chrome at 1280×800, two runs each with the same
 build, against a room whose class script was empty:
@@ -417,18 +418,19 @@ the stock image, tinted as before. Nothing outside the class screens
 changes: the HUD's offhand icons, the kill feed and the ammo counter stay
 white.
 
-The development host's pictures cover all 33 class weapons:
+The development host's pictures cover 34 of the 35 class weapons, all but the C4:
 
 | Weapons | Picture |
 | --- | --- |
 | American frag (M2) | CoD WWII's MK 2, cut out of the owner's capture |
 | All four smoke grenades | CoD WWII's smoke canister, cut out of the owner's capture; in CoD2 every smoke grenade is the American canister |
 | British frag (MK1), RGD-33, Stielhandgranate | Rendered from CoD2's world model of each, lit like the captures |
+| S-Mine 44 | CoD WWII's S-Mine 44, cut out of the owner's capture |
 | The 21 primaries and four pistols | Rendered from their world models the same way, muzzle to the left as the retail menu images have it |
 
 The owner's other captures (the Signal Flare, Mk V gas grenade, No. 69,
-throwing knife, satchel charge, No. 74 ST and S-Mine 44) show equipment this
-game does not have. Their cut-outs wait in `data/wwii_equipment_pictures/`,
+throwing knife, satchel charge and No. 74 ST) show equipment this game does
+not have. Their cut-outs wait in `data/wwii_equipment_pictures/`,
 on canvases the generator accepts, for the day a class weapon matches one.
 
 ## Limits

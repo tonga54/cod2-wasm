@@ -448,10 +448,10 @@ published to the LAN. Private files are mounted read-only. Set `COD2_WEB_PORT`
 to change the public port or `COD2_WEB_DATA_DIR` to use another private-data
 location.
 
-The prepared two-map subset is approximately **332.9 MB**, including 442 original
-sound files (the development host's owner sounds add 237 more) and every
-faction's weapons for custom classes; the development host's 33 class
-pictures add 8.2 MB. Browsers download it once per site/cache version and keep it in
+The prepared two-map subset is approximately **341.2 MB**, including 442 original
+sound files (the development host's owner sounds add 237 more), every faction's
+weapons for custom classes, the S-Mine 44 and C4, and the development host's 34
+class pictures (8.3 MB). Browsers download it once per site/cache version and keep it in
 IndexedDB. Size/SHA-256 checks verify each archive. Original owner IWDs stay
 untouched in `data/main/`; the prepared copies stay in `data/browser/`. Original
 assets are excluded from Git and image layers. Generated WASM binaries are ignored by Git and shipped
