@@ -503,11 +503,15 @@ int main(void) {
     assert(text("SELECT CLASS") && washes == 1);
     cases += 2;
 
-    /* The pointer focuses the row under it and clicks choose it; over a tab
-     * it leaves the focus, and a click shows that tab. */
+    /* The pointer focuses the row it is over now, not the one it left, and
+     * clicks choose it; over a tab it leaves the focus, and a click shows
+     * that tab. */
+    point(100, rowTop(2) + 14);
+    paint(&classMenu);
+    assert(s_cac.classFocus == 2);
     point(100, rowTop(3) + 14);
     paint(&classMenu);
-    point(102, rowTop(3) + 15);
+    assert(s_cac.classFocus == 3);
     paint(&classMenu);
     assert(s_cac.classFocus == 3 && drawnText("RAT", 1, focusLeft(), rowTop(3) + CAC_SELECT_FOCUS_BASELINE,
                                                CAC_SELECT_FOCUS_CAP, CAC_SELECT_FOCUS_TRACKING, gold));
@@ -522,7 +526,13 @@ int main(void) {
     paint(&classMenu);
     assert(key(0xc8) == 1 && chose("class,thompson_mp,colt_mp,frag_grenade_american_mp,smoke_grenade_american_mp,none,none,"
                                      "steadyaim+extmag,none"));
-    cases += 2;
+    /* Reopened with the pointer over another row, it keeps the class chosen
+     * until the pointer moves. */
+    point(100, rowTop(4) + 14);
+    UI_ClassMenu_Open(&dc, 1);
+    paint(&classMenu);
+    assert(s_cac.classFocus == 1 && s_cac.tab == CAC_TAB_STANDARD);
+    cases += 3;
 
     /* Escape closes it without a choice. */
     UI_ClassMenu_Open(&dc, 1);
@@ -583,6 +593,14 @@ mutants = [
     ('            s_cac.tab = s_cac.hover - CAC_HOVER_TAB;', '            s_cac.tab = CAC_TAB_CUSTOM;'),
     ('        if (s_cac.hover < CLASS_COUNT)\n            s_cac.classFocus = s_cac.hover;',
      '        if (s_cac.hover >= 0)\n            s_cac.classFocus = s_cac.hover % CLASS_COUNT;'),
+    # The focus from the hover the last frame painted, where the pointer was.
+    ('    s_cac.hover = -1;\n    Cac_PaintScreen(dc);',
+     '    if (moved && !s_cac.renaming)\n        Cac_FocusHover();\n    moved = 0;\n    s_cac.hover = -1;\n'
+     '    Cac_PaintScreen(dc);'),
+    ('    moved = dc->cursorx != s_cac.cursorX || dc->cursory != s_cac.cursorY;',
+     '    moved = dc->cursorx != s_cac.cursorX;'),
+    ('    s_cac.hover = -1;\n    s_cac.cursorX = dc->cursorx;\n    s_cac.cursorY = dc->cursory;\n    if (choose',
+     '    s_cac.hover = -1;\n    if (choose'),
     ('s_cac.tab == CAC_TAB_CUSTOM ? 2 : 1, "ESC", "Back"', '2, "ESC", "Back"'),
     ('    if (s_cac.tab == CAC_TAB_CUSTOM)\n        Cac_StatusNote(', '    if (1)\n        Cac_StatusNote('),
     ('    if (!Cac_Respond(&Cac_Listed()[s_cac.classFocus]))', '    if (!Cac_Respond(&s_cac.classes[s_cac.classFocus]))'),

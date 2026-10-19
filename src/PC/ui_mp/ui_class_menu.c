@@ -639,7 +639,6 @@ void UI_ClassMenu_Saved(int generation, int status)
 
 void UI_ClassMenu_Open(displayContextDef_t *dc, int choose)
 {
-    (void)dc;
     Cac_Load();
     s_cac.open = 1;
     s_cac.choose = choose;
@@ -647,6 +646,8 @@ void UI_ClassMenu_Open(displayContextDef_t *dc, int choose)
     s_cac.fromPause = 0;
     s_cac.renaming = 0;
     s_cac.hover = -1;
+    s_cac.cursorX = dc->cursorx;
+    s_cac.cursorY = dc->cursory;
     if (choose && s_cac.chosen >= 0) {
         s_cac.classFocus = s_cac.chosen;
         s_cac.tab = s_cac.chosenTab;
@@ -1870,39 +1871,13 @@ static void Cac_PaintSelect(displayContextDef_t *dc)
                           CAC_SELECT_PROMPT_RIGHT, CAC_SELECT_PROMPT_LOWER);
 }
 
-void UI_ClassMenu_Paint(displayContextDef_t *dc, menuDef_t *menu)
+/* The screen up, with its prompts. */
+static void Cac_PaintScreen(displayContextDef_t *dc)
 {
-    int kind = Cac_MenuKind(menu);
     static const char *const keys[] = { "ENTER", "F1", "F2" };
     static const char *const attachmentKeys[] = { "ENTER", "BACKSPACE" };
     const char *labels[3] = { NULL, NULL, NULL };
 
-    if (!kind)
-        return;
-    if (!s_cac.open)
-        UI_ClassMenu_Open(dc, kind == 2);
-    Cac_ReadStats();
-    /* In a match the renderer blurs the scene behind and turns it gray, as
-     * WWII's; the next frame takes the request. */
-    if (kind == 2)
-        g_webMenuBackdrop = 1.0f;
-    /* The text stands on a dark scene, as WWII's: the backdrop or the match. */
-    if (s_cac.choose && s_cac.screen == CAC_SCREEN_LIST) {
-        CL_DrawStretchPic(0.0f, 0.0f, 640.0f, 480.0f, CAC_ALIGN_FULLSCREEN, CAC_ALIGN_FULLSCREEN, 0.0f, 0.0f, 1.0f,
-                          1.0f, s_cacSelectShade, sharedUiInfo.assets.whiteMaterial);
-        UI_WWIIMenu_PaintWash();
-    } else {
-        CL_DrawStretchPic(0.0f, 0.0f, 640.0f, 480.0f, CAC_ALIGN_FULLSCREEN, CAC_ALIGN_FULLSCREEN, 0.0f, 0.0f, 1.0f,
-                          1.0f, s_cacShade, sharedUiInfo.assets.whiteMaterial);
-    }
-    /* Pointer motion moves the focus; keys move it otherwise. */
-    if (dc->cursorx != s_cac.cursorX || dc->cursory != s_cac.cursorY) {
-        s_cac.cursorX = dc->cursorx;
-        s_cac.cursorY = dc->cursory;
-        if (!s_cac.renaming)
-            Cac_FocusHover();
-    }
-    s_cac.hover = -1;
     switch (s_cac.screen) {
     case CAC_SCREEN_EDIT:
         Cac_PaintEdit(dc);
@@ -1955,6 +1930,40 @@ void UI_ClassMenu_Paint(displayContextDef_t *dc, menuDef_t *menu)
         return;
     }
     UI_WWIIMenu_Prompts(keys, labels, labels[2] ? 3 : labels[1] ? 2 : 1, "ESC", "Back");
+}
+
+void UI_ClassMenu_Paint(displayContextDef_t *dc, menuDef_t *menu)
+{
+    int kind = Cac_MenuKind(menu);
+    int moved;
+
+    if (!kind)
+        return;
+    if (!s_cac.open)
+        UI_ClassMenu_Open(dc, kind == 2);
+    Cac_ReadStats();
+    /* In a match the renderer blurs the scene behind and turns it gray, as
+     * WWII's; the next frame takes the request. */
+    if (kind == 2)
+        g_webMenuBackdrop = 1.0f;
+    /* The text stands on a dark scene, as WWII's: the backdrop or the match. */
+    if (s_cac.choose && s_cac.screen == CAC_SCREEN_LIST) {
+        CL_DrawStretchPic(0.0f, 0.0f, 640.0f, 480.0f, CAC_ALIGN_FULLSCREEN, CAC_ALIGN_FULLSCREEN, 0.0f, 0.0f, 1.0f,
+                          1.0f, s_cacSelectShade, sharedUiInfo.assets.whiteMaterial);
+        UI_WWIIMenu_PaintWash();
+    } else {
+        CL_DrawStretchPic(0.0f, 0.0f, 640.0f, 480.0f, CAC_ALIGN_FULLSCREEN, CAC_ALIGN_FULLSCREEN, 0.0f, 0.0f, 1.0f,
+                          1.0f, s_cacShade, sharedUiInfo.assets.whiteMaterial);
+    }
+    moved = dc->cursorx != s_cac.cursorX || dc->cursory != s_cac.cursorY;
+    s_cac.cursorX = dc->cursorx;
+    s_cac.cursorY = dc->cursory;
+    s_cac.hover = -1;
+    Cac_PaintScreen(dc);
+    /* Pointer motion moves the focus to what it is over now; keys move it
+     * otherwise. */
+    if (moved && !s_cac.renaming)
+        Cac_FocusHover();
 }
 
 const ClassLoadout *UI_ClassMenu_Classes(int standard)

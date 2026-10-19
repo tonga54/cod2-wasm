@@ -521,24 +521,34 @@ int main(void) {
      * click acts on it, or on a tab switches to it. A list's toggle only
      * changes with a click. */
     s_pause.tab = PAUSE_TAB_TEAM; s_pause.teamFocus = PAUSE_TEAM_ALLIES;
-    point(44.2f + 155.8f + 9.0f + 70.0f, 56.0f + 70.0f); paint(); dc.cursorx++; paint();
+    point(44.2f + 155.8f + 9.0f + 70.0f, 56.0f + 70.0f); paint();
     assert(s_pause.teamFocus == PAUSE_TEAM_AXIS);
     clearLogs(); key(0xc8); assert(commandCount == 1 && !strcmp(commands[0], "cmd mr 7 5 axis\n"));
     UI_PauseMenu_Open(&dc); s_pause.tab = PAUSE_TAB_TEAM;
     {
         const Drawn *overview;
         paint(); overview = text("OVERVIEW");
-        point(overview->x + 2.0f, 30.0f); paint(); dc.cursorx++; paint();
+        point(overview->x + 2.0f, 30.0f); paint();
         assert(s_pause.tab == PAUSE_TAB_TEAM);
         key(0xc8); assert(s_pause.tab == PAUSE_TAB_OVERVIEW);
     }
     s_pause.tab = PAUSE_TAB_CLASS; s_pause.standard = 0;
-    point(43.3f + 95.9f + 20.0f, 76.0f); paint(); dc.cursorx++; paint(); assert(s_pause.standard == 0);
+    point(43.3f + 95.9f + 20.0f, 76.0f); paint(); assert(s_pause.standard == 0);
     chooseCalls = 0; key(0xc8); assert(s_pause.standard == 1 && chooseCalls == 0 && s_pause.open);
-    point(20.0f, 98.3f + 4.0f * 29.25f + 10.0f); paint(); dc.cursory++; paint(); assert(s_pause.classFocus == 4);
+    /* A step from one row into the next focuses the row it is over now, not
+     * the one it left, and the focus stays there while the pointer rests. */
+    s_pause.classFocus = 0;
+    point(20.0f, 98.3f + 3.0f * 29.25f + 10.0f); paint(); assert(s_pause.classFocus == 3);
+    point(20.0f, 98.3f + 4.0f * 29.25f + 10.0f); paint(); assert(s_pause.classFocus == 4);
+    paint(); assert(s_pause.classFocus == 4);
     key(0xc8); assert(chooseCalls == 1 && chooseIndex == 4 && chooseStandard == 1);
     UI_PauseMenu_Open(&dc); s_pause.tab = PAUSE_TAB_LEAVE;
-    point(20.0f, 207.5f + 29.25f + 10.0f); paint(); dc.cursory++; paint(); assert(s_pause.leaveFocus == PAUSE_LEAVE_MATCH);
+    point(20.0f, 207.5f + 29.25f + 10.0f); paint(); assert(s_pause.leaveFocus == PAUSE_LEAVE_MATCH);
+    /* Opened with the pointer over another row, the menu keeps the class
+     * chosen last until the pointer moves. */
+    chosenIndex = 2; chosenStandard = 0;
+    point(20.0f, 98.3f + 4.0f * 29.25f + 10.0f); UI_PauseMenu_Open(&dc); paint();
+    assert(s_pause.tab == PAUSE_TAB_CLASS && s_pause.classFocus == 2);
 
     /* The wash fades in over 150 ms. */
     dc.realTime = 5000; UI_PauseMenu_Open(&dc); s_pause.tab = PAUSE_TAB_LEAVE;
@@ -587,7 +597,15 @@ mutants = [
      '    { "AUDIO", "Set the volume of the game\'s sound and music", "options_graphics" },'),
     ('    if (s_pause.tab != PAUSE_TAB_OVERVIEW)\n        x +=', '    if (1)\n        x +='),
     ('    if (s_pause.tab == PAUSE_TAB_CLASS && !s_pause.standard && !gamepad)', '    if (s_pause.tab == PAUSE_TAB_CLASS)'),
-    ('        if ((s_pause.hover >> 8) != PAUSE_HOVER_TOGGLE)\n            Pause_FocusHover();', '        Pause_FocusHover();'),
+    ('    if (moved && (s_pause.hover >> 8) != PAUSE_HOVER_TOGGLE)\n        Pause_FocusHover();',
+     '    if (moved)\n        Pause_FocusHover();'),
+    # The focus from the hover the last frame painted, where the pointer was.
+    ('    s_pause.hover = PAUSE_HOVER_NONE;\n    Pause_PaintTabs(dc, gamepad);',
+     '    if (moved && (s_pause.hover >> 8) != PAUSE_HOVER_TOGGLE)\n        Pause_FocusHover();\n    moved = 0;\n'
+     '    s_pause.hover = PAUSE_HOVER_NONE;\n    Pause_PaintTabs(dc, gamepad);'),
+    ('    moved = dc->cursorx != s_pause.cursorX || dc->cursory != s_pause.cursorY;',
+     '    moved = dc->cursorx != s_pause.cursorX;'),
+    ('    s_pause.cursorX = dc->cursorx;\n    s_pause.cursorY = dc->cursory;\n    Pause_Tabs();', '    Pause_Tabs();'),
     ('shade[3] = PAUSE_WASH * wash;', 'shade[3] = PAUSE_WASH;'),
     ('snprintf(value, sizeof(value), "%d", values[i] < 0 ? 0 : values[i]);',
      'snprintf(value, sizeof(value), "%d", values[i]);'),

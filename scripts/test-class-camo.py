@@ -413,12 +413,16 @@ int main(void) {
     paintedReady = 1;
     cases++;
 
-    /* The pointer: a click on a gun's camouflage opens its picker, a click
-     * on a swatch equips it, and the gun's tile takes the focus. */
+    /* The pointer: over a gun's camouflage it focuses the gun; with the
+     * focus moved off by a key, a click there still opens that gun's picker,
+     * a click on a swatch equips it, and the gun's tile takes the focus. */
     assert(key(&createMenu, 0x1b) && s_cac.screen == CAC_SCREEN_EDIT && s_cac.slotFocus == CLASS_SLOT_SECONDARY);
     point(100.0f, 226.0f);
     paint(&createMenu);
-    assert(s_cac.hover == CAC_HOVER_CAMO + CLASS_SLOT_PRIMARY);
+    assert(s_cac.hover == CAC_HOVER_CAMO + CLASS_SLOT_PRIMARY && s_cac.slotFocus == CLASS_SLOT_PRIMARY);
+    assert(key(&createMenu, 0x9d) && s_cac.slotFocus == CLASS_SLOT_LETHAL);
+    paint(&createMenu);
+    assert(s_cac.slotFocus == CLASS_SLOT_LETHAL);
     assert(key(&createMenu, 0xc8) && s_cac.screen == CAC_SCREEN_CAMO && s_cac.camoSlot == CLASS_SLOT_PRIMARY);
     point(swatchX(oakleaf) + 15.0f, swatchY(oakleaf) + 15.0f);
     paint(&createMenu);

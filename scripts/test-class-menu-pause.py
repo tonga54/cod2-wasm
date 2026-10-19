@@ -172,9 +172,17 @@ int main(void) {
      * its Back returns there. */
     clearLogs();
     UI_ClassMenu_Choose(1, 4);
+    /* The pointer rests on the secondary's tile: the primary keeps the focus
+     * until it moves. */
+    dc.cursorx = (int)(CAC_LEFT + 20.0f); dc.cursory = 300;
     UI_ClassMenu_EditFromPause(&dc, 3);
     assert(logged("+browser_class") && logged("-ingame") && s_cac.open && s_cac.choose && s_cac.tab == CAC_TAB_CUSTOM);
     assert(s_cac.screen == CAC_SCREEN_EDIT && s_cac.classFocus == 3 && s_cac.fromPause);
+    UI_ClassMenu_Paint(&dc, &classMenu);
+    assert(s_cac.slotFocus == CLASS_SLOT_PRIMARY);
+    dc.cursory = 301; UI_ClassMenu_Paint(&dc, &classMenu);
+    assert(s_cac.slotFocus == CLASS_SLOT_SECONDARY);
+    s_cac.slotFocus = CLASS_SLOT_PRIMARY;
     key(0x0d); assert(s_cac.screen == CAC_SCREEN_WEAPONS);
     key(0x1b); assert(s_cac.screen == CAC_SCREEN_EDIT && returns == 0);
     clearLogs(); key(0x1b);
@@ -229,6 +237,8 @@ mutants = [
     ('        return "The last change was not saved.";', '        return NULL;'),
     ('    Cac_GunPicture(loadout->weapon[slot], Cac_SlotCamo(loadout, slot), &box, color);',
      '    Cac_GunPicture(loadout->weapon[slot], WEAPON_CAMO_NONE, &box, color);'),
+    ('    s_cac.hover = -1;\n    s_cac.cursorX = dc->cursorx;\n    s_cac.cursorY = dc->cursory;\n    if (choose',
+     '    s_cac.hover = -1;\n    if (choose'),
 ]
 
 

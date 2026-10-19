@@ -1082,6 +1082,7 @@ void UI_PauseMenu_Paint(displayContextDef_t *dc, menuDef_t *menu)
     float wash;
     vec4_t shade;
     int gamepad = Pause_Gamepad();
+    int moved;
 
     if (!Pause_IsMenu(menu))
         return;
@@ -1097,13 +1098,9 @@ void UI_PauseMenu_Paint(displayContextDef_t *dc, menuDef_t *menu)
     shade[3] = PAUSE_WASH * wash;
     CL_DrawStretchPic(0.0f, 0.0f, 640.0f, 480.0f, PAUSE_ALIGN_FULLSCREEN, PAUSE_ALIGN_FULLSCREEN, 0.0f, 0.0f, 1.0f,
                       1.0f, shade, sharedUiInfo.assets.whiteMaterial);
-    /* Pointer motion moves the focus; keys move it otherwise. */
-    if (dc->cursorx != s_pause.cursorX || dc->cursory != s_pause.cursorY) {
-        s_pause.cursorX = dc->cursorx;
-        s_pause.cursorY = dc->cursory;
-        if ((s_pause.hover >> 8) != PAUSE_HOVER_TOGGLE)
-            Pause_FocusHover();
-    }
+    moved = dc->cursorx != s_pause.cursorX || dc->cursory != s_pause.cursorY;
+    s_pause.cursorX = dc->cursorx;
+    s_pause.cursorY = dc->cursory;
     s_pause.hover = PAUSE_HOVER_NONE;
     Pause_PaintTabs(dc, gamepad);
     switch (s_pause.tab) {
@@ -1123,5 +1120,9 @@ void UI_PauseMenu_Paint(displayContextDef_t *dc, menuDef_t *menu)
         Pause_PaintClass(dc);
         break;
     }
+    /* Pointer motion moves the focus to what it is over now; keys move it
+     * otherwise. */
+    if (moved && (s_pause.hover >> 8) != PAUSE_HOVER_TOGGLE)
+        Pause_FocusHover();
     Pause_PaintPrompts(gamepad);
 }
