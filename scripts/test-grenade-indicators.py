@@ -77,6 +77,8 @@ static centity_t entities[1024],*cg_entities=entities;static snapshot_t snap,nex
 static WeaponDef defs[CHARGE+1];static int nullWeapon,hidden;
 static int BG_GetNumWeapons(void){return CHARGE;}
 static WeaponDef *BG_GetWeaponDef(int index){assert(index>=1&&index<=CHARGE);return index==nullWeapon?NULL:&defs[index];}
+/* No attachment here changes the scope the indicators check. */
+static WeaponDef *BG_GetPlayerWeaponDef(const playerState_t *ps,int index){assert(ps);return BG_GetWeaponDef(index);}
 static int CG_AreHudMenusHidden(void){return hidden;}
 static float vectoyaw(const vec_t *v){return atan2f(v[1],v[0])*57.295779513f;}
 static dvar_t range,height,scope,offset,iconW,iconH,pointerW,pointerH,pivot,freq,pulseMax,pulseMin;
