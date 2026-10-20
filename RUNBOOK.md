@@ -4588,3 +4588,23 @@ Validation:
   - the music decoded at a minute left and rose from 0 to 0.54 in 4 s;
   - it played until the match ended 60.6 s later;
   - it gave way to the end of match music at 0.54 at once.
+
+## Silent ammo pickups — 2026-10-20
+
+The owner asked for no sound when walking over a gun on the ground. Walking
+over a gun the player carries takes its ammo: the server's `Touch_Item` sends
+`EV_AMMO_PICKUP` (0x91), and the client played the weapon's ammo pickup sound,
+`weap_ammo_pickup` by default. Walking over any other gun picks nothing up,
+because `BG_CanItemBeGrabbed` refuses a gun that needs a slot unless the use
+key takes it.
+
+`CG_EntityEvent` now plays no sound for `EV_AMMO_PICKUP`. The ammo is still
+taken, and still selects the weapon as before. A new gun picked up with the use
+key (`EV_ITEM_PICKUP`, 0x90) keeps its pickup sound.
+
+Validation: `test-pickup-sounds.py` (new, 4 mutants) runs the client's pickup
+events: the new gun's sound, no sound for ammo, out-of-range items and the
+viewer's weapon selection. `test-remote-sound-events.py`, `test-rumble.py` and
+`test-killcam.py` pass, and the web client and the native server build. Not
+checked in the browser: that needs another player's gun of the same kind on
+the ground.

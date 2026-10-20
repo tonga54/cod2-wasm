@@ -602,15 +602,11 @@ void CG_EntityEvent(centity_t *cent, int event)
             char *itemDefs = CG_ItemInfoBase();
             char *itemData = itemDefs + itemIndex * 9 * 4;
 
-            if (event == 0x90) {
-
-                CG_PlayEntitySoundAlias(es->number,
-                                        *(int *)(itemData + 0x1c) );
-            } else {
-
-                CG_PlayEntitySoundAlias(es->number,
-                                        *(int *)(itemData + 0x20) );
-            }
+            /* Ammo taken from a gun on the ground, as walking over one the
+             * player carries takes it, makes no sound; picking up a new gun
+             * keeps its own. */
+            if (event == 0x90)
+                CG_PlayEntitySoundAlias(es->number, *(int *)(itemData + 0x1c));
 
             snap = (char *)cg->nextSnap;
             if (!(*(int *)(snap + SNAP_FLAGS) & 0xc00000))
