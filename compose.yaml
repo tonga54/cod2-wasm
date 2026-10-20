@@ -6,6 +6,9 @@ services:
     image: local/cod2-wasm:dev
     cpus: 1.0
     mem_limit: 512m
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
     expose:
       - "8088"
     volumes:
@@ -19,7 +22,15 @@ services:
     platform: linux/amd64
     cpus: 3.0
     mem_limit: 1g
+    pids_limit: 256
     read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      # benchmark-connected-server.py captures game packets through docker exec.
+      - NET_RAW
     tmpfs:
       - /profile:uid=1000,gid=1000,size=32m
       - /tmp:size=16m
@@ -37,7 +48,16 @@ services:
     image: local/cod2-gateway:dev
     cpus: 2.0
     mem_limit: 96m
+    pids_limit: 128
     read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    sysctls:
+      # Keep at most 16 KiB unsent in the kernel per socket, so a stalled
+      # player's snapshots back up where the gateway can drop them.
+      net.ipv4.tcp_notsent_lowat: 16384
     volumes:
       - "${COD2_WEB_DATA_DIR:-./data/browser}/web:/game-ui:ro"
       - "cod2-classes:/data"

@@ -14,11 +14,48 @@ export const TIME_LIMITS = [0, 5, 10, 15, 20, 30, 45, 60];
 export const SCORE_LIMITS = { dm: [0, 10, 20, 30, 50, 75, 100, 150], tdm: [0, 25, 50, 75, 100, 150, 200, 300],
   ctf: [0, 1, 3, 5, 7, 10, 15, 20], hq: [0, 60, 120, 180, 300, 450, 600, 900], sd: [0, 3, 4, 5, 6, 7, 10, 15] };
 
+// The connectionless commands a browser client sends its game server
+// (cl_main_mp.c, cl_main_pc_mp.c). rcon, voice, authorization and anything
+// else reaching SV_ConnectionlessPacket is dropped here.
+export const CLIENT_OOB_COMMANDS = new Set(['getchallenge', 'connect', 'getinfo', 'getstatus']);
+// The client netchan sends at most 1400 bytes; connect carries ~1 KiB.
+export const MAX_CLIENT_DATAGRAM = 2048;
+// A client sends ~60 commands a second. Budgets well above that drop a flood
+// as UDP loss before it reaches the single-threaded engine.
+export const CLIENT_BUDGET = Object.freeze({ packets: [200, 400], bytes: [131072, 262144], oob: [10, 20],
+  closeAfterDrops: 1000, dropWindowMs: 10000 });
+// Snapshots queued behind a stalled TCP connection are stale; past this many
+// bytes they are dropped as UDP would, instead of arriving seconds late.
+export const SERVER_BACKLOG_BYTES = 65536;
+
+// SV_ConnectionlessPacket's command: the bytes after 0xffffffff up to the
+// first whitespace or control byte. Anything odd (quotes, leading spaces) is
+// simply not an allowed command. null when the datagram is sequenced.
+export function oobCommand(data) {
+  if (data.length < 4 || data.readInt32LE(0) !== -1) return null;
+  let end = 4;
+  while (end < data.length && end < 20 && data[end] > 32) ++end;
+  return data.toString('latin1', 4, end).toLowerCase();
+}
+
+function tokenBucket([rate, burst], now) {
+  let tokens = burst, last = now();
+  return cost => {
+    const time = now();
+    tokens = Math.min(burst, tokens + (time - last) * rate / 1000);
+    last = time;
+    if (tokens < cost) return false;
+    tokens -= cost;
+    return true;
+  };
+}
+
 export function createGateway({ webHost = 'cod2-web', webPort = 8088,
   udpHost = 'cod2-server', udpPort = 28960, maxClients = 64,
   iconPath = '/game-ui/cod2.ico', startupPath = '/game-ui/cod2-startup.png',
   roomsEnabled = false, managerPort = 8090, updateChecker, maintenanceCheck = createMaintenanceCheck(),
-  classStore = null, cdnRedirect = null, udpSocketFactory = () => dgram.createSocket('udp4') } = {}) {
+  classStore = null, cdnRedirect = null, udpSocketFactory = () => dgram.createSocket('udp4'),
+  clientBudget = CLIENT_BUDGET, now = () => performance.now() } = {}) {
   const reservations = new Map();
   const artworkCache = new Map();
   const wsBinaryOptions = Object.freeze({ binary: true, compress: false });
@@ -98,7 +135,8 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
   function proxy(request, response) {
     const upstream = http.request({ hostname: webHost, port: webPort,
       method: request.method, path: request.url, headers: request.headers }, reply => {
-      response.writeHead(reply.statusCode, reply.headers);
+      response.writeHead(reply.statusCode, { 'x-frame-options': 'DENY', 'referrer-policy': 'same-origin',
+        ...reply.headers });
       reply.pipe(response);
       reply.on('error', () => response.destroy());
     });
@@ -238,7 +276,10 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
     }
     proxy(request, response);
   });
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 65507,
+  // Slow or idle request headers must not hold sockets open.
+  server.headersTimeout = 15000;
+  server.requestTimeout = 30000;
+  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_CLIENT_DATAGRAM,
     perMessageDeflate: false });
   server.on('upgrade', async (request, socket, head) => {
     if (maintenanceCheck()) {
@@ -283,9 +324,22 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
     let alive = true;
     let pending = [];
     let pendingBytes = 0;
+    const packetBudget = tokenBucket(clientBudget.packets, now);
+    const byteBudget = tokenBucket(clientBudget.bytes, now);
+    const oobBudget = tokenBucket(clientBudget.oob, now);
+    let drops = 0, dropWindow = now();
     // One send callback per peer avoids allocating a closure for every command.
     const sentToUdp = error => {
       if (error && ws.readyState === WebSocket.OPEN) ws.close(1011, 'UDP send failed');
+    };
+    const admitted = data => {
+      const command = oobCommand(data);
+      if (packetBudget(1) && byteBudget(data.length) &&
+          (command === null || (CLIENT_OOB_COMMANDS.has(command) && oobBudget(1)))) return true;
+      const time = now();
+      if (time - dropWindow > clientBudget.dropWindowMs) { drops = 0; dropWindow = time; }
+      if (++drops > clientBudget.closeAfterDrops) ws.close(1008, 'Too many packets');
+      return false;
     };
     const closeUdp = () => {
       if (closed) return;
@@ -299,7 +353,7 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
     ws.on('pong', () => { alive = true; });
     ws.on('message', (data, binary) => {
       if (!binary || !data.length) { ws.close(1003, 'Binary datagrams required'); return; }
-      if (closed) return;
+      if (closed || !admitted(data)) return;
       if (udpReady) udp.send(data, sentToUdp);
       else {
         // WebSocket open can precede UDP DNS/connect readiness. Preserve the
@@ -312,7 +366,7 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
       }
     });
     udp.on('message', data => {
-      if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount < 262144)
+      if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount < SERVER_BACKLOG_BYTES)
         ws.send(data, wsBinaryOptions);
     });
     udp.on('error', error => {

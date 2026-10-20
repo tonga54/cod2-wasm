@@ -27,7 +27,7 @@ try {
     await once(client, 'open');
   }
   const replies = clients.map(client => once(client, 'message'));
-  const packets = clients.map((client, i) => Buffer.from([255,255,255,255,i,128,0]));
+  const packets = clients.map((client, i) => Buffer.from([i,0,0,0,128,0]));
   clients.forEach((client, i) => client.send(packets[i]));
   const received = await Promise.all(replies);
   received.forEach((reply, i) => assert.deepEqual(reply[0], packets[i]));
