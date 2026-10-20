@@ -31,6 +31,7 @@ for name in generated:
 changed = []
 report = []
 metrics = []
+balanced = {}
 hit_fields = ('locNone', 'locHelmet', 'locHead', 'locNeck', 'locTorsoUpper',
               'locTorsoLower', 'locRightArmUpper', 'locLeftArmUpper',
               'locRightArmLower', 'locLeftArmLower', 'locRightHand', 'locLeftHand',
@@ -69,11 +70,41 @@ for name, data in sorted(current.items()):
         return '{0,0,0,' + ','.join(fields[k] for k in (
             'damage', 'minDamage', 'maxDamageRange', 'minDamageRange')) + ',{' + \
             ','.join(fields[k] for k in hit_fields) + '}}'
+    automatic = before.get('semiAuto') != '1' and before.get('boltAction') != '1'
+    reviewed = sum(1 << i for i, key in enumerate(hit_fields) if key in differences)
+    balanced[name.removeprefix('weapons/mp/')] = after
     metrics.append('{' + initializer(before) + ',' + initializer(after) + ',' +
-                   str(int(bool(differences))) + ',' + str(int(name.endswith(('bren_mp', 'mp44_mp')))) + ',' +
-                   str(int('damage' in differences)) + '}')
+                   str(int(bool(differences))) + ',' + str(int(name.endswith(('bren_mp', 'mp44_mp', 'bar_mp')))) + ',' +
+                   str(int('damage' in differences)) + ',' + str(int(automatic)) + ',' + str(reviewed) + '}')
 
 assert sorted(changed) == sorted(profile['weapons'])
+
+# Congruence: weapons alike in class, damage, rate of fire, zoom and bullet
+# differ only in magazines, reloads and handling, never in how they hurt.
+model_fields = ('damage', 'minDamage', 'maxDamageRange', 'minDamageRange') + hit_fields
+twins = {}
+for name, fields in balanced.items():
+    key = tuple(fields.get(k) for k in ('weaponClass', 'damage', 'fireTime', 'adsZoomFov', 'rifleBullet'))
+    twins.setdefault(key, []).append(name)
+for key, names in twins.items():
+    assert len({tuple(balanced[name][k] for k in model_fields) for name in names}) == 1, names
+assert any(len(names) > 1 for names in twins.values())
+# The automatic weapons' rules: two headshots to kill; SMGs falling to 10,
+# from 600 to 1,500 units at 700 rounds a minute or more and from 700 to
+# 2,000 below; automatic rifles from 40 to 28 between 1,200 and 2,500, with
+# 0.2 degrees of aimed spread.
+automatics = [name for name, fields in balanced.items() if fields['semiAuto'] != '1' and fields['boltAction'] != '1']
+assert len(automatics) == 9, automatics
+for name in automatics:
+    fields = balanced[name]
+    assert fields['locHead'] == fields['locHelmet'] == '2', name
+    if fields['weaponClass'] == 'smg':
+        expected = ('10', '600', '1500') if 60 / float(fields['fireTime']) >= 700 else ('10', '700', '2000')
+        assert (fields['minDamage'], fields['maxDamageRange'], fields['minDamageRange']) == expected, name
+    else:
+        assert fields['weaponClass'] == 'rifle', name
+        assert (fields['minDamage'], fields['maxDamageRange'], fields['minDamageRange'], fields['adsSpread']) == \
+            ('28', '1200', '2500', '0.2'), name
 # Refuse a different retail patch instead of silently changing the wrong field.
 name = 'weapons/mp/sten_mp'
 malformed = original[name].replace(b'\\locHead\\3', b'\\locHead\\4')
@@ -147,7 +178,7 @@ static int Dvar_GetInt(const char *name) {return 0;}
 static int OnSameTeam(gentity_t *a,gentity_t *b) {return 1;}
 '''
 checks = r'''
-typedef struct {WeaponDef retail,balanced;int changed,rangedAutomatic,closeBodyReduced;} Metric;
+typedef struct {WeaponDef retail,balanced;int changed,rangedAutomatic,closeBodyReduced,automatic,reviewed;} Metric;
 static int shot(WeaponDef *weapon,float distance,int loc) {
  activeWeapon=weapon;hitLocation=loc;receivedDamage=damageCalls=0;
  vec3_t start={0,0,0},end={distance*2,0,0};weaponParms wp={weapon};
@@ -164,11 +195,15 @@ int main(void) {
    assert(now<=old && now<=previous[loc]);previous[loc]=now;
    if(!m->changed)assert(now==old);
    if(m->changed && distance<100) {
-    if(loc==1 || loc==2) {assert(now<100 && now>=50 && old>=100);}
+    /* A reviewed hit location deals less, an automatic weapon's headshot
+     * still half or more of a life. */
+    if(m->reviewed>>loc&1) {assert(now<old);if(m->automatic&&(loc==1||loc==2))assert(now>=50);}
     /* Where reviewed, a weaker body shot that still kills in four. */
     else if(m->closeBodyReduced) {assert(loc==18 ? now==old : now<old);if(loc==4||loc==5)assert(3*now<100 && 4*now>=100);}
     else assert(now==old);
    }
+   /* No automatic weapon kills with one headshot. */
+   if(m->automatic && (loc==1 || loc==2)) assert(now<100);
    cases++;
   }
   for(int side=-1;side<=1;side++) for(int loc=0;loc<19;loc++) {
@@ -195,6 +230,7 @@ output.parent.mkdir(exist_ok=True)
 output.write_text(json.dumps({'profile': profile['id'], 'healthReference': 100,
     'note': 'Body/head damage uses the server range curve and hit multipliers. Shotgun damage is per pellet; turret file stats do not assert a player TTK.',
     'weapons': report}, indent=2) + '\n')
-print(f'PASS: {len(report)} packaged weapon definitions audited; only {len(changed)} reviewed automatic definitions changed, '
-      f'recoil only ever added; retail mismatch rejected')
+print(f'PASS: {len(report)} packaged weapon definitions audited; only {len(changed)} reviewed definitions changed, '
+      f'recoil only ever added; alike weapons share one damage model; every automatic weapon follows its class rules; '
+      f'retail mismatch rejected')
 print(output)

@@ -396,4 +396,4 @@ policy = {
 args.manifest.write_text(json.dumps(policy, indent=2) + "\n")
 print(f"Private Toujane/Carentan/Dawnville archives: {sum(item['size'] for item in files)} bytes; "
       f"asset closure: {len(renderer)} files; gameplay still unverified")
-print(f"Weapon balance: {balance_profile['id']} ({len(balance_profile['weapons'])} automatic weapons)")
+print(f"Weapon balance: {balance_profile['id']} ({len(balance_profile['weapons'])} weapons)")

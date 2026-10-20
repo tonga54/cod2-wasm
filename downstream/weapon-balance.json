@@ -1,13 +1,27 @@
 {
-  "id": "lan-balanced-v2",
+  "id": "lan-balanced-v3",
   "reference": "Owner-supplied CoD2 multiplayer weapon definitions; later retail IWDs override earlier files.",
   "designReference": "https://support.activision.com/call-of-duty--wwii/articles/call-of-duty-wwii-multiplayer",
-  "note": "Custom LAN tuning based on retail CoD2. These overrides are not official WWII statistics. Preserve original cadence, magazines and reloads, and the close body damage and recoil of every weapon but the PPSh, which deals less and kicks more; reduce automatic headshot and ranged/hip-fire advantages.",
+  "note": "Custom LAN tuning based on retail CoD2. These overrides are not official WWII statistics. Preserve original cadence, magazines, reloads and handling. Weapons that share a class, damage, rate of fire, zoom and bullet share one damage model. No automatic weapon kills with one headshot. SMGs firing 700 rounds a minute or more keep full damage to 600 units and fall to 10 by 1,500; slower SMGs to 700 and 2,000. Automatic rifles fall from 40 to 28 between 1,200 and 2,500 units, with 0.2 degrees of aimed spread. The PPSh deals 30 up close and kicks more.",
   "weapons": {
+    "thompson_mp": {
+      "locHelmet": ["3", "2"],
+      "locHead": ["3", "2"],
+      "maxDamageRange": ["800", "600"]
+    },
+    "pps42_mp": {
+      "locHelmet": ["3", "2"],
+      "locHead": ["3", "2"],
+      "maxDamageRange": ["1000", "600"],
+      "minDamageRange": ["2000", "1500"],
+      "adsViewKickPitchMin": ["55", "60"],
+      "adsViewKickPitchMax": ["65", "70"]
+    },
     "ppsh_mp": {
       "damage": ["35", "30"],
       "minDamage": ["20", "10"],
-      "maxDamageRange": ["1000", "700"],
+      "maxDamageRange": ["1000", "600"],
+      "minDamageRange": ["2000", "1500"],
       "locHelmet": ["3", "2"],
       "locHead": ["3", "2"],
       "adsViewKickPitchMin": ["60", "62"],
@@ -22,15 +36,24 @@
       "maxDamageRange": ["1000", "700"],
       "adsSpread": ["0", "0.2"]
     },
-    "thompson_mp": {
-      "locHelmet": ["3", "2"],
-      "locHead": ["3", "2"],
-      "maxDamageRange": ["800", "600"]
-    },
     "mp40_mp": {
       "locHelmet": ["3", "2"],
       "locHead": ["3", "2"],
       "maxDamageRange": ["1000", "700"]
+    },
+    "greasegun_mp": {
+      "locHelmet": ["3", "2"],
+      "locHead": ["3", "2"],
+      "maxDamageRange": ["1000", "700"]
+    },
+    "mp44_mp": {
+      "locHelmet": ["3", "2"],
+      "locHead": ["3", "2"],
+      "minDamage": ["40", "28"],
+      "maxDamageRange": ["1500", "1200"],
+      "adsSpread": ["0", "0.2"],
+      "hipSpreadStandMin": ["1", "1.25"],
+      "hipSpreadMax": ["5", "5.5"]
     },
     "bren_mp": {
       "locHelmet": ["3", "2"],
@@ -41,14 +64,19 @@
       "hipSpreadStandMin": ["1", "1.5"],
       "hipSpreadMax": ["5", "6"]
     },
-    "mp44_mp": {
+    "bar_mp": {
       "locHelmet": ["3", "2"],
       "locHead": ["3", "2"],
       "minDamage": ["40", "28"],
       "maxDamageRange": ["1500", "1200"],
       "adsSpread": ["0", "0.2"],
-      "hipSpreadStandMin": ["1", "1.25"],
-      "hipSpreadMax": ["5", "5.5"]
+      "hipSpreadStandMin": ["1", "1.5"],
+      "hipSpreadMax": ["5", "6"]
+    },
+    "m1garand_mp": {
+      "locTorsoLower": ["2", "1"],
+      "locRightLegUpper": ["2", "1"],
+      "locLeftLegUpper": ["2", "1"]
     }
   }
 }

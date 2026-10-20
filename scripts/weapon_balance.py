@@ -5,9 +5,9 @@ import re
 
 PROFILE_PATH = Path(__file__).resolve().parent.parent / "downstream/weapon-balance.json"
 ALLOWED_FIELDS = {
-    "locHelmet", "locHead", "damage", "minDamage", "maxDamageRange", "adsSpread",
-    "hipSpreadStandMin", "hipSpreadMax", "adsViewKickPitchMin", "adsViewKickPitchMax",
-    "adsViewKickYawMin", "adsViewKickYawMax", "adsViewKickCenterSpeed",
+    "locHelmet", "locHead", "locTorsoLower", "locRightLegUpper", "locLeftLegUpper", "damage", "minDamage",
+    "maxDamageRange", "minDamageRange", "adsSpread", "hipSpreadStandMin", "hipSpreadMax", "adsViewKickPitchMin",
+    "adsViewKickPitchMax", "adsViewKickYawMin", "adsViewKickYawMax", "adsViewKickCenterSpeed",
 }
 
 

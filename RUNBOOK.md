@@ -4146,3 +4146,54 @@ Validation:
   feet and stayed there; an enemy 60 units away, in god mode, fired a short
   burst at it. It went off, the owner died, and the shooter's kill feed read
   "Aim QB [S-Mine] Aim QA" with "You killed Aim QA" and Kill +100.
+
+## One damage model for alike weapons — 2026-10-20
+
+The owner asked for the PPS-42, Grease Gun and BAR to follow the balance
+profile, and for every weapon to be consistent with the rest. The profile
+predates the Soviet weapons and custom classes, which let any side carry any
+gun, so these weapons still had their faction's retail tuning against their
+counterparts:
+
+- The PPS-42 hurt like the Thompson (35 damage at 700 rounds a minute) but
+  killed with one headshot, kept full damage to 1,000 units instead of 600 and
+  fell to 10 at 2,000 instead of 1,500, and kicked less when aimed (55–65).
+  Its 35 rounds and slower reload are its own.
+- The Grease Gun differed from the MP40 only by a one-shot headshot and full
+  damage to 1,000 units instead of 700.
+- The BAR killed with one headshot and kept 40 damage to 1,500 units and at
+  every range, with no aimed spread and the tightest hip fire, against the
+  MP44's and Bren's 28 from 2,500. Its hip spread grows and recovers as the
+  Bren's does.
+- The M1 Garand dealt double damage to the lower torso and thighs, so two
+  shots killed where the G43 and SVT-40 need three.
+
+`lan-balanced-v3` brings all four into line. The Thompson, PPS-42 and PPSh,
+at 700 rounds a minute or more, keep full damage to 600 units and fall to 10
+by 1,500; the Sten, MP40 and Grease Gun keep it to 700 and fall by 2,000. The
+PPSh moves from 700 and 2,000 to that faster group. The PPS-42 takes the
+Thompson's aimed kick. Magazines, reloads, rates of fire and handling stay
+retail: they are what sets alike weapons apart. Bolt-action and scoped rifles
+(identical within each class), pistols, the shotgun and the M1 Carbine
+already agreed and are unchanged. Semi-automatic, bolt-action and pistol
+headshots still kill at close range; no automatic weapon's does.
+
+Shots to the upper torso, and the time they take at 300, 1,000 and 2,000
+units: Thompson and PPS-42 3, 5 and 10 (171, 343 and 771 ms); PPSh 4, 5 and
+10 (201, 268, 603); Sten 3, 4, 10 (200, 300, 900); MP40 and Grease Gun 3, 3,
+10 (240, 240, 1,080); MP44 and Bren 3, 3, 4 (240, 240, 360); BAR 3, 3, 4 (220,
+220, 330); the four semi-automatic rifles 2 (135 ms) at every range.
+
+Validation:
+
+- `scripts/test-weapon-balance.py` (owner data) audits the 37 definitions
+  through the server's damage functions, 130,910 cases. Reviewed hit
+  locations deal less, every other one as retail, and no automatic weapon,
+  in the profile or not, kills with one headshot. It now checks the profile's
+  rules as well. Weapons alike in class, damage, rate of fire, zoom and
+  bullet share one damage model, and every automatic weapon follows its
+  class's headshot and range rules. Each of six earlier values put back alone
+  fails it.
+- `check-private-assets.py`, `test-weapon-fire-modes.py`,
+  `test-ads-transitions.py`, `test-melee-damage.py` and
+  `test-bullet-penetration.py` pass.
