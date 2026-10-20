@@ -222,8 +222,8 @@ try {
     check(pixel(smeared, 955, 360) === 0 && pixel(smeared, 950, 200) === 0, 'the viewmodel stays out of the world smear');
     check(pixel(smeared, 960, 360) === 255 && pixel(smeared, 962, 100) === 255, 'the viewmodel edge stays sharp');
     const flick = render(4, 0, {glow: 0, film: 0, layout: squares, motion: turn(0.03, 20)});
-    check(pixel(flick, 716, 360) > 0 && pixel(flick, 728, 360) === 0 && pixel(flick, 551, 360) === 0,
-      'a flick smears 6% of the screen height at most');
+    check(pixel(flick, 722, 360) > 0 && pixel(flick, 733, 360) === 0 && pixel(flick, 546, 360) === 0,
+      'a flick smears 7% of the screen height at most');
 
     // The viewmodel's own motion. A white viewmodel square over the black
     // world covers pixels 576-703 by 324-395 and moves right with a half

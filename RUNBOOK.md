@@ -4376,3 +4376,19 @@ Validation:
 - Two browsers on opposite teams in a Carentan TDM room, 152 units apart and
   facing: each crosshair red on the other's chest under his red name, and
   white on the wall beside him.
+
+## Stronger motion blur — 2026-10-20
+
+The owner found the hands' and weapon's blur faint on switches, reloads and
+the sprint pose, the lateral motion right, and asked for slightly more camera
+blur when turning. Switches and reloads already hit the viewmodel's 3% cap.
+`web_scene_fx.c` now keeps the viewmodel's 10 ms half smear up to a knee at
+0.8% of the height, where the bob and sway fall, counts each pixel past it
+twice up to a 6% cap, and gathers up to 16 taps. The camera's exposure goes
+from 10 to 12 ms and its cap from 6% to 7%. Details and evidence are in
+`docs/GRAPHICS_2026-10-16.md`, "Stronger motion blur".
+
+Validation: `test-viewmodel-motion.py` (31 and 7 mutants),
+`test-web-scene-fx.py` (46), `test-web-scene-fx.mjs` (107 WebGL2 checks),
+`test-web-scene-fx-scale.cjs` and `test-web-point-lights.cjs`; the web client
+builds; a screencast of a reload, a switch and a sprint in the QA stack.

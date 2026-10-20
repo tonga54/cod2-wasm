@@ -96,7 +96,15 @@ enum {
 #define SCENE_FX_DEFAULT_WORLD_NEAR_CLIP (0.9995002746582031f * 4.0f)
 
 /* Milliseconds of camera motion the blur spans, at any frame rate. */
-#define SCENE_FX_MOTION_EXPOSURE 10.0
+#define SCENE_FX_MOTION_EXPOSURE 12.0
+/* The viewmodel's own motion smears over 10 ms. A half smear up to the knee,
+ * a fraction of the screen's height, is the bob and sway and stays as it is;
+ * a faster motion (a switch, a reload, the sprint pose) counts each pixel past
+ * the knee SCENE_FX_VM_GAIN times, up to the cap. */
+#define SCENE_FX_VM_EXPOSURE 10.0
+#define SCENE_FX_VM_KNEE 0.008f
+#define SCENE_FX_VM_GAIN 2.0f
+#define SCENE_FX_VM_CAP 0.06f
 /* Two views further apart in time or space than these are a cut: a spawn,
  * a teleport or a new killcam, not motion. */
 #define SCENE_FX_MOTION_MAX_GAP 100.0
@@ -400,10 +408,10 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "      highp float self = 1.0 / max(lenX, 0.5);\n" +
                 "      highp vec3 sum = col * self;\n" +
                 "      highp float weight = self;\n" +
-                "      int taps = int(clamp(ceil(span * 0.5), 3.0, 12.0));\n" +
+                "      int taps = int(clamp(ceil(span * 0.5), 3.0, 16.0));\n" +
                 "      float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));\n" +
                 "      ivec2 last = textureSize(u_scene, 0) - 1;\n" +
-                "      for (int i = 0; i < 12; ++i) {\n" +
+                "      for (int i = 0; i < 16; ++i) {\n" +
                 "        if (i >= taps) break;\n" +
                 "        highp vec2 offset = reach * ((float(i) + jitter) / float(taps) * 2.0 - 1.0);\n" +
                 "        ivec2 q = clamp(ivec2(gl_FragCoord.xy + offset), ivec2(0), last);\n" +
@@ -822,8 +830,8 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             /* CoD4 blurs the near world from one unit up to nearEnd. */
             gl.uniform4f(C.u_near, H[o + 15], nearEnd, 1 / Math.max(nearEnd - 1, 1), H[o + 17]);
             gl.uniform2f(C.u_tier, smallTier, medTier);
-            /* The longest smear is 6% of the screen's height. */
-            gl.uniform4f(C.u_motion, motion > 0 ? motion : 0, H[o + 31], H[o + 32], 0.06 * h);
+            /* The longest smear is 7% of the screen's height. */
+            gl.uniform4f(C.u_motion, motion > 0 ? motion : 0, H[o + 31], H[o + 32], 0.07 * h);
             if (motion > 0) {
                 gl.uniformMatrix3fv(C.u_motionRotation, false, H, o + 19, 9);
                 gl.uniform3f(C.u_motionMove, H[o + 28], H[o + 29], H[o + 30]);
@@ -1260,8 +1268,8 @@ static int WebSceneFx_MarkViewmodelTiles(const float *lo, const float *hi, const
 /* This view's camera, with the depth hack's near clip, puts each viewmodel
  * vertex on the screen, and the vertex smears along the way it moved there
  * since the last frame: the viewmodel's own motion, which the camera's does
- * not change. Its half smear spans 5 ms of that motion either side, like the
- * camera's blur. The mesh holds each vertex's GL clip position and smear, the
+ * not change. Its half smear spans 5 ms of that motion either side, longer
+ * past the knee. The mesh holds each vertex's GL clip position and smear, the
  * triangles with every corner in front of the eye, and for each tile of the
  * screen the largest smear within one tile of it. A tile is as wide as the
  * longest half smear, so that covers every smear that reaches the tile. */
@@ -1271,7 +1279,7 @@ static void WebSceneFx_TrackViewmodel(int width, int height, float nearClip)
     float *screen = s_vmScreens[s_vmLastScreen ^ 1];
     const float *last = s_vmScreens[s_vmLastScreen];
     float lens[16], m[16], *index;
-    float cap, scale, motion = 0.0f;
+    float knee, cap, scale, motion = 0.0f;
     int blur, tile, tilesX, tilesY, vertexRows, tileRow, s, t, i, j, k, n = 0;
 
     s_vmMotion = 0.0f;
@@ -1296,12 +1304,13 @@ static void WebSceneFx_TrackViewmodel(int width, int height, float nearClip)
                 sum += view[i * 4 + k] * lens[k * 4 + j];
             m[i * 4 + j] = sum;
         }
-    cap = 0.03f * (float)height;
+    knee = SCENE_FX_VM_KNEE * (float)height;
+    cap = SCENE_FX_VM_CAP * (float)height;
     tile = (int)ceilf(cap);
     tilesX = (width + tile - 1) / tile;
     tilesY = (height + tile - 1) / tile;
     blur = tilesX * tilesY <= SCENE_FX_VM_MAX_TILES && s_viewContinuous && WebSceneFx_Enabled(r_motionBlur);
-    scale = blur ? (float)(SCENE_FX_MOTION_EXPOSURE / s_viewGap) * 0.25f : 0.0f;
+    scale = blur ? (float)(SCENE_FX_VM_EXPOSURE / s_viewGap) * 0.25f : 0.0f;
     for (s = 0; s < s_vmSurfaceCount; ++s) {
         const WebSceneFxVmSurface *surface = &s_vmSurfaces[s];
         const WebSceneFxVmSurface *before = blur ? WebSceneFx_LastViewmodelSurface(s) : NULL;
@@ -1339,9 +1348,10 @@ static void WebSceneFx_TrackViewmodel(int width, int height, float nearClip)
                     smear[0] = (screen[i * 2] - was[0]) * (float)width * scale;
                     smear[1] = (screen[i * 2 + 1] - was[1]) * (float)height * scale;
                     length = sqrtf(smear[0] * smear[0] + smear[1] * smear[1]);
-                    if (length > cap) {
-                        smear[0] *= cap / length;
-                        smear[1] *= cap / length;
+                    if (length > knee) {
+                        float boosted = fminf(knee + SCENE_FX_VM_GAIN * (length - knee), cap);
+                        smear[0] *= boosted / length;
+                        smear[1] *= boosted / length;
                     }
                 }
             }
