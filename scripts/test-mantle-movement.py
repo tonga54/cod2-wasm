@@ -227,6 +227,7 @@ static void Mantle_Move(pmove_t *pm,playerState_t *ps,pml_t *pml) {
 pmove_source = (root / 'src/PC/bgame/bg_pmove.c').read_text()
 dispatch_support += pmove_source[pmove_source.index('#define PMF_FROZEN '):pmove_source.index('#define ENTITYNUM_WORLD')]
 dispatch_support += function('src/PC/bgame/bg_pmove.c', 'PM_FilterFrozenCommand')
+dispatch_support += function('src/PC/bgame/bg_pmove.c', 'PM_ClearProneFlags')
 dispatch_body = function('src/PC/bgame/bg_pmove.c', 'Pmove')
 dispatch_checks = r'''
 int main(void) {

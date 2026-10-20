@@ -412,6 +412,16 @@ static void PM_UpdateSprint(pmove_t *pm, pml_t *pml)
     ps->pm_flags |= PMF_SPRINT;
 }
 
+/* 0x10000 marks a prone attempt or prone turn blocked during this command;
+ * 0x800 is the hold a weapon action takes on crawling while prone. Sprint
+ * tests both and leaning tests 0x10000, so neither may outlast its cause. */
+static void PM_ClearProneFlags(playerState_t *ps)
+{
+    ps->pm_flags &= ~0x10000;
+    if (!(ps->pm_flags & 0x1))
+        ps->pm_flags &= ~0x800;
+}
+
 static void PM_DropTimers(playerState_t *ps, int msec)
 {
     /* Timed jump/land/weapon gestures must release the movement animation. */
@@ -2135,6 +2145,7 @@ void Pmove(pmove_t *pm)
         }
 
         BG_AnimUpdatePlayerStateConditions(pm);
+        PM_ClearProneFlags(ps);
 
         {
             extern int PM_WeaponAmmoAvailable(playerState_t * ps);
