@@ -153,7 +153,9 @@ retail CoD2:
   Lens and 4x sights. They change that player's magazine, fire rate, aiming,
   spread, recoil, sway, zoom, damage range, penetration and head damage, in
   prediction and on the server alike, and a suppressed gun is quiet, without
-  flash and off the enemy minimap. CoD2 has no attachment models; the sights are
+  flash and off the enemy minimap. Each one also costs something: a slower
+  aim, a harder kick or a shorter damage range, shown in red in Create a Class
+  beside its gains. CoD2 has no attachment models; the sights are
   drawn reticles and the 4x Optic a sniper scope. See
   [attachments](docs/CLASSES.md#attachments).
 - **Placed explosives:** CoD WWII's S-Mine 44, set down at your feet after

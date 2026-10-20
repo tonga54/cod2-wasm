@@ -1398,14 +1398,6 @@ static unsigned Cac_SlotAttachments(const ClassLoadout *loadout, int slot)
     return slot <= CLASS_SLOT_SECONDARY ? ClassData_AttachmentMask(loadout, slot) : 0;
 }
 
-/* A bar's filled fraction: the rating before rounding. */
-static float Cac_BarFraction(float value, float lowest, float highest)
-{
-    float rating = highest > lowest ? 1.0f + 9.0f * (value - lowest) / (highest - lowest) : 5.0f;
-
-    return (rating < 1.0f ? 1.0f : rating > 10.0f ? 10.0f : rating) / 10.0f;
-}
-
 static const vec_t *Cac_ChangeColor(float before, float after)
 {
     return after > before ? s_cacBetter : after < before ? s_cacWorse : UI_WWIIMenu_Color(WWII_COLOR_WHITE);
@@ -1430,10 +1422,11 @@ static void Cac_Stats(int weapon, unsigned base, unsigned preview)
     ClassData_AttachedStats(file, g_classWeapons[weapon].weapon, preview, &after);
     for (stat = 0; stat < CLASS_STAT_COUNT; stat++) {
         float top = CAC_STAT_TOP + (float)stat * CAC_STAT_ROW;
-        float from = Cac_BarFraction(before.value[stat], s_cac.lowest[stat], s_cac.highest[stat]);
-        float to = Cac_BarFraction(after.value[stat], s_cac.lowest[stat], s_cac.highest[stat]);
-        int rating = ClassData_Rate(after.value[stat], s_cac.lowest[stat], s_cac.highest[stat]);
-        int was = ClassData_Rate(before.value[stat], s_cac.lowest[stat], s_cac.highest[stat]);
+        float from =
+            ClassData_AttachedRating(file->value[stat], before.value[stat], s_cac.lowest[stat], s_cac.highest[stat]);
+        float to =
+            ClassData_AttachedRating(file->value[stat], after.value[stat], s_cac.lowest[stat], s_cac.highest[stat]);
+        int rating = (int)(to + 0.5f), was = (int)(from + 0.5f);
         CacRect bar = Cac_Rect(x, top + 2.0f, CAC_STAT_BAR, 1.2f, CAC_ALIGN_RIGHT);
 
         snprintf(text, sizeof(text), "%d", rating);
@@ -1441,11 +1434,11 @@ static void Cac_Stats(int weapon, unsigned base, unsigned preview)
                  Cac_ChangeColor((float)was, (float)rating));
         Cac_Caps(s_cacStats[stat], 0, x, top - 1.0f, CAC_ALIGN_RIGHT, 4.2f, 0.12f, UI_WWIIMenu_Color(WWII_COLOR_GOLD));
         Cac_Fill(&bar, s_cacBar);
-        bar.w = CAC_STAT_BAR * (from < to ? from : to);
+        bar.w = CAC_STAT_BAR * 0.1f * (from < to ? from : to);
         Cac_Fill(&bar, s_cacNote);
         if (from != to) {
             bar.x += bar.w;
-            bar.w = CAC_STAT_BAR * (from < to ? to - from : from - to);
+            bar.w = CAC_STAT_BAR * 0.1f * (from < to ? to - from : from - to);
             Cac_Fill(&bar, Cac_ChangeColor(from, to));
         }
     }

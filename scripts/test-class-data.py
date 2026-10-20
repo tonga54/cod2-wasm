@@ -11,6 +11,9 @@ source = root / 'src/PC/ui_mp/ui_class_data.c'
 camo_source = root / 'src/PC/bgame/bg_weapon_camo.c'
 rules_source = root / 'src/PC/bgame/bg_attachment_rules.c'
 rules = json.loads((root / 'downstream/gateway/classes.json').read_text())
+# The FMJ line's percentage is the server's armorPiercing depth.
+assert 'if (weapon->armorPiercing)\n        depth *= 1.25f;' in (root / 'src/PC/game_mp/g_weapon_mp.c').read_text()
+assert '"Penetrates 25%% deeper, keeps more damage"' in source.read_text()
 
 # One set of lists and defaults: the host's, the client's and the server's.
 table = re.findall(r'\{ "([A-Za-z0-9_]+_mp)", CLASS_SLOT_(PRIMARY|SECONDARY|LETHAL|TACTICAL),', source.read_text())
@@ -353,11 +356,12 @@ int main(void)
         char lines[8][48];
         int tones[8], count;
         ClassData_ReadStats("WEAPONFILE\\displayName\\WEAPON_X\\damage\\90\\maxDamageRange\\2000\\adsSpread\\0"
-                            "\\fireTime\\0.33\\moveSpeedScale\\1\\clipSize\\5\\maxAmmo\\60\\adsOverlayShader\\scope", &stats);
+                            "\\fireTime\\0.33\\moveSpeedScale\\1\\clipSize\\5\\maxAmmo\\60\\adsOverlayShader\\scope"
+                            "\\adsTransInTime\\0.2", &stats);
         assert(stats.valid && stats.value[CLASS_STAT_DAMAGE] == 90.0f && stats.value[CLASS_STAT_RANGE] == 2000.0f);
         assert(fabsf(stats.value[CLASS_STAT_ACCURACY] - 4.8f) < 1e-4f);
         assert(fabsf(stats.value[CLASS_STAT_FIRE_RATE] - 1.0f / 0.33f) < 1e-4f);
-        assert(stats.value[CLASS_STAT_MOBILITY] == 1.0f && stats.clip == 5 && stats.ammo == 60);
+        assert(stats.value[CLASS_STAT_MOBILITY] == 1.0f && stats.moveSpeed == 1.0f && stats.clip == 5 && stats.ammo == 60);
         ClassData_ReadStats("WEAPONFILE\\damage\\35\\adsSpread\\0.5\\adsOverlayShader\\\\fireTime\\0.086", &stats);
         assert(stats.valid && fabsf(stats.value[CLASS_STAT_ACCURACY] - 1.0f / 0.75f) < 1e-4f);
         /* A value equal to a key's name is still a value. */
@@ -381,63 +385,124 @@ int main(void)
         assert(stats.raw.fireTime == 85 && stats.raw.adsTransInTime == 220 && stats.raw.clipSize == 20);
         assert(stats.raw.maxDamageRange == 800.0f && stats.raw.hipSpread[0] == 1.5f && stats.raw.hipSpread[3] == 5.0f);
         assert(stats.raw.headMultiplier[0] == 2.0f && stats.raw.headMultiplier[1] == 2.0f && stats.raw.adsKick[1] == 70.0f);
+        /* The bars: damage with a tenth per headshot multiple, range midway
+         * through the fall, accuracy with kick and hip-fire spread, mobility
+         * with the time to aim. */
+        assert(fabsf(stats.value[CLASS_STAT_DAMAGE] - 38.5f) < 1e-4f && stats.value[CLASS_STAT_RANGE] == 1150.0f);
+        assert(fabsf(stats.value[CLASS_STAT_ACCURACY] - 1.0f / 0.75f * (100.0f / 170.0f) * 0.8f) < 1e-5f);
+        assert(fabsf(stats.value[CLASS_STAT_MOBILITY] - 400.0f / 420.0f) < 1e-5f);
         ClassData_AttachedStats(&stats, "thompson_mp", 0, &attached);
         assert(!memcmp(attached.value, stats.value, sizeof(stats.value)) && attached.clip == 20 && attached.ammo == 180);
         ClassData_AttachedStats(&stats, "thompson_mp",
                                 ATT_BIT(ATT_EXTMAG) | ATT_BIT(ATT_RAPIDFIRE) | ATT_BIT(ATT_REFLEX), &attached);
         assert(attached.clip == 30 && attached.ammo == 270 && attached.raw.startAmmo == 210);
-        assert(attached.raw.fireTime == 80);
+        assert(attached.raw.fireTime == 80 && attached.raw.adsTransInTime == 266);
         assert(fabsf(attached.value[CLASS_STAT_FIRE_RATE] - stats.value[CLASS_STAT_FIRE_RATE] * 85.0f / 80.0f) < 1e-3f);
-        assert(fabsf(attached.value[CLASS_STAT_ACCURACY] - 1.0f / (0.25f + 0.375f)) < 1e-4f);
+        assert(fabsf(attached.value[CLASS_STAT_ACCURACY] - 1.0f / 0.65f * (100.0f / 180.5f) * 0.8f) < 1e-5f);
+        assert(fabsf(attached.value[CLASS_STAT_MOBILITY] - 400.0f / 466.0f) < 1e-5f);
         assert(attached.value[CLASS_STAT_DAMAGE] == stats.value[CLASS_STAT_DAMAGE]);
+        /* What an attachment gives comes first, what it costs last. */
         count = ClassData_AttachmentEffects(&stats.raw, &attached.raw, lines, tones, 8);
-        assert(count == 5);
+        assert(count == 7);
         assert(!strcmp(lines[0], "Magazine 30, from 20") && tones[0] == 1);
         assert(!strcmp(lines[1], "Reserve 270, from 180") && tones[1] == 1);
         assert(!strcmp(lines[2], "Fire rate +6%") && tones[2] == 1);
-        assert(!strcmp(lines[3], "Zoom 1.5x, from 1.3x") && tones[3] == 0);
-        assert(!strcmp(lines[4], "Aimed spread -25%") && tones[4] == 1);
+        assert(!strcmp(lines[3], "Aimed spread -20%") && tones[3] == 1);
+        assert(!strcmp(lines[4], "Zoom 1.5x, from 1.3x") && tones[4] == 0);
+        assert(!strcmp(lines[5], "Aims in 266 ms, from 220") && tones[5] == -1);
+        assert(!strcmp(lines[6], "Aimed recoil +15%") && tones[6] == -1);
+        assert(ClassData_AttachmentEffects(&stats.raw, &attached.raw, lines, tones, 2) == 2);
+        assert(!strcmp(lines[1], "Reserve 270, from 180"));
         ClassData_AttachedStats(&stats, "thompson_mp", ATT_BIT(ATT_SUPPRESSOR) | ATT_BIT(ATT_QUICKDRAW) |
                                 ATT_BIT(ATT_STEADYAIM), &attached);
         count = ClassData_AttachmentEffects(&stats.raw, &attached.raw, lines, tones, 8);
-        assert(count == 4);
-        assert(!strcmp(lines[0], "Aims in 110 ms, from 220") && tones[0] == 1);
-        assert(!strcmp(lines[1], "Hip-fire spread -35%") && tones[1] == 1);
-        assert(!strcmp(lines[2], "Damage range -30%") && tones[2] == -1);
-        assert(!strcmp(lines[3], "Quiet, no flash, off the minimap") && tones[3] == 1);
-        assert(attached.value[CLASS_STAT_RANGE] == 560.0f);
-        /* Advanced Rifling keeps an SMG's full damage range and its bar; the
-         * fall beyond reaches a quarter further. */
+        assert(count == 5);
+        assert(!strcmp(lines[0], "Aims in 157 ms, from 220") && tones[0] == 1);
+        assert(!strcmp(lines[1], "Hip-fire spread -25%") && tones[1] == 1);
+        assert(!strcmp(lines[2], "Quiet, no flash, off the minimap") && tones[2] == 1);
+        assert(!strcmp(lines[3], "Aimed recoil +15%") && tones[3] == -1);
+        assert(!strcmp(lines[4], "Damage range -30%") && tones[4] == -1);
+        assert(attached.value[CLASS_STAT_RANGE] == 805.0f);
+        assert(fabsf(attached.value[CLASS_STAT_MOBILITY] - 400.0f / 357.0f) < 1e-5f);
+        /* Advanced Rifling keeps an SMG's full damage range; the fall beyond
+         * reaches a quarter further, and so does its bar. */
         ClassData_AttachedStats(&stats, "thompson_mp", ATT_BIT(ATT_RIFLING), &attached);
         count = ClassData_AttachmentEffects(&stats.raw, &attached.raw, lines, tones, 8);
-        assert(count == 1 && !strcmp(lines[0], "Falloff range +25%") && tones[0] == 1);
-        assert(attached.value[CLASS_STAT_RANGE] == 800.0f && attached.raw.minDamageRange == 1875.0f);
-        /* High Caliber: a semi-automatic rifle's headshot x3; an automatic
-         * one stops a point short of a kill. */
+        assert(count == 2 && !strcmp(lines[0], "Falloff range +25%") && tones[0] == 1);
+        assert(!strcmp(lines[1], "Aims in 242 ms, from 220") && tones[1] == -1);
+        assert(attached.value[CLASS_STAT_RANGE] == 1337.5f && attached.raw.minDamageRange == 1875.0f);
+        /* FMJ raises the damage bar for its penetration and lowers range. */
+        ClassData_AttachedStats(&stats, "thompson_mp", ATT_BIT(ATT_FMJ), &attached);
+        assert(fabsf(attached.value[CLASS_STAT_DAMAGE] - 38.5f * 1.1f) < 1e-4f);
+        assert(fabsf(attached.value[CLASS_STAT_RANGE] - 1035.0f) < 1e-3f);
+        count = ClassData_AttachmentEffects(&stats.raw, &attached.raw, lines, tones, 8);
+        assert(count == 2 && !strcmp(lines[0], "Penetrates 25% deeper, keeps more damage") && tones[0] == 1);
+        assert(!strcmp(lines[1], "Damage range -10%") && tones[1] == -1);
+        /* High Caliber: a semi-automatic rifle's headshot x3, a harder kick;
+         * an automatic one stops a point short of a kill. */
         {
             ClassStats rifle;
             ClassData_ReadStats("WEAPONFILE\\damage\\45\\semiAuto\\1\\maxDamageRange\\2000\\minDamageRange\\3000"
                                 "\\fireTime\\0.135\\adsViewKickPitchMax\\70\\locHead\\2\\locHelmet\\2", &rifle);
-            ClassData_AttachedStats(&rifle, "m1garand_mp", ATT_BIT(ATT_HIGHCAL) | ATT_BIT(ATT_FMJ) | ATT_BIT(ATT_GRIP),
-                                    &attached);
+            ClassData_AttachedStats(&rifle, "m1garand_mp", ATT_BIT(ATT_HIGHCAL) | ATT_BIT(ATT_FMJ), &attached);
+            assert(fabsf(rifle.value[CLASS_STAT_DAMAGE] - 49.5f) < 1e-4f);
+            assert(fabsf(attached.value[CLASS_STAT_DAMAGE] - 45.0f * 1.2f * 1.1f) < 1e-4f);
             count = ClassData_AttachmentEffects(&rifle.raw, &attached.raw, lines, tones, 8);
-            assert(count == 3 && !strcmp(lines[0], "Aimed recoil -10%") && !strcmp(lines[1], "Head damage x3, from x2"));
-            assert(!strcmp(lines[2], "Keeps more damage through cover"));
+            assert(count == 4 && !strcmp(lines[0], "Head damage x3, from x2") && tones[0] == 1);
+            assert(!strcmp(lines[1], "Penetrates 25% deeper, keeps more damage") && tones[1] == 1);
+            assert(!strcmp(lines[2], "Aimed recoil +15%") && tones[2] == -1);
+            assert(!strcmp(lines[3], "Damage range -10%") && tones[3] == -1);
             assert(ClassData_AttachmentEffects(&rifle.raw, &attached.raw, lines, tones, 1) == 1);
+            assert(!strcmp(lines[0], "Head damage x3, from x2"));
+            /* Grip trades a tenth on the aim for 15% off the kick. */
+            ClassData_AttachedStats(&rifle, "m1garand_mp", ATT_BIT(ATT_GRIP), &attached);
+            count = ClassData_AttachmentEffects(&rifle.raw, &attached.raw, lines, tones, 8);
+            assert(count == 1 && !strcmp(lines[0], "Aimed recoil -15%") && tones[0] == 1);
+            assert(attached.value[CLASS_STAT_ACCURACY] > rifle.value[CLASS_STAT_ACCURACY]);
         }
         assert(stats.raw.damage == 35 && !stats.raw.semiAuto && !stats.raw.boltAction);
         ClassData_AttachedStats(&stats, "mp44_mp", ATT_BIT(ATT_HIGHCAL), &attached);
         count = ClassData_AttachmentEffects(&stats.raw, &attached.raw, lines, tones, 8);
-        assert(count == 1 && !strcmp(lines[0], "Head damage x2.84, from x2") && tones[0] == 1);
-        /* A 4x Optic scopes the rifle: its fifth for a scope, and 4x zoom. */
+        assert(count == 2 && !strcmp(lines[0], "Head damage x2.84, from x2") && tones[0] == 1);
+        assert(!strcmp(lines[1], "Aimed recoil +15%") && tones[1] == -1);
+        /* A 4x Optic scopes the rifle: its fifth for a scope, 4x zoom, and a
+         * quarter on the aim. */
         ClassData_AttachedStats(&stats, "m1garand_mp", ATT_BIT(ATT_OPTIC4X), &attached);
-        assert(fabsf(attached.value[CLASS_STAT_ACCURACY] - 1.2f / 0.75f) < 1e-4f && attached.raw.overlay[0]);
+        assert(fabsf(attached.value[CLASS_STAT_ACCURACY] - 1.2f * stats.value[CLASS_STAT_ACCURACY]) < 1e-5f);
+        assert(attached.raw.overlay[0]);
         count = ClassData_AttachmentEffects(&stats.raw, &attached.raw, lines, tones, 8);
-        assert(count == 1 && !strcmp(lines[0], "Zoom 4.0x, from 1.3x"));
+        assert(count == 2 && !strcmp(lines[0], "Zoom 4.0x, from 1.3x") && tones[0] == 0);
+        assert(!strcmp(lines[1], "Aims in 275 ms, from 220") && tones[1] == -1);
+        /* Ballistic Calibration steadies a scope: sway in the accuracy bar. */
+        {
+            ClassStats sniper;
+            ClassData_ReadStats("WEAPONFILE\\damage\\90\\adsSpread\\0\\adsIdleAmount\\20\\adsTransInTime\\0.25"
+                                "\\adsOverlayShader\\scope\\moveSpeedScale\\1", &sniper);
+            assert(fabsf(sniper.value[CLASS_STAT_ACCURACY] - 4.8f * 40.0f / 60.0f) < 1e-4f);
+            ClassData_AttachedStats(&sniper, "kar98k_sniper_mp", ATT_BIT(ATT_CALIBRATION), &attached);
+            assert(fabsf(attached.value[CLASS_STAT_ACCURACY] - 4.8f * 40.0f / 52.0f) < 1e-4f);
+            assert(fabsf(attached.value[CLASS_STAT_MOBILITY] - 400.0f / 475.0f) < 1e-5f);
+        }
     }
-    assert(ClassData_Rate(35.0f, 35.0f, 90.0f) == 1 && ClassData_Rate(90.0f, 35.0f, 90.0f) == 10);
-    assert(ClassData_Rate(62.5f, 35.0f, 90.0f) == 6 && ClassData_Rate(500.0f, 35.0f, 90.0f) == 10);
-    assert(ClassData_Rate(-5.0f, 35.0f, 90.0f) == 1 && ClassData_Rate(7.0f, 7.0f, 7.0f) == 5);
+    /* The guns from 2 to 8 between the lowest and highest. */
+    assert(ClassData_AttachedRating(35.0f, 35.0f, 35.0f, 90.0f) == 2.0f);
+    assert(ClassData_AttachedRating(90.0f, 90.0f, 35.0f, 90.0f) == 8.0f);
+    assert(fabsf(ClassData_AttachedRating(62.5f, 62.5f, 35.0f, 90.0f) - 5.0f) < 1e-5f);
+    assert(ClassData_AttachedRating(-5.0f, -5.0f, 35.0f, 90.0f) == 2.0f);
+    assert(ClassData_AttachedRating(500.0f, 500.0f, 35.0f, 90.0f) == 8.0f);
+    assert(ClassData_AttachedRating(7.0f, 7.0f, 7.0f, 7.0f) == 5.0f && ClassData_AttachedRating(7.0f, 8.0f, 7.0f, 7.0f) > 5.0f);
+    /* With attachments, about a point for each tenth more, whatever the
+     * bar's spread, and room past the best and the worst gun. */
+    assert(fabsf(ClassData_AttachedRating(62.5f, 62.5f * 1.1f, 35.0f, 90.0f) - (5.0f + 10.0f * logf(1.1f))) < 1e-4f);
+    assert(fabsf(ClassData_AttachedRating(0.5f, 0.55f, 0.04f, 2.3f) - ClassData_AttachedRating(0.5f, 0.5f, 0.04f, 2.3f) -
+                 10.0f * logf(1.1f)) < 1e-4f);
+    assert(fabsf(ClassData_AttachedRating(90.0f, 99.0f, 35.0f, 90.0f) - (8.0f + 10.0f * logf(1.1f))) < 1e-4f);
+    assert(fabsf(ClassData_AttachedRating(35.0f, 31.5f, 35.0f, 90.0f) - (2.0f + 10.0f * logf(0.9f))) < 1e-4f);
+    assert(ClassData_AttachedRating(90.0f, 200.0f, 35.0f, 90.0f) == 10.0f);
+    assert(ClassData_AttachedRating(35.0f, 10.0f, 35.0f, 90.0f) == 0.0f);
+    assert(fabsf(ClassData_AttachedRating(62.5f, 0.0f, 35.0f, 90.0f) - 5.0f) < 1e-5f);
+    /* The gun's own rating is capped before the change moves it. */
+    assert(fabsf(ClassData_AttachedRating(120.0f, 60.0f, 35.0f, 90.0f) - (8.0f + 10.0f * logf(0.5f))) < 1e-4f);
     puts("PASS: 35 weapons in four slots, two camouflages and the guns' attachments per class, attachments "
          "edited by WWII's rules, storage lines round-trip with per-field defaults, host name rules, bounded "
          "rename, the comma response with camouflage and attachments only when set, and stats with "
@@ -457,11 +522,24 @@ mutants = [
     ('"class,%s,%s,%s,%s"', '"class %s %s %s %s"'),
     ('            snprintf(attachments[slot], CLASS_ATTACHMENTS_MAX, "none");\n', '            ;\n'),
     ("(raw->overlay[0] ? 1.2f : 1.0f)", "1.0f"),
-    ('CLASS_KEY("maxDamageRange")', 'CLASS_KEY("minDamageRange")'),
+    ("(raw->armorPiercing ? 1.1f : 1.0f)", "1.0f"),
+    ("(1.0f + 0.1f * (head - 1.0f))", "1.0f"),
+    ("raw->minDamageRange > raw->maxDamageRange ? 0.5f * (raw->maxDamageRange + raw->minDamageRange)",
+     "raw->minDamageRange > raw->maxDamageRange ? raw->maxDamageRange"),
+    ("100.0f / (100.0f + fabsf(raw->adsKick[1]))", "1.0f"),
+    ("(6.0f + hip)", "6.0f"),
+    ("(40.0f + sway)", "40.0f"),
+    ("400.0f / (200.0f + (float)(raw->adsTransInTime > 0 ? raw->adsTransInTime : 0))", "1.0f"),
+    ("    ClassData_Measure(attached);\n", ""),
+    ("    for (tone = 1; tone >= -1; tone--) {", "    for (tone = -1; tone <= 1; tone++) {"),
+    ("        rating += 10.0f * logf(attached / bare);", "        rating += 9.0f * logf(attached / bare);"),
+    ("    if (bare > 0.0f && attached > 0.0f)\n", "    if (bare > 0.0f)\n"),
+    ("    if (rating < 2.0f)\n        rating = 2.0f;\n    else if (rating > 8.0f)\n        rating = 8.0f;\n", ""),
+    ("        for (i = 0; i < count && written < max; i++) {", "        for (i = 0; i < count; i++) {"),
     ('CLASS_KEY("fuseTime")', 'CLASS_KEY("fuse")'),
-    ("rating = 1 + (int)(9.0f * (value - lowest) / (highest - lowest) + 0.5f);",
-     "rating = 1 + (int)(9.0f * (value - lowest) / (highest - lowest));"),
-    ("    if (!(highest > lowest))\n        return 5;\n", ""),
+    ("2.0f + 6.0f * (bare - lowest) / (highest - lowest) : 5.0f;", "1.0f + 9.0f * (bare - lowest) / (highest - lowest) : 5.0f;"),
+    ("highest > lowest ? 2.0f + 6.0f", "highest >= lowest ? 2.0f + 6.0f"),
+    ("    return rating < 0.0f ? 0.0f : rating > 10.0f ? 10.0f : rating;", "    return rating < 1.0f ? 1.0f : rating > 10.0f ? 10.0f : rating;"),
     ("            if (length < sizeof(fields[0]))\n                memcpy(fields[count], text, length);\n            else\n                valid = 0;\n",
      "            memcpy(fields[count], text, length);\n"),
     ('        while (count < 1 + CLASS_SLOT_COUNT + CLASS_CAMO_SLOTS + 2) {',

@@ -4273,3 +4273,67 @@ Validation:
   130 units away: the squad emblem went as the mine sprang 0.3 s after the
   enemy stepped by it, the canister rose in front of him to his chest, and it
   went off there about 0.3 s later.
+
+## Attachments that cost something — 2026-10-20
+
+The owner found the attachments too strong, all gain and no cost, and FMJ
+showing nothing in Create a Class. Two causes: no attachment had a drawback
+but the Suppressor's range, and the bars measured only damage, full-damage
+range, aimed spread, fire rate and move speed, so FMJ, High Caliber, Grip,
+Steady Aim, Quickdraw and Ballistic Calibration moved no bar.
+
+`BG_ApplyAttachmentStats` now gives every attachment a cost, multiplied into
+one factor each for the aim-in time, the aimed kick and the damage ranges and
+applied once at the end:
+
+- Aim-in +10%: Grip, Steady Aim, Extended Mag, Advanced Rifling, Ballistic
+  Calibration and the Reflex Sight; +15% the Lens Sight, +25% the 4x Optic.
+- Aimed view and gun kick +15%: Quickdraw, Rapid Fire, High Caliber.
+- Damage ranges −10%: FMJ. The Suppressor keeps its −30% (SMGs) and −15%
+  (pistols).
+
+The strongest gains come down: Quickdraw −35% on SMGs (was −50%), Steady Aim
+−40% and −25% on the Thompson and PPSh (was −55% and −35%), the Reflex
+Sight's aimed spread −20% (was −25%), Advanced Rifling ×1.5 on rifles (was
+×2, which took the MP44's full damage to 2400 units). Grip, the weakest gain,
+goes to −15% kick now that it costs aim-in time. Reload and move speed were
+left out: `PM_SetReloadingState` reads the reload time from the shared
+definition while `PM_SetReloadDelay` reads the player's, and `PM_CmdScale`
+never applies a weapon's `moveSpeedScale`, so neither would be felt in play
+as the menu showed it.
+
+Create a Class:
+
+- Each bar now measures what attachments change. Damage counts a tenth more
+  per headshot multiple and a tenth more for FMJ's penetration; Range is
+  midway through the fall to minimum damage; Accuracy adds the aimed kick,
+  hip-fire spread and sway to the aimed spread; Mobility adds the aim-in
+  time to the move speed.
+- `ClassData_AttachedRating` rates the bare gun 2 to 8 among the guns and
+  moves the bar from there by the attachment's own change, ten points per
+  natural log. Rated between the guns, a 10% gain in accuracy, where the guns
+  sit fifty times apart, barely moved its bar while a 10% slower aim sank
+  Mobility, where they sit a fifth apart; and the best and worst guns had no
+  room to show a change. `ClassData_Rate` is gone.
+- The effect lines list gains first, then neutral changes, then costs. FMJ's
+  line reads "Penetrates 25% deeper, keeps more damage", the server's
+  armorPiercing depth.
+
+Validation:
+
+- `scripts/test-attachments.py`: each attachment's gain and cost on the
+  production definitions, three attachments' costs multiplied, the cached
+  player definitions against direct application for every Thompson set, the
+  Quickdraw lerp at 44/143, Grip's recoil and Steady Aim's spread through the
+  weapon code. 54 mutants fail.
+- `scripts/test-class-data.py`: the bars' measures, the effect lines in
+  their order, FMJ raising Damage and lowering Range, Calibration in
+  Accuracy, the attached rating's scale and limits, and that the FMJ line's
+  25% matches `Bullet_PenetrationDepth`. 47 mutants fail.
+- `test-class-camo.py`, `test-class-menu-pause.py`, `test-class-select.py`,
+  `test-view-attachments.py` and `test-owner-class-pictures.py` pass; the web
+  client and the native server build.
+- The browser's Create a Class on a Thompson: Lens Sight, Accuracy 4 to 5
+  in green and Mobility 7 to 6 in red, "Aims in 253 ms, from 220" in red;
+  FMJ, Damage 2 to 3 and Range 3 to 2 with its penetration line in green;
+  Quickdraw, Mobility 7 to 9 and Accuracy 4 to 3.

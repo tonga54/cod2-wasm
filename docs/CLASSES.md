@@ -33,8 +33,8 @@ the menus already use, or with [pictures the owner keeps](#pictures).
   Standard Issue keeps the game's own finish.
 - An attachment box opens **Modify Attachment**: WWII's grid of the gun's
   attachments, three a row, with the focused one's description, a line for each
-  value it changes on that gun (green better, red worse) and the rating bars
-  with its change. Enter fits it in that box; Backspace, Delete or a
+  value it changes on that gun, what it gives in green first and what it costs
+  in red last, and the rating bars with its change. Enter fits it in that box; Backspace, Delete or a
   controller's X takes the box's attachment off. An attachment already on the
   gun, or a second optic, is greyed with the reason in yellow.
 - Names are 1 to 20 printable ASCII characters without `"`, `\`, `;`, `%` or
@@ -95,24 +95,31 @@ WWII's Iron Sight is not offered: CoD2 already has each bolt-action rifle with
 and without its scope. The Bayonet, Rifle Grenade, Incendiary Rounds, Rifle
 Bullet and Tactical Knife need models or mechanics CoD2 lacks.
 
-Each attachment changes the weapon file's values for its player only. The
-numbers are WWII's where they are published, otherwise this port's:
+Each attachment changes the weapon file's values for its player only, and each
+one costs something for what it gives: most add to the aim-in time, the others
+kick harder or shorten the damage ranges. The gains are WWII's where they are
+published, otherwise this port's; the costs are this port's:
 
-| Attachment | Effect | Source |
-| --- | --- | --- |
-| Extended Mag | Magazine and reserve +50%, rounded down; the Bren a 100-round drum with 200 in reserve | WWII |
-| Rapid Fire | Fire and rechamber times for +6.38% rate, the Bren and Trench Gun included; +5.4% on bolt-actions | WWII's RPM tables |
-| Quickdraw | Aim-in time −50% on SMGs, −20% on the Bren, −16% on the others | WWII after its 2018 updates |
-| Steady Aim | Hip-fire spread −55%, −35% on the Thompson and PPSh | WWII (M1928, PPSh-41) |
-| Grip | Aimed view and gun kick −10% | WWII (7–10%) |
-| Advanced Rifling | Damage ranges ×2 on rifles, ×1.25 on the BAR and pistols, ×1.13 on the Trench Gun; on SMGs full damage reaches as far and the fall beyond it ×1.25 | WWII |
-| Suppressor | Damage ranges −30% on SMGs, −15% on pistols; quiet, no flash, off the minimap | WWII |
-| High Caliber | Helmet and head multipliers ×1.5; an automatic weapon's headshot stays a point short of a kill | WWII; the limit ours |
-| FMJ | Penetrates as armor-piercing: 25% more depth, so less damage lost, through cover | Ours, on the existing penetration |
-| Ballistic Calibration | Aimed idle sway and sway −40% | WWII |
-| Reflex Sight | View −10% (more zoom), aimed spread −25%, a red dot over the sights | Ours |
-| Lens Sight | View −20%, aimed spread −15%, an amber ring over the sights | Ours |
-| 4x Optic | A 23.7° view, four times an 80° one; an iron-sighted gun takes its nation's sniper scope | Ours; on a sniper rifle, WWII's lower-zoom scope |
+| Attachment | Gain | Cost | Source of the gain |
+| --- | --- | --- | --- |
+| Extended Mag | Magazine and reserve +50%, rounded down; the Bren a 100-round drum with 200 in reserve | Aim-in +10% | WWII |
+| Rapid Fire | Fire and rechamber times for +6.38% rate, the Bren and Trench Gun included; +5.4% on bolt-actions | Aimed kick +15% | WWII's RPM tables |
+| Quickdraw | Aim-in time −35% on SMGs, −20% on the Bren, −16% on the others | Aimed kick +15% | WWII for the Bren and the others; the SMGs' ours (WWII's −50%) |
+| Steady Aim | Hip-fire spread −40%, −25% on the Thompson and PPSh | Aim-in +10% | Ours, under WWII's −55% and −35% |
+| Grip | Aimed view and gun kick −15% | Aim-in +10% | Ours, over WWII's 7–10% |
+| Advanced Rifling | Damage ranges ×1.5 on rifles, ×1.25 on the BAR and pistols, ×1.13 on the Trench Gun; on SMGs full damage reaches as far and the fall beyond it ×1.25 | Aim-in +10% | WWII; the rifles' ours (WWII's ×2) |
+| Suppressor | Quiet, no flash, off the minimap | Damage ranges −30% on SMGs, −15% on pistols | WWII |
+| High Caliber | Helmet and head multipliers ×1.5; an automatic weapon's headshot stays a point short of a kill | Aimed kick +15% | WWII; the limit ours |
+| FMJ | Penetrates as armor-piercing: 25% more depth, so less damage lost, through cover | Damage ranges −10% | Ours, on the existing penetration |
+| Ballistic Calibration | Aimed idle sway and sway −40% | Aim-in +10% | WWII |
+| Reflex Sight | View −10% (more zoom), aimed spread −20%, a red dot over the sights | Aim-in +10% | Ours |
+| Lens Sight | View −20%, aimed spread −15%, an amber ring over the sights | Aim-in +15% | Ours |
+| 4x Optic | A 23.7° view, four times an 80° one; an iron-sighted gun takes its nation's sniper scope | Aim-in +25% | Ours; on a sniper rifle, WWII's lower-zoom scope |
+
+The costs multiply like the gains: three attachments that each add a tenth to
+the aim-in time add a third, and Quickdraw with a Grip kicks about as the bare
+gun does. The aim-in time is the one the engine reads to raise the sights, so
+a slower aim is felt in play, not only in the menu.
 
 A suppressed shot has no muzzle flash and does not show on the enemy minimap.
 CoD2 has no suppressed fire sounds, so it plays the weapon's own at 35% of its
@@ -367,27 +374,36 @@ height.
 ## Ratings
 
 The bars compare the 25 guns, 21 primaries and 4 pistols. Each value comes from
-the weapon's file and is rated 1 to 10 between the lowest and highest:
+the weapon's file and is rated 2 to 8 between the lowest and highest, which
+leaves room on the bar for the best and the worst gun's attachments. Every
+attachment changes at least one of these values, so each one moves a bar:
 
 | Bar | Weapon file value |
 | --- | --- |
-| Damage | `damage` |
-| Range | `maxDamageRange` |
-| Accuracy | `1 / (0.25 + adsSpread)`, times 1.2 with an `adsOverlayShader` scope |
+| Damage | `damage`, times 1 + 0.1 for each `locHead` multiple past the body's, times 1.1 with FMJ's penetration |
+| Range | Midway between `maxDamageRange` and `minDamageRange` (`maxDamageRange` when there is no fall) |
+| Accuracy | `1 / (0.25 + adsSpread)`, times 1.2 with an `adsOverlayShader` scope, `100 / (100 + adsViewKickPitchMax)`, `6 / (6 + hipSpreadStandMin)` and `40 / (40 + adsIdleAmount)` |
 | Fire Rate | `1 / fireTime` |
-| Mobility | `moveSpeedScale` |
+| Mobility | `moveSpeedScale` times `400 / (200 + adsTransInTime in ms)` |
 | Capacity | `clipSize` / `maxAmmo` (shown as numbers) |
+
+Mobility takes `moveSpeedScale` from the file as WWII's bar does, but this
+port's movement does not apply it yet; the aim-in time in the same bar does
+apply.
 
 These are comparisons, not retail statistics. The lethal note uses the frag's
 `fuseTime`, 3.5 seconds: as elsewhere in this port, a frag cooks in the hand
 from the moment the pin comes out. Smoke grenades do not cook.
 
 With attachments, the same values come from the attached definition, Fire Rate
-scaled by the engine's whole-millisecond fire time. The bars stay continuous
-before rounding, so a small change such as Rapid Fire's 6% still shows as a
-sliver of green; the number changes color only when its rating does. Grip,
-Steady Aim, Quickdraw and Ballistic Calibration change no bar: their lines say
-what they change.
+scaled by the engine's whole-millisecond fire time. The bar starts from the
+bare gun's rating and moves by the attachment's own change, ten points per
+natural log, about a point for each tenth, within 0 and 10. The guns sit fifty
+times apart on accuracy and only a fifth apart on mobility, so rated between
+the guns the same 10% would barely move one bar and sink the other. The bars
+stay continuous before rounding, so a small change such as Rapid Fire's 6%
+still shows as a sliver of green; the number changes color only when its
+rating does.
 
 ## Placed explosives
 
@@ -594,7 +610,8 @@ on canvases the generator accepts, for the day a class weapon matches one.
   defaults and older lines without camouflage or attachments, the name rules
   and renaming, fitting and removing attachments, the menu response with
   camouflage and attachments only when set, the ratings and the effects the
-  attachment menu lists, and rejects 34 mutations. It also checks that
+  attachment menu lists, gains before costs, and rejects 47 mutations. It also
+  checks that the FMJ line's 25% is the server's penetration depth and that
   `classes.json`, the C tables and the GSC lists agree, camouflage and
   attachments included.
 - `python3 scripts/test-owner-class-pictures.py` covers the pictures: the PNGs
@@ -633,10 +650,10 @@ on canvases the generator accepts, for the day a class weapon matches one.
 - `python3 scripts/test-attachments.py` compiles the attachment rules, the
   attachment masks in the player state and the production weapon code with
   sanitizers. It covers every weapon's list, the limits and the one-optic rule,
-  each attachment's numbers, the cached player definitions, reload, spread,
-  fire rate, aim time, recoil and the suppressed fire event, and a dropped
-  gun's camouflage and attachments in its item's animation fields. It rejects
-  28 mutations.
+  each attachment's gain and cost and how they multiply, the cached player
+  definitions, reload, spread, fire rate, aim time, recoil and the suppressed
+  fire event, and a dropped gun's camouflage and attachments in its item's
+  animation fields. It rejects 54 mutations.
 - `python3 scripts/test-suppressed-shots.py` runs the client's `CG_FireWeapon`
   on 120 fire events. Only a player's shot marked suppressed loses its flash
   and minimap ping and plays the quiet copy of its sound, one copy per sound,

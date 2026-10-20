@@ -52,6 +52,8 @@ typedef struct {
     int ammo;
     /* A grenade's fuseTime, in seconds. */
     float fuse;
+    /* The file's moveSpeedScale. */
+    float moveSpeed;
     /* The values attachments change, as the engine reads them. */
     AttachmentStats raw;
 } ClassStats;
@@ -103,7 +105,9 @@ void ClassData_AttachedStats(const ClassStats *base, const char *weapon, unsigne
  * better, -1 worse, 0 neither. The count written. */
 int ClassData_AttachmentEffects(const AttachmentStats *base, const AttachmentStats *attached, char (*lines)[48],
                                 int *tones, int max);
-/* 1 to 10 between the lowest and highest value of all the guns. */
-int ClassData_Rate(float value, float lowest, float highest);
+/* A bar's rating before rounding: 2 to 8 between the lowest and highest value
+ * of all the guns, moved about a point for each tenth the attachments change
+ * the value, within 0 to 10. */
+float ClassData_AttachedRating(float bare, float attached, float lowest, float highest);
 
 #endif

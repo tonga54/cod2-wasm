@@ -463,10 +463,47 @@ static void ClassData_ReadRaw(AttachmentStats *raw, const char *key, size_t keyL
 /* The menus only need to know whether a gun has a scope. */
 static const char s_classScope[] = "scope";
 
+/* The bars measure what the attachments change, so each one moves a bar.
+ * Damage: a shot's, a tenth more for each headshot multiple past the body's
+ * and a tenth more for FMJ's penetration. */
+static float ClassData_Damage(const AttachmentStats *raw)
+{
+    float head = raw->headMultiplier[1] > 1.0f ? raw->headMultiplier[1] : 1.0f;
+
+    return (float)raw->damage * (1.0f + 0.1f * (head - 1.0f)) * (raw->armorPiercing ? 1.1f : 1.0f);
+}
+
+/* Midway through the fall to minimum damage. */
+static float ClassData_Range(const AttachmentStats *raw)
+{
+    return raw->minDamageRange > raw->maxDamageRange ? 0.5f * (raw->maxDamageRange + raw->minDamageRange)
+                                                     : raw->maxDamageRange;
+}
+
+/* Aimed spread decides a shot's fate and a scope adds a fifth; the aimed
+ * kick, hip-fire spread and sway take their share. */
 static float ClassData_Accuracy(const AttachmentStats *raw)
 {
-    /* Aimed spread decides a shot's fate; a scope adds a fifth. */
-    return (raw->overlay[0] ? 1.2f : 1.0f) / (0.25f + (raw->adsSpread > 0.0f ? raw->adsSpread : 0.0f));
+    float spread = raw->adsSpread > 0.0f ? raw->adsSpread : 0.0f;
+    float hip = raw->hipSpread[0] > 0.0f ? raw->hipSpread[0] : 0.0f;
+    float sway = raw->adsIdleAmount > 0.0f ? raw->adsIdleAmount : 0.0f;
+
+    return (raw->overlay[0] ? 1.2f : 1.0f) / (0.25f + spread) * 100.0f / (100.0f + fabsf(raw->adsKick[1])) * 6.0f /
+           (6.0f + hip) * 40.0f / (40.0f + sway);
+}
+
+/* Move speed, and the time to aim. */
+static float ClassData_Mobility(const AttachmentStats *raw, float moveSpeed)
+{
+    return moveSpeed * 400.0f / (200.0f + (float)(raw->adsTransInTime > 0 ? raw->adsTransInTime : 0));
+}
+
+static void ClassData_Measure(ClassStats *stats)
+{
+    stats->value[CLASS_STAT_DAMAGE] = ClassData_Damage(&stats->raw);
+    stats->value[CLASS_STAT_RANGE] = ClassData_Range(&stats->raw);
+    stats->value[CLASS_STAT_ACCURACY] = ClassData_Accuracy(&stats->raw);
+    stats->value[CLASS_STAT_MOBILITY] = ClassData_Mobility(&stats->raw, stats->moveSpeed);
 }
 
 /* The file is "WEAPONFILE\key\value\key\value...". */
@@ -495,14 +532,10 @@ void ClassData_ReadStats(const char *weaponFile, ClassStats *stats)
             memcpy(text, value, valueLength);
             text[valueLength] = '\0';
 #define CLASS_KEY(name) (keyLength == sizeof(name) - 1 && !memcmp(key, name, keyLength))
-            if (CLASS_KEY("damage"))
-                stats->value[CLASS_STAT_DAMAGE] = (float)atof(text);
-            else if (CLASS_KEY("maxDamageRange"))
-                stats->value[CLASS_STAT_RANGE] = (float)atof(text);
-            else if (CLASS_KEY("fireTime"))
+            if (CLASS_KEY("fireTime"))
                 fireTime = (float)atof(text);
             else if (CLASS_KEY("moveSpeedScale"))
-                stats->value[CLASS_STAT_MOBILITY] = (float)atof(text);
+                stats->moveSpeed = (float)atof(text);
             else if (CLASS_KEY("clipSize"))
                 stats->clip = atoi(text);
             else if (CLASS_KEY("maxAmmo"))
@@ -518,9 +551,9 @@ void ClassData_ReadStats(const char *weaponFile, ClassStats *stats)
             break;
         p = end;
     }
-    stats->value[CLASS_STAT_ACCURACY] = ClassData_Accuracy(&stats->raw);
+    ClassData_Measure(stats);
     stats->value[CLASS_STAT_FIRE_RATE] = fireTime > 0.0f ? 1.0f / fireTime : 0.0f;
-    stats->valid = stats->value[CLASS_STAT_DAMAGE] > 0.0f;
+    stats->valid = stats->raw.damage > 0;
 }
 
 void ClassData_AttachedStats(const ClassStats *base, const char *weapon, unsigned mask, ClassStats *attached)
@@ -529,8 +562,7 @@ void ClassData_AttachedStats(const ClassStats *base, const char *weapon, unsigne
     BG_ApplyAttachmentStats(weapon, mask, &attached->raw);
     attached->clip = attached->raw.clipSize;
     attached->ammo = attached->raw.maxAmmo;
-    attached->value[CLASS_STAT_RANGE] = attached->raw.maxDamageRange;
-    attached->value[CLASS_STAT_ACCURACY] = ClassData_Accuracy(&attached->raw);
+    ClassData_Measure(attached);
     /* The bars keep the file's seconds; the attachment scales the engine's
      * milliseconds. */
     if (base->raw.fireTime > 0 && attached->raw.fireTime > 0)
@@ -552,13 +584,14 @@ static float ClassData_Zoom(float fov)
 int ClassData_AttachmentEffects(const AttachmentStats *base, const AttachmentStats *attached, char (*lines)[48],
                                 int *tones, int max)
 {
-    int count = 0;
+    char found[16][48];
+    int toneFound[16], count = 0, written = 0, tone, i;
 
 #define CLASS_EFFECT(better, ...)                                                                                 \
     do {                                                                                                          \
-        if (count < max) {                                                                                        \
-            tones[count] = (better);                                                                              \
-            snprintf(lines[count++], sizeof(lines[0]), __VA_ARGS__);                                              \
+        if (count < (int)(sizeof(found) / sizeof(found[0]))) {                                                    \
+            toneFound[count] = (better);                                                                          \
+            snprintf(found[count++], sizeof(found[0]), __VA_ARGS__);                                              \
         }                                                                                                         \
     } while (0)
 #define CLASS_SIGN(a, b) ((a) > (b) ? 1 : -1)
@@ -601,21 +634,38 @@ int ClassData_AttachmentEffects(const AttachmentStats *base, const AttachmentSta
     if (attached->headMultiplier[1] != base->headMultiplier[1])
         CLASS_EFFECT(CLASS_SIGN(attached->headMultiplier[1], base->headMultiplier[1]), "Head damage x%.3g, from x%.3g",
                      (double)attached->headMultiplier[1], (double)base->headMultiplier[1]);
+    /* The server's armorPiercing depth, Bullet_PenetrationDepth. */
     if (attached->armorPiercing && !base->armorPiercing)
-        CLASS_EFFECT(1, "Keeps more damage through cover");
+        CLASS_EFFECT(1, "Penetrates 25%% deeper, keeps more damage");
     if (attached->suppressed && !base->suppressed)
         CLASS_EFFECT(1, "Quiet, no flash, off the minimap");
 #undef CLASS_SIGN
 #undef CLASS_EFFECT
-    return count;
+    /* What it gives, then what it only changes, then what it costs. */
+    for (tone = 1; tone >= -1; tone--) {
+        for (i = 0; i < count && written < max; i++) {
+            if (toneFound[i] != tone)
+                continue;
+            tones[written] = tone;
+            memcpy(lines[written++], found[i], sizeof(found[i]));
+        }
+    }
+    return written;
 }
 
-int ClassData_Rate(float value, float lowest, float highest)
+/* The guns sit fifty times apart on accuracy and a fifth apart on mobility;
+ * measured from the attachment's own change, a tenth more moves any bar
+ * alike. The guns themselves stay within 2 and 8, so the best and the worst
+ * still show what an attachment does. */
+float ClassData_AttachedRating(float bare, float attached, float lowest, float highest)
 {
-    int rating;
+    float rating = highest > lowest ? 2.0f + 6.0f * (bare - lowest) / (highest - lowest) : 5.0f;
 
-    if (!(highest > lowest))
-        return 5;
-    rating = 1 + (int)(9.0f * (value - lowest) / (highest - lowest) + 0.5f);
-    return rating < 1 ? 1 : rating > 10 ? 10 : rating;
+    if (rating < 2.0f)
+        rating = 2.0f;
+    else if (rating > 8.0f)
+        rating = 8.0f;
+    if (bare > 0.0f && attached > 0.0f)
+        rating += 10.0f * logf(attached / bare);
+    return rating < 0.0f ? 0.0f : rating > 10.0f ? 10.0f : rating;
 }

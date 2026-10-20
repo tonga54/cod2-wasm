@@ -227,6 +227,7 @@ int main(void)
     /* Each attachment on the weapon file values, with WWII's numbers. */
     d = Attached(THOMPSON, ATT_BIT(ATT_EXTMAG));
     assert(d.iClipSize == 30 && d.iMaxAmmo == 270 && d.iStartAmmo == 270 && d.iFireTime == 85);
+    assert(d.iAdsTransInTime == 242 && NEAR(d.fOOPosAnimLength[0], 1.0f / 242.0f));
     d = Attached(KAR98K, ATT_BIT(ATT_EXTMAG));
     assert(d.iClipSize == 7 && d.iMaxAmmo == 90);
     d = Attached(COLT, ATT_BIT(ATT_EXTMAG));
@@ -238,6 +239,7 @@ int main(void)
     assert(d.iClipSize == 100 && d.iMaxAmmo == 200 && d.iStartAmmo == 200);
     d = Attached(THOMPSON, ATT_BIT(ATT_RAPIDFIRE));
     assert(d.iFireTime == 80 && d.iRechamberTime == 94);
+    assert(NEAR(d.fAdsViewKickPitchMax, 80.5f) && NEAR(d.fAdsGunKickPitchMin, 46.0f) && d.iAdsTransInTime == 220);
     /* The Bren and Trench Gun gain the rifles' and SMGs' 6.38%. */
     d = Attached(BREN, ATT_BIT(ATT_RAPIDFIRE));
     assert(d.iFireTime == 113);
@@ -245,35 +247,48 @@ int main(void)
     assert(d.iFireTime == 266 && d.iRechamberTime == 689 && d.iRechamberBoltTime == 344);
     d = Attached(KAR98K_SNIPER, ATT_BIT(ATT_RAPIDFIRE));
     assert(d.iFireTime == 313 && d.iRechamberTime == 949);
+    /* Quickdraw: a third off an SMG's aim, and a harder kick. */
     d = Attached(THOMPSON, ATT_BIT(ATT_QUICKDRAW));
-    assert(d.iAdsTransInTime == 110 && NEAR(d.fOOPosAnimLength[0], 1.0f / 110.0f) && NEAR(d.fOOPosAnimLength[1], 1.0f / 400.0f));
+    assert(d.iAdsTransInTime == 143 && NEAR(d.fOOPosAnimLength[0], 1.0f / 143.0f) && NEAR(d.fOOPosAnimLength[1], 1.0f / 400.0f));
+    assert(NEAR(d.fAdsViewKickPitchMax, 80.5f));
     assert(Attached(BREN, ATT_BIT(ATT_QUICKDRAW)).iAdsTransInTime == 240);
     assert(Attached(GARAND, ATT_BIT(ATT_QUICKDRAW)).iAdsTransInTime == 252);
     assert(Attached(COLT, ATT_BIT(ATT_QUICKDRAW)).iAdsTransInTime == 224);
     assert(Attached(SHOTGUN, ATT_BIT(ATT_QUICKDRAW)).iAdsTransInTime == 252);
+    /* Grip: 15% off every kick, a tenth on the aim. */
     d = Attached(THOMPSON, ATT_BIT(ATT_GRIP));
-    assert(NEAR(d.fAdsViewKickPitchMax, 63.0f) && NEAR(d.fAdsViewKickYawMin, -18.0f) && NEAR(d.fAdsGunKickPitchMin, 36.0f));
-    assert(NEAR(Attached(THOMPSON, ATT_BIT(ATT_STEADYAIM)).fHipSpreadStandMin, 0.975f));
+    assert(NEAR(d.fAdsViewKickPitchMax, 59.5f) && NEAR(d.fAdsViewKickYawMin, -17.0f) && NEAR(d.fAdsGunKickPitchMin, 34.0f));
+    assert(d.iAdsTransInTime == 242);
+    d = Attached(THOMPSON, ATT_BIT(ATT_STEADYAIM));
+    assert(NEAR(d.fHipSpreadStandMin, 1.125f) && d.iAdsTransInTime == 242);
     d = Attached(GREASEGUN, ATT_BIT(ATT_STEADYAIM));
-    assert(NEAR(d.fHipSpreadStandMin, 0.675f) && NEAR(d.fHipSpreadProneMin, 0.405f) && NEAR(d.hipSpreadProneMax, 2.25f));
+    assert(NEAR(d.fHipSpreadStandMin, 0.9f) && NEAR(d.fHipSpreadProneMin, 0.54f) && NEAR(d.hipSpreadProneMax, 3.0f));
     d = Attached(KAR98K_SNIPER, ATT_BIT(ATT_CALIBRATION));
     assert(NEAR(d.fAdsIdleAmount, 12.0f) && NEAR(d.adsSwayMaxAngle, 2.4f) && NEAR(d.adsSwayVertScale, 1.2f));
+    assert(d.iAdsTransInTime == 275);
     d = Attached(THOMPSON, ATT_BIT(ATT_REFLEX));
-    assert(NEAR(d.fAdsZoomFov, 58.5f) && NEAR(d.fAdsSpread, 0.375f) && !d.szOverlayMaterial[0]);
+    assert(NEAR(d.fAdsZoomFov, 58.5f) && NEAR(d.fAdsSpread, 0.4f) && !d.szOverlayMaterial[0] && d.iAdsTransInTime == 242);
     d = Attached(THOMPSON, ATT_BIT(ATT_LENS));
-    assert(NEAR(d.fAdsZoomFov, 52.0f) && NEAR(d.fAdsSpread, 0.425f));
+    assert(NEAR(d.fAdsZoomFov, 52.0f) && NEAR(d.fAdsSpread, 0.425f) && d.iAdsTransInTime == 253);
+    /* The costs multiply with the gains: two tenths on and a third off. */
+    d = Attached(THOMPSON, ATT_BIT(ATT_REFLEX) | ATT_BIT(ATT_GRIP) | ATT_BIT(ATT_QUICKDRAW));
+    assert(d.iAdsTransInTime == 173 && NEAR(d.fAdsViewKickPitchMax, 68.425f));
     d = Attached(GARAND, ATT_BIT(ATT_OPTIC4X));
     assert(NEAR(d.fAdsZoomFov, 23.7f) && !strcmp(d.szOverlayMaterial, "scope_overlay_american") && d.overlayReticle == 3);
+    assert(d.iAdsTransInTime == 375);
     assert(d.overlayWidth == 480.0f && d.overlayHeight == 480.0f && NEAR(d.fAdsZoomInFrac, 0.42f) && NEAR(d.fAdsZoomOutFrac, 0.08f));
     d = Attached(KAR98K, ATT_BIT(ATT_OPTIC4X));
     assert(!strcmp(d.szOverlayMaterial, "scope_overlay_german") && d.overlayReticle == 2);
     d = Attached(KAR98K_SNIPER, ATT_BIT(ATT_OPTIC4X));
     assert(NEAR(d.fAdsZoomFov, 23.7f) && d.szOverlayMaterial == defs[KAR98K_SNIPER].szOverlayMaterial);
     assert(d.overlayReticle == 2 && NEAR(d.fAdsZoomInFrac, 0.5f));
-    assert(Attached(THOMPSON, ATT_BIT(ATT_FMJ)).armorPiercing == 1);
+    /* FMJ goes through more cover for a tenth of the range. */
+    d = Attached(THOMPSON, ATT_BIT(ATT_FMJ));
+    assert(d.armorPiercing == 1 && NEAR(d.fMaxDamageRange, 720.0f) && NEAR(d.fMinDamageRange, 1440.0f));
+    assert(d.iAdsTransInTime == 220 && NEAR(d.fAdsViewKickPitchMax, 70.0f));
     d = Attached(GARAND, ATT_BIT(ATT_HIGHCAL));
     assert(NEAR(d.locationDamageMultipliers[HITLOC_HEAD], 3.0f) && NEAR(d.locationDamageMultipliers[HITLOC_HELMET], 3.0f));
-    assert(NEAR(d.locationDamageMultipliers[4], 1.0f));
+    assert(NEAR(d.locationDamageMultipliers[4], 1.0f) && NEAR(d.fAdsViewKickPitchMax, 80.5f));
     /* An automatic rifle's headshot stops a point short of killing alone,
      * after the server truncates it, and never falls below the gun's own. */
     d = Attached(BAR, ATT_BIT(ATT_HIGHCAL));
@@ -289,8 +304,9 @@ int main(void)
     /* An SMG keeps its full damage range; the fall beyond it reaches a
      * quarter further. */
     d = Attached(THOMPSON, ATT_BIT(ATT_RIFLING));
-    assert(NEAR(d.fMaxDamageRange, 800.0f) && NEAR(d.fMinDamageRange, 2000.0f));
-    assert(NEAR(Attached(GARAND, ATT_BIT(ATT_RIFLING)).fMaxDamageRange, 4000.0f));
+    assert(NEAR(d.fMaxDamageRange, 800.0f) && NEAR(d.fMinDamageRange, 2000.0f) && d.iAdsTransInTime == 242);
+    assert(NEAR(Attached(GARAND, ATT_BIT(ATT_RIFLING)).fMaxDamageRange, 3000.0f));
+    assert(Attached(GARAND, ATT_BIT(ATT_RIFLING)).iAdsTransInTime == 330);
     assert(NEAR(Attached(BAR, ATT_BIT(ATT_RIFLING)).fMaxDamageRange, 1875.0f));
     /* WWII's light machine guns take neither Advanced Rifling nor High Caliber, nor its carbine a Lens Sight. */
     assert(NEAR(Attached(BREN, ATT_BIT(ATT_RIFLING)).fMaxDamageRange, 1200.0f));
@@ -307,6 +323,8 @@ int main(void)
      * eighth short of the gun's own. */
     d = Attached(THOMPSON, ATT_BIT(ATT_SUPPRESSOR) | ATT_BIT(ATT_RIFLING));
     assert(NEAR(d.fMaxDamageRange, 560.0f) && NEAR(d.fMinDamageRange, 1400.0f));
+    d = Attached(THOMPSON, ATT_BIT(ATT_SUPPRESSOR) | ATT_BIT(ATT_FMJ));
+    assert(NEAR(d.fMaxDamageRange, 504.0f) && NEAR(d.fMinDamageRange, 1008.0f));
     /* Nothing a weapon cannot take, and nothing on an unknown weapon. */
     d = Attached(GARAND, ATT_BIT(ATT_SUPPRESSOR) | ATT_BIT(ATT_CALIBRATION));
     assert(!memcmp(&d, &defs[GARAND], sizeof(d)));
@@ -361,7 +379,8 @@ int main(void)
         def = BG_GetPlayerWeaponDef(&ps, THOMPSON);
         assert(def->iClipSize == (mask & ATT_BIT(ATT_EXTMAG) ? 30 : 20));
         assert(def->iFireTime == (mask & ATT_BIT(ATT_RAPIDFIRE) ? 80 : 85));
-        assert(def->iAdsTransInTime == (mask & ATT_BIT(ATT_QUICKDRAW) ? 110 : 220));
+        assert(def->iAdsTransInTime == Attached(THOMPSON, mask).iAdsTransInTime);
+        assert(def->fAdsViewKickPitchMax == Attached(THOMPSON, mask).fAdsViewKickPitchMax);
     }
     /* Weapons reload with each map: copies follow the new definitions. */
     BG_SetSlotAttachments(&ps, 1, ATT_BIT(ATT_EXTMAG));
@@ -390,7 +409,7 @@ int main(void)
         float low, high;
         ps = Holding(THOMPSON, ATT_BIT(ATT_STEADYAIM), COLT, 0);
         BG_GetSpreadForWeapon(&ps, THOMPSON, &low, &high);
-        assert(NEAR(low, 0.975f) && NEAR(high, 3.25f));
+        assert(NEAR(low, 1.125f) && NEAR(high, 3.75f));
         BG_GetSpreadForWeapon(&ps, COLT, &low, &high);
         assert(NEAR(low, 3.0f) && NEAR(high, 5.0f));
     }
@@ -415,7 +434,7 @@ int main(void)
         ps = Holding(THOMPSON, ATT_BIT(ATT_QUICKDRAW), COLT, 0);
         ps.pm_flags = 0x40;
         PM_UpdateAimDownSightLerp(&pm, &pml);
-        assert(NEAR(ps.fWeaponPosFrac, 0.4f));
+        assert(NEAR(ps.fWeaponPosFrac, 44.0f / 143.0f));
         BG_SetSlotAttachments(&ps, 1, 0);
         ps.fWeaponPosFrac = 0.0f;
         PM_UpdateAimDownSightLerp(&pm, &pml);
@@ -427,7 +446,7 @@ int main(void)
         ps = Holding(THOMPSON, ATT_BIT(ATT_GRIP), COLT, 0);
         ps.fWeaponPosFrac = 1.0f;
         BG_WeaponFireRecoil(&ps, gun, kick);
-        assert(NEAR(kick[0], -58.5f) && NEAR(gun[0], 36.0f));
+        assert(NEAR(kick[0], -55.25f) && NEAR(gun[0], 34.0f));
         BG_SetSlotAttachments(&ps, 1, 0);
         gun[0] = 0.0f;
         BG_WeaponFireRecoil(&ps, gun, kick);
@@ -476,9 +495,29 @@ mutants = [
      '    return BG_AttachmentCount(mask) <= max &&'),
     (rules_path, '    mask &= entry->allowed;\n', ''),
     (rules_path, '        stats->clipSize = stats->clipSize * 3 / 2;', '        stats->clipSize = stats->clipSize * 2;'),
-    (rules_path, ': kind == ATT_KIND_LMG                            ? 0.8f', ': kind == ATT_KIND_LMG                            ? 0.84f'),
-    (rules_path, 'kind == ATT_KIND_SMG || kind == ATT_KIND_FAST_SMG ? 0.5f', 'kind == ATT_KIND_SMG || kind == ATT_KIND_FAST_SMG ? 0.4f'),
-    (rules_path, '            stats->adsKick[i] *= 0.9f;', '            stats->adsKick[i] *= 0.65f;'),
+    (rules_path, 'kind == ATT_KIND_LMG ? 0.8f : 0.84f', 'kind == ATT_KIND_LMG ? 0.84f : 0.84f'),
+    (rules_path, 'kind == ATT_KIND_SMG || kind == ATT_KIND_FAST_SMG ? 0.65f', 'kind == ATT_KIND_SMG || kind == ATT_KIND_FAST_SMG ? 0.5f'),
+    (rules_path, '        kick *= 0.85f;', '        kick *= 0.9f;'),
+    (rules_path, '        stats->adsSpread *= 0.8f;\n        aim *= 1.1f;\n', '        stats->adsSpread *= 0.8f;\n'),
+    (rules_path, '        aim *= 1.15f;\n', ''),
+    (rules_path, '        aim *= 1.25f;\n', ''),
+    (rules_path, '0.84f;\n        kick *= 1.15f;\n', '0.84f;\n'),
+    (rules_path, '        kick *= 0.85f;\n        aim *= 1.1f;\n', '        kick *= 0.85f;\n'),
+    (rules_path, '            stats->hipSpread[i] *= scale;\n        aim *= 1.1f;\n', '            stats->hipSpread[i] *= scale;\n'),
+    (rules_path, '            stats->adsSway[i] *= 0.6f;\n        aim *= 1.1f;\n', '            stats->adsSway[i] *= 0.6f;\n'),
+    (rules_path, '(stats->rechamberBoltTime, rate);\n        kick *= 1.15f;\n', '(stats->rechamberBoltTime, rate);\n'),
+    (rules_path, '            stats->startAmmo = stats->startAmmo * 3 / 2;\n        }\n        aim *= 1.1f;\n',
+     '            stats->startAmmo = stats->startAmmo * 3 / 2;\n        }\n'),
+    (rules_path, '        reach *= 0.9f;\n', ''),
+    (rules_path, '            stats->headMultiplier[i] = raised;\n        }\n        kick *= 1.15f;\n',
+     '            stats->headMultiplier[i] = raised;\n        }\n'),
+    (rules_path, '            stats->minDamageRange *= scale;\n        }\n        aim *= 1.1f;\n',
+     '            stats->minDamageRange *= scale;\n        }\n'),
+    (rules_path, 'kind == ATT_KIND_RIFLE ? 1.5f', 'kind == ATT_KIND_RIFLE ? 2.0f'),
+    (rules_path, '(int)((float)stats->adsTransInTime * aim + 0.5f);', '(int)((float)stats->adsTransInTime * aim);'),
+    (rules_path, '    for (i = 0; i < 8; i++)\n        stats->adsKick[i] *= kick;\n',
+     '    for (i = 0; i < 2; i++)\n        stats->adsKick[i] *= kick;\n'),
+    (rules_path, '    stats->minDamageRange *= reach;\n', ''),
     (rules_path, '        stats->adsIdleAmount *= 0.6f;', '        stats->adsIdleAmount *= 0.5f;'),
     (rules_path, '? 1.054f : 1.0638f;', '? 1.054f : kind == ATT_KIND_LMG ? 1.0989f : 1.0638f;'),
     (rules_path, '            stats->clipSize = 100;', '            stats->clipSize = stats->clipSize * 3 / 2;'),
@@ -487,10 +526,10 @@ mutants = [
     (rules_path, '                raised = cap > stats->headMultiplier[i] ? cap : stats->headMultiplier[i];', '                raised = cap;'),
     (rules_path, '            stats->minDamageRange *= 1.25f;\n', '            stats->minDamageRange *= 1.25f;\n            stats->maxDamageRange *= 1.25f;\n'),
     (rules_path, 'return time > 0 ? (int)((float)time / rate + 0.5f) : time;', 'return time > 0 ? (int)((float)time / rate) : time;'),
-    (rules_path, '        float scale = kind == ATT_KIND_PISTOL ? 0.85f : 0.7f;', '        float scale = 0.7f;'),
+    (rules_path, '        reach *= kind == ATT_KIND_PISTOL ? 0.85f : 0.7f;', '        reach *= 0.7f;'),
     (rules_path, "int ca = *a >= 'A' && *a <= 'Z' ? *a + 32 : *a, cb = *b >= 'A' && *b <= 'Z' ? *b + 32 : *b;",
      'int ca = *a, cb = *b;'),
-    (rules_path, '        float scale = kind == ATT_KIND_FAST_SMG ? 0.65f : 0.45f;', '        float scale = 0.45f;'),
+    (rules_path, '        float scale = kind == ATT_KIND_FAST_SMG ? 0.75f : 0.6f;', '        float scale = 0.6f;'),
     (rules_path, '        if (!stats->overlay || !stats->overlay[0]) {', '        {'),
     (glue_path, '    return (unsigned char)ps->weaponslots[2 + 2 * slot] | (unsigned)(unsigned char)ps->weaponslots[3 + 2 * slot] << 8;',
      '    return (unsigned char)ps->weaponslots[1 + 2 * slot] | (unsigned)(unsigned char)ps->weaponslots[2 + 2 * slot] << 8;'),

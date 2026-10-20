@@ -226,6 +226,9 @@ static int BG_AttachmentScaledTime(int time, float rate)
 void BG_ApplyAttachmentStats(const char *weapon, unsigned mask, AttachmentStats *stats)
 {
     const AttachmentWeapon *entry = BG_AttachmentWeapon(weapon);
+    /* Every attachment costs something, and the costs multiply: the time to
+     * aim, the aimed kick, the damage ranges. */
+    float aim = 1.0f, kick = 1.0f, reach = 1.0f;
     int kind, i;
 
     if (!entry)
@@ -234,11 +237,13 @@ void BG_ApplyAttachmentStats(const char *weapon, unsigned mask, AttachmentStats 
     kind = entry->kind;
     if (mask & ATT_BIT(ATT_REFLEX)) {
         stats->adsZoomFov *= 0.9f;
-        stats->adsSpread *= 0.75f;
+        stats->adsSpread *= 0.8f;
+        aim *= 1.1f;
     }
     if (mask & ATT_BIT(ATT_LENS)) {
         stats->adsZoomFov *= 0.8f;
         stats->adsSpread *= 0.85f;
+        aim *= 1.15f;
     }
     if (mask & ATT_BIT(ATT_OPTIC4X)) {
         /* Four times a 80-degree view; a sniper scope's 15 degrees zooms
@@ -251,31 +256,30 @@ void BG_ApplyAttachmentStats(const char *weapon, unsigned mask, AttachmentStats 
             stats->adsZoomInFrac = 0.42f;
             stats->adsZoomOutFrac = 0.08f;
         }
+        aim *= 1.25f;
     }
     if (mask & ATT_BIT(ATT_QUICKDRAW)) {
-        /* WWII's: half an SMG's aim time off, a fifth of the machine gun's,
-         * a sixth of the others'. */
-        float scale = kind == ATT_KIND_SMG || kind == ATT_KIND_FAST_SMG ? 0.5f
-                      : kind == ATT_KIND_LMG                            ? 0.8f
-                                                                        : 0.84f;
-
-        stats->adsTransInTime = (int)((float)stats->adsTransInTime * scale + 0.5f);
+        /* A third of an SMG's aim time off, a fifth of the machine gun's, a
+         * sixth of the others'; the lighter hold kicks harder. */
+        aim *= kind == ATT_KIND_SMG || kind == ATT_KIND_FAST_SMG ? 0.65f : kind == ATT_KIND_LMG ? 0.8f : 0.84f;
+        kick *= 1.15f;
     }
     if (mask & ATT_BIT(ATT_GRIP)) {
-        /* WWII's grip takes 7 to 10% off the kick. */
-        for (i = 0; i < 8; i++)
-            stats->adsKick[i] *= 0.9f;
+        kick *= 0.85f;
+        aim *= 1.1f;
     }
     if (mask & ATT_BIT(ATT_STEADYAIM)) {
-        float scale = kind == ATT_KIND_FAST_SMG ? 0.65f : 0.45f;
+        float scale = kind == ATT_KIND_FAST_SMG ? 0.75f : 0.6f;
 
         for (i = 0; i < 6; i++)
             stats->hipSpread[i] *= scale;
+        aim *= 1.1f;
     }
     if (mask & ATT_BIT(ATT_CALIBRATION)) {
         stats->adsIdleAmount *= 0.6f;
         for (i = 0; i < 5; i++)
             stats->adsSway[i] *= 0.6f;
+        aim *= 1.1f;
     }
     if (mask & ATT_BIT(ATT_RAPIDFIRE)) {
         /* WWII's increases in rounds per minute. */
@@ -284,6 +288,7 @@ void BG_ApplyAttachmentStats(const char *weapon, unsigned mask, AttachmentStats 
         stats->fireTime = BG_AttachmentScaledTime(stats->fireTime, rate);
         stats->rechamberTime = BG_AttachmentScaledTime(stats->rechamberTime, rate);
         stats->rechamberBoltTime = BG_AttachmentScaledTime(stats->rechamberBoltTime, rate);
+        kick *= 1.15f;
     }
     if (mask & ATT_BIT(ATT_EXTMAG)) {
         if (kind == ATT_KIND_LMG) {
@@ -295,9 +300,12 @@ void BG_ApplyAttachmentStats(const char *weapon, unsigned mask, AttachmentStats 
             stats->maxAmmo = stats->maxAmmo * 3 / 2;
             stats->startAmmo = stats->startAmmo * 3 / 2;
         }
+        aim *= 1.1f;
     }
-    if (mask & ATT_BIT(ATT_FMJ))
+    if (mask & ATT_BIT(ATT_FMJ)) {
         stats->armorPiercing = 1;
+        reach *= 0.9f;
+    }
     if (mask & ATT_BIT(ATT_HIGHCAL)) {
         /* An automatic weapon's headshot stays a point short of killing
          * outright; the server truncates the damage. */
@@ -310,6 +318,7 @@ void BG_ApplyAttachmentStats(const char *weapon, unsigned mask, AttachmentStats 
                 raised = cap > stats->headMultiplier[i] ? cap : stats->headMultiplier[i];
             stats->headMultiplier[i] = raised;
         }
+        kick *= 1.15f;
     }
     if (mask & ATT_BIT(ATT_RIFLING)) {
         if (kind == ATT_KIND_SMG || kind == ATT_KIND_FAST_SMG) {
@@ -317,17 +326,20 @@ void BG_ApplyAttachmentStats(const char *weapon, unsigned mask, AttachmentStats 
              * damage reaches further. */
             stats->minDamageRange *= 1.25f;
         } else {
-            float scale = kind == ATT_KIND_RIFLE ? 2.0f : kind == ATT_KIND_SHOTGUN ? 1.13f : 1.25f;
+            float scale = kind == ATT_KIND_RIFLE ? 1.5f : kind == ATT_KIND_SHOTGUN ? 1.13f : 1.25f;
 
             stats->maxDamageRange *= scale;
             stats->minDamageRange *= scale;
         }
+        aim *= 1.1f;
     }
     if (mask & ATT_BIT(ATT_SUPPRESSOR)) {
-        float scale = kind == ATT_KIND_PISTOL ? 0.85f : 0.7f;
-
-        stats->maxDamageRange *= scale;
-        stats->minDamageRange *= scale;
+        reach *= kind == ATT_KIND_PISTOL ? 0.85f : 0.7f;
         stats->suppressed = 1;
     }
+    stats->adsTransInTime = (int)((float)stats->adsTransInTime * aim + 0.5f);
+    for (i = 0; i < 8; i++)
+        stats->adsKick[i] *= kick;
+    stats->maxDamageRange *= reach;
+    stats->minDamageRange *= reach;
 }
