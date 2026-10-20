@@ -123,6 +123,12 @@ assert backend.index('RB_SetViewmodelProjection(WebSceneFx_ViewmodelNearClip(bac
                      '                                          WebSceneFx_ViewmodelProjection());', enter) < \
     backend.index('WebSceneFx_BeginViewmodel();', enter) < backend.index('RB_SetDepthRange(0.0f, 0.2f);', enter)
 assert backend.count('WebSceneFx_BeginViewmodel();') == 1
+# Each material's draws begin once the last's have ended, the compositor told which material it is.
+assert backend.count('    if (tess.indexCount || tess.optimizedIndexCount)\n        RB_EndSurface();\n\n'
+                     '    if (materialTime != materialTimePrev') == 1
+assert backend.index('    if (materialTime != materialTimePrev') < \
+    backend.index('    WebSceneFx_ViewmodelMaterial(material->info.name);\n#endif\n'
+                  '    RB_BeginSurface(material, actualTechType, lightmap);\n')
 assert backend.count('                WebSceneFx_EndViewmodel();\n                RB_SetViewmodelProjection(nc, NULL);\n') == 1
 assert backend.count('            WebSceneFx_EndViewmodel();\n            RB_SetViewmodelProjection(nc, NULL);\n') == 1
 world = backend.index('        if (!isWorldSpaceEntPrev)\n            RB_PopMatrixStack();\n        if (depthRangePrev) {\n')
@@ -612,6 +618,50 @@ int main(void)
         /* The rifle's depth is linearized with the near clip it was drawn with. */
         assert(composed[SCENE_FX_NEAR_CLIP] == 0.8f);
         WebSceneFx_EndFrame();
+        /* A Reflex or Lens Sight's window, a glass the rifle draws around
+         * with the view's own projection: the attachments' own surfaces stay
+         * drawn over it, every other material of the rifle is kept off it,
+         * and nothing is left masked after the rifle. */
+        {
+            float sight[13];
+            int savedStencils = stencils, savedMasks = masks;
+
+            memcpy(sight, lens, sizeof(sight));
+            sight[10] = sight[11] = sight[12] = 0.0f;
+            WebSceneFx_SetScope(sight);
+            WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 4.0f);
+            masks = 0;
+            WebSceneFx_ViewmodelMaterial("mtl_browser_att_blued");
+            assert(masks == 0);
+            WebSceneFx_BeginViewmodel();
+            assert(masks == 1 && maskOn == 0);
+            WebSceneFx_ViewmodelMaterial("mtl_browser_att_worn");
+            assert(masks == 1);
+            WebSceneFx_ViewmodelMaterial("mtl_weapon_thompson");
+            assert(masks == 2 && maskOn == 1);
+            WebSceneFx_ViewmodelMaterial(NULL);
+            assert(masks == 2 && maskOn == 1);
+            WebSceneFx_ViewmodelMaterial("mtl_browser_att_parkerized");
+            assert(masks == 3 && maskOn == 0);
+            WebSceneFx_EndViewmodel();
+            assert(masks == 4 && maskOn == 0);
+            WebSceneFx_ViewmodelMaterial("mtl_weapon_thompson");
+            WebSceneFx_ViewmodelMaterial("mtl_browser_att_blued");
+            assert(masks == 4);
+            WebSceneFx_EndFrame();
+            /* A scope's glass keeps the attachments off it too. */
+            WebSceneFx_SetScope(lens);
+            WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 4.0f);
+            WebSceneFx_ViewmodelMaterial("mtl_browser_att_parkerized");
+            WebSceneFx_BeginViewmodel();
+            assert(maskOn == 1);
+            WebSceneFx_ViewmodelMaterial("mtl_weapon_kar98k");
+            assert(maskOn == 1);
+            WebSceneFx_EndViewmodel();
+            WebSceneFx_EndFrame();
+            stencils = savedStencils;
+            masks = savedMasks;
+        }
         /* Outside a composed view the rifle keeps the view's projection and
          * near clip and draws without the stencil. */
         assert(!WebSceneFx_ViewmodelProjection());
@@ -718,7 +768,12 @@ mutants = [
     ('        s_scopeUnavailable = 1;\n        return;', '        return;'),
     ('    if (!s_scopeStencil) {', '    if (1) {'),
     ('    s_frameUsed = 1;\n    s_scopeStencil = 0;\n', '    s_frameUsed = 1;\n'),
-    ('    WebSceneFx_ScopeMask(1);\n    s_scopeMasking = 1;', '    WebSceneFx_ScopeMask(1);'),
+    ('    WebSceneFx_ScopeMask(!s_scopeExempt);\n    s_scopeMasking = 1;', '    WebSceneFx_ScopeMask(!s_scopeExempt);'),
+    ('    WebSceneFx_ScopeMask(!s_scopeExempt);\n', '    WebSceneFx_ScopeMask(1);\n'),
+    ('        exempt = !strncmp(name, "mtl_browser_att_", 16);', '        exempt = 0;'),
+    ('    if (s_active && name && WebSceneFx_SightWindow())', '    if (s_active && name)'),
+    ('    if (s_scopeMasking)\n        WebSceneFx_ScopeMask(!exempt);\n', '    WebSceneFx_ScopeMask(!exempt);\n'),
+    ('           !(s_scope[SCENE_FX_SCOPE_PROJECTION - SCENE_FX_SCOPE] > 0.0f);', '           1;'),
     ('    WebSceneFx_EndViewmodel();\n    if (!s_active)\n        return;\n    s_active = 0;',
      '    if (!s_active)\n        return;\n    s_active = 0;'),
     ('    return s_active && projection[0] > 0.0f ? projection : NULL;',

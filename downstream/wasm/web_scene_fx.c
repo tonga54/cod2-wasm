@@ -189,6 +189,8 @@ static float s_scope[SCENE_FX_SCOPE_FLOATS];
 /* The window's stencil is drawn once per view, before the rifle's first draw. */
 static int s_scopeStencil;
 static int s_scopeMasking;
+/* The material drawing now stays over a sight's window. */
+static int s_scopeExempt;
 /* Set when the last full view could not compose, so the cgame keeps the
  * stock overlay: the window needs the scene's own depth and stencil. */
 static int s_scopeUnavailable;
@@ -1069,6 +1071,31 @@ float WebSceneFx_ViewmodelNearClip(float nearClip)
     return s_active ? WebSceneFx_ScopeNearClip(nearClip) : nearClip;
 }
 
+/* A Reflex or Lens Sight's window: a glass the rifle is drawn around with
+ * the view's own projection. */
+static int WebSceneFx_SightWindow(void)
+{
+    return s_scope[SCENE_FX_SCOPE_PRESENCE - SCENE_FX_SCOPE] > 0.0f &&
+           !(s_scope[SCENE_FX_SCOPE_PROJECTION - SCENE_FX_SCOPE] > 0.0f);
+}
+
+/* Before each material's draws. A sight's window is the disc of its ring:
+ * the attachments' own surfaces, this port's mtl_browser_att_ materials,
+ * stay drawn over it, so the ring shows whole, the iron sights before it
+ * cut away at its edge. */
+void WebSceneFx_ViewmodelMaterial(const char *name)
+{
+    int exempt = 0;
+
+    if (s_active && name && WebSceneFx_SightWindow())
+        exempt = !strncmp(name, "mtl_browser_att_", 16);
+    if (exempt == s_scopeExempt)
+        return;
+    s_scopeExempt = exempt;
+    if (s_scopeMasking)
+        WebSceneFx_ScopeMask(!exempt);
+}
+
 /* Around the rifle's draws in the composed view: the stencil keeps every
  * part of it off the glass, so the world shows through. */
 void WebSceneFx_BeginViewmodel(void)
@@ -1079,7 +1106,7 @@ void WebSceneFx_BeginViewmodel(void)
         WebSceneFx_ScopeStencil(s_scope);
         s_scopeStencil = 1;
     }
-    WebSceneFx_ScopeMask(1);
+    WebSceneFx_ScopeMask(!s_scopeExempt);
     s_scopeMasking = 1;
 }
 

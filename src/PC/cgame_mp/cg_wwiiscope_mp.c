@@ -117,6 +117,16 @@ extern const dvar_t *cg_fovMin;
 #define CG_WWIISCOPE_MAX_WEAPONS 128
 #define CG_WWIISCOPE_UNKNOWN -2
 #define CG_WWIISCOPE_NONE -1
+/* The sight attachments whose glass browser_attachment_models.py writes
+ * beside their model, glass/<gun model>__<attachment>: the 4x Optic's, and
+ * the opening of the Reflex and Lens Sights' ring. */
+#define CG_WWIISCOPE_SIGHTS 3
+#define CG_WWIISCOPE_SIGHT_OPTIC 0
+#define CG_WWIISCOPE_SIGHT_REFLEX 1
+#define CG_WWIISCOPE_SIGHT_LENS 2
+/* Over this part of the raise a Reflex or Lens Sight's window comes in. */
+#define CG_WWIISCOPE_WINDOW_START 0.6f
+#define CG_WWIISCOPE_WINDOW_END 0.85f
 
 typedef struct CgWwiiScopeImage {
     MaterialHandle overlay;
@@ -136,17 +146,27 @@ typedef struct CgWwiiScopeBolt {
 /* Read by R_RenderScene: the floats of this frame's CgWwiiScopeLens. */
 float g_webScopeLens[13];
 
+static const unsigned char s_sights[CG_WWIISCOPE_SIGHTS] = { ATT_OPTIC4X, ATT_REFLEX, ATT_LENS };
+/* How many times its opening each sight's ring reaches: the generator's
+ * SIGHT_RINGS. */
+static const float s_sightRings[CG_WWIISCOPE_SIGHTS] = { 1.0f, 1.25f, 1.2f };
+
 static const dvar_t *cg_wwiiScope;
 static signed char s_glassIndex[CG_WWIISCOPE_MAX_WEAPONS];
-/* Each gun's 4x Optic glass, read once: 1 when known, else NONE. */
-static CgWwiiScopeGlass s_opticGlasses[CG_WWIISCOPE_MAX_WEAPONS];
-static signed char s_opticKnown[CG_WWIISCOPE_MAX_WEAPONS];
+/* Each gun's glass of each sight attachment, read once: 1 when known, else
+ * NONE. */
+static CgWwiiScopeGlass s_sightGlasses[CG_WWIISCOPE_MAX_WEAPONS][CG_WWIISCOPE_SIGHTS];
+static signed char s_sightKnown[CG_WWIISCOPE_MAX_WEAPONS][CG_WWIISCOPE_SIGHTS];
 /* The scoped rechamber anim is the idle pose. */
 static unsigned char s_idleBolt[CG_WWIISCOPE_MAX_WEAPONS];
 /* The scoped rechamber anim gave way to the idle pose. */
 static unsigned char s_heldBolt[CG_WWIISCOPE_MAX_WEAPONS];
 static CgWwiiScopeImage s_images[R_HUD_IMAGE_SCOPE_LENS_COUNT];
 static CgWwiiScopeLens s_lens;
+/* A Reflex or Lens Sight's window this frame: its ring's disc, which the
+ * rifle stays off but for the sight itself, and the opening's share of it. */
+static CgWwiiScopeLens s_window;
+static float s_windowOpening;
 /* The view weapon this frame is a WWII scope's rifle: its stock overlay
  * stays off even before the window opens. */
 static int s_viewWeapon;
@@ -184,27 +204,46 @@ static const CgWwiiScopeGlass *CG_WwiiScopeWeaponGlass(int weapon)
     return s_glassIndex[weapon] >= 0 ? &cg_wwiiScopeGlasses[s_glassIndex[weapon]] : NULL;
 }
 
-/* The glass of the gun's 4x Optic, where the archives place one on it. */
-static const CgWwiiScopeGlass *CG_WwiiScopeOpticGlass(int weapon)
+/* The glass of the gun's sight attachment, where the archives place one on
+ * it. */
+static const CgWwiiScopeGlass *CG_WwiiScopeSightGlass(int weapon, int sight)
 {
-    if (s_opticKnown[weapon] == CG_WWIISCOPE_UNKNOWN) {
+    if (s_sightKnown[weapon][sight] == CG_WWIISCOPE_UNKNOWN) {
         const WeaponDef *weapDef = BG_GetWeaponDef(weapon);
+        CgWwiiScopeGlass *glass = &s_sightGlasses[weapon][sight];
         void *file = NULL;
         char name[96];
 
-        s_opticKnown[weapon] = CG_WWIISCOPE_NONE;
+        s_sightKnown[weapon][sight] = CG_WWIISCOPE_NONE;
         if (weapDef && weapDef->szGunXModel && weapDef->szGunXModel[0]) {
-            snprintf(name, sizeof(name), "glass/%s__%s", weapDef->szGunXModel, g_attachments[ATT_OPTIC4X].name);
-            if (FS_ReadFile(name, &file) > 0 && file &&
-                CG_WwiiScopeParseGlass((const char *)file, &s_opticGlasses[weapon])) {
-                s_opticGlasses[weapon].gunModel = weapDef->szGunXModel;
-                s_opticKnown[weapon] = 1;
+            snprintf(name, sizeof(name), "glass/%s__%s", weapDef->szGunXModel, g_attachments[s_sights[sight]].name);
+            if (FS_ReadFile(name, &file) > 0 && file && CG_WwiiScopeParseGlass((const char *)file, glass)) {
+                glass->gunModel = weapDef->szGunXModel;
+                s_sightKnown[weapon][sight] = 1;
             }
             if (file)
                 FS_FreeFile(file);
         }
     }
-    return s_opticKnown[weapon] > 0 ? &s_opticGlasses[weapon] : NULL;
+    return s_sightKnown[weapon][sight] > 0 ? &s_sightGlasses[weapon][sight] : NULL;
+}
+
+/* The window of the Reflex or Lens Sight ps has on the weapon, and how many
+ * times its opening the sight's ring reaches, else NULL. */
+static const CgWwiiScopeGlass *CG_WwiiScopeWindowGlass(const playerState_t *ps, int weapon, float *ring)
+{
+    unsigned mask;
+    int sight;
+
+    if (weapon <= 0 || weapon >= CG_WWIISCOPE_MAX_WEAPONS || weapon > BG_GetNumWeapons())
+        return NULL;
+    mask = BG_GetWeaponAttachments(ps, weapon);
+    sight = mask & ATT_BIT(ATT_REFLEX) ? CG_WWIISCOPE_SIGHT_REFLEX :
+            mask & ATT_BIT(ATT_LENS)   ? CG_WWIISCOPE_SIGHT_LENS   : -1;
+    if (sight < 0)
+        return NULL;
+    *ring = s_sightRings[sight];
+    return CG_WwiiScopeSightGlass(weapon, sight);
 }
 
 /* A scoped rifle's own glass, else the glass of the 4x Optic the player
@@ -220,7 +259,7 @@ static const CgWwiiScopeGlass *CG_WwiiScopePlayerGlass(const playerState_t *ps, 
     weapDef = BG_GetPlayerWeaponDef(ps, weapon);
     if (!weapDef || !weapDef->overlayReticle || !weapDef->szOverlayMaterial[0])
         return NULL;
-    return CG_WwiiScopeOpticGlass(weapon);
+    return CG_WwiiScopeSightGlass(weapon, CG_WWIISCOPE_SIGHT_OPTIC);
 }
 
 static int CG_WwiiScopeFullView(void)
@@ -232,11 +271,14 @@ static int CG_WwiiScopeFullView(void)
 }
 
 /* The compositor only composes a view that fills the screen. */
+static int CG_WwiiScopeComposed(void)
+{
+    return cg_wwiiScope && cg_wwiiScope->current.enabled && WebSceneFx_ScopeAvailable() && CG_WwiiScopeFullView();
+}
+
 static const CgWwiiScopeGlass *CG_WwiiScopeGlassFor(const playerState_t *ps, int weapon)
 {
-    if (!cg_wwiiScope || !cg_wwiiScope->current.enabled || !WebSceneFx_ScopeAvailable() || !CG_WwiiScopeFullView())
-        return NULL;
-    return CG_WwiiScopePlayerGlass(ps, weapon);
+    return CG_WwiiScopeComposed() ? CG_WwiiScopePlayerGlass(ps, weapon) : NULL;
 }
 
 const CgWwiiScopeGlass *CG_WwiiScopeGlassForWeapon(int weapon)
@@ -291,12 +333,14 @@ void CG_WwiiScopeInit(void)
 
     cg_wwiiScope = Dvar_RegisterBool_mac("cg_wwiiScope", 1, 0x1001);
     memset(s_glassIndex, CG_WWIISCOPE_UNKNOWN, sizeof(s_glassIndex));
-    memset(s_opticKnown, CG_WWIISCOPE_UNKNOWN, sizeof(s_opticKnown));
+    memset(s_sightKnown, CG_WWIISCOPE_UNKNOWN, sizeof(s_sightKnown));
     memset(s_idleBolt, 0, sizeof(s_idleBolt));
     memset(s_heldBolt, 0, sizeof(s_heldBolt));
     memset(s_images, 0, sizeof(s_images));
     memset(&s_lens, 0, sizeof(s_lens));
+    memset(&s_window, 0, sizeof(s_window));
     memset(g_webScopeLens, 0, sizeof(g_webScopeLens));
+    s_windowOpening = 0.0f;
     s_viewWeapon = 0;
     s_lightsOnly = 0;
     s_dark = 0.0f;
@@ -315,7 +359,9 @@ void CG_WwiiScopeInit(void)
 void CG_WwiiScopeClear(void)
 {
     memset(&s_lens, 0, sizeof(s_lens));
+    memset(&s_window, 0, sizeof(s_window));
     memset(g_webScopeLens, 0, sizeof(g_webScopeLens));
+    s_windowOpening = 0.0f;
     s_viewWeapon = 0;
     s_lightsOnly = 0;
 }
@@ -638,6 +684,38 @@ static float CG_WwiiScopeDarkStep(float dark, float target, float seconds)
     return target > dark ? fminf(target, dark + rate) : fmaxf(target, dark - rate);
 }
 
+/* A Reflex or Lens Sight's window: its ring's disc as the view projects it,
+ * the rifle drawn with the view's own projection, over the last of the
+ * raise. The world through it is not magnified, blurred or blacked out. */
+static void CG_WwiiScopeUpdateWindow(const playerState_t *ps, int weapon, qboolean drawGun)
+{
+    const CgWwiiScopeGlass *glass;
+    CgWwiiScopeGlass disc;
+    vec3_t boneAxis[3];
+    vec3_t boneOrigin;
+    float ring = 1.0f, projection[2];
+
+    if (!drawGun || cg->renderingThirdPerson || (ps->eFlags & 0x300) ||
+        !(ps->fWeaponPosFrac > CG_WWIISCOPE_WINDOW_START) || !CG_WwiiScopeComposed())
+        return;
+    glass = CG_WwiiScopeWindowGlass(ps, weapon, &ring);
+    if (!glass ||
+        !CG_WwiiScopeGunBone((*(weaponInfo_t **)imp_cg_weapons)[weapon].viewModelDObj, boneAxis, boneOrigin))
+        return;
+    disc = *glass;
+    disc.radius *= ring;
+    projection[0] = 1.0f / tanf(cg->refdef.fov_x * 0.00872664626f);
+    projection[1] = 1.0f / tanf(cg->refdef.fov_y * 0.00872664626f);
+    if (!CG_WwiiScopeProjectGlass(&disc, (const vec3_t *)boneAxis, boneOrigin, cg->refdef.vieworg,
+                                  (const vec3_t *)cg->refdef.viewaxis, projection, &s_window)) {
+        memset(&s_window, 0, sizeof(s_window));
+        return;
+    }
+    s_window.presence = CG_WwiiScopeSmoothstep(CG_WWIISCOPE_WINDOW_START, CG_WWIISCOPE_WINDOW_END, ps->fWeaponPosFrac);
+    s_window.open = s_window.presence;
+    s_windowOpening = 1.0f / ring;
+}
+
 qboolean CG_WwiiScopeUpdate(const playerState_t *ps, int weapon, qboolean drawGun)
 {
     const CgWwiiScopeGlass *glass = drawGun ? CG_WwiiScopeGlassFor(ps, weapon) : NULL;
@@ -678,13 +756,51 @@ qboolean CG_WwiiScopeUpdate(const playerState_t *ps, int weapon, qboolean drawGu
             }
         }
     }
-    memcpy(g_webScopeLens, lens, sizeof(g_webScopeLens));
+    memset(&s_window, 0, sizeof(s_window));
+    s_windowOpening = 0.0f;
+    if (!s_viewWeapon)
+        CG_WwiiScopeUpdateWindow(ps, weapon, drawGun);
+    memcpy(g_webScopeLens, s_viewWeapon ? lens : &s_window, sizeof(g_webScopeLens));
     return s_viewWeapon;
 }
 
 const CgWwiiScopeLens *CG_WwiiScopeLens(void)
 {
     return &s_lens;
+}
+
+/* The opening, opening of the window's disc, in pixels of a width by height
+ * screen: its centre, and the matrix taking a pixel's offset from it to the
+ * unit disc. Returns 0 for an opening without area. */
+static int CG_WwiiScopeOpeningPixels(const CgWwiiScopeLens *window, float opening, float width, float height,
+                                     float *centre, float *toUnit)
+{
+    float a[2], b[2], det;
+
+    centre[0] = (window->center[0] + 1.0f) * 0.5f * width;
+    centre[1] = (1.0f - window->center[1]) * 0.5f * height;
+    a[0] = window->axes[0][0] * 0.5f * width * opening;
+    a[1] = -window->axes[0][1] * 0.5f * height * opening;
+    b[0] = window->axes[1][0] * 0.5f * width * opening;
+    b[1] = -window->axes[1][1] * 0.5f * height * opening;
+    det = a[0] * b[1] - b[0] * a[1];
+    if (!(fabsf(det) > 1e-6f))
+        return 0;
+    toUnit[0] = b[1] / det;
+    toUnit[1] = -b[0] / det;
+    toUnit[2] = -a[1] / det;
+    toUnit[3] = a[0] / det;
+    return 1;
+}
+
+int CG_WwiiScopeSightOpening(float *centre, float *toUnit)
+{
+    const vidConfig_t *vid = &((clientStatic_t *)imp_cls)->vidConfig;
+
+    if (!(s_window.presence > 0.0f))
+        return 0;
+    return CG_WwiiScopeOpeningPixels(&s_window, s_windowOpening, (float)vid->width, (float)vid->height, centre,
+                                     toUnit);
 }
 
 /* The overlay's quad in screen pixels: its lens circle, edge of its half
@@ -800,6 +916,13 @@ const CgWwiiScopeLens *CG_WwiiScopeLens(void)
     static const CgWwiiScopeLens closed;
 
     return &closed;
+}
+
+int CG_WwiiScopeSightOpening(float *centre, float *toUnit)
+{
+    (void)centre;
+    (void)toUnit;
+    return 0;
 }
 
 #endif

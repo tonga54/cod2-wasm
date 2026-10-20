@@ -4509,3 +4509,43 @@ showed the WWII view at full aim and black only with Shift: the Garand,
 Kar98k, Bren, Lee-Enfield and MP44 with the optic, and the four sniper
 rifles. The Kar98k worked its bolt through the optic without the hand
 crossing the view, and through its iron sights without the optic as before.
+
+## Reflex and Lens Sights as WWII's — 2026-10-20
+
+The owner compared our Reflex Sight at full aim with WWII's Lens Sight and
+asked for the sights, and the attachments generally, to look real while still
+working. Ours had a flat red disc for a reticle, and the gun's own rear sight
+hid the ring and sat inside it.
+
+- The Lens Sight is now WWII's: a thin ring holding the lens, on a stalk and
+  a clamped block.
+- The generator writes each sight's window beside its model, as
+  `glass/<gun>__reflex` and `__lens`.
+- At full aim `cg_wwiiscope_mp.c` hands the ring's disc to the compositor.
+  The compositor keeps the gun off it but lets this port's attachment
+  materials draw over it, so the ring shows whole with the world through it.
+- The reticle glows and is clipped to the opening.
+- The mounts no longer reach into the opening.
+
+Only `cod2_browser_renderer.iwd` changes, so `site/wasm-game-data.json` is
+regenerated with this commit. The owner's Create a Class pictures still show
+the old Lens. To update them, run `/usr/bin/python3
+scripts/render-class-pictures.py`, copy `owner_class_pictures/` to the Pi
+before deploying, and regenerate the manifest. Details are in
+`docs/GRAPHICS_2026-10-16.md`, "WWII Reflex and Lens Sights".
+
+Validation:
+
+- Tests, with their failing mutants:
+  - `test-browser-attachment-models.py`: 32 mutants.
+  - `test-wwii-scope.py`: 64 mutants.
+  - `test-web-scene-fx.py`: 51 mutants.
+  - `test-attachment-sight.py`: 14 mutants.
+- Builds and archives: the web client and the native server build; the
+  archives are regenerated and `check-private-assets.py` passes.
+- In the QA stack, at full aim:
+  - the Thompson with either sight, the Garand with the Lens, and the MP40
+    and Bren with the Reflex each framed a clear window with the reticle at
+    its centre;
+  - the iron sights ended at the ring's edge;
+  - no mount showed inside the opening.

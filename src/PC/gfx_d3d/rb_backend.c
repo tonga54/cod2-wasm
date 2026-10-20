@@ -245,6 +245,7 @@ extern const float *WebSceneFx_ViewmodelProjection(void);
 extern float WebSceneFx_ViewmodelNearClip(float nearClip);
 extern void WebSceneFx_BeginViewmodel(void);
 extern void WebSceneFx_EndViewmodel(void);
+extern void WebSceneFx_ViewmodelMaterial(const char *name);
 #endif
 extern void RB_SetWorldMatrixForEntity(const void *entity);
 extern int RB_FogOffset(void);
@@ -1723,6 +1724,9 @@ check_material:
         }
     }
 
+#ifdef __EMSCRIPTEN__
+    WebSceneFx_ViewmodelMaterial(material->info.name);
+#endif
     RB_BeginSurface(material, actualTechType, lightmap);
     materialPrev = material;
     lightmapPrev = lightmap;

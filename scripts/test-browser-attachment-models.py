@@ -186,9 +186,11 @@ def model_entries(model, attachment):
 expected = set()
 for finish in A.FINISHES:
     expected |= {'images/' + A.IMAGE + finish + '.iwi', 'materials/' + A.MATERIAL + finish}
-# The SMG has no scope of its nation's to take, so no 4x Optic model; grip and FMJ show nothing.
+# The SMG has no scope of its nation's to take, so no 4x Optic model; grip and FMJ show nothing. Its sights have
+# their window beside them.
 for attachment in ('suppressor', 'reflex', 'lens', 'extmag', 'nomag'):
     expected |= model_entries('viewmodel_test_smg', attachment)
+expected |= {A.GLASS + 'viewmodel_test_smg' + A.SUFFIX + attachment for attachment in ('reflex', 'lens')}
 # A scoped rifle keeps its own scope; the rifles take the scoped rifles'; a pistol a can and a longer magazine.
 expected |= model_entries('viewmodel_test_sniper', 'suppressor')
 for model in ('viewmodel_test_kar98k', 'viewmodel_test_g43', 'viewmodel_test_garand', 'viewmodel_test_bren'):
@@ -299,19 +301,59 @@ assert math.dist(before, eye) > 0.3, 'the made-up raise must move the eye on its
 # The reflex's window and the lens's tube and rim sit on that line, OPTIC_AHEAD in front of the eye.
 reach = A.OPTIC_AHEAD['thompson_mp']
 sights = {'reflex': A.reflex(gun), 'lens': A.lens(gun)}
+# The reflex's frame; the lens's thin ring, as WWII's, and the bezel at its front.
 for attachment, index, low, high, centre in (('reflex', 0, 0.64, 0.8, reach),
-                                             ('lens', 0, 0.42, 0.5 * 1.05, reach + (0.35 - 0.45) / 2),
-                                             ('lens', 1, 0.42 * 0.98, 0.5 * 1.12, reach + 0.35 + 0.085)):
+                                             ('lens', 0, 0.5, 0.6, reach),
+                                             ('lens', 1, 0.5 * 1.005, 0.5 * 1.14, reach + 0.08 + 0.0125)):
     found = [distance_to_line(p, eye, ahead) for p in sights[attachment][index].positions]
     assert all(low - 2e-3 <= r <= high + 2e-3 for r, _ in found), (attachment, index, min(found), max(found))
     alongs = [a for _, a in found]
     assert abs((min(alongs) + max(alongs)) / 2 - centre) < 2e-3, (attachment, index, min(alongs), max(alongs))
+# The lens's ring stands on a stalk from a block clamped to a base on the receiver.
+ring_bottom = min(p[2] for p in sights['lens'][0].positions)
+base, block, stalk = sights['lens'][4:7]
+assert (base.finish, block.finish, stalk.finish) == ('parkerized', 'blued', 'blued')
+ring_x = [p[0] for p in sights['lens'][0].positions]
+top = A.receiver_top(gun, (min(ring_x) + max(ring_x)) / 2, reach=1.0)
+assert abs(min(p[2] for p in base.positions) - (top - 0.05)) < 1e-3
+assert abs(max(p[2] for p in base.positions) - min(p[2] for p in block.positions) - 0.01) < 1e-3
+assert min(p[2] for p in stalk.positions) < max(p[2] for p in block.positions)
+assert abs(max(p[2] for p in stalk.positions) - (ring_bottom + 0.03)) < 2e-3, (stalk.positions, ring_bottom)
 # Their glass is there for the pictures, on the line, and out of the models: the eye sees the reticle.
 for attachment, meshes in sights.items():
     glass = [m for m in meshes if m.picture_only]
     assert len(glass) == 2 and all(m.finish == 'glass' for m in glass), attachment
     assert all(distance_to_line(p, eye, ahead)[0] <= 0.64 + 2e-3 for m in glass for p in m.positions)
     assert A.MATERIAL + 'glass' not in surfaces_of('viewmodel_test_smg__' + attachment)[1], attachment
+# No part of a sight's mount reaches into its opening, the eye seeing the world through it: not over a gun
+# whose top stands taller there, as the Bren's cover with the sight moved over it, nor where the line of sight
+# runs low over the gun.
+saved_ahead = A.OPTIC_AHEAD['bren_mp']
+A.OPTIC_AHEAD['bren_mp'] = 15.2
+for gun_ in (gun, A.Gun(read, 'bren_mp'), A.Gun(read, 'colt_mp')):
+    for attachment, build in (('reflex', A.reflex), ('lens', A.lens)):
+        centre = S._add(gun_.eye, S._scale(gun_.ahead, A.OPTIC_AHEAD.get(gun_.weapon, 7.5)))
+        mount = [m for m in build(gun_)[4:] if not m.picture_only]
+        reach_ = max(p[2] for m in mount for p in m.positions) if mount else None
+        assert mount and reach_ <= centre[2] - A.SIGHT_OPENINGS[attachment] - 0.02 + 1e-6, (gun_.weapon, attachment)
+        if gun_.weapon == 'bren_mp':
+            assert A.receiver_top(gun_, centre[0], reach=1.0, y=centre[1]) > centre[2], 'the cover must stand tall'
+A.OPTIC_AHEAD['bren_mp'] = saved_ahead
+# Beside each model its window for the WWII scope: the opening, centred on the line of sight at the sight,
+# OPTIC_AHEAD ahead of the eye at full aim; the scope keeps the gun off the ring's disc, as many times the
+# opening as cg_wwiiscope_mp.c reaches.
+rings = re.search(r's_sightRings\[CG_WWIISCOPE_SIGHTS\] = \{ ([\d.]+)f, ([\d.]+)f, ([\d.]+)f \};',
+                  (Path(__file__).resolve().parent.parent / 'src/PC/cgame_mp/cg_wwiiscope_mp.c').read_text())
+assert rings and float(rings[1]) == 1.0
+for attachment, opening, ring in (('reflex', 0.64, float(rings[2])), ('lens', 0.5, float(rings[3]))):
+    text = entries[A.GLASS + 'viewmodel_test_smg' + A.SUFFIX + attachment].decode()
+    assert re.fullmatch(r'(-?\d+\.\d{4} ){7}-?\d+\.\d{4}\n', text), text
+    numbers = [float(v) for v in text.split()]
+    rim, radius, at_aim, cant = tuple(numbers[0:3]), numbers[3], numbers[4:7], numbers[7]
+    assert radius == opening and abs(A.SIGHT_RINGS[attachment] - ring) < 1e-6, (attachment, radius, ring)
+    radial, along = distance_to_line(rim, eye, ahead)
+    assert radial < 1e-3 and abs(along - reach) < 1e-3, (attachment, radial, along)
+    assert abs(at_aim[0] - reach) < 2e-3 and abs(at_aim[1]) < 2e-3 and abs(at_aim[2]) < 2e-3 and cant == 0.0
 cases += 1
 
 
@@ -560,6 +602,18 @@ MUTANTS = [
     ("    roll = math.degrees(math.atan2(-up[1], up[2]))", "    roll = math.degrees(math.atan2(up[1], up[2]))"),
     ("            if glass:\n                entries[GLASS + base + attachment] = glass.encode()\n", ""),
     ("    if not glass:\n        return None\n", ""),
+    ("            entries[GLASS + base + attachment] = sight_glass(gun, attachment).encode()\n", ""),
+    ("SIGHT_OPENINGS = {'reflex': REFLEX_INNER, 'lens': LENS_INNER}",
+     "SIGHT_OPENINGS = {'reflex': REFLEX_OUTER, 'lens': LENS_OUTER}"),
+    ("SIGHT_RINGS = {'reflex': REFLEX_OUTER / REFLEX_INNER, 'lens': LENS_OUTER / LENS_INNER}",
+     "SIGHT_RINGS = {'reflex': REFLEX_OUTER / REFLEX_INNER, 'lens': 1.25}"),
+    ("    rim = S._add(gun.eye, S._scale(gun.ahead, OPTIC_AHEAD.get(gun.weapon, 7.5)))\n",
+     "    rim = S._add(gun.eye, S._scale(gun.ahead, OPTIC_AHEAD.get(gun.weapon, 7.5) + 0.3))\n"),
+    ("                       (centre[0] + 0.07, centre[1] + 0.1, max(bottom, block_top)), ceiling)",
+     "                       (centre[0] + 0.07, centre[1] + 0.1, block_top), ceiling)"),
+    ("    points = [p for p in gun.points(without='j_clip') if p[2] < ceiling]\n",
+     "    points = gun.points(without='j_clip')\n"),
+    ("    top = min(high[2], ceiling)\n", "    top = high[2]\n"),
 ]
 if not os.environ.get('COD2_ATTACHMENT_MODELS_MUTANT'):
     here = Path(__file__).resolve().parent

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Exercise the real reflex and lens sight reticles drawn over the aim."""
+"""Exercise the real reflex and lens sight reticles drawn over the aim, their glow and the sight's opening
+they show through."""
 from pathlib import Path
 import subprocess
 import tempfile
@@ -35,17 +36,26 @@ static void CalcScreenPlacement(float *x, float *y, float *w, float *h, int horz
     *h *= 1.5f;
 }
 typedef struct {
-    HudVertex2D verts[128];
-    unsigned short indices[512];
+    HudVertex2D verts[160];
+    unsigned short indices[800];
     int vertexCount, indexCount;
     MaterialHandle material;
 } Draw;
 static Draw draws[4];
 static int drawCount;
+/* The sight's opening the WWII scope gives, in pixels: none unless a test sets it. */
+static int openingOn;
+static float openingCentre[2], openingToUnit[4];
+static int CG_WwiiScopeSightOpening(float *centre, float *toUnit)
+{
+    memcpy(centre, openingCentre, sizeof(openingCentre));
+    memcpy(toUnit, openingToUnit, sizeof(openingToUnit));
+    return openingOn;
+}
 static void R_AddCmdDrawTriangles2D(const HudVertex2D *verts, int vertexCount, const unsigned short *indices,
                                     int indexCount, MaterialHandle material)
 {
-    assert(drawCount < 4 && vertexCount <= 128 && indexCount <= 512);
+    assert(drawCount < 4 && vertexCount <= 160 && indexCount <= 800);
     memcpy(draws[drawCount].verts, verts, sizeof(*verts) * vertexCount);
     memcpy(draws[drawCount].indices, indices, sizeof(*indices) * indexCount);
     draws[drawCount].vertexCount = vertexCount;
@@ -119,34 +129,69 @@ int main(void)
     assert(!Sight(ATT_BIT(ATT_REFLEX), 0.0f) && !Sight(ATT_BIT(ATT_REFLEX), 0.3f));
     assert(!Sight(ATT_BIT(ATT_REFLEX), 0.6f) && !Sight(ATT_BIT(ATT_LENS), 0.6f));
 
-    /* The reflex dot: a centre, a solid disc and a glow fading to nothing. */
+    /* The reflex dot: a centre, a solid disc, a glow and a halo fading to nothing. */
     assert(Sight(ATT_BIT(ATT_REFLEX) | ATT_BIT(ATT_GRIP), 1.0f) == 1);
     d = &draws[0];
-    assert(d->vertexCount == 49 && d->indexCount == 216);
+    assert(d->vertexCount == 73 && d->indexCount == 360);
     assert(NEAR(d->verts[0].xy[0], CX) && NEAR(d->verts[0].xy[1], CY) && NEAR(d->verts[0].rgba[3], 0.95f));
-    Ring(d, 1, 0.9f * 1.5f, red, 1.0f);
-    Ring(d, 25, 2.5f * 1.5f, red, 0.0f);
-    Mesh(d, 0.0f, 2.5f * 1.5f);
+    Ring(d, 1, 0.8f * 1.5f, red, 1.0f);
+    Ring(d, 25, 1.4f * 1.5f, red, 0.28f);
+    Ring(d, 49, 3.8f * 1.5f, red, 0.0f);
+    Mesh(d, 0.0f, 3.8f * 1.5f);
 
     /* It eases in: a quarter of the way through the fade shows 0.15625 of it. */
     assert(Sight(ATT_BIT(ATT_REFLEX), 0.7f) == 1);
     assert(NEAR(draws[0].verts[0].rgba[3], 0.95f * 0.15625f));
-    Ring(&draws[0], 1, 0.9f * 1.5f, red, 0.15625f);
+    Ring(&draws[0], 1, 0.8f * 1.5f, red, 0.15625f);
 
-    /* The lens sight: a feathered ring and a small dot. */
+    /* The lens sight: a thin ring and a small dot, each in a halo. */
     assert(Sight(ATT_BIT(ATT_LENS), 1.0f) == 2);
     d = &draws[0];
-    assert(d->vertexCount == 96 && d->indexCount == 432);
-    Ring(d, 0, 5.625f * 1.5f, amber, 0.0f);
-    Ring(d, 24, 6.225f * 1.5f, amber, 1.0f);
-    Ring(d, 48, 6.775f * 1.5f, amber, 1.0f);
-    Ring(d, 72, 7.375f * 1.5f, amber, 0.0f);
-    Mesh(d, 5.625f * 1.5f, 7.375f * 1.5f);
+    assert(d->vertexCount == 144 && d->indexCount == 720);
+    Ring(d, 0, 3.375f * 1.5f, amber, 0.0f);
+    Ring(d, 24, 5.775f * 1.5f, amber, 0.28f);
+    Ring(d, 48, 6.275f * 1.5f, amber, 1.0f);
+    Ring(d, 72, 6.725f * 1.5f, amber, 1.0f);
+    Ring(d, 96, 7.225f * 1.5f, amber, 0.28f);
+    Ring(d, 120, 9.625f * 1.5f, amber, 0.0f);
+    Mesh(d, 3.375f * 1.5f, 9.625f * 1.5f);
     d = &draws[1];
-    assert(d->vertexCount == 49 && d->indexCount == 216 && NEAR(d->verts[0].rgba[3], 0.9f));
-    Ring(d, 1, 0.5f * 1.5f, amber, 1.0f);
-    Ring(d, 25, 1.1f * 1.5f, amber, 0.0f);
-    Mesh(d, 0.0f, 1.1f * 1.5f);
+    assert(d->vertexCount == 73 && d->indexCount == 360 && NEAR(d->verts[0].rgba[3], 0.9f));
+    Ring(d, 1, 0.45f * 1.5f, amber, 1.0f);
+    Ring(d, 25, 0.95f * 1.5f, amber, 0.28f);
+    Ring(d, 49, 3.35f * 1.5f, amber, 0.0f);
+    Mesh(d, 0.0f, 3.35f * 1.5f);
+
+    /* Through the sight's opening the reticle shows whole well inside it. */
+    openingOn = 1;
+    openingCentre[0] = CX;
+    openingCentre[1] = CY;
+    openingToUnit[0] = openingToUnit[3] = 1.0f / 50.0f;
+    openingToUnit[1] = openingToUnit[2] = 0.0f;
+    assert(Sight(ATT_BIT(ATT_REFLEX), 1.0f) == 1);
+    assert(NEAR(draws[0].verts[0].rgba[3], 0.95f));
+    Ring(&draws[0], 1, 0.8f * 1.5f, red, 1.0f);
+    /* Behind the ring, nothing of it. */
+    openingCentre[0] = CX + 1000.0f;
+    assert(Sight(ATT_BIT(ATT_LENS), 1.0f) == 2);
+    for (int k = 0; k < 2; k++)
+        for (int i = 0; i < draws[k].vertexCount; i++)
+            assert(draws[k].verts[i].rgba[3] == 0.0f);
+    /* At 0.95 of the opening, half, along the opening's own axes: a pixel's
+     * offset (dx, dy) is (dy / 100, -dx / 50) on the unit disc. */
+    openingCentre[0] = CX - 47.5f;
+    openingToUnit[0] = 0.0f;
+    openingToUnit[1] = 1.0f / 100.0f;
+    openingToUnit[2] = -1.0f / 50.0f;
+    openingToUnit[3] = 0.0f;
+    assert(Sight(ATT_BIT(ATT_REFLEX), 1.0f) == 1);
+    assert(NEAR(draws[0].verts[0].rgba[3], 0.95f * 0.5f));
+    /* At 0.925, smoothly: 0.84375. */
+    openingCentre[0] = CX;
+    openingCentre[1] = CY - 92.5f;
+    assert(Sight(ATT_BIT(ATT_REFLEX), 1.0f) == 1);
+    assert(NEAR(draws[0].verts[0].rgba[3], 0.95f * 0.84375f));
+    openingOn = 0;
     return 0;
 }
 '''
@@ -155,13 +200,19 @@ mutants = [
     ('ps->fWeaponPosFrac <= SIGHT_FADE_START', 'ps->fWeaponPosFrac <= 0.0f'),
     ('    alpha = alpha * alpha * (3.0f - 2.0f * alpha);\n', ''),
     ('if (!(mask & (ATT_BIT(ATT_REFLEX) | ATT_BIT(ATT_LENS)))', 'if (!mask'),
-    ('        const float alphas[3] = { 1.0f, 1.0f, 0.0f };', '        const float alphas[3] = { 1.0f, 1.0f, 1.0f };'),
+    ('        const float alphas[4] = { 1.0f, 1.0f, SIGHT_HALO_ALPHA, 0.0f };',
+     '        const float alphas[4] = { 1.0f, 1.0f, 1.0f, 0.0f };'),
     ('        int next = (i + 1) % SIGHT_SEGMENTS;', '        int next = i + 1;'),
     ('            indices[indexCount++] = (unsigned short)(a + SIGHT_SEGMENTS);', '            indices[indexCount++] = a;'),
     ('    CalcScreenPlacement(&x, &y, &w, &scale, 2, 2);\n', ''),
-    ('        CG_DrawSightRings(x, y, dot, dotAlphas, 3, s_sightLens, alpha);\n', ''),
+    ('        CG_DrawSightRings(x, y, dot, dotAlphas, 4, s_sightLens, alpha);\n', ''),
     ('(SIGHT_REFLEX_RADIUS + SIGHT_REFLEX_GLOW) * scale', '(SIGHT_REFLEX_RADIUS + SIGHT_REFLEX_GLOW)'),
-    ('    vertex->rgba[3] = color[3] * alpha;', '    vertex->rgba[3] = color[3];'),
+    ('color[3] * alpha * CG_SightOpeningAlpha(x, y)', 'color[3] * CG_SightOpeningAlpha(x, y)'),
+    ('color[3] * alpha * CG_SightOpeningAlpha(x, y)', 'color[3] * alpha'),
+    ('    u = s_sightOpening.toUnit[0] * dx + s_sightOpening.toUnit[1] * dy;',
+     '    u = s_sightOpening.toUnit[0] * dx + s_sightOpening.toUnit[2] * dy;'),
+    ('    return r * r * (3.0f - 2.0f * r);', '    return r;'),
+    ('    s_sightOpening.on = CG_WwiiScopeSightOpening(s_sightOpening.centre, s_sightOpening.toUnit);\n', ''),
 ]
 
 
@@ -184,4 +235,5 @@ with tempfile.TemporaryDirectory(prefix='cod2-attachment-sight-') as tmp:
                         str(path / f'mutant{index}')], check=True)
         result = subprocess.run([str(path / f'mutant{index}')], capture_output=True)
         assert result.returncode != 0, f'mutant survived: {after!r}'
-print(f'PASS: reflex and lens reticles, their fade, placement, rings and meshes; {len(mutants)} mutants fail')
+print(f'PASS: reflex and lens reticles, their fade, placement, rings, halos and meshes, shown through the '
+      f'sight\'s opening; {len(mutants)} mutants fail')

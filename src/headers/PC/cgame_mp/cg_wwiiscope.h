@@ -8,8 +8,10 @@
  * a window onto the magnified world, the world around the eyepiece is blurred
  * and blacked out while the breath is held, and the reticle turns with the
  * scope as the bolt is worked. A 4x Optic on a gun without a scope of its
- * own is drawn the same way. cg_wwiiScope 0, a rifle whose eyepiece is not
- * known or a browser without the scene compositor keep the stock overlay. */
+ * own is drawn the same way. Through a Reflex or Lens Sight the world shows
+ * in the sight's ring with nothing of the rest of the gun over it.
+ * cg_wwiiScope 0, a rifle whose eyepiece is not known or a browser without
+ * the scene compositor keep the stock overlay and sights. */
 
 /* A scope's glass, in the space of the gun's j_gun bone: the centre of its
  * rim, nearest the muzzle, and the rim's radius. The glass faces -x, towards
@@ -93,5 +95,10 @@ qboolean CG_WwiiScopeMuzzleLightsOnly(void);
  * hip crosshair, as CG_DrawWeapReticle, or -1 when the stock overlay draws. */
 float CG_DrawWwiiScopeReticle(void);
 const CgWwiiScopeLens *CG_WwiiScopeLens(void);
+/* While a Reflex or Lens Sight's window comes in or is up, the opening of the
+ * sight's ring on screen, the rest of the gun kept off the ring's disc: its
+ * centre in pixels, and the matrix taking a pixel's offset from it to the
+ * unit disc. Returns 0 without one. */
+int CG_WwiiScopeSightOpening(float *centre, float *toUnit);
 
 #endif

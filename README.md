@@ -158,7 +158,9 @@ retail CoD2:
   flash and off the enemy minimap. Each one also costs something: a slower
   aim, a harder kick or a shorter damage range, shown in red in Create a Class
   beside its gains. CoD2 has no attachment models; the sights are
-  drawn reticles and the 4x Optic a sniper scope. See
+  drawn reticles and the 4x Optic a sniper scope. Raised, the Reflex and Lens
+  Sights frame the world in their ring, as WWII's do, with nothing of the gun's
+  iron sights inside it and the reticle glowing on the glass. See
   [attachments](docs/CLASSES.md#attachments).
 - **Placed explosives:** CoD WWII's S-Mine 44, set down at your feet after
   the left hand draws its pin, which clicks under an enemy's feet and springs

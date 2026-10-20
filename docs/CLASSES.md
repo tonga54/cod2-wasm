@@ -216,7 +216,7 @@ repository holds none of their data.
 | --- | --- | --- | --- |
 | Suppressor | WWII's two-part can: on an SMG whose barrel runs bare, a rusted, perforated sleeve over it back to the receiver, then a blued can of radius 1 reaching 6.5 past the muzzle; on a pistol a can of radius 0.62 reaching 4.8. A band at each end and a dark bore | `tag_flash` | The six SMGs and four pistols |
 | Reflex Sight | A round window in a thick frame with a lip, upright on a post over a clamped base | `j_gun` | Every gun that takes it |
-| Lens Sight | A short tube with a brass objective ring on a low mount | `j_gun` | Every gun that takes it |
+| Lens Sight | WWII's: the lens in a thin ring, upright on a short stalk and a block clamped to a base | `j_gun` | Every gun that takes it |
 | 4x Optic | CoD2's own scopes: the Kar98k and Lee-Enfield take their sniper rifle's where it sits on it; the G43 and MP44 the Kar98k's, the Bren the Lee-Enfield's, the American and Soviet rifles the Springfield's, each along the gun's line of sight with its mount on the receiver | `j_gun` | The rifles, BAR, Bren and the iron-sighted bolt-actions; the scoped rifles keep their own |
 | Extended Mag | The SMGs' and MP44's: a second magazine clamped beside their own, on the left, lower and a little ahead, as WWII's M3 shows. The other rifles', LMGs' and pistols': their own magazine, its lower part stretched to 1.5 times the length. Both in the gun's material, so they take the camouflage | `j_clip` | The guns with a box magazine |
 | Extended Mag | A box magazine down out of the stock ahead of the trigger guard, with its floorplate, ribs and catch, as WWII's Kar98k shows; the Lee-Enfield's wraps its own | `j_gun` | The Kar98k, Springfield, Mosin-Nagant, Lee-Enfield, their scoped versions and the M1 Garand |
@@ -225,6 +225,12 @@ repository holds none of their data.
   anim gives the eye on its last frame, a set distance ahead of the eye, so the
   reticle drawn at the screen's centre sits in the ring. Their glass shows in
   the class pictures only: in a match the eye looks through to the reticle.
+  Raised, the sight's ring is a window, as WWII's sights are: the WWII scope
+  code projects the ring's disc from `glass/<gun>__reflex` or `__lens`, and the
+  compositor keeps the rest of the gun off it, the iron sights before the ring
+  cut away at its edge, while the sight itself stays drawn. The world shows
+  through it, and the reticle, glowing and clipped to the opening, slips
+  behind the ring at its edge. No mount part reaches into the opening.
 - The 4x Optic's scope is a rigid copy of the source rifle's, turned from that
   rifle's line of sight to the gun's, its middle 3 ahead of the sights' place,
   its lowest point on the highest of the gun beneath its middle, magazines

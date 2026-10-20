@@ -5,7 +5,8 @@ their data.
 For a gun model viewmodel_x and each attachment its weapon takes that WWII shows on the gun:
 - xmodel/viewmodel_x__suppressor rides tag_flash: a can along the muzzle's +x;
 - xmodel/viewmodel_x__reflex and __lens ride j_gun, centred on the line of sight the aiming
-  animation puts the eye on, so the reticle drawn at the screen's centre sits in the glass;
+  animation puts the eye on, so the reticle drawn at the screen's centre sits in the glass; beside
+  each, glass/viewmodel_x__reflex or __lens is the window the WWII scope keeps the gun out of;
 - xmodel/viewmodel_x__optic4x rides j_gun, a scoped rifle's scope over the receiver; beside it
   glass/viewmodel_x__optic4x is its glass for the WWII scope (cg_wwiiscope_mp.c), which centres
   that glass at the eye while aiming;
@@ -55,6 +56,12 @@ OPTIC_AHEAD = {
     'bar_mp': 9.0, 'bren_mp': 10.0, 'mp44_mp': 8.0, 'shotgun_mp': 7.0, 'enfield_mp': 7.5,
     'mosin_nagant_mp': 6.5, 'kar98k_mp': 7.5,
 }
+# The Reflex Sight's frame and the Lens Sight's ring: their outer radius and the opening the eye looks through.
+# The WWII scope (cg_wwiiscope_mp.c) keeps the gun off the ring's whole disc, SIGHT_RINGS times the opening.
+REFLEX_OUTER, REFLEX_INNER = 0.8, 0.64
+LENS_OUTER, LENS_INNER = 0.6, 0.5
+SIGHT_OPENINGS = {'reflex': REFLEX_INNER, 'lens': LENS_INNER}
+SIGHT_RINGS = {'reflex': REFLEX_OUTER / REFLEX_INNER, 'lens': LENS_OUTER / LENS_INNER}
 # A suppressor's can: how far it reaches past the muzzle and its radius.
 CAN = {'smg': (6.5, 1.0), 'pistol': (4.8, 0.62)}
 # How far back from the muzzle a bare SMG barrel takes the sleeve.
@@ -507,6 +514,21 @@ def _on_sight_line(gun, meshes, ahead_by):
     return [mesh.moved(rotation, centre) for mesh in meshes], centre
 
 
+def _under_opening(gun, centre, inner):
+    """Where a sight's mount may stand: the gun's top beneath the sight, of what lies below the opening at the
+    sight's side, and the ceiling no part of the mount reaches past, just under the opening, as the eye sees the
+    world through it with the rest of the gun kept out."""
+    ceiling = centre[2] - inner - 0.02
+    points = [p for p in gun.points(without='j_clip') if p[2] < ceiling]
+    return receiver_top(gun, centre[0], reach=1.0, y=centre[1], points=points), ceiling
+
+
+def _mount_box(mesh, low, high, ceiling):
+    """A box of the mount, its top no higher than the ceiling; None when nothing of it is left."""
+    top = min(high[2], ceiling)
+    return box(mesh, low, (high[0], high[1], top)) if top > low[2] + 1e-3 else None
+
+
 def _glass(radius, at, finish='glass'):
     """A sight's glass for the pictures, facing both ways at at along the line of sight."""
     return [lathe(Mesh(finish, picture_only=True), [(at, radius), (at, 0.0)], segments=32),
@@ -517,36 +539,51 @@ def reflex(gun):
     """WWII's reflex sight: a round window in a thick frame, upright on a post and a clamped base over the
     receiver, centred on the line of sight; its glass shows in the pictures, the reticle in a match."""
     ahead = OPTIC_AHEAD.get(gun.weapon, 7.5)
-    outer, inner, depth = 0.8, 0.64, 0.26
+    outer, inner, depth = REFLEX_OUTER, REFLEX_INNER, 0.26
     frame = lathe(Mesh('blued'), [(-depth, inner), (-depth, outer), (depth, outer), (depth, inner), (-depth, inner)],
                   segments=40)
     lip = lathe(Mesh('worn'), [(depth, outer * 0.995), (depth + 0.04, outer * 0.96), (depth + 0.04, inner * 1.04),
                                (depth, inner * 1.005)], segments=40)
     meshes, centre = _on_sight_line(gun, [frame, lip] + _glass(inner, 0.0), ahead)
-    top = receiver_top(gun, centre[0])
-    post = box(Mesh('blued'), (centre[0] - 0.2, centre[1] - 0.2, top + 0.25),
-               (centre[0] + 0.2, centre[1] + 0.2, centre[2] - outer + 0.05))
-    base = box(Mesh('parkerized'), (centre[0] - 0.8, centre[1] - 0.42, top - 0.05),
-               (centre[0] + 0.6, centre[1] + 0.42, top + 0.28))
-    screw = box(Mesh('worn'), (centre[0] - 0.15, centre[1] - 0.52, top), (centre[0] + 0.15, centre[1] - 0.42, top + 0.22))
-    return meshes + [post, base, screw]
+    top, ceiling = _under_opening(gun, centre, inner)
+    post = _mount_box(Mesh('blued'), (centre[0] - 0.2, centre[1] - 0.2, top + 0.25),
+                      (centre[0] + 0.2, centre[1] + 0.2, centre[2] - outer + 0.05), ceiling)
+    base = _mount_box(Mesh('parkerized'), (centre[0] - 0.8, centre[1] - 0.42, top - 0.05),
+                      (centre[0] + 0.6, centre[1] + 0.42, top + 0.28), ceiling)
+    screw = _mount_box(Mesh('worn'), (centre[0] - 0.15, centre[1] - 0.52, top),
+                       (centre[0] + 0.15, centre[1] - 0.42, top + 0.22), ceiling)
+    return meshes + [part for part in (post, base, screw) if part]
 
 
 def lens(gun):
-    """WWII's lens sight: a short tube with a brass objective ring on a low mount, centred on the line of sight;
-    its lens shows in the pictures, the reticle in a match."""
+    """WWII's lens sight: the lens in a thin ring, upright on a short stalk and a block clamped to a base over
+    the receiver, centred on the line of sight; its lens shows in the pictures, the reticle in a match."""
     ahead = OPTIC_AHEAD.get(gun.weapon, 7.5)
-    inner, outer, back, front = 0.42, 0.5, -0.45, 0.35
-    tube = lathe(Mesh('blued'), [(back, inner), (back, outer * 1.05), (back + 0.08, outer * 1.05),
-                                 (back + 0.11, outer), (front, outer), (front, inner), (back, inner)], segments=36)
-    rim = lathe(Mesh('brass'), [(front, inner * 0.98), (front, outer * 1.12), (front + 0.14, outer * 1.12),
-                                (front + 0.17, outer * 1.04), (front + 0.17, inner * 0.98), (front, inner * 0.98)],
-                segments=36)
-    meshes, centre = _on_sight_line(gun, [tube, rim] + _glass(inner, front + 0.08), ahead)
-    top = receiver_top(gun, centre[0], reach=1.0)
-    mount = box(Mesh('parkerized'), (centre[0] - 0.4, centre[1] - 0.22, top - 0.05),
-                (centre[0] + 0.3, centre[1] + 0.22, centre[2] - outer + 0.05))
-    return meshes + [mount]
+    outer, inner, half, bevel = LENS_OUTER, LENS_INNER, 0.08, 0.025
+    ring = lathe(Mesh('blued'), [(-half, inner), (-half, outer - bevel), (-half + bevel, outer), (half - bevel, outer),
+                                 (half, outer - bevel), (half, inner), (-half, inner)], segments=48)
+    bezel = lathe(Mesh('worn'), [(half, inner * 1.005), (half + 0.025, inner * 1.02), (half + 0.025, inner * 1.1),
+                                 (half, inner * 1.14)], segments=48)
+    meshes, centre = _on_sight_line(gun, [ring, bezel] + _glass(inner, 0.0), ahead)
+    top, ceiling = _under_opening(gun, centre, inner)
+    bottom = centre[2] - outer + 0.03
+    block_top = max(top + 0.22, min(top + 0.4, bottom - 0.05))
+    base = _mount_box(Mesh('parkerized'), (centre[0] - 0.75, centre[1] - 0.34, top - 0.05),
+                      (centre[0] + 0.55, centre[1] + 0.34, top + 0.16), ceiling)
+    block = _mount_box(Mesh('blued'), (centre[0] - 0.3, centre[1] - 0.26, top + 0.15),
+                       (centre[0] + 0.3, centre[1] + 0.26, block_top), ceiling)
+    stalk = _mount_box(Mesh('blued'), (centre[0] - 0.07, centre[1] - 0.1, block_top - 0.02),
+                       (centre[0] + 0.07, centre[1] + 0.1, max(bottom, block_top)), ceiling)
+    screws = [_mount_box(Mesh('worn'), (centre[0] + x - 0.09, centre[1] - 0.42, top),
+                         (centre[0] + x + 0.09, centre[1] - 0.34, top + 0.13), ceiling) for x in (-0.5, 0.3)]
+    return meshes + [part for part in [base, block, stalk] + screws if part]
+
+
+def sight_glass(gun, attachment):
+    """The Reflex or Lens Sight's window as the WWII scope reads a glass: its centre on the line of sight
+    OPTIC_AHEAD in front of the eye, its radius the opening of the sight's ring."""
+    rim = S._add(gun.eye, S._scale(gun.ahead, OPTIC_AHEAD.get(gun.weapon, 7.5)))
+    return glass_line(gun, rim, SIGHT_OPENINGS[attachment])
 
 
 # The 4x Optic each gun wears: a CoD2 scope, its nation's where one comes apart from its rifle's model; the
@@ -634,6 +671,13 @@ def optic4x_glass(gun, read):
     rim, radius = glass
     if place is not None:
         rim = S._add(S._qrot(place[0], rim), place[1])
+    return glass_line(gun, rim, radius)
+
+
+def glass_line(gun, rim, radius):
+    """A glass of radius at rim in j_gun's space as the WWII scope reads it: the rim, the radius, where the
+    gun's full aim leaves the rim from the view weapon's origin, forward, left and up, and the degrees it cants
+    the gun clockwise."""
     q, t = gun.aimed
     eye = S._add(S._qrot(q, rim), t)
     up = S._qrot(q, (0.0, 0.0, 1.0))
@@ -961,6 +1005,7 @@ def gun_attachments(read, weapon, takes):
         else:
             meshes = {'reflex': reflex, 'lens': lens}[attachment](gun)
             entries.update(mesh_model(base + attachment, meshes, RIDES[attachment]))
+            entries[GLASS + base + attachment] = sight_glass(gun, attachment).encode()
         shown.append(attachment)
     return entries, shown
 
