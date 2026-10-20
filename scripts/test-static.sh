@@ -5,6 +5,7 @@ site_dir="${1:-${repo_root}/out/cod2-wasm-core/site}"
 framework_dir="${2:-${COD2_WASM_FRAMEWORK_DIR:-${repo_root}/../wasm-game-framework}}"
 node --check "${site_dir}/native-game-adapter.js"
 node --check "${site_dir}/update-notifier.js"
+node --check "${site_dir}/install-app.js"
 node --check "${site_dir}/asset-sha256.js"
 node --check "${site_dir}/cod2.js"
 node "${repo_root}/scripts/test-emscripten-gl.cjs" "${site_dir}/cod2.js"
@@ -196,6 +197,7 @@ node "${repo_root}/scripts/test-web-audio.cjs"
 python3 "${repo_root}/scripts/test-web-audio-levels.py"
 node "${repo_root}/scripts/test-web-haptics.cjs"
 node "${repo_root}/scripts/test-update-notifier.cjs"
+node "${repo_root}/scripts/test-install-app.cjs"
 python3 "${repo_root}/scripts/test-client-update-menu.py"
 python3 "${repo_root}/scripts/test-dev-console.py"
 python3 "${repo_root}/scripts/test-update-local.py"
@@ -206,8 +208,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const site = process.argv[2];
 const expected = [
-  'asset-sha256.js', 'build-info.json', 'cod2-diagnostic.svg', 'cod2.js', 'cod2.wasm', 'native-game-adapter.js',
-  'startup.css', 'update-notifier.js', 'wasm-game-data.json', 'wasm-game-framework.json', 'wasm-game.json'
+  'asset-sha256.js', 'build-info.json', 'cod2-diagnostic.svg', 'cod2.js', 'cod2.wasm', 'fonts', 'install-app.js',
+  'native-game-adapter.js', 'startup.css', 'update-notifier.js', 'wasm-game-data.json', 'wasm-game-framework.json',
+  'wasm-game.json'
 ];
 assert.deepEqual(fs.readdirSync(site).sort(), expected.sort());
 assert.deepEqual([...fs.readFileSync(path.join(site, 'cod2.wasm')).subarray(0, 8)], [0,97,115,109,1,0,0,0]);

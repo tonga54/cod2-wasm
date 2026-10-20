@@ -62,6 +62,7 @@ install -m 0644 \
     "${repo_root}/site/cod2-diagnostic.svg" \
     "${repo_root}/site/native-game-adapter.js" \
     "${repo_root}/site/update-notifier.js" \
+    "${repo_root}/site/install-app.js" \
     "${repo_root}/site/startup.css" \
     "${repo_root}/site/asset-sha256.js" \
     "${repo_root}/site/wasm-game-data.json" \

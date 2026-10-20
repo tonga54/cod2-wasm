@@ -1069,6 +1069,14 @@ void UI_WWIIMenu_PaintMenu(displayContextDef_t *dc, menuDef_t *menu)
     UI_WWIIMenu_PaintPrompts();
 }
 
+int UI_WWIIMenu_RightPromptFree(void)
+{
+    const displayContextDef_t *dc = s_wwiiMenu.dc;
+
+    return s_wwiiMenu.applied && dc && UI_WWIIMenu_MainOpen(dc) && !UI_WWIIMenu_PageOpen(dc) &&
+           !UI_WWIISettings_Covers(dc) && !Dvar_GetBool("cl_ingame");
+}
+
 int UI_WWIIMenu_DrawCursor(int x, int y)
 {
     float px = (float)x, py = (float)y, size;

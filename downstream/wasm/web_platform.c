@@ -74,6 +74,14 @@ void Web_ReloadClient(void) {
     EM_ASM({ if (Module.cod2ReloadClient) Module.cod2ReloadClient(); });
 }
 
+extern int UI_WWIIMenu_RightPromptFree(void);
+
+/* The browser's install offer stands in the main menu's right key-prompt
+ * place, which every other menu takes for its Back. */
+EMSCRIPTEN_KEEPALIVE int web_right_prompt_free(void) {
+    return cls.uiStarted && !web_client_connected() && UI_WWIIMenu_RightPromptFree();
+}
+
 EMSCRIPTEN_KEEPALIVE void web_background_frame(void) {
     /* Use the normal frame error guard, including disconnect cleanup. */
     Com_Frame();

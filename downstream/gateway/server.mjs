@@ -58,6 +58,16 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
   clientBudget = CLIENT_BUDGET, now = () => performance.now() } = {}) {
   const reservations = new Map();
   const artworkCache = new Map();
+  // Drawing the install icons holds the event loop that forwards game packets
+  // for about 0.1 s, so it is done once, as the gateway starts.
+  let appIcons = null;
+  function drawAppIcons() {
+    appIcons ||= Promise.all([import('./app-icons.mjs'), readFile(iconPath), readFile(startupPath)])
+      .then(([{ renderAppIcons }, icon, logo]) => renderAppIcons(icon, logo));
+    appIcons.catch(() => { appIcons = null; });
+    return appIcons;
+  }
+  drawAppIcons().catch(() => {});
   const wsBinaryOptions = Object.freeze({ binary: true, compress: false });
   function roomConnections(roomId) {
     let count = reservations.get(roomId) || 0;
@@ -235,17 +245,20 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
       })().catch(() => json(response, 503, {error:'The server manager is unavailable.'}));
       return;
     }
+    const appIcon = /^\/game-data\/files\/cod2-icon\/([a-z0-9-]+\.png)$/.exec(request.url)?.[1];
     const artwork = request.url === '/game-data/files/cod2-icon/original.ico'
-      ? { path: iconPath, type: 'image/x-icon' }
+      ? { type: 'image/x-icon', load: () => readFile(iconPath) }
       : request.url === '/game-data/files/cod2-startup/original.png'
-        ? { path: startupPath, type: 'image/png' } : null;
+        ? { type: 'image/png', load: () => readFile(startupPath) }
+        : appIcon ? { type: 'image/png', load: () => drawAppIcons().then(icons =>
+          icons[appIcon] ?? Promise.reject(new Error('Unknown icon'))) } : null;
     if (artwork) {
       if (!['GET', 'HEAD'].includes(request.method)) {
         response.writeHead(405, { Allow: 'GET, HEAD' }); response.end(); return;
       }
-      const cached = artworkCache.get(artwork.path);
-      (cached ? Promise.resolve(cached) : readFile(artwork.path).then(buf => {
-        artworkCache.set(artwork.path, buf);
+      const cached = artworkCache.get(request.url);
+      (cached ? Promise.resolve(cached) : artwork.load().then(buf => {
+        artworkCache.set(request.url, buf);
         return buf;
       })).then(icon => {
         response.writeHead(200, { 'Content-Type': artwork.type,

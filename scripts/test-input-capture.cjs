@@ -18,6 +18,7 @@ let escapes = 0;
 let starts = 0;
 let loadingShown = 0;
 let nativeState = 2;
+let rightPromptFree = false;
 let fullscreenRequests = 0;
 let keyboardCaptureRequests = 0;
 let clockMs = Date.now();
@@ -67,6 +68,7 @@ const native = {
     assert.match(profile, /seta name "Test"/, 'gametag reaches the native player profile');
   },
   _web_client_state: () => nativeState,
+  _web_right_prompt_free: () => rightPromptFree ? 1 : 0,
   _web_chat_char: code => chatCharacters.push(code),
   _web_capture_lost: () => { ++escapes; }
 };
@@ -125,6 +127,25 @@ const context = {
   assert.equal(fullscreenRequests, 0, 'engine startup must not request fullscreen');
   assert.equal(loadingShown, 1);
   assert.equal(context.elements.console.hidden, true, 'diagnostic output is hidden during normal loading');
+  // install-app.js offers installation over the loading screen until the native menu runs, then wherever the
+  // engine reports the main menu's right key-prompt place free.
+  for (const [state, free, offered] of [[0, false, true], [1, true, true], [1, false, false], [2, false, false],
+    [3, false, false]]) {
+    nativeState = state;
+    rightPromptFree = free;
+    assert.equal(sandbox.cod2InstallMoment(), offered, `install offer in state ${state}, place free ${free}`);
+  }
+  nativeState = 0;
+  context.elements.loading.hidden = true;
+  assert.equal(sandbox.cod2InstallMoment(), false, 'nothing is offered between the loading screen and the menu');
+  delete context.elements.loading.hidden;
+  const rightPrompt = native._web_right_prompt_free;
+  delete native._web_right_prompt_free;
+  nativeState = 1;
+  assert.equal(sandbox.cod2InstallMoment(), false, 'an engine without the query never shows the offer in its menus');
+  native._web_right_prompt_free = rightPrompt;
+  nativeState = 2;
+  rightPromptFree = false;
   for (const captured of [false, true]) {
     document.pointerLockElement = captured ? canvas : null;
     let prevented = false;

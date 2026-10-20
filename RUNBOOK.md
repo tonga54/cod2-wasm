@@ -5503,6 +5503,80 @@ Validation:
   changed. `check-private-assets.py` passes.
 - Not yet heard in a browser.
 
+## Installable app — 2026-10-20
+
+Browsers never offered to install the game. Chrome's own check
+(`Page.getInstallabilityErrors`) answered `manifest-missing-suitable-icon` and
+`no-acceptable-icon`: an app needs a PNG, SVG or WebP icon of at least 144 px
+for "any", and the manifest's only icon was the executable's ICO, 48 px at most
+and declared `sizes: any`. HTTPS or `localhost`, the manifest and its display
+mode already passed.
+
+The gateway now draws the install icons (`app-icons.mjs`) from the two private
+originals it already serves, `/game-ui/cod2.ico` and `/game-ui/cod2-startup.png`:
+the executable's 48 px star, enlarged with a Mitchell filter and lifted off its
+(4, 4, 3) ground, over `logo_cod2`'s lettering at its own size, on the loading
+screen's gradient. `app-192.png` and `app-512.png` are rounded tiles with a gold
+rim; `app-maskable-512.png` and the 180 px `apple-touch-icon.png` are full
+bleed, the maskable one inside the circle masks keep. Drawing takes about 0.1 s
+and 13 MB, once, as the gateway starts, because it holds the event loop that
+forwards game packets; the four PNGs total 248 KB and are kept. The renderer is
+imported lazily, so a gateway without it answers 404 for the icons and keeps
+running. The manifest lists the drawn icons and the original ICO at its real
+16, 32 and 48 px sizes, which Windows can use for small icons.
+
+`install-app.js`, loaded deferred in the page's head before any adapter, keeps
+Chromium's `beforeinstallprompt` and shows **Install app** while the adapter's
+`cod2InstallMoment()` holds, never in an installed window. It sits in the WWII
+menu's right key-prompt place (`ui_wwii_menu.c`: capitals 6.0 units on the 49.8
+baseline, the pen ending 48.4 from the right edge) in the label's grey, gold
+under the cursor. Start New Server, Join Game, Create a Class and the settings
+put their ESC Back there, and the main menu its Back to Game in a match, so the
+moment is the loading screen and then the engine's `web_right_prompt_free()`:
+`UI_WWIIMenu_RightPromptFree()` holds while the laid-out main menu is open with
+no page or settings over it and `cl_ingame` off, the condition under which the
+menu leaves that place empty, and only while not connected. The framework hides the host pointer over native menus so players see
+one cursor; the label takes no pointer events, and a left click over it is taken
+in the window's capture phase, prompts once per offer and never reaches the
+menu. Safari takes `apple-touch-icon` for Add to Dock and Add to Home Screen.
+The manifest link now sends credentials: by default a browser fetches a
+manifest without cookies, which a host's login rejects.
+
+Validation:
+
+- Chrome 155 headless, against a QA stack of the `attach-qa` images with this
+  tree's site, shell and gateway files and a client built from it mounted: no
+  installability errors (two on the same images before). With engagement
+  checks bypassed, a real `beforeinstallprompt` arrived during the download;
+  the label showed over the loading screen, then the main menu on the ENTER
+  Select baseline; it left with real clicks into Start New Server and Options,
+  where ESC Back stands in its place, and came back with Escape; the game's
+  cursor over it lit it gold; a real click prompted once, hid it and left the
+  menu as it was.
+- Behind a test login proxy that requires a cookie on every request: without
+  `crossorigin="use-credentials"` Chrome fetched the manifest without the
+  cookie (401) and reported `manifest-parsing-or-network-error`; with it, the
+  manifest and icons returned 200 and no errors remained.
+- `app-icons.test.mjs` (in the gateway's 24 tests): the largest 32-bit ICO
+  image, PNG rows of every filter, checksums, sizes, transparent or opaque
+  corners by purpose, nothing outside the maskable circle, no square behind
+  the star, deterministic output, HEAD, 405, unknown names, and icons drawn
+  once artwork appears after startup.
+- `test-install-app.cjs`: the offer's lifecycle, the cursor and click capture,
+  installed windows, and the manifest, gateway names, Safari's icon and the
+  label's geometry against `ui_wwii_menu.c`. `test-input-capture.cjs` covers the
+  adapter's moment and `test-web-shell.cjs` the head. 15 mutants fail.
+- `test-wwii-main-menu.py` runs `UI_WWIIMenu_RightPromptFree()` in the
+  production menu against a page, the settings, a match, a hidden or closed
+  `main_text` and the layout switched off (43 cases; 4 more mutants fail, 105);
+  `test-client-update-menu.py` checks the export's guards for every connection
+  state and that it is exported.
+- `test-static.sh`'s site listing lacked `fonts`, which the build has shipped
+  since the loading screen took Barlow, so it failed; it now lists `fonts` and
+  `install-app.js`.
+- Not verified: accepting the install dialog in a visible window, Edge, Safari,
+  and the Pi's own login overlay.
+
 ## Other players run smoothly online — 2026-10-20
 
 The owner saw other people run in small, regular cuts in online matches; bots

@@ -26,11 +26,14 @@ code = r'''
 #define EM_ASM(...) (++reloads)
 static struct {int uiStarted;} cls;
 static struct {int state;} clientConnections[1];
-static int notice, writes, reloads;
+static int notice, writes, reloads, menuFree;
 static void Dvar_SetBoolByName(const char *name,int value){assert(!strcmp(name,"ui_clientUpdateAvailable"));notice=value;writes++;}
 static int Dvar_GetBool(const char *name){assert(!strcmp(name,"ui_clientUpdateAvailable"));return notice;}
-''' + ''.join(function(n) for n in ['web_client_connected', 'web_client_update_available', 'Web_ReloadClient']) + r'''
+static int UI_WWIIMenu_RightPromptFree(void){return menuFree;}
+''' + ''.join(function(n) for n in ['web_client_connected', 'web_client_update_available', 'Web_ReloadClient',
+                                    'web_right_prompt_free']) + r'''
 int main(void){
+ menuFree=1;assert(!web_right_prompt_free());
  web_client_update_available(1);assert(!writes);Web_ReloadClient();assert(!reloads);
  cls.uiStarted=1;
  for(int state=0;state<=10;state++)for(int available=0;available<=1;available++){
@@ -40,6 +43,10 @@ int main(void){
   // A connection can start after the button was painted.
   notice=1;clientConnections[0].state=CA_CONNECTING;before=reloads;
   Web_ReloadClient();assert(reloads==before);
+  // The install offer's place: the main menu's own answer, never while connecting or connected.
+  for(menuFree=0;menuFree<=1;menuFree++){
+   clientConnections[0].state=state;assert(web_right_prompt_free()==(menuFree&&state<CA_CONNECTING));
+  }
  }
  return 0;
 }
@@ -57,4 +64,6 @@ assert b'uiScript ReloadClient;' in patched
 assert b'text "New client version available"' in patched
 assert apply_settings_menu('ui_mp/joinserver.menu', menu) == menu
 assert 'Web_ReloadClient();' in (root / 'src/PC/ui_mp/ui_main_mp.c').read_text()
-print('PASS: native client update/reload guards, stale connected clicks, native main-menu message/action and unrelated menus')
+assert '_web_right_prompt_free' in (root / 'downstream/wasm/CMakeLists.txt').read_text()
+print('PASS: native client update/reload guards, stale connected clicks, native main-menu message/action and unrelated '
+      'menus, and the install offer\'s place only in the main menu while disconnected')

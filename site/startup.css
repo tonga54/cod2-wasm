@@ -137,3 +137,48 @@ html, body { background: #000 !important; }
 .wasm-game-framework #loading.cod2-startup #loading-console {
   text-align: left;
 }
+
+/* The browser's install offer (install-app.js), as the WWII menu's right key
+ * prompt (ui_wwii_menu.c): a label with capitals 6.0 units tall on a baseline
+ * 49.8 above the bottom, its pen ending 48.4 left of the right edge, in the
+ * 16:9 view 480 units tall. Barlow's capitals are 0.7 of its size and, a line
+ * tall, its baseline 0.1 above the line's foot. */
+#cod2-install-app {
+  --cod2-unit: calc(min(100vh, 56.25vw) / 480);
+  position: fixed;
+  z-index: 60;
+  right: calc((100vw - min(100vw, 177.7778vh)) / 2 + 45.4 * var(--cod2-unit));
+  bottom: calc((100vh - min(100vh, 56.25vw)) / 2 + 45.9429 * var(--cod2-unit));
+  display: flex;
+  align-items: center;
+  gap: calc(3.1 * var(--cod2-unit));
+  padding: calc(3 * var(--cod2-unit));
+  color: #cfcfcf;
+  font-family: Barlow, 'Helvetica Neue', Arial, sans-serif;
+  font-size: calc(8.5714 * var(--cod2-unit));
+  font-weight: 400;
+  line-height: 1;
+  white-space: nowrap;
+  text-shadow: 0 0 calc(2 * var(--cod2-unit)) rgb(0 0 0 / 70%);
+  pointer-events: none;
+  user-select: none;
+  transition: color 100ms ease-out;
+}
+
+#cod2-install-app[hidden] {
+  display: none;
+}
+
+#cod2-install-app[data-hover] {
+  color: #ccb878;
+}
+
+#cod2-install-app svg {
+  width: 1.1em;
+  height: 1.1em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}

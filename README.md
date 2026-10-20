@@ -216,6 +216,16 @@ Classes are stored by the gateway in SQLite under the gametag. **Gametags are
 not authenticated accounts**: anyone using the same name shares its classes.
 Room ownership is tied to a private token saved in the creator's browser.
 
+### Install as an app
+
+Chrome and Edge can install the game as an app: its own window, and an icon in
+the Start menu, on the desktop or in Launchpad and the Dock. Choose **Install app**
+in the lower-right corner of the main menu or the loading screen, or the install
+button in the address bar. On a Mac, Safari offers **File → Add to Dock**; on an
+iPhone or iPad, **Share → Add to Home Screen**. The app opens the host it was
+installed from and keeps the files already downloaded. Browsers only install
+from an HTTPS address or `localhost`, not from `http://HOST_LAN_IP:8088`.
+
 ### Keyboard and mouse
 
 | Action | Default |

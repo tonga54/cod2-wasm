@@ -716,6 +716,31 @@ int main(void) {
         uiDc.menuStack[1] = &mainText;
         cases++;
     }
+    /* The browser's install offer takes the right key-prompt place only where
+     * nothing else does: the main menu itself, outside a match. */
+    {
+        menuDef_t page = { .window.name = "joinserver" };
+
+        assert(UI_WWIIMenu_RightPromptFree());
+        uiDc.menuStack[2] = &page;
+        uiDc.openMenuCount = 3;
+        assert(!UI_WWIIMenu_RightPromptFree());
+        uiDc.openMenuCount = 2;
+        settingsCover = 1;
+        assert(!UI_WWIIMenu_RightPromptFree());
+        settingsCover = 0;
+        inGame = 1;
+        assert(!UI_WWIIMenu_RightPromptFree());
+        inGame = 0;
+        mainText.window.dynamicFlags[0] = 0;
+        assert(!UI_WWIIMenu_RightPromptFree());
+        mainText.window.dynamicFlags[0] = 4;
+        uiDc.openMenuCount = 1;
+        assert(!UI_WWIIMenu_RightPromptFree());
+        uiDc.openMenuCount = 2;
+        assert(UI_WWIIMenu_RightPromptFree());
+        cases++;
+    }
     /* An image that cannot be made gray is left to the retail code, and not
      * read again until the background changes. */
     grayFails = 1;
@@ -729,6 +754,7 @@ int main(void) {
     UI_WWIIMenu_Update(&uiDc);
     for (int i = 0; i < bg.itemCount; i++)
         assert(!UI_WWIIMenu_PaintItem(&uiDc, bgList[i]));
+    assert(!UI_WWIIMenu_RightPromptFree());
     wwiiDvar.current.enabled = 1;
     UI_WWIIMenu_Update(&uiDc);
     cases++;
@@ -1008,6 +1034,10 @@ mutants = [
       '    return 1;\n}')],
     [('!I_stricmp(menu->window.name, "create_a_class")', '0')],
     [('!I_stricmp(menu->window.name, "createserver")', '0')],
+    [('    return s_wwiiMenu.applied && dc && UI_WWIIMenu_MainOpen(dc)', '    return dc && UI_WWIIMenu_MainOpen(dc)')],
+    [('UI_WWIIMenu_MainOpen(dc) && !UI_WWIIMenu_PageOpen(dc) &&', 'UI_WWIIMenu_MainOpen(dc) &&')],
+    [('           !UI_WWIISettings_Covers(dc) && !Dvar_GetBool("cl_ingame");', '           !Dvar_GetBool("cl_ingame");')],
+    [('!UI_WWIISettings_Covers(dc) && !Dvar_GetBool("cl_ingame");', '!UI_WWIISettings_Covers(dc);')],
     [('    if (!s_wwiiMenu.backdrop)\n        return 0;', '    if (!s_wwiiMenu.backdrop)\n        return 1;')],
     [('    if (source != s_wwiiMenu.backdropSource) {', '    if (1) {')],
     [('aspect = rect->w > 0.0f && rect->h > 0.0f ? rect->w / rect->h : s_wwiiMenu.backdropAspect;',

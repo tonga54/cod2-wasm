@@ -523,6 +523,24 @@ Private files are mounted read-only. Set `COD2_WEB_PORT`
 to change the public port or `COD2_WEB_DATA_DIR` to use another private-data
 location.
 
+The page is an installable web app. Chrome installs one only with a PNG icon of
+at least 144 px, and the executable's icon is 48 px, so the gateway draws the
+install icons (`downstream/gateway/app-icons.mjs`) once at startup from the two
+private originals it already serves, `cod2.ico` and the decoded `logo_cod2`: the
+star over the lettering, on the loading screen's gradient. It serves them at
+`/game-data/files/cod2-icon/app-192.png`, `app-512.png`,
+`app-maskable-512.png` and `apple-touch-icon.png`; nothing derived from the
+originals is committed or built into an image. The manifest lists them with the
+original ICO at its real 16, 32 and 48 px sizes. `site/install-app.js` keeps
+Chromium's install offer and shows **Install app** in the WWII menu's right
+key-prompt place over the loading screen, then while the engine reports that
+place free (`web_right_prompt_free`): the main menu itself, outside a match.
+Every other WWII screen puts its Back there, and an installed window never
+shows the label. The label takes no pointer events: the game keeps its own
+cursor, and a click over the label opens the browser's install dialog without
+reaching the menu. The manifest link sends credentials, so a host behind a login
+(such as the Pi's Nginx overlay) remains installable.
+
 The current six-map package is approximately **473.4 MB** (451.5 MiB) in
 the checked-in manifest, including renderer and audio archives. Optional owner
 sounds and class pictures affect the prepared package size; use

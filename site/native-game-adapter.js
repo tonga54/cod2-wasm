@@ -857,10 +857,17 @@
     script.onerror = () => context.log('[updates] Unable to load the update notice.');
     document.head.appendChild(script);
   }
+  function startInstallOffer(context) {
+    // install-app.js shows the browser's install offer over the loading
+    // screen, then in the main menu's free right key-prompt place.
+    globalThis.cod2InstallMoment = () => !failed && (native?._web_client_state() >= 1 ?
+      native._web_right_prompt_free?.() === 1 : !context.elements.loading.hidden);
+  }
   globalThis.WasmGameAdapter = Object.freeze({
     async init(context) {
       startFullscreenControl(context);
       startUpdateNotifier(context);
+      startInstallOffer(context);
       // Keep right-click available to the game, including before pointer lock.
       context.elements.canvas.addEventListener('contextmenu', event => event.preventDefault());
       // Window capture runs before the framework's document key guard. A

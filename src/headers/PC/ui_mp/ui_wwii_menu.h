@@ -21,6 +21,10 @@ int UI_WWIIMenu_PaintItem(displayContextDef_t *dc, itemDef_t *item);
 int UI_WWIIMenu_PaintText(displayContextDef_t *dc, itemDef_t *item, const char *text);
 /* After a menu's items: the layout's logo, version and key prompts. */
 void UI_WWIIMenu_PaintMenu(displayContextDef_t *dc, menuDef_t *menu);
+/* 1 while the laid-out main menu shows with its right key-prompt place empty:
+ * outside a match, with no page or settings over it. Every other WWII screen
+ * puts its Back there. */
+int UI_WWIIMenu_RightPromptFree(void);
 /* 1 when the gold cursor has been drawn at the UI's cursor, in the 640 by
  * 480 units the whole screen stretches over. */
 int UI_WWIIMenu_DrawCursor(int x, int y);
