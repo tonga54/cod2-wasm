@@ -40,6 +40,11 @@ the menus already use, or with [pictures the owner keeps](#pictures).
 - Names are 1 to 20 printable ASCII characters without `"`, `\`, `;`, `%` or
   `^`. Leading spaces cannot be typed, trailing spaces are removed.
 - Escape or the right mouse button goes back one screen.
+- The screens use the retail menus' two sounds: `mouse_over` as the arrows, the
+  controller or the pointer move the focus to another element, and
+  `mouse_click` for what acts: choosing, opening a screen, equipping, removing,
+  going back and renaming. Typing a name and keys that change nothing are
+  silent.
 - **Joining a match** opens **Select Class** before anything else, in place of
   the server information and the team choice. Choosing a class puts the player
   on the team the mode's own auto-assign picks (the smaller team, or on a tie

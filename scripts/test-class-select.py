@@ -285,6 +285,10 @@ const char *UI_SafeTranslateString(const char *reference) {
 }
 float g_webMenuBackdrop;
 void UI_PauseMenu_Return(displayContextDef_t *dc) { (void)dc; }
+int UI_PlayLocalSoundAliasByName(const char *name) {
+    assert(!strcmp(name, "mouse_over") || !strcmp(name, "mouse_click"));
+    return 1;
+}
 '''
 
 checks = r'''

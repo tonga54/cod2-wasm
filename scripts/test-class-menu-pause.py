@@ -111,6 +111,10 @@ void UI_WWIIMenu_Prompts(const char *const *keys, const char *const *labels, int
 void UI_WWIIMenu_PaintWash(void) {}
 float g_webMenuBackdrop;
 void UI_PauseMenu_Return(displayContextDef_t *d) { (void)d; returns++; Menus_OpenByName(d, "ingame"); }
+int UI_PlayLocalSoundAliasByName(const char *name) {
+    assert(!strcmp(name, "mouse_over") || !strcmp(name, "mouse_click"));
+    return 1;
+}
 '''
 
 checks = r'''

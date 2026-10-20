@@ -28,6 +28,7 @@ extern char *va(const char *format, ...);
 extern void Menus_CloseByName(displayContextDef_t *dc, const char *name);
 extern qboolean Menus_OpenByName(displayContextDef_t *dc, const char *name);
 extern int I_stricmp(const char *s0, const char *s1);
+extern int UI_PlayLocalSoundAliasByName(const char *name);
 extern float g_webMenuBackdrop;
 #ifdef __EMSCRIPTEN__
 extern void Web_ClassesLoad(const char *player, int generation);
@@ -1255,21 +1256,42 @@ static void Cac_FocusHover(void)
     }
 }
 
+/* What the menu has in focus: its screen and the element each screen
+ * focuses. */
+typedef struct {
+    int screen, tab, classFocus, slotFocus, pickSlot, pickFocus, attachFocus, camoFocus;
+} CacFocus;
+
+static CacFocus Cac_Focus(void)
+{
+    CacFocus focus = { s_cac.screen,   s_cac.tab,       s_cac.classFocus,  s_cac.slotFocus,
+                       s_cac.pickSlot, s_cac.pickFocus, s_cac.attachFocus, s_cac.camoFocus };
+
+    return focus;
+}
+
+static int Cac_FocusMoved(const CacFocus *before)
+{
+    CacFocus now = Cac_Focus();
+
+    return memcmp(before, &now, sizeof(now)) != 0;
+}
+
+static int Cac_NavigationKey(int key)
+{
+    return key == CAC_KEY_UP || key == CAC_KEY_DOWN || key == CAC_KEY_LEFT || key == CAC_KEY_RIGHT ||
+           key == CAC_KEY_WHEEL_UP || key == CAC_KEY_WHEEL_DOWN || key == CAC_KEY_TAB;
+}
+
 int UI_ClassMenu_WantsKeys(const menuDef_t *menu)
 {
     return Cac_MenuKind(menu) != 0;
 }
 
-int UI_ClassMenu_KeyEvent(displayContextDef_t *dc, menuDef_t *menu, int key, int down)
+static void Cac_Key(displayContextDef_t *dc, int key)
 {
-    int kind = Cac_MenuKind(menu), screen;
+    int screen;
 
-    if (!kind)
-        return 0;
-    if (!s_cac.open)
-        UI_ClassMenu_Open(dc, kind == 2);
-    if (!down)
-        return 1;
     if (s_cac.renaming) {
         if (key == CAC_KEY_ENTER || key == CAC_KEY_KP_ENTER)
             Cac_FinishRename(1);
@@ -1277,7 +1299,7 @@ int UI_ClassMenu_KeyEvent(displayContextDef_t *dc, menuDef_t *menu, int key, int
             Cac_FinishRename(0);
         else
             ClassData_EditName(s_cac.rename, key);
-        return 1;
+        return;
     }
     if (key & CAC_KEY_CHAR) {
         /* As the retail weapon menus' number keys: choose a class at once. */
@@ -1287,7 +1309,7 @@ int UI_ClassMenu_KeyEvent(displayContextDef_t *dc, menuDef_t *menu, int key, int
             s_cac.classFocus = number;
             Cac_Choose(dc);
         }
-        return 1;
+        return;
     }
     screen = s_cac.screen;
     switch (key) {
@@ -1344,6 +1366,29 @@ int UI_ClassMenu_KeyEvent(displayContextDef_t *dc, menuDef_t *menu, int key, int
     /* The last frame's hover belongs to the screen it painted. */
     if (s_cac.screen != screen)
         s_cac.hover = -1;
+}
+
+int UI_ClassMenu_KeyEvent(displayContextDef_t *dc, menuDef_t *menu, int key, int down)
+{
+    int kind = Cac_MenuKind(menu), renaming;
+    CacFocus focus;
+
+    if (!kind)
+        return 0;
+    if (!s_cac.open)
+        UI_ClassMenu_Open(dc, kind == 2);
+    if (!down)
+        return 1;
+    focus = Cac_Focus();
+    renaming = s_cac.renaming;
+    Cac_Key(dc, key);
+    /* The retail menus' two sounds: a click for what acts (choosing, opening,
+     * going back, removing, renaming) and mouse_over as keys move the focus.
+     * Typing a name, or a key that changes nothing, is silent. */
+    if (!s_cac.open || s_cac.screen != focus.screen || s_cac.renaming != renaming)
+        UI_PlayLocalSoundAliasByName("mouse_click");
+    else if (Cac_FocusMoved(&focus))
+        UI_PlayLocalSoundAliasByName(Cac_NavigationKey(key) ? "mouse_over" : "mouse_click");
     return 1;
 }
 
@@ -2149,10 +2194,15 @@ void UI_ClassMenu_Paint(displayContextDef_t *dc, menuDef_t *menu)
     s_cac.cursorY = dc->cursory;
     s_cac.hover = -1;
     Cac_PaintScreen(dc);
-    /* Pointer motion moves the focus to what it is over now; keys move it
-     * otherwise. */
-    if (moved && !s_cac.renaming)
+    /* Pointer motion moves the focus to what it is over now, with the retail
+     * menus' mouse_over as it enters another element; keys move it otherwise. */
+    if (moved && !s_cac.renaming) {
+        CacFocus focus = Cac_Focus();
+
         Cac_FocusHover();
+        if (Cac_FocusMoved(&focus))
+            UI_PlayLocalSoundAliasByName("mouse_over");
+    }
 }
 
 const ClassLoadout *UI_ClassMenu_Classes(int standard)

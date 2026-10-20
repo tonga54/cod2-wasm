@@ -175,6 +175,14 @@ const char *UI_SafeTranslateString(const char *reference) {
 }
 float g_webMenuBackdrop;
 void UI_PauseMenu_Return(displayContextDef_t *dc) { (void)dc; }
+static int sounds;
+static const char *lastSound = "";
+int UI_PlayLocalSoundAliasByName(const char *name) {
+    assert(!strcmp(name, "mouse_over") || !strcmp(name, "mouse_click"));
+    sounds++;
+    lastSound = name;
+    return 1;
+}
 /* The browser's host: the loads asked for and the lines saved. */
 static int loads, saves;
 static char saved[1024];
@@ -528,12 +536,52 @@ int main(void) {
     }
     cases++;
 
+    /* The retail menus' two sounds: mouse_over as keys or the pointer move
+     * the focus, mouse_click for what acts. A key that changes nothing,
+     * typing a name and a pointer still on its element are silent. */
+    UI_ClassMenu_Open(&dc, 0);
+    s_cac.classFocus = 0;
+    sounds = 0;
+    assert(key(&createMenu, 0x9b) && s_cac.classFocus == 1 && sounds == 1 && !strcmp(lastSound, "mouse_over"));
+    assert(key(&createMenu, 0x0d) && s_cac.screen == CAC_SCREEN_EDIT && sounds == 2 && !strcmp(lastSound, "mouse_click"));
+    s_cac.slotFocus = CLASS_SLOT_PRIMARY;
+    assert(key(&createMenu, 0x9d) && s_cac.slotFocus == CLASS_SLOT_LETHAL && sounds == 3 &&
+           !strcmp(lastSound, "mouse_over"));
+    assert(key(&createMenu, 0xa8) && s_cac.screen == CAC_SCREEN_EDIT && sounds == 3);
+    assert(key(&createMenu, 0xa7) && s_cac.renaming && sounds == 4 && !strcmp(lastSound, "mouse_click"));
+    assert(key(&createMenu, 0x400 | 'Z') && key(&createMenu, 0x400 | 'q') && sounds == 4);
+    assert(key(&createMenu, 0x1b) && !s_cac.renaming && sounds == 5 && !strcmp(lastSound, "mouse_click"));
+    {
+        const CacRect *primary = &Cac_EditTiles()[CLASS_SLOT_PRIMARY];
+
+        point(primary->x + 0.5f * primary->w, primary->y + 0.5f * primary->h);
+        paint(&createMenu);
+        assert(s_cac.slotFocus == CLASS_SLOT_PRIMARY && sounds == 6 && !strcmp(lastSound, "mouse_over"));
+        point(primary->x + 0.5f * primary->w + 6.0f, primary->y + 0.5f * primary->h + 4.0f);
+        paint(&createMenu);
+        paint(&createMenu);
+        assert(sounds == 6);
+    }
+    assert(key(&createMenu, 0x1b) && s_cac.screen == CAC_SCREEN_LIST && sounds == 7 && !strcmp(lastSound, "mouse_click"));
+    assert(key(&createMenu, 0x1b) && !s_cac.open && sounds == 8 && !strcmp(lastSound, "mouse_click"));
+    cases++;
+
     printf("%d\n", cases);
     return 0;
 }
 '''
 
 mutants = [
+    # A click for every move, no sound for renaming, a sound for keys that
+    # change nothing, a hover sound on every pointer motion or never.
+    ('        UI_PlayLocalSoundAliasByName(Cac_NavigationKey(key) ? "mouse_over" : "mouse_click");',
+     '        UI_PlayLocalSoundAliasByName("mouse_click");'),
+    ('    if (!s_cac.open || s_cac.screen != focus.screen || s_cac.renaming != renaming)\n',
+     '    if (!s_cac.open || s_cac.screen != focus.screen)\n'),
+    ('    return memcmp(before, &now, sizeof(now)) != 0;', '    return 1;'),
+    ('        if (Cac_FocusMoved(&focus))\n            UI_PlayLocalSoundAliasByName("mouse_over");\n',
+     '        UI_PlayLocalSoundAliasByName("mouse_over");\n'),
+    ('        if (Cac_FocusMoved(&focus))\n            UI_PlayLocalSoundAliasByName("mouse_over");\n', ''),
     ('    case CAC_KEY_BUTTON_Y:\n', ''),
     ('        if (s_cac.screen == CAC_SCREEN_EDIT && s_cac.slotFocus <= CLASS_SLOT_SECONDARY)\n'
      '            Cac_OpenCamo(s_cac.slotFocus);',
@@ -619,5 +667,6 @@ print(f'PASS: Create a Class paints each gun\'s camouflage under its tile and in
       f'focused one\'s note and the gun, or the owner\'s picture of it, painted in it; keys and clicks move and equip, '
       f'saving only a change; grenades '
       f'take none; Select Class shows the player\'s guns painted and Standard Issue as issued, and a match receives '
-      f'the class with its camouflage, an unpainted one as five fields; {cases} cases, '
+      f'the class with its camouflage, an unpainted one as five fields; the retail mouse_over as keys or the pointer '
+      f'move the focus and mouse_click for what acts, typing and still keys silent; {cases} cases, '
       f'{len(mutants)} failing mutants')

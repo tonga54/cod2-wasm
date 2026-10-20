@@ -4431,3 +4431,28 @@ client builds. A recording pad in the QA stack: a 1.2 s Thompson burst sent 27
 commands, each round's kick (0.5, 0.58) back to the floor (0.4, 0.3), at most
 67 ms apart, and one `reset()` after the trigger was let go; each Colt shot
 held the strong motor at 0.92 to 0.7 for about 100 ms and reset after 230 ms.
+
+## Menu sounds in Create a Class — 2026-10-20
+
+The owner noticed that choosing a weapon, an attachment and the rest made
+none of the menus' sounds. Create a Class and Select Class are drawn and
+driven by `ui_class_menu.c`, which never played them; the pause and match
+menus do (`mouse_over` and `mouse_click`, the only menu sounds the game ships,
+used 318 and 305 times by the retail menus).
+
+`UI_ClassMenu_KeyEvent` now compares the screen and every focus before and
+after each key (`CacFocus`): opening, choosing, equipping, removing, going
+back, renaming and closing play `mouse_click`; the arrows, the wheel, Tab and
+the controller's directions moving the focus play `mouse_over`. A key that
+changes nothing and typing a name are silent. `UI_ClassMenu_Paint` plays
+`mouse_over` when pointer motion moves the focus to another element, as the
+retail items' `mouseEnter`, so a screen opening under a still pointer is
+silent.
+
+Validation: `test-class-camo.py` checks each case against the production menu
+(5 more mutants); `test-class-select.py` and `test-class-menu-pause.py` pass
+with the sound stub; the web client builds. In the browser, with the client's
+audio hooked: a class row, Enter into Modify, a move to the Lethal slot,
+Enter into its picker, the next grenade and two Escapes played once each;
+F2 on a grenade and pointer motion within a row played nothing; pointer
+motion across three rows played three.
