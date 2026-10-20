@@ -162,6 +162,7 @@ static const dvar_t *cl_gamepadLookSensitivity;
 static const dvar_t *cl_gamepadDeadzone;
 static const dvar_t *cl_gamepadInvertY;
 static const dvar_t *cl_gamepadRumble;
+static const dvar_t *cl_gamepadAimAssist;
 
 static int g_buttonLayoutSouthpaw;
 
@@ -344,6 +345,7 @@ void CL_Gamepad_Init(void)
     cl_gamepadDeadzone = Dvar_RegisterFloat("cl_gamepadDeadzone", 0.20f, 0.0f, 0.9f, 0x1);
     cl_gamepadInvertY = Dvar_RegisterBool_mac("cl_gamepadInvertY", 0, 0x1);
     cl_gamepadRumble = Dvar_RegisterBool_mac("cl_gamepadRumble", 1, 0x1);
+    cl_gamepadAimAssist = Dvar_RegisterBool_mac("cl_gamepadAimAssist", 1, 0x1);
 
     if (SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) != 0) {
         Com_Printf("Gamepad: SDL_INIT_GAMECONTROLLER failed: %s\n", SDL_GetError());
@@ -640,6 +642,21 @@ static float Gamepad_LookDelta(float axis, float seconds, float sensitivity, flo
     return delta;
 }
 
+/* The cgame's aim assist (cg_aimassist_mp.c), given every frame: the share of
+ * the right stick's turn to keep and the degrees a second to follow. Its last
+ * word lapses after 100 ms, as when the cgame stops drawing. */
+#    define GAMEPAD_AIM_ASSIST_MSEC 100
+static float g_aimAssistSlowdown = 1.0f, g_aimAssistYawRate, g_aimAssistPitchRate;
+static int g_aimAssistTime;
+
+void CL_Gamepad_SetAimAssist(float slowdown, float yawRate, float pitchRate)
+{
+    g_aimAssistSlowdown = slowdown >= 0.0f && slowdown <= 1.0f ? slowdown : 1.0f;
+    g_aimAssistYawRate = isfinite(yawRate) ? yawRate : 0.0f;
+    g_aimAssistPitchRate = isfinite(pitchRate) ? pitchRate : 0.0f;
+    g_aimAssistTime = cls.realtime;
+}
+
 void CL_Gamepad_Move(usercmd_t *cmd)
 {
     SDL_GameController *gc;
@@ -647,6 +664,7 @@ void CL_Gamepad_Move(usercmd_t *cmd)
     int side, forward;
     clientActive_t *cl;
     float seconds, lookX, lookY, sensitivity;
+    float slowdown = 1.0f, yawRate = 0.0f, pitchRate = 0.0f;
 
     if (!g_gamepadInit || !cl_gamepadEnable->current.enabled)
         return;
@@ -666,12 +684,24 @@ void CL_Gamepad_Move(usercmd_t *cmd)
     if (seconds < 0.0f) seconds = 0.0f;
     lookX = Gamepad_VirtualAxis(gc, VIRT_LOOK_X);
     lookY = Gamepad_VirtualAxis(gc, VIRT_LOOK_Y);
-    sensitivity = isfinite(cl->cgameSensitivity) ? cl->cgameSensitivity : 1.0f;
-    cl->viewangles[1] -= Gamepad_LookDelta(lookX, seconds, sensitivity, cl->cgameMaxYawSpeed);
-    cl->viewangles[0] += Gamepad_LookDelta(lookY, seconds, sensitivity, cl->cgameMaxPitchSpeed) *
-                         (cl_gamepadInvertY->current.enabled ? -1.0f : 1.0f);
     mx = Gamepad_VirtualAxis(gc, VIRT_MOVE_X);
     my = Gamepad_VirtualAxis(gc, VIRT_MOVE_Y);
+    /* For stick aiming alone: the right stick slows over an enemy, and the view
+     * follows a little of their motion only while a stick moves. */
+    if (cl_gamepadAimAssist->current.enabled && CL_Gamepad_IsActiveDevice() &&
+        (unsigned int)(cls.realtime - g_aimAssistTime) <= GAMEPAD_AIM_ASSIST_MSEC) {
+        slowdown = g_aimAssistSlowdown;
+        if (lookX != 0.0f || lookY != 0.0f || mx != 0.0f || my != 0.0f) {
+            yawRate = g_aimAssistYawRate;
+            pitchRate = g_aimAssistPitchRate;
+        }
+    }
+    sensitivity = isfinite(cl->cgameSensitivity) ? cl->cgameSensitivity : 1.0f;
+    cl->viewangles[1] -= Gamepad_LookDelta(lookX, seconds, sensitivity, cl->cgameMaxYawSpeed) * slowdown;
+    cl->viewangles[0] += Gamepad_LookDelta(lookY, seconds, sensitivity, cl->cgameMaxPitchSpeed) * slowdown *
+                         (cl_gamepadInvertY->current.enabled ? -1.0f : 1.0f);
+    cl->viewangles[1] += yawRate * seconds;
+    cl->viewangles[0] += pitchRate * seconds;
 
     side = (int)cmd->rightmove + (int)(mx * 127.0f);
     forward = (int)cmd->forwardmove - (int)(my * 127.0f);

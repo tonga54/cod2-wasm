@@ -27,6 +27,7 @@ static void UI_Gamepad_Defaults_f(void)
     Cbuf_AddText("seta cl_gamepadDeadzone 0.2\n");
     Cbuf_AddText("seta cl_gamepadInvertY 0\n");
     Cbuf_AddText("seta cl_gamepadRumble 1\n");
+    Cbuf_AddText("seta cl_gamepadAimAssist 1\n");
     Cbuf_AddText("seta cl_gamepadButtonConfig default\n");
     {
         extern void CL_Gamepad_DefaultBindings(void);

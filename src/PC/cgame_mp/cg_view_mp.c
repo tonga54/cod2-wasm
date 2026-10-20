@@ -4,6 +4,7 @@
 #include "headers/PC/bgame/bg_attachments.h"
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_wwiiscope.h"
+#include "headers/PC/cgame_mp/cg_aimassist.h"
 #include <math.h>
 
 #ifdef __EMSCRIPTEN__
@@ -1039,6 +1040,9 @@ qboolean CG_DrawActiveFrame(int serverTime, DemoType demoType,
         extern void CG_UpdateRumble(void);
         CG_UpdateRumble();
     }
+#endif
+#if COD2_FEATURE_GAMEPAD
+    CG_AimAssistFrame();
 #endif
 
     *(void **)imp_bgs = 0;

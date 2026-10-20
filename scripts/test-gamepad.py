@@ -298,6 +298,83 @@ for old, new in rumble_mutants:
     assert not passes(rumble_prefix + source.replace(old, new) + rumble_main), old
 print(f'PASS: {len(rumble_mutants)} vibration gating mutants fail')
 
+# The cgame's aim assist reaches stick aiming alone: the right stick keeps the
+# share of its turn the cgame hands over, and the view follows the cgame's
+# rate only while a stick moves, never inverted; a lapsed word, the switch off,
+# the keyboard and invalid values leave the sticks alone.
+assist_main = r'''
+static void press(void){
+ pad.buttons[SDL_CONTROLLER_BUTTON_A]=1;CL_Gamepad_Frame();pad.buttons[SDL_CONTROLLER_BUTTON_A]=0;CL_Gamepad_Frame();
+}
+/* One command's turn from level, the right stick at (x, y), the left at (mx, my). */
+static void turn(int x,int y,int mx,int my,float *yaw,float *pitch){
+ usercmd_t cmd={0};
+ pad.axes[2]=x;pad.axes[3]=y;pad.axes[0]=mx;pad.axes[1]=my;
+ client.viewangles[0]=client.viewangles[1]=0;CL_Gamepad_Move(&cmd);
+ *yaw=client.viewangles[1];*pitch=client.viewangles[0];
+ pad.axes[0]=pad.axes[1]=pad.axes[2]=pad.axes[3]=0;
+}
+static int same(float a,float b){return fabsf(a-b)<1e-5f;}
+int main(void){
+ float yaw0,pitch0,yawX,pitchX,yaw,pitch;
+ client.cgameSensitivity=1;CL_Gamepad_Init();cls.frametime=10;cls.realtime=1000;
+ assert(var("cl_gamepadAimAssist")->current.enabled);
+ press();
+ turn(16384,16384,0,0,&yaw0,&pitch0);assert(yaw0<0&&pitch0>0);
+ turn(16384,0,0,0,&yawX,&pitchX);assert(yawX<0&&pitchX==0);
+ CL_Gamepad_SetAimAssist(.75f,0,0);
+ turn(16384,16384,0,0,&yaw,&pitch);assert(same(yaw,yaw0*.75f)&&same(pitch,pitch0*.75f));
+ CL_Gamepad_SetAimAssist(1,3,-1.5f);
+ turn(0,0,0,0,&yaw,&pitch);assert(yaw==0&&pitch==0);
+ turn(0,0,0,-32767,&yaw,&pitch);assert(same(yaw,.03f)&&same(pitch,-.015f));
+ turn(0,0,32767,0,&yaw,&pitch);assert(same(yaw,.03f)&&same(pitch,-.015f));
+ var("cl_gamepadInvertY")->current.enabled=1;
+ turn(16384,0,0,0,&yaw,&pitch);assert(same(yaw,yawX+.03f)&&same(pitch,-.015f));
+ var("cl_gamepadInvertY")->current.enabled=0;
+ CL_Gamepad_SetAimAssist(.75f,3,3);cls.realtime+=100;
+ turn(16384,16384,0,0,&yaw,&pitch);assert(same(yaw,yaw0*.75f+.03f));
+ cls.realtime+=1;
+ turn(16384,16384,0,0,&yaw,&pitch);assert(same(yaw,yaw0)&&same(pitch,pitch0));
+ CL_Gamepad_SetAimAssist(.75f,3,3);var("cl_gamepadAimAssist")->current.enabled=0;
+ turn(16384,16384,0,0,&yaw,&pitch);assert(same(yaw,yaw0)&&same(pitch,pitch0));
+ var("cl_gamepadAimAssist")->current.enabled=1;
+ CL_Gamepad_NoteKbmActive();
+ turn(16384,16384,0,0,&yaw,&pitch);assert(same(yaw,yaw0)&&same(pitch,pitch0));
+ press();
+ CL_Gamepad_SetAimAssist(NAN,NAN,INFINITY);
+ turn(16384,16384,0,0,&yaw,&pitch);assert(same(yaw,yaw0)&&same(pitch,pitch0));
+ CL_Gamepad_SetAimAssist(1.5f,0,0);
+ turn(16384,16384,0,0,&yaw,&pitch);assert(same(yaw,yaw0)&&same(pitch,pitch0));
+ CL_Gamepad_SetAimAssist(-.5f,0,0);
+ turn(16384,16384,0,0,&yaw,&pitch);assert(same(yaw,yaw0)&&same(pitch,pitch0));
+ CL_Gamepad_Shutdown();return 0;
+}
+'''
+run(prefix + source + assist_main, 'aim assist slows only the right stick and follows only while a stick moves, '
+    'never inverted; a lapsed word, the switch off, the keyboard and invalid values leave the sticks alone')
+assist_mutants = [
+    ('        slowdown = g_aimAssistSlowdown;\n', ''),
+    ('        if (lookX != 0.0f || lookY != 0.0f || mx != 0.0f || my != 0.0f) {', '        if (1) {'),
+    ('        if (lookX != 0.0f || lookY != 0.0f || mx != 0.0f || my != 0.0f) {',
+     '        if (lookX != 0.0f || lookY != 0.0f) {'),
+    ('cl->cgameMaxPitchSpeed) * slowdown *', 'cl->cgameMaxPitchSpeed) *'),
+    ('(unsigned int)(cls.realtime - g_aimAssistTime) <= GAMEPAD_AIM_ASSIST_MSEC', '1'),
+    ('    if (cl_gamepadAimAssist->current.enabled && CL_Gamepad_IsActiveDevice() &&',
+     '    if (CL_Gamepad_IsActiveDevice() &&'),
+    ('    if (cl_gamepadAimAssist->current.enabled && CL_Gamepad_IsActiveDevice() &&',
+     '    if (cl_gamepadAimAssist->current.enabled &&'),
+    ('    g_aimAssistSlowdown = slowdown >= 0.0f && slowdown <= 1.0f ? slowdown : 1.0f;',
+     '    g_aimAssistSlowdown = slowdown;'),
+    ('    g_aimAssistYawRate = isfinite(yawRate) ? yawRate : 0.0f;', '    g_aimAssistYawRate = yawRate;'),
+    ('    cl->viewangles[0] += pitchRate * seconds;', '    cl->viewangles[0] -= pitchRate * seconds;'),
+    ('    cl->viewangles[0] += pitchRate * seconds;',
+     '    cl->viewangles[0] += pitchRate * seconds * (cl_gamepadInvertY->current.enabled ? -1.0f : 1.0f);'),
+]
+for old, new in assist_mutants:
+    assert source.count(old) == 1, old
+    assert not passes(prefix + source.replace(old, new) + assist_main), old
+print(f'PASS: {len(assist_mutants)} aim assist application mutants fail')
+
 def input_function(name):
     text = (root / 'src/PC/client_mp/cl_input.c').read_text()
     match = re.search(r'^[^\n;]*\b' + name + r'\([^;]*?\)\n\{', text, re.M)
@@ -458,16 +535,18 @@ for item in rows:
 assert page_bindings == [0, 8, 8]
 print('PASS: all controller pages fit the original safe area; at most eight assignments per page')
 
-# The settings page has the vibration switch, and none of its rows overlap.
+# The settings page has the vibration and aim assist switches, and none of its
+# rows overlap.
 def rect(item):
     return tuple(map(float, re.search(r'\brect\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)', item).groups()))
-rumble = [item for item in rows if 'dvar "cl_gamepadRumble"' in item]
-assert len(rumble) == 1 and 'type ITEM_TYPE_YESNO' in rumble[0]
-assert 'dvarTest "ui_gamepadPage" showDvar { "0" }' in rumble[0]
+for dvar in ('cl_gamepadRumble', 'cl_gamepadAimAssist'):
+    switch = [item for item in rows if f'dvar "{dvar}"' in item]
+    assert len(switch) == 1 and 'type ITEM_TYPE_YESNO' in switch[0], dvar
+    assert 'dvarTest "ui_gamepadPage" showDvar { "0" }' in switch[0], dvar
 settings = [item for item in rows if ('dvarTest "ui_gamepadPage" showDvar { "0" }' in item and 'name "tab_' not in item)
             or 'dvarTest' not in item]
 for i, a in enumerate(settings):
     for b in settings[i + 1:]:
         (ax, ay, aw, ah), (bx, by, bw, bh) = rect(a), rect(b)
         assert ax + aw <= bx or bx + bw <= ax or ay + ah <= by or by + bh <= ay, (a, b)
-print('PASS: the settings page offers vibration with no overlapping rows')
+print('PASS: the settings page offers vibration and aim assist with no overlapping rows')

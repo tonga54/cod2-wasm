@@ -351,8 +351,8 @@ button to let the browser detect it. Open **Options → Controller**, choose
 then press the desired controller button or
 trigger. Controller assignments are saved in this browser independently of
 keyboard/mouse bindings. Escape cancels an assignment; Backspace clears it.
-The same page adjusts sensitivity, stick deadzone, inverted vertical look and
-vibration, and restores controller defaults. Left stick moves/navigates; right stick looks.
+The same page adjusts sensitivity, stick deadzone, inverted vertical look,
+vibration and aim assist, and restores controller defaults. Left stick moves/navigates; right stick looks.
 By default, RT/R2 fires, LT/L2 aims, A/Cross jumps, B/Circle toggles crouch/stand
 on a short press and goes prone when held for 300 ms (tap again to stand),
 X/Square uses/reloads, Y/Triangle changes weapons, LB/L1 throws smoke,
@@ -371,6 +371,12 @@ console rumble: a kick for every round fired, one per bullet on automatic too,
 nearby grenade, S-Mine, C4 and rocket blasts fading with distance, hits taken,
 dying and melee impacts. **Options → Controller → Vibration** turns it off.
 Chrome and Edge drive both motors; other browsers may not vibrate.
+
+The controller also gets a minimal aim assist: over an enemy in sight the
+right stick turns a quarter slower, and while a stick moves the view follows
+15% of that enemy's motion. It never turns the view on its own or snaps onto
+anyone, and the mouse never gets it. **Options → Controller → Aim assist**
+turns it off.
 
 Bullets can penetrate thin cover according to its collision material, thickness
 and the weapon's power, losing damage with each layer. Wood, glass, plaster and

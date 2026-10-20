@@ -3945,3 +3945,60 @@ Validation:
   kick; a rifle butt against a tree played `melee_medium`; Options →
   Controller → Vibration off silenced a shot, on again restored it.
 - Physical controller hardware has not been verified.
+
+## Minimal aim assist for controllers — 2026-10-19
+
+The owner asked for a minimal, minimal aim assist for whoever plays with a
+controller. The retail weapon files keep their console ranges
+(`slowdownAimRange`, `lockonAimRange`; 50000 in every MP file) and the server
+its `enableaimassist` script methods for brush models, but the PC game has no
+code left that assisted anyone.
+
+`cg_aimassist_mp.c` runs every drawn frame, after the rumble. In the local
+player's own view, while they play (pm_type 0 or 1, not a spectator), it
+finds the enemy nearest the crosshair: a player entity, neither hidden
+(eFlags 0x20) nor dead (0x20000), of the other team or anyone without teams,
+from 32 to 3000 units ahead. Each body is a centre line from just over the
+feet to the top of the head by stance (crouch 4, prone 8); the crosshair
+counts within 16 units of it, fully, and fades out over a further 1.25
+degrees (at least 8 units). The nearest candidate in sight wins: a trace
+stopped by the world or another player hides it, one stopped by its own body
+does not, nor does smoke the server would see through. The view follows the
+direction to the target at 40 units over its feet, so a change of stance is
+no motion, smoothed over 0.1 s, held to 90 degrees a second, and started over
+for a new target or after a 0.2 s gap.
+
+It hands `CL_Gamepad_SetAimAssist` the share of the right stick's turn to
+keep (1 − 0.25 × the weight) and 15% of the followed motion. `CL_Gamepad_Move`
+applies them to stick aiming alone: the right stick's turn is scaled, and the
+followed motion is added only while either stick moves, never inverted. The
+cgame's word lapses after 100 ms, and nothing applies while the switch
+(`cl_gamepadAimAssist`, archived, on, Options → Controller → Aim assist, in
+the controller defaults) is off or the controller is not the device in use.
+Nothing ever turns the view on its own or pulls it onto a target; the mouse
+never gets any of it. The settings page's two stick lines became one to make
+room for the switch.
+
+Validation:
+
+- `scripts/test-aim-assist.py` (new) runs the production module on simulated
+  enemies: the slowdown over enemies, not teammates, spectators or anyone for
+  a spectator, a dead or a followed view; the zone's core and edge at two
+  ranges; heights by stance; the hidden, dead, absent and other entities;
+  range limits; walls, players between, its own body, thick and thin smoke;
+  the nearest in sight winning; following a runner to 15% of their angular
+  speed, smoothed, unaffected by a crouch, held to 90 degrees a second,
+  starting over, fading at the edge. 32 mutants fail.
+- `scripts/test-gamepad.py` runs `CL_Gamepad_Move`: the right stick scaled on
+  both axes, following only while a stick moves, scaled by the frame and never
+  inverted, and the stick alone after the word lapses, with the switch off,
+  the keyboard in use or invalid values. 11 mutants fail. The settings page
+  fits with both switches and no overlapping rows.
+- In the browser, with temporary instrumentation (never committed) printing
+  the client's yaw each frame: a second client stood still as an enemy 217
+  units away on Carentan. Sweeping the scripted pad's right stick across it
+  at a fixed deflection turned 12.25 degrees a second clear of it, 10.67 at
+  the zone's edge and 9.14 over it (74.6%). With it strafing, the view
+  followed at up to 3.9 degrees a second while the left stick moved, 0.26
+  degrees in all, and not at all without stick input. With the keyboard last
+  used, the sweep kept 12.25 over it too.
