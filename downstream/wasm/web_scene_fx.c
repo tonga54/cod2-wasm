@@ -13,7 +13,9 @@
  * A raised WWII scope (cg_wwiiscope_mp.c) turns its glass into a window: the
  * rifle is drawn with its own projection and near clip and kept off the glass
  * by the stencil, so the magnified world shows through, and the world around
- * the eyepiece blurs, or blacks out while the breath is held.
+ * the eyepiece blurs, or blacks out while the breath is held. A round ring of
+ * worn metal is drawn about the glass in place of the rifle's own eyepiece,
+ * whose bell the stencil keeps the rifle off as well.
  * The HUD and any later view draw straight into the canvas. A canvas taller
  * than r_sceneHeight lines renders that 3D view at r_sceneHeight and scales
  * it up as it composes, so the HUD gets the canvas's resolution for the
@@ -185,7 +187,13 @@ static int s_vmTileRow;
 static int s_vmRows;
 static int s_vmTile;
 static int s_vmTilesX;
+/* After the scope's floats in a CgWwiiScopeLens, the outline the rifle is
+ * kept off about a scope's glass, centre and half-axes, which only the
+ * stencil needs. */
+#define SCENE_FX_SCOPE_BELL_FLOATS 6
+#define SCENE_FX_SCOPE_LENS_FLOATS (SCENE_FX_SCOPE_FLOATS + SCENE_FX_SCOPE_BELL_FLOATS)
 static float s_scope[SCENE_FX_SCOPE_FLOATS];
+static float s_scopeBell[SCENE_FX_SCOPE_BELL_FLOATS];
 /* The window's stencil is drawn once per view, before the rifle's first draw. */
 static int s_scopeStencil;
 static int s_scopeMasking;
@@ -308,6 +316,66 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "float cone(highp float d, highp float len) { return clamp(1.0 - d / max(len, 0.0001), 0.0, 1.0); }\n" +
                 "float cylinder(highp float d, highp float len) {\n" +
                 "  return 1.0 - smoothstep(0.95 * len, 1.05 * len + 0.0001, d);\n}\n";
+            /* The drawn eyepiece of a raised scope, coming in with its window
+             * (u_lensFx.w): a turned ring of blued steel from the glass's edge
+             * to EYE_RING glass radii, worn to bare metal at its edges and in
+             * patches, scratched round, with lathe lines and grime. Its wear
+             * turns with the scope (u runs round the glass's own outline); its
+             * light comes from the screen's upper left, scaled by the light of
+             * the world in the glass, and it reflects the blurred world about
+             * it. Hashes are integer, so every GPU draws the same metal, and
+             * wrap round the ring. */
+            var drawnEyepiece = "const float EYE_RING = 1.15;\nconst vec3 EYE_LIGHT = vec3(-0.43, 0.62, 0.656);\n" +
+                /* The glass's radius in pixels, from the pixel and a half of
+                 * its edge's fade. */
+                "highp float eyeRadius() { return 1.5 / u_lensFx.z; }\n" +
+                "highp float eyeHash(highp vec2 p, highp float period) {\n" +
+                "  highp uvec2 q = uvec2(ivec2(mod(p.x, period), p.y) + 4096);\n" +
+                "  highp uint h = (q.x * 1597334677u) ^ (q.y * 3812015801u);\n" +
+                "  h = (h ^ (h >> 16u)) * 2246822519u;\n" +
+                "  h ^= h >> 13u;\n" +
+                "  return float(h) * (1.0 / 4294967295.0);\n}\n" +
+                "float eyeNoise(highp vec2 p, highp float period) {\n" +
+                "  highp vec2 i = floor(p);\n" +
+                "  vec2 f = fract(p);\n" +
+                "  f = f * f * (3.0 - 2.0 * f);\n" +
+                "  return mix(mix(eyeHash(i, period), eyeHash(i + vec2(1.0, 0.0), period), f.x),\n" +
+                "    mix(eyeHash(i + vec2(0.0, 1.0), period), eyeHash(i + vec2(1.0, 1.0), period), f.x), f.y);\n}\n" +
+                "float eyeFbm(highp vec2 p, highp float period) {\n" +
+                "  return 0.55 * eyeNoise(p, period) + 0.3 * eyeNoise(p * 2.0, period * 2.0) +\n" +
+                "    0.15 * eyeNoise(p * 4.0, period * 4.0);\n}\n" +
+                /* The light of the world in the glass, blurred. */
+                "vec3 eyeLight() {\n" +
+                "  highp vec2 c = u_lens.xy * u_px.xy, r = eyeRadius() * 0.45 * u_px.xy;\n" +
+                "  return 0.2 * (texture(u_dofLarge, c).rgb + texture(u_dofLarge, c + vec2(r.x, 0.0)).rgb +\n" +
+                "    texture(u_dofLarge, c - vec2(r.x, 0.0)).rgb + texture(u_dofLarge, c + vec2(0.0, r.y)).rgb +\n" +
+                "    texture(u_dofLarge, c - vec2(0.0, r.y)).rgb);\n}\n" +
+                "float eyeLevel(vec3 light) { return clamp(dot(light, vec3(0.2126, 0.7152, 0.0722)) * 2.2, 0.3, 1.4); }\n" +
+                /* The ring at t across it, 0 at the glass and 1 at its rim, and u
+                 * round it; rd is the screen's direction from the glass's centre.
+                 * From the glass out: a black gap, a thin lip that catches the
+                 * light, the matte crown, and the outer edge rolling away. */
+                "vec3 eyeMetal(float t, highp float u, vec2 rd, vec3 light) {\n" +
+                "  float lean = t < 0.12 ? -0.9 : mix(-0.25, 1.2, smoothstep(0.12, 1.0, t));\n" +
+                "  vec3 n = vec3(rd * sin(lean), cos(lean));\n" +
+                "  float diffuse = max(dot(n, EYE_LIGHT), 0.0);\n" +
+                "  float spec = pow(max(dot(n, normalize(EYE_LIGHT + vec3(0.0, 0.0, 1.0))), 0.0), 8.0);\n" +
+                "  float mottle = eyeFbm(vec2(u * 14.0, t * 2.5), 14.0);\n" +
+                "  float edges = max(1.0 - smoothstep(0.1, 0.28, t), smoothstep(0.72, 0.96, t));\n" +
+                "  float wear = clamp(0.6 * smoothstep(0.55, 0.8, eyeFbm(vec2(u * 22.0, t * 3.0 + 5.0), 22.0)) +\n" +
+                "    0.7 * edges * smoothstep(0.4, 0.8, eyeNoise(vec2(u * 70.0, t * 2.0), 70.0)), 0.0, 1.0);\n" +
+                "  float scratch = 0.5 * smoothstep(0.86, 0.97, eyeNoise(vec2(u * 90.0, t * 26.0), 90.0)) * (1.0 - 0.5 * edges);\n" +
+                "  float lathe = 0.85 + 0.3 * eyeHash(vec2(floor(t * 30.0), 3.0), 4096.0);\n" +
+                "  vec3 steel = vec3(0.2, 0.205, 0.215) * mix(0.7, 1.15, mottle);\n" +
+                "  vec3 albedo = mix(steel, vec3(0.47, 0.45, 0.42), max(wear, scratch)) * lathe;\n" +
+                "  vec3 env = texture(u_dofLarge, v_uv + n.xy * n.z * 2.0 * eyeRadius() * 0.35 * u_px.xy).rgb;\n" +
+                "  float level = eyeLevel(light);\n" +
+                "  vec3 col = albedo * (0.3 + 0.7 * diffuse) * level +\n" +
+                "    env * (0.04 + 0.25 * pow(1.0 - n.z, 3.0)) * mix(0.4, 1.0, wear) +\n" +
+                "    vec3(0.18 * spec * mix(0.3, 1.0, wear) * level);\n" +
+                "  col += smoothstep(0.035, 0.06, t) * (1.0 - smoothstep(0.09, 0.13, t)) *\n" +
+                "    vec3(0.16, 0.14, 0.12) * level * (0.5 + 0.5 * diffuse);\n" +
+                "  return col * smoothstep(0.0, 0.04, t) * mix(1.0, 0.6, smoothstep(0.93, 1.0, t));\n}\n";
             /* Each viewmodel vertex is read from the mesh texture by its index,
              * which is itself read by gl_VertexID, so this pass binds no vertex
              * or index buffer for the GL emulation to lose track of. The smear
@@ -345,7 +413,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "uniform highp sampler2D u_vmVelocity;\nuniform highp sampler2D u_vmMesh;\nuniform highp vec4 u_vm;\n" +
                 "uniform highp vec4 u_lens;\nuniform highp vec4 u_lensInv;\nuniform vec4 u_lensFx;\n" +
                 coc + nearWorld + viewmodelMotion +
-                "void main() {\n" +
+                drawnEyepiece + "void main() {\n" +
                 "  vec3 c = texture(u_scene, v_uv).rgb;\n" +
                 "  vec3 col = c;\n" +
                 "  bool smeared = false;\n" +
@@ -353,10 +421,20 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                  * stencil kept clear of the rifle, fading over a pixel. */
                 "  float lensIn = 0.0;\n" +
                 "  highp float lensR = 2.0;\n" +
+                "  highp vec2 lensDp = vec2(0.0), lensQ = vec2(1.0, 0.0);\n" +
                 "  if (u_lens.z > 0.0) {\n" +
-                "    highp vec2 dp = gl_FragCoord.xy - u_lens.xy;\n" +
-                "    lensR = length(vec2(dot(u_lensInv.xy, dp), dot(u_lensInv.zw, dp)));\n" +
+                "    lensDp = gl_FragCoord.xy - u_lens.xy;\n" +
+                "    lensQ = vec2(dot(u_lensInv.xy, lensDp), dot(u_lensInv.zw, lensDp));\n" +
+                "    lensR = length(lensQ);\n" +
                 "    lensIn = 1.0 - smoothstep(1.0 - u_lensFx.z, 1.0, lensR);\n" +
+                "  }\n" +
+                /* Toward the edge of a scope's glass its colours part a little,
+                 * red outward and blue inward. */
+                "  if (u_lensFx.w > 0.0 && lensR > 0.8 && lensR < 1.0) {\n" +
+                "    highp vec2 shift = lensDp / max(length(lensDp), 1.0) *\n" +
+                "      (0.0035 * eyeRadius() * u_lensFx.w * smoothstep(0.8, 1.0, lensR)) * u_px.xy;\n" +
+                "    c = vec3(texture(u_scene, v_uv + shift).r, c.g, texture(u_scene, v_uv - shift).b);\n" +
+                "    col = c;\n" +
                 "  }\n" +
                 /* Each world pixel goes back to where the last frame's camera saw
                  * it, and the scene is averaged along that path. The viewmodel
@@ -480,6 +558,20 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "    vec3 glass = texture(u_dofLarge, clamp(lc + (v_uv - lc) * 1.8, 0.0, 1.0)).rgb;\n" +
                 "    glass = glass * (0.16 + 0.3 * (1.0 - lensR * lensR)) + vec3(0.012, 0.016, 0.024);\n" +
                 "    col = mix(col, glass, lensIn * (1.0 - u_lens.w));\n" +
+                "  }\n" +
+                /* A scope's drawn eyepiece: the glass darkens into its seat, the
+                 * ring shades what lies just round it, and the ring itself. */
+                "  if (u_lens.z > 0.0 && u_lensFx.w > 0.0) {\n" +
+                "    float beyond = smoothstep(EYE_RING - u_lensFx.z, EYE_RING, lensR);\n" +
+                "    float ring = smoothstep(1.0 - u_lensFx.z, 1.0, lensR) * (1.0 - beyond);\n" +
+                "    col *= 1.0 - 0.5 * u_lensFx.w * lensIn * smoothstep(0.86, 1.0, lensR);\n" +
+                "    col *= 1.0 - 0.25 * u_lensFx.w * beyond * (1.0 - smoothstep(EYE_RING, EYE_RING + 0.08, lensR));\n" +
+                "    if (ring > 0.0) {\n" +
+                "      highp float u = atan(lensQ.y, lensQ.x) * 0.15915494 + 0.5;\n" +
+                "      vec3 metal = eyeMetal(clamp((lensR - 1.0) / (EYE_RING - 1.0), 0.0, 1.0), u,\n" +
+                "        lensDp / max(length(lensDp), 0.001), eyeLight());\n" +
+                "      col = mix(col, metal, ring * u_lensFx.w);\n" +
+                "    }\n" +
                 "  }\n" +
                 "  if (u_glow.x > 0.0)\n" +
                 "    col = 1.0 - (1.0 - col) * (1.0 - min(texture(u_bloom, v_uv).rgb, vec3(1.0)));\n" +
@@ -847,7 +939,10 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 var radius = 0.5 * Math.min(Math.hypot(ax * w, ay * h), Math.hypot(bx * w, by * h));
                 gl.uniform4f(C.u_lens, (H[o + 42] + 1) * 0.5 * w, (H[o + 43] + 1) * 0.5 * h, lensPresence, H[o + 49]);
                 gl.uniform4f(C.u_lensInv, 2 * by / (det * w), -2 * bx / (det * h), -2 * ay / (det * w), 2 * ax / (det * h));
-                gl.uniform4f(C.u_lensFx, lensBlur, H[o + 51], Math.min(1.5 / Math.max(radius, 1), 0.5), 0);
+                /* A scope's glass, drawn with the rifle's projection, comes in
+                 * with its drawn eyepiece. */
+                gl.uniform4f(C.u_lensFx, lensBlur, H[o + 51], Math.min(1.5 / Math.max(radius, 1), 0.5),
+                    H[o + 52] > 0 ? lensPresence : 0);
             } else {
                 gl.uniform4f(C.u_lens, 0, 0, 0, 0);
             }
@@ -895,12 +990,14 @@ EM_JS(void, WebSceneFx_Compose, (const float *params, const float *mesh), {
 });
 
 /* Marks the scope's glass in the scene's stencil, bit 0x80, before the
- * rifle's first draw. The D3D9 device never uses the stencil; it sets both
- * write masks again for every draw, and the depth mask too. */
-EM_JS(void, WebSceneFx_ScopeStencil, (const float *scope), {
+ * rifle's first draw, and the outline about it when it has one, which opens
+ * to the rifle's own eyepiece's bell. The D3D9 device never uses the
+ * stencil; it sets both write masks again for every draw, and the depth mask
+ * too. */
+EM_JS(void, WebSceneFx_ScopeStencil, (const float *scope, const float *bell), {
     var fx = Module.cod2SceneFx;
     if (!fx || !fx.t || !fx.programs || !fx.programs.lens) return;
-    var gl = fx.gl, o = scope >>> 2, L = fx.programs.lens;
+    var gl = fx.gl, o = scope >>> 2, b = bell >>> 2, L = fx.programs.lens;
     var program = gl.getParameter(gl.CURRENT_PROGRAM);
     var vao = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
     var caps = [gl.SCISSOR_TEST, gl.BLEND, gl.DEPTH_TEST, gl.CULL_FACE, gl.POLYGON_OFFSET_FILL];
@@ -920,6 +1017,11 @@ EM_JS(void, WebSceneFx_ScopeStencil, (const float *scope), {
     gl.uniformMatrix2fv(L.u_axes, false, HEAPF32.subarray(o + 2, o + 6));
     gl.bindVertexArray(fx.vao);
     gl.drawArrays(gl.TRIANGLE_FAN, 0, 66);
+    if (HEAPF32[b + 2] * HEAPF32[b + 5] - HEAPF32[b + 4] * HEAPF32[b + 3] !== 0) {
+        gl.uniform2f(L.u_center, HEAPF32[b], HEAPF32[b + 1]);
+        gl.uniformMatrix2fv(L.u_axes, false, HEAPF32.subarray(b + 2, b + 6));
+        gl.drawArrays(gl.TRIANGLE_FAN, 0, 66);
+    }
     gl.stencilMask(0);
     gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
     gl.colorMask(true, true, true, true);
@@ -1015,15 +1117,19 @@ void WebSceneFx_SetGray(float grayFrac)
 /* The cgame's scope window for the scene about to render, as the floats of a
  * CgWwiiScopeLens; NULL closes it. A window without a usable outline, or a
  * rifle projection with a non-positive scale, is dropped; the rifle's near
- * clip is kept within the depth hack's range. */
+ * clip is kept within the depth hack's range. Only a scope's glass, drawn
+ * with the rifle's projection, keeps the outline about it, when that has
+ * area. */
 void WebSceneFx_SetScope(const float *scope)
 {
     float *axes = s_scope + (SCENE_FX_SCOPE_AXES - SCENE_FX_SCOPE);
     float *projection = s_scope + (SCENE_FX_SCOPE_PROJECTION - SCENE_FX_SCOPE);
     float *nearClip = s_scope + (SCENE_FX_SCOPE_NEAR_CLIP - SCENE_FX_SCOPE);
+    const float *bellAxes = s_scopeBell + 2;
     int i;
 
     memset(s_scope, 0, sizeof(s_scope));
+    memset(s_scopeBell, 0, sizeof(s_scopeBell));
     if (!scope)
         return;
     for (i = 0; i < SCENE_FX_SCOPE_FLOATS; ++i)
@@ -1035,6 +1141,10 @@ void WebSceneFx_SetScope(const float *scope)
     if (!(projection[0] > 0.0f) || !(projection[1] > 0.0f))
         projection[0] = projection[1] = 0.0f;
     *nearClip = WebSceneFx_Clamp(*nearClip, 0.0f, 16.0f);
+    for (i = 0; i < SCENE_FX_SCOPE_BELL_FLOATS; ++i)
+        s_scopeBell[i] = isfinite(scope[SCENE_FX_SCOPE_FLOATS + i]) ? scope[SCENE_FX_SCOPE_FLOATS + i] : 0.0f;
+    if (!(projection[0] > 0.0f) || !(fabsf(bellAxes[0] * bellAxes[3] - bellAxes[2] * bellAxes[1]) > 1e-6f))
+        memset(s_scopeBell, 0, sizeof(s_scopeBell));
 }
 
 int WebSceneFx_ScopeAvailable(void)
@@ -1103,7 +1213,7 @@ void WebSceneFx_BeginViewmodel(void)
     if (!s_active || !(s_scope[SCENE_FX_SCOPE_PRESENCE - SCENE_FX_SCOPE] > 0.0f))
         return;
     if (!s_scopeStencil) {
-        WebSceneFx_ScopeStencil(s_scope);
+        WebSceneFx_ScopeStencil(s_scope, s_scopeBell);
         s_scopeStencil = 1;
     }
     WebSceneFx_ScopeMask(!s_scopeExempt);

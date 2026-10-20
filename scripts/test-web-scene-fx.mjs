@@ -31,7 +31,7 @@ const browser = await chromium.launch({headless: false, executablePath: process.
 try {
   const page = await browser.newPage({viewport: {width: 1300, height: 760}});
   await page.setContent('<body style="margin:0;background:#111"><canvas width="1280" height="720"></canvas></body>');
-  const result = await page.evaluate(({bindBody, composeBody, cache}) => {
+  const result = await page.evaluate(({bindBody, composeBody, stencilBody, maskBody, cache}) => {
     const canvas = document.querySelector('canvas');
     const gl = canvas.getContext('webgl2', {antialias: false, alpha: false, depth: true, stencil: true, preserveDrawingBuffer: true});
     const checks = [], images = {};
@@ -46,6 +46,8 @@ try {
     const bind = (gl, Module, HEAPF32, width, height, samples, screenWidth = width, screenHeight = height) =>
       bindScene(gl, Module, HEAPF32, width, height, samples, screenWidth, screenHeight);
     const compose = Function('GLctx', 'Module', 'HEAPF32', 'params', 'mesh', composeBody);
+    const stencil = Function('Module', 'HEAPF32', 'scope', 'bell', stencilBody);
+    const mask = Function('Module', 'on', maskBody);
     const W = 1280, H = 720;
 
     const shader = (type, text) => { const s = gl.createShader(type); gl.shaderSource(s, text); gl.compileShader(s);
@@ -289,6 +291,75 @@ try {
     check(spread(halfGray, vivid) > 5 && spread(halfGray, vivid) < spread(colour, vivid) - 5,
       'half the gray keeps half the color');
 
+    // A raised scope (cg_wwiiscope_mp.c's CgWwiiScopeLens) over a flat gray world: its glass at the centre, 144
+    // pixels across its radius, the rifle's own faceted eyepiece a white 16-sided annulus round it out to 1.6
+    // glass radii, kept off the outline the stencil marks, which opens with the window to its bell, 1.65 glass
+    // radii. The drawn eyepiece rings the glass out to 1.15 of them.
+    const glassR = 0.4, R = glassR * H / 2, SCOPE = 2048, BELL = 2080;
+    const annulus = gl.createProgram();
+    gl.attachShader(annulus, shader(gl.VERTEX_SHADER, '#version 300 es\nuniform vec3 u_r;uniform float u_aspect;\n' +
+      'void main(){int k=gl_VertexID%6;int s=gl_VertexID/6+((k==2||k==4||k==5)?1:0);bool o=k==1||k==2||k==4;\n' +
+      'float a=float(s)*0.3926991;gl_Position=vec4(vec2(cos(a)/u_aspect,sin(a))*(o?u_r.y:u_r.x),u_r.z,1.0);}'));
+    gl.attachShader(annulus, shader(gl.FRAGMENT_SHADER, '#version 300 es\nprecision highp float;out vec4 o;void main(){o=vec4(1.0);}'));
+    gl.linkProgram(annulus);
+    check(gl.getProgramParameter(annulus, gl.LINK_STATUS), 'eyepiece fixture program linked');
+    // A sight's window, drawn with the view's projection, is the same but for that projection.
+    function scopeFrame({open = 1, sight = false, dark = 0, world = [0.5, 0.5, 0.5]} = {}) {
+      bind(gl, Module, HEAPF32, W, H, 1);
+      // The D3D9 device clears the stencil with every bit writable.
+      gl.stencilMask(0xff);
+      drawScene(() => rect(-1, -1, 1, 1, worldDepth(2000), world, 0));
+      const outline = glassR + (1.65 - 1) * glassR * open;
+      const scope = [0, 0, glassR * H / W, 0, 0, glassR, 1, open, open, dark, sight ? 0 : 1.7, sight ? 0 : 3.0, 0.8];
+      HEAPF32.set(scope, SCOPE);
+      HEAPF32.set([0, 0, outline * H / W, 0, 0, outline], BELL);
+      stencil(Module, HEAPF32, SCOPE * 4, BELL * 4);
+      mask(Module, 1);
+      gl.useProgram(annulus);
+      gl.uniform3f(gl.getUniformLocation(annulus, 'u_r'), 0.95 * glassR, 1.6 * glassR, vmDepth(2));
+      gl.uniform1f(gl.getUniformLocation(annulus, 'u_aspect'), W / H);
+      gl.drawArrays(gl.TRIANGLES, 0, 16 * 6);
+      mask(Module, 0);
+      const at = params(0, {glow: 0, film: 0});
+      HEAPF32.set(scope, at / 4 + 42);
+      compose(gl, Module, HEAPF32, at, MESH * 4);
+      return read();
+    }
+    const polar = (px, r, degrees) => pixel(px, Math.round(W / 2 + r * Math.cos(degrees * Math.PI / 180)),
+      Math.round(H / 2 + r * Math.sin(degrees * Math.PI / 180)));
+    const around = (px, r, from = 0, to = 360) => { const v = []; for (let a = from; a < to; ++a) v.push(polar(px, r, a)); return v; };
+    const mean = v => v.reduce((a, b) => a + b, 0) / v.length;
+    const scoped = scopeFrame(); snapshot('scope');
+    const world = pixel(scoped, 40, 40);
+    check(Math.abs(world - 128) <= 2 && Math.abs(pixel(scoped, W / 2, H / 2) - world) <= 2, 'the world shows round and through the scope');
+    check([1.3, 1.45, 1.55].every(k => around(scoped, k * R).every(v => Math.abs(v - world) <= 2)),
+      'the rifle\'s faceted eyepiece is kept off its bell\'s outline, the world showing round the drawn one');
+    // Over a black world whatever shows round the glass is the eyepiece.
+    const night = scopeFrame({world: [0, 0, 0]}), edges = [];
+    for (let a = 0; a < 360; a += 2) {
+      let edge = 0;
+      for (let r = R; r < 1.45 * R; r += 0.25) if (polar(night, r, a) > 0) edge = r;
+      edges.push(edge);
+    }
+    const roundness = Math.max(...edges) - Math.min(...edges);
+    check(roundness < 3 && Math.abs(mean(edges) - 1.15 * R) < 4, `the drawn eyepiece is round: its rim ${mean(edges).toFixed(1)} px out, within ${roundness.toFixed(2)} px all round`);
+    const band = (from, to) => mean([1.03, 1.06, 1.09, 1.12].flatMap(k => around(scoped, k * R, from, to)));
+    check(band(100, 170) > band(280, 350) + 8, `it is lit from the upper left (${band(100, 170).toFixed(0)} against ${band(280, 350).toFixed(0)})`);
+    const ring = around(scoped, 1.08 * R);
+    const grain = mean(ring.map((v, i) => Math.abs(v - ring[(i + 1) % ring.length])));
+    check(grain > 1.5, `its metal is worn and scratched, not flat (${grain.toFixed(2)} levels a degree)`);
+    check(mean(around(scoped, 0.98 * R)) < mean(around(scoped, 0.5 * R)) - 10, 'the glass darkens into its seat');
+    const shut = scopeFrame({open: 0});
+    check(around(shut, 1.3 * R).filter(v => v > 200).length > 0.9 * 360, 'until the window opens the rifle\'s own eyepiece shows round the ring');
+    const held = scopeFrame({dark: 1});
+    check(around(held, 1.08 * R).every(v => v <= 3) && Math.abs(pixel(held, W / 2, H / 2) - world) <= 2,
+      'a held breath blacks out the eyepiece with everything round the glass');
+    // The rifle kept off the same outline, to see that no ring is drawn.
+    const bare = scopeFrame({sight: true});
+    check(around(bare, 1.08 * R).every(v => Math.abs(v - world) <= 2), 'a sight\'s window draws no eyepiece round its glass');
+    HEAPF32.fill(0, 16 + 42, 16 + 55);
+    gl.stencilMask(0xff);
+
     // A scene of half the canvas's lines renders at its size from the canvas
     // viewport the engine sets, and is filtered up to the whole canvas with
     // Catmull-Rom. The square's right edge falls between scene columns 351 and
@@ -413,7 +484,8 @@ try {
     check(gl.getError() === gl.NO_ERROR, 'no WebGL errors');
     check(!warnings.length, 'no compositor warnings');
     return {checks, images};
-  }, {bindBody: emjs('WebSceneFx_Bind'), composeBody: emjs('WebSceneFx_Compose'), cache});
+  }, {bindBody: emjs('WebSceneFx_Bind'), composeBody: emjs('WebSceneFx_Compose'),
+      stencilBody: emjs('WebSceneFx_ScopeStencil'), maskBody: emjs('WebSceneFx_ScopeMask'), cache});
   for (const [name, url] of Object.entries(result.images))
     fs.writeFileSync(path.join(outputDir, name + '.png'), Buffer.from(url.split(',')[1], 'base64'));
   console.log(result.checks.map(message => 'ok - ' + message).join('\n'));
