@@ -5223,3 +5223,41 @@ Validation:
   - the pointer down the rows of either list: one `mouse_over` per row it
     entered.
   Before the change, none of these played.
+
+## Loading screen in the menus' style — 2026-10-20
+
+The owner asked for the screen that downloads the files on arrival to match the
+current menus and their lettering. It showed the startup logo, its status in
+Georgia, a thin bar and the megabytes in the system's face.
+
+`startup.css` now letters it in Barlow, which the menus' fonts are made from
+(`third_party/barlow`, OFL):
+- Below the logo is the main menu's `MULTIPLAYER`, in Medium capitals spaced
+  as the menu spaces them.
+- The status is in Medium capitals, spaced as the menu's items.
+- The megabytes are in Regular.
+- The colours are the main menu's own: its idle items for the status, the
+  subtitle's for `MULTIPLAYER`, the focused item's gold for the bar's fill,
+  and the version's for the megabytes.
+
+The background is black with a faint dark centre. The screen fades in over
+450 ms, and the launcher's errors use Barlow too. `build-web.sh` copies Barlow
+Regular and Medium (about 100 KB each) and `OFL.txt` to the site's `fonts/`.
+The framework's server sends them as `font/ttf`. `prepare-web-shell.cjs`
+preloads both in the document's head, so the text need not wait for them; the
+QA stack's web image keeps its older document, so only the test covers that.
+
+Validation:
+
+- `test-startup-screen.cjs` (new, also in the Pi release build):
+  - both faces from `/fonts/`, which the build fills from `third_party` with
+    the licence;
+  - the colours equal `s_wwiiIdle`, `s_wwiiTitle`, `s_wwiiGold` and
+    `s_wwiiVersion` in `ui_wwii_menu.c`;
+  - the subtitle equals `WWII_TITLE`;
+  - every font the screen sets is Barlow.
+  The previous `startup.css` fails it.
+- `test-web-shell.cjs` checks the preloads; `test-input-capture.cjs` passes.
+- In Chrome on a throttled network against the QA stack, the screen was shot
+  starting, downloading, verifying and preparing. Barlow 400 and 500 loaded
+  from `/fonts/` (200, `font/ttf`), and the status is set in Barlow 500.

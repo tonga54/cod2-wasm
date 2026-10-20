@@ -4,67 +4,122 @@ html, body { background: #000 !important; }
 #launcher { display: none !important; }
 #launcher:has(#error:not([hidden])) { display: grid !important; }
 #launcher-form > :not(#error):not(#status) { display: none !important; }
-#launcher-form { background: #000 !important; color: #d4d4d0; }
-
-.wasm-game-framework #loading.cod2-startup {
+#launcher-form {
   background: #000 !important;
-  color: #d4d4d0;
+  color: #c6c6c4;
+  font-family: Barlow, 'Helvetica Neue', Arial, sans-serif;
+  letter-spacing: 0.04em;
+}
+
+/* Barlow, the menus' lettering (third_party/barlow, OFL), before the game's
+ * own fonts load. */
+@font-face {
+  font-family: Barlow;
+  src: url('/fonts/Barlow-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-display: block;
+}
+
+@font-face {
+  font-family: Barlow;
+  src: url('/fonts/Barlow-Medium.ttf') format('truetype');
+  font-weight: 500;
+  font-display: block;
+}
+
+/* The main menu's colours (ui_wwii_menu.c): its idle items, the subtitle,
+ * the focused item's gold and the version. */
+.wasm-game-framework #loading.cod2-startup {
+  --cod2-idle: #c6c6c4;
+  --cod2-title: #d9d7d3;
+  --cod2-gold: #ccb878;
+  --cod2-version: rgb(199 199 199 / 85%);
+  --cod2-font: Barlow, 'Helvetica Neue', Arial, sans-serif;
+  background: radial-gradient(ellipse 75% 65% at 50% 42%, #1a1a17 0%, #0c0c0b 58%, #000 100%) !important;
+  color: var(--cod2-idle);
+  font-family: var(--cod2-font);
 }
 
 .wasm-game-framework #loading.cod2-startup [data-shell-card] {
-  width: min(640px, 92vw) !important;
+  width: min(560px, 92vw) !important;
   padding: 24px 0 !important;
   border: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
   text-align: center;
+  animation: cod2-startup-in 450ms ease-out both;
+}
+
+@keyframes cod2-startup-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+.wasm-game-framework #loading.cod2-startup #loading-kicker:empty {
+  display: none;
 }
 
 .wasm-game-framework #loading.cod2-startup #loading-title {
-  margin: 0 0 18px !important;
+  margin: 0 0 clamp(30px, 7vh, 54px) !important;
   padding: 0 !important;
   line-height: 0;
 }
 
 .wasm-game-framework #loading.cod2-startup #loading-title img {
   display: block;
-  width: min(512px, 82vw);
+  width: min(440px, 76vw);
   height: auto;
   margin: 0 auto;
   user-select: none;
 }
 
+/* The main menu's subtitle: Medium capitals centred under the lettering,
+ * 0.711 capitals apart, which the tracking after the last letter would push
+ * right of centre without the padding before the first. */
+.wasm-game-framework #loading.cod2-startup #loading-title::after {
+  content: 'MULTIPLAYER';
+  display: block;
+  margin-top: 0.45em;
+  padding-left: 0.5em;
+  color: var(--cod2-title);
+  font: 500 min(22px, 3.8vw)/1 var(--cod2-font);
+  letter-spacing: 0.5em;
+}
+
+/* As the menu's items: capitals 0.22 of their height apart. */
 .wasm-game-framework #loading.cod2-startup #loading-status {
-  margin: 0 0 16px !important;
-  color: #d4d4d0 !important;
-  font: 18px/1.4 Georgia, 'Times New Roman', serif;
-  letter-spacing: 0.04em;
+  min-height: 0 !important;
+  margin: 0 0 14px !important;
+  color: var(--cod2-idle) !important;
+  font: 500 15px/1.3 var(--cod2-font);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
   font-variant-numeric: tabular-nums;
 }
 
 .wasm-game-framework #loading.cod2-startup #loading-progress {
   display: block;
   appearance: none;
-  width: min(300px, 70vw);
-  height: 5px;
+  width: min(420px, 72vw);
+  height: 3px;
   margin: 0 auto;
   border: 0;
   border-radius: 0;
-  background: #25251f;
-  color: #a49b79;
-  accent-color: #a49b79;
+  background: rgb(255 255 255 / 12%);
+  color: var(--cod2-gold);
+  accent-color: var(--cod2-gold);
 }
 
 .wasm-game-framework #loading.cod2-startup #loading-progress::-webkit-progress-bar {
-  background: #25251f;
+  background: rgb(255 255 255 / 12%);
 }
 
 .wasm-game-framework #loading.cod2-startup #loading-progress::-webkit-progress-value {
-  background: #a49b79;
+  background: var(--cod2-gold);
 }
 
 .wasm-game-framework #loading.cod2-startup #loading-progress::-moz-progress-bar {
-  background: #a49b79;
+  background: var(--cod2-gold);
 }
 
 .wasm-game-framework #loading.cod2-startup #loading-detail:empty {
@@ -73,8 +128,9 @@ html, body { background: #000 !important; }
 
 .wasm-game-framework #loading.cod2-startup #loading-detail {
   margin: 12px 0 0;
-  color: #a9a99f;
-  font: 14px/1.4 system-ui, sans-serif;
+  color: var(--cod2-version);
+  font: 400 13px/1.3 var(--cod2-font);
+  letter-spacing: 0.1em;
   font-variant-numeric: tabular-nums;
 }
 

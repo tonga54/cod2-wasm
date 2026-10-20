@@ -67,6 +67,13 @@ install -m 0644 \
     "${repo_root}/site/wasm-game-data.json" \
     "${repo_root}/site/wasm-game.json" \
     "${site_dir}/"
+# startup.css letters the loading screen in the menus' Barlow.
+install -d "${site_dir}/fonts"
+install -m 0644 \
+    "${repo_root}/third_party/barlow/Barlow-Regular.ttf" \
+    "${repo_root}/third_party/barlow/Barlow-Medium.ttf" \
+    "${repo_root}/third_party/barlow/OFL.txt" \
+    "${site_dir}/fonts/"
 
 metadata_dir="$(mktemp -d -t cod2-wasm-framework-metadata.XXXXXX)"
 "${framework_dir}/scripts/install-browser-package.sh" "${metadata_dir}" copy >/dev/null
