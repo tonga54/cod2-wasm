@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import zipfile
 from weapon_balance import apply_weapon_balance, load_profile, weapon_fields
+from browser_explosives import WEAPONS as EXPLOSIVES
 
 root = Path(__file__).resolve().parent.parent
 profile = load_profile()
@@ -20,6 +21,12 @@ for path in sorted((root / 'data/main').glob('*.iwd')):
             if name in current:
                 original[name] = archive.read(name)
                 sources[name] = path.name
+# The mine and C4 are built from the frag's file and audited with the
+# explosives; every other definition has its retail original.
+generated = {'weapons/mp/' + weapon for weapon in EXPLOSIVES}
+assert current.keys() - original.keys() == generated
+for name in generated:
+    del current[name]
 
 changed = []
 report = []
@@ -39,10 +46,16 @@ for name, data in sorted(current.items()):
     assert differences == profile['weapons'].get(name.removeprefix('weapons/mp/'), {}), name
     if differences:
         changed.append(name.removeprefix('weapons/mp/'))
+    # Recoil overrides only ever add kick: higher, wider, slower to centre.
+    for key, sign in (('adsViewKickPitchMin', 1), ('adsViewKickPitchMax', 1), ('adsViewKickYawMin', -1),
+                      ('adsViewKickYawMax', 1), ('adsViewKickCenterSpeed', -1)):
+        if key in differences:
+            assert sign * (float(after[key]) - float(before[key])) > 0, (name, key)
     keys = ('weaponClass', 'weaponType', 'damage', 'minDamage', 'maxDamageRange',
             'minDamageRange', 'fireTime', 'clipSize', 'shotCount', 'reloadTime',
             'reloadEmptyTime', 'adsSpread', 'hipSpreadStandMin', 'hipSpreadMax',
-            'locHead', 'locTorsoUpper', 'boltAction', 'rechamberTime')
+            'locHead', 'locTorsoUpper', 'boltAction', 'rechamberTime', 'adsViewKickPitchMin',
+            'adsViewKickPitchMax', 'adsViewKickYawMin', 'adsViewKickYawMax', 'adsViewKickCenterSpeed')
     report.append({'weapon': name.removeprefix('weapons/mp/'), 'retailSource': sources[name],
                    'changes': differences, 'retail': {k: before[k] for k in keys if k in before},
                    'balanced': {k: after[k] for k in keys if k in after}})
@@ -57,7 +70,8 @@ for name, data in sorted(current.items()):
             'damage', 'minDamage', 'maxDamageRange', 'minDamageRange')) + ',{' + \
             ','.join(fields[k] for k in hit_fields) + '}}'
     metrics.append('{' + initializer(before) + ',' + initializer(after) + ',' +
-                   str(int(bool(differences))) + ',' + str(int(name.endswith(('bren_mp', 'mp44_mp')))) + '}')
+                   str(int(bool(differences))) + ',' + str(int(name.endswith(('bren_mp', 'mp44_mp')))) + ',' +
+                   str(int('damage' in differences)) + '}')
 
 assert sorted(changed) == sorted(profile['weapons'])
 # Refuse a different retail patch instead of silently changing the wrong field.
@@ -132,7 +146,7 @@ static int Dvar_GetInt(const char *name) {return 0;}
 static int OnSameTeam(gentity_t *a,gentity_t *b) {return 1;}
 '''
 checks = r'''
-typedef struct {WeaponDef retail,balanced;int changed,rangedAutomatic;} Metric;
+typedef struct {WeaponDef retail,balanced;int changed,rangedAutomatic,closeBodyReduced;} Metric;
 static int shot(WeaponDef *weapon,float distance,int loc) {
  activeWeapon=weapon;hitLocation=loc;receivedDamage=damageCalls=0;
  vec3_t start={0,0,0},end={distance*2,0,0};weaponParms wp={weapon};
@@ -150,6 +164,8 @@ int main(void) {
    if(!m->changed)assert(now==old);
    if(m->changed && distance<100) {
     if(loc==1 || loc==2) {assert(now<100 && now>=50 && old>=100);}
+    /* Where reviewed, a weaker body shot that still kills in four. */
+    else if(m->closeBodyReduced) {assert(loc==18 ? now==old : now<old);if(loc==4||loc==5)assert(3*now<100 && 4*now>=100);}
     else assert(now==old);
    }
    cases++;
@@ -160,7 +176,7 @@ int main(void) {
   }
   if(m->rangedAutomatic) {assert(shot(&m->balanced,3000,4)==28);assert(shot(&m->balanced,3000,2)==56);}
  }
- printf("PASS: %d original/balanced server bullet/player-damage cases, 19 hit locations, range boundaries, close body damage preserved, no automatic one-headshot kill\n",cases);
+ printf("PASS: %d original/balanced server bullet/player-damage cases, 19 hit locations, range boundaries, close body damage preserved but where reviewed (four body shots), no automatic one-headshot kill\n",cases);
  return 0;
 }
 '''
@@ -178,5 +194,6 @@ output.parent.mkdir(exist_ok=True)
 output.write_text(json.dumps({'profile': profile['id'], 'healthReference': 100,
     'note': 'Body/head damage uses the server range curve and hit multipliers. Shotgun damage is per pellet; turret file stats do not assert a player TTK.',
     'weapons': report}, indent=2) + '\n')
-print(f'PASS: {len(report)} packaged weapon definitions audited; only {len(changed)} reviewed automatic definitions changed; retail mismatch rejected')
+print(f'PASS: {len(report)} packaged weapon definitions audited; only {len(changed)} reviewed automatic definitions changed, '
+      f'recoil only ever added; retail mismatch rejected')
 print(output)

@@ -205,7 +205,9 @@ retail CoD2:
 - **Custom LAN weapon balance:** `downstream/weapon-balance.json` retains retail
   close body damage, cadence, magazines and reloads, reduces automatic headshot
   multipliers from ×3 to ×2, shortens SMG full-damage range, and adjusts ranged
-  damage and hip-fire dispersion for Bren/MP44. Rifles, scopes, pistols, shotgun,
+  damage and hip-fire dispersion for Bren/MP44. The PPSh deals 30 instead of 35
+  up close (four body shots instead of three) and 10 instead of 20 at range, and
+  kicks higher and wider when aimed. Rifles, scopes, pistols, shotgun,
   grenades and mounted MG42 retain their original weapon definitions; the
   mounted heat/recoil rules are implemented separately.
 - **Larger visual effects:** brief muzzle sprites are 40% larger with stronger

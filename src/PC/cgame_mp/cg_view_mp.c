@@ -819,35 +819,63 @@ void CG_InitView(void)
     FX_AdjustTime(cg->time);
 }
 
-/* Integrate the weapon's camera impulse as a critically damped spring.
- * Analytic integration keeps the kick/return independent of browser FPS. */
-static void CG_IntegrateViewKick(float *angles, float *velocity, float centerSpeed, float dt)
+/* The original game's camera kick: the centring speed pulls each angle back,
+ * but an angle on its way back moves only CG_KICK_RETURN as far, so a burst
+ * climbs and settles after it. An angle crossing the centre stops there and
+ * none passes CG_KICK_MAX. Whole steps give the same path at any frame
+ * rate. */
+#define CG_KICK_STEP_MSEC 5
+#define CG_KICK_RETURN 0.06f
+#define CG_KICK_MAX 10.0f
+/* With no weapon in hand. */
+#define CG_KICK_CENTER_SPEED 2400.0f
+
+static void CG_IntegrateViewKick(float *angles, float *velocity, float centerSpeed, int msec)
 {
-    float omega = sqrtf(fmaxf(centerSpeed, 1.0f));
-    float decay = expf(-omega * fmaxf(dt, 0.0f));
     int i;
-    for (i = 0; i < 3; ++i) {
-        float x = angles[i];
-        float c = velocity[i] + omega * x;
-        angles[i] = (x + c * dt) * decay;
-        velocity[i] = (velocity[i] - omega * c * dt) * decay;
+
+    for (; msec > 0; msec -= CG_KICK_STEP_MSEC) {
+        const float ft = 0.001f * (float)(msec < CG_KICK_STEP_MSEC ? msec : CG_KICK_STEP_MSEC);
+
+        for (i = 0; i < 3; ++i) {
+            float change, next;
+
+            if (angles[i] == 0.0f && velocity[i] == 0.0f)
+                continue;
+            if (angles[i] != 0.0f)
+                velocity[i] += (angles[i] > 0.0f ? -centerSpeed : centerSpeed) * ft;
+            change = velocity[i] * ft;
+            if (change * angles[i] < 0.0f)
+                change *= CG_KICK_RETURN;
+            next = angles[i] + change;
+            if (next * angles[i] < 0.0f || next == 0.0f) {
+                angles[i] = velocity[i] = 0.0f;
+            } else if (fabsf(next) > CG_KICK_MAX) {
+                angles[i] = next > 0.0f ? CG_KICK_MAX : -CG_KICK_MAX;
+                velocity[i] = 0.0f;
+            } else {
+                angles[i] = next;
+            }
+        }
     }
 }
 
 static void CG_UpdateViewKick(void)
 {
     const playerState_t *ps = &cg->predictedPlayerState;
-    const WeaponDef *weapon = BG_GetWeaponDef(BG_GetViewmodelWeaponIndex((void *)ps));
+    const int weaponIndex = BG_GetViewmodelWeaponIndex((void *)ps);
+    const WeaponDef *weapon = BG_GetWeaponDef(weaponIndex);
     vec3_t aim;
     int i;
     if (ps->pm_type >= 5 || !weapon) {
         memset(cg->kickAVel, 0, sizeof(cg->kickAVel));
         memset(cg->kickAngles, 0, sizeof(cg->kickAngles));
     } else {
-        float centerSpeed = ps->fWeaponPosFrac == 1.0f
-            ? weapon->fAdsViewKickCenterSpeed : weapon->fHipViewKickCenterSpeed;
-        CG_IntegrateViewKick(cg->kickAngles, cg->kickAVel, centerSpeed,
-                             (float)cg->frametime * 0.001f);
+        /* The sights' centring speed from halfway into them. */
+        float centerSpeed = !weaponIndex ? CG_KICK_CENTER_SPEED
+                            : ps->fWeaponPosFrac > 0.5f ? weapon->fAdsViewKickCenterSpeed
+                                                        : weapon->fHipViewKickCenterSpeed;
+        CG_IntegrateViewKick(cg->kickAngles, cg->kickAVel, centerSpeed, cg->frametime);
     }
     for (i = 0; i < 3; ++i)
         aim[i] = cg->kickAngles[i] + cg->offsetAngles[i];

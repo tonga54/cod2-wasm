@@ -5,8 +5,9 @@ import re
 
 PROFILE_PATH = Path(__file__).resolve().parent.parent / "downstream/weapon-balance.json"
 ALLOWED_FIELDS = {
-    "locHelmet", "locHead", "minDamage", "maxDamageRange", "adsSpread",
-    "hipSpreadStandMin", "hipSpreadMax",
+    "locHelmet", "locHead", "damage", "minDamage", "maxDamageRange", "adsSpread",
+    "hipSpreadStandMin", "hipSpreadMax", "adsViewKickPitchMin", "adsViewKickPitchMax",
+    "adsViewKickYawMin", "adsViewKickYawMax", "adsViewKickCenterSpeed",
 }
 
 
@@ -18,7 +19,7 @@ def load_profile():
         for key, values in fields.items():
             if key not in ALLOWED_FIELDS or not isinstance(values, list) or len(values) != 2:
                 raise ValueError("Invalid balance field: " + name + "/" + key)
-            if not all(isinstance(v, str) and re.fullmatch(r"\d+(?:\.\d+)?", v) for v in values):
+            if not all(isinstance(v, str) and re.fullmatch(r"-?\d+(?:\.\d+)?", v) for v in values):
                 raise ValueError("Invalid balance value: " + name + "/" + key)
     return profile
 

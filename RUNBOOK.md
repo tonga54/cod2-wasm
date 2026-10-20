@@ -4055,3 +4055,53 @@ Validation:
   and played at once, held its volume until 13.03 s and fell to 0 at 15.99 s;
   the result was still up at 2.7 s, the scoreboard at 7.1 and 12.1 s, and the
   next map loaded at 16 s.
+
+## The original camera kick, and a weaker PPSh — 2026-10-20
+
+The owner found the PPSh too strong, and most automatic weapons without
+recoil: firing left the sight where it was. The camera kick fed the damped
+spring of 2026-10-08, whose stiffness, the square root of the centring speed
+(40 a second for 1600), brought each round's 0.6 degrees back before the next:
+ten rounds never raised the sight past about 0.7 degrees.
+
+The owner's `CoD2MP_s.exe`, disassembled locally, integrates the kick at
+`0x4cec80` as RTCW's `CG_KickAngles` does. In 5 ms steps, the weapon's centring
+speed, aimed once the weapon is more than halfway up and 2400 with none in
+hand, accelerates each angle back. An angle on its way back moves only 0.06
+as far, one crossing the centre stops there, and none passes 10 degrees.
+`CG_IntegrateViewKick` now does exactly that, for every weapon with its retail
+values. A burst climbs: an aimed Thompson is 3.1 degrees up after 0.25 s and
+6.2 after 0.5 s, and the sight settles 0.2–0.4 s after the trigger is
+released. The command still carries the kick, so bullets follow the sight.
+
+`lan-balanced-v2` adds the PPSh. It deals 30 body damage instead of 35, so
+four torso shots kill instead of three, and 10 instead of 20 at range; full
+damage ends at 700 units instead of 1,000; head and helmet are ×2 instead of
+×3, so one headshot no longer kills. Aimed, it kicks 62–70 up and up to 50
+either side (from 60–65 and −20 to 40) and centres at 2000 instead of 2200:
+it climbs about 30% faster than the Thompson and moves twice as far sideways.
+`weapon_balance.py` accepts `damage` and the aimed kick fields, negative
+values included.
+
+Validation:
+
+- `scripts/test-client-clock-recoil.py` runs the production integrator and
+  `CG_UpdateViewKick`. One kick goes out to about v²/2c and back several
+  times slower, to exactly 0, at every frame from 1 to 100 ms; frames of
+  whole steps take the reference path and others stay within 0.25 degrees.
+  Ten kicks at a Thompson's pace climb past 5 degrees and settle. It also
+  checks the 10 degree limit, stopping at the centre, aimed centring from
+  halfway in, the fixed speed with no weapon and none when dead; 7 recoil
+  mutants fail.
+- `scripts/test-weapon-balance.py` (owner data) audits 37 definitions with
+  130,910 server damage cases. The PPSh's close body damage falls but still
+  kills in four, no changed automatic weapon kills with one headshot, and
+  recoil overrides only ever add kick. It now leaves the generated mine and
+  C4 to their own audit; it had stopped at them.
+- `check-private-assets.py`, `test-weapon-fire-modes.py`,
+  `test-ads-transitions.py`, `test-melee-damage.py` and
+  `test-grenade-indicators.py` pass.
+- In a Carentan TDM room, a one-second aimed burst at a wall raised the view
+  by about a sixth of the screen with the PPSh (14 rounds) and the Thompson
+  (13 rounds); a second after release the view was back where it started,
+  with the hits running up the wall from the aim point.

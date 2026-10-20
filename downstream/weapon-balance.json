@@ -1,9 +1,21 @@
 {
-  "id": "lan-balanced-v1",
+  "id": "lan-balanced-v2",
   "reference": "Owner-supplied CoD2 multiplayer weapon definitions; later retail IWDs override earlier files.",
   "designReference": "https://support.activision.com/call-of-duty--wwii/articles/call-of-duty-wwii-multiplayer",
-  "note": "Custom LAN tuning based on retail CoD2. These overrides are not official WWII statistics. Preserve original close body damage, cadence, recoil, magazines and reloads; reduce automatic headshot and ranged/hip-fire advantages.",
+  "note": "Custom LAN tuning based on retail CoD2. These overrides are not official WWII statistics. Preserve original cadence, magazines and reloads, and the close body damage and recoil of every weapon but the PPSh, which deals less and kicks more; reduce automatic headshot and ranged/hip-fire advantages.",
   "weapons": {
+    "ppsh_mp": {
+      "damage": ["35", "30"],
+      "minDamage": ["20", "10"],
+      "maxDamageRange": ["1000", "700"],
+      "locHelmet": ["3", "2"],
+      "locHead": ["3", "2"],
+      "adsViewKickPitchMin": ["60", "62"],
+      "adsViewKickPitchMax": ["65", "70"],
+      "adsViewKickYawMin": ["-20", "-50"],
+      "adsViewKickYawMax": ["40", "50"],
+      "adsViewKickCenterSpeed": ["2200", "2000"]
+    },
     "sten_mp": {
       "locHelmet": ["3", "2"],
       "locHead": ["3", "2"],
