@@ -2039,7 +2039,7 @@ static void SV_BotRunAI(int clientNum, playerState_t *ps)
     if(!visible) ai->scopeReadyAt=0;
     if(visible) {
         WeaponDef *weapon=ps->weapon>0?BG_GetWeaponDef(ps->weapon):NULL;
-        if(g_entities[clientNum].health<45 || (weapon && weapon->iClipIndex>=0 &&
+        if(g_entities[clientNum].health*100<ps->stats[2]*45 || (weapon && weapon->iClipIndex>=0 &&
            weapon->iClipIndex<128 && !ps->ammoclip[weapon->iClipIndex] && ps->weaponTime>500))
             Bot_FindCover(ai,ps);
     }

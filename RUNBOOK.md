@@ -5056,3 +5056,90 @@ Validation:
   aim, and five again after the UV change.
 - `render-class-pictures.py --only shotgun_mp thompson_mp --out /tmp/...`
   draws the sights in each gun's metal.
+
+## Players at 125 health — 2026-10-20
+
+The owner felt that players and bots died too quickly now that classes exist,
+though weapons that kill with one shot should still do so. Retail CoD2 gives
+every player 100 health. Up close, the class guns killed in 0.17 to 0.24 s
+(three body shots for most automatic weapons and pistols).
+
+Every mode now gives players and bots 125. When the archives are prepared,
+`browser_player_health.py` rewrites retail's `maxhealth = 100;` in the five
+modes' `spawnPlayer` and in HQ's two heals, when a radio is taken or lost.
+`check-private-assets.py` checks the result. Up to 135, every single shot
+that killed still kills: a bolt-action or scoped rifle's to the body (90 ×
+1.5) and a semi-automatic rifle's to the head (45 × 3) deal 135. Above that
+they would take two.
+
+`lan-balanced-v4` gives every automatic weapon and pistol one more shot to
+the body:
+- the MP40 and Grease Gun deal 40 instead of 45, since three shots of 45
+  still kill at 125;
+- the pistols deal 40 too. Their head multiplier is ×3.125, so a headshot up
+  close deals exactly 125. That is the most that leaves no hit at any range a
+  larger share of a life than retail's;
+- the PPSh's head is ×2.125, so two headshots kill: ×2.1 truncates 30 to 62.
+
+Shots to the upper torso up close, and the time they take:
+
+| Weapon | Shots | Time | Before |
+| --- | --- | --- | --- |
+| Thompson, PPS-42 | 4 | 257 ms | 3 in 171 ms |
+| Sten | 4 | 300 ms | 3 in 200 ms |
+| PPSh | 5 | 268 ms | 4 in 201 ms |
+| MP40, Grease Gun | 4 | 360 ms | 3 in 240 ms |
+| BAR | 4 | 330 ms | 3 in 220 ms |
+| MP44, Bren | 4 | 360 ms | 3 in 240 ms |
+| Pistols | 4 | 375–405 ms | 3 in 250–270 ms |
+| Semi-automatic rifles | 2 | 135 ms | unchanged |
+| Bolt-action and scoped rifles | 1 | — | unchanged |
+
+Automatic weapons kill with two headshots, never one. Semi-automatic rifles
+and pistols kill with one up close.
+
+The engine follows the new health through `BG_PLAYER_HEALTH` in
+`bg_player_health.h`:
+- High Caliber keeps an automatic weapon's headshot a point short of 125
+  instead of 100. No gun reaches that cap any more: the BAR's and MP44's
+  headshot rises to 120.
+- A butt strike deals 50 of retail's 100, scaled to 63, so two still kill.
+  A weaker strike, a grenade's 40 for example, keeps its share.
+- Bots look for cover below 45% of their full health instead of below 45.
+
+The retail regeneration (`_healthoverlay.gsc`) already takes the health a
+player has at `spawned_player` as full, and each mode sets health before that.
+Falls deal a share of full health, and the client's low-health overlay and
+grenade warning read the maximum from the player state. Grenades and mines
+keep their damage, so they kill in a smaller radius and wound at their edges:
+
+| Explosive | Kill radius now | Before |
+| --- | --- | --- |
+| Frag | 128 units | 171 units |
+| C4 | 168 units | 202 units |
+| S-Mine | 140 units | 160 units |
+
+Validation:
+
+- `test-player-health.py` (new, also in the Pi release build): the five
+  modes' patch and HQ's heals, unexpected retail refused, the engine's copy
+  equal to the Python one, 5 mutants. With the owner's files, it also checks
+  that every mode sets health before the regeneration reads it.
+- `test-weapon-balance.py` measures against the players' health, through the
+  server's damage functions (130,910 cases):
+  - no hit at any range takes a larger share of a life than retail's of 100;
+  - the shots that kill up close match the table above for all 24 rated guns;
+  - no automatic weapon kills with one headshot.
+  Run at 100, 120, 136 or 140 health, it fails.
+- `test-attachments.py` (61 mutants) covers the High Caliber cap.
+  `test-melee-damage.py` covers the scaled strike, and its mutants fail.
+  `test-bot-ai.py` covers the cover threshold: at 125, 56 takes cover and 57
+  does not. The old threshold fails it.
+- `check-private-assets.py` and `test-endgame.py` pass. The client and native
+  server build.
+- QA: a Toujane TDM with 8 Normal bots, on the native server with the
+  prepared archives, read from `games_mp.log`. In 29 of 67 deaths, the
+  victim had already taken 105 to 122 in the same burst. No death of several
+  hits took less than 127 in its burst. All 21 one-shot deaths were bolt-action
+  or scoped rifles. Lives that took 120, then another 128 or 160, regenerated
+  between bursts.

@@ -2,6 +2,7 @@
 #include "imports.h"
 #include "bytematch.h"
 #include "headers/PC/bgame/bg_attachments.h"
+#include "headers/PC/bgame/bg_player_health.h"
 
 extern int rand(void);
 extern double tan(double x);
@@ -148,9 +149,11 @@ void Weapon_Melee(gentity_s (*ent)[16], weaponParms *wp, float range, float widt
     weaponIndex = ((gentity_t *)ent)->s.weapon;
     damage = ((WeaponDef *)BG_GetWeaponDef(weaponIndex))->iMeleeDamage;
     /* Custom LAN balance: two butt strikes against a full-health player.
-     * Keep weapons with weaker melee damage at their original value. */
+     * Weapons with weaker melee damage keep the share of a life theirs took
+     * of retail's 100. */
     if (damage > 50)
         damage = 50;
+    damage = (damage * BG_PLAYER_HEALTH + 99) / 100;
 
     if (!Melee_Trace((gentity_t *)ent, wp, damage, range, width, height, &tr, endpos))
         return;

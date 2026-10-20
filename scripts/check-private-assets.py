@@ -20,6 +20,7 @@ from browser_settings_menu import apply_settings_menu
 from browser_objective_assets import objective_asset_roots
 from browser_spawn_safety import apply_spawn_safety
 from browser_endgame import SCRIPTS as ENDGAME_SCRIPTS, apply_endgame_timing
+from browser_player_health import apply_player_health
 from browser_sound_assets import (ENDGAME_MUSIC_FILE, ENDGAME_MUSIC_OWNER_FILE, ENDGAME_MUSIC_TABLE,
                                   HIT_SOUND_ALIAS, HIT_SOUND_FILE, HIT_SOUND_OWNER_FILE, HIT_SOUND_TABLE,
                                   LASTMINUTE_MUSIC_FILE, LASTMINUTE_MUSIC_TABLE, lastminute_owner_file,
@@ -115,9 +116,9 @@ try:
                     assert original.count(b'self.sessionstate = "playing";') == 1
                     expected = original.replace(b"delay = 2;", b'delay = 3;\n\tself setClientCvar("cg_respawnDeadline", getTime() + 3000);')
                     expected = expected.replace(b'self.sessionstate = "playing";', b'self.sessionstate = "playing";\n\tself setClientCvar("cg_respawnDeadline", 0);')
-                    assert data == apply_endgame_timing(name, expected), name
+                    assert data == apply_player_health(name, apply_endgame_timing(name, expected)), name
                 elif name in ENDGAME_SCRIPTS:
-                    assert data == apply_endgame_timing(name, original), name
+                    assert data == apply_player_health(name, apply_endgame_timing(name, original)), name
                 elif name == "ui_mp/createserver.menu":
                     assert data == apply_bot_menu(original), name
                 elif name == "ui_mp/joinserver.menu":

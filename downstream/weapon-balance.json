@@ -1,8 +1,8 @@
 {
-  "id": "lan-balanced-v3",
+  "id": "lan-balanced-v4",
   "reference": "Owner-supplied CoD2 multiplayer weapon definitions; later retail IWDs override earlier files.",
   "designReference": "https://support.activision.com/call-of-duty--wwii/articles/call-of-duty-wwii-multiplayer",
-  "note": "Custom LAN tuning based on retail CoD2. These overrides are not official WWII statistics. Preserve original cadence, magazines, reloads and handling. Weapons that share a class, damage, rate of fire, zoom and bullet share one damage model. No automatic weapon kills with one headshot. SMGs firing 700 rounds a minute or more keep full damage to 600 units and fall to 10 by 1,500; slower SMGs to 700 and 2,000. Automatic rifles fall from 40 to 28 between 1,200 and 2,500 units, with 0.2 degrees of aimed spread. The PPSh deals 30 up close and kicks more.",
+  "note": "Custom LAN tuning based on retail CoD2. These overrides are not official WWII statistics. Preserve original cadence, magazines, reloads and handling. Weapons that share a class, damage, rate of fire, zoom and bullet share one damage model. Players have 125 health (browser_player_health.py): every automatic weapon and pistol takes one more shot to the body than at retail's 100, so the MP40, Grease Gun and pistols deal 40. Bolt-action rifles still kill with one shot to the body, and semi-automatic rifles and pistols with one to the head up close. No automatic weapon kills with one headshot, and two do. SMGs firing 700 rounds a minute or more keep full damage to 600 units and fall to 10 by 1,500; slower SMGs to 700 and 2,000. Automatic rifles fall from 40 to 28 between 1,200 and 2,500 units, with 0.2 degrees of aimed spread. The PPSh deals 30 up close and kicks more.",
   "weapons": {
     "thompson_mp": {
       "locHelmet": ["3", "2"],
@@ -22,8 +22,8 @@
       "minDamage": ["20", "10"],
       "maxDamageRange": ["1000", "600"],
       "minDamageRange": ["2000", "1500"],
-      "locHelmet": ["3", "2"],
-      "locHead": ["3", "2"],
+      "locHelmet": ["3", "2.125"],
+      "locHead": ["3", "2.125"],
       "adsViewKickPitchMin": ["60", "62"],
       "adsViewKickPitchMax": ["65", "70"],
       "adsViewKickYawMin": ["-20", "-50"],
@@ -37,11 +37,13 @@
       "adsSpread": ["0", "0.2"]
     },
     "mp40_mp": {
+      "damage": ["45", "40"],
       "locHelmet": ["3", "2"],
       "locHead": ["3", "2"],
       "maxDamageRange": ["1000", "700"]
     },
     "greasegun_mp": {
+      "damage": ["45", "40"],
       "locHelmet": ["3", "2"],
       "locHead": ["3", "2"],
       "maxDamageRange": ["1000", "700"]
@@ -77,6 +79,26 @@
       "locTorsoLower": ["2", "1"],
       "locRightLegUpper": ["2", "1"],
       "locLeftLegUpper": ["2", "1"]
+    },
+    "colt_mp": {
+      "damage": ["45", "40"],
+      "locHelmet": ["2.5", "3.125"],
+      "locHead": ["2.5", "3.125"]
+    },
+    "webley_mp": {
+      "damage": ["45", "40"],
+      "locHelmet": ["2.5", "3.125"],
+      "locHead": ["2.5", "3.125"]
+    },
+    "tt30_mp": {
+      "damage": ["45", "40"],
+      "locHelmet": ["2.5", "3.125"],
+      "locHead": ["2.5", "3.125"]
+    },
+    "luger_mp": {
+      "damage": ["45", "40"],
+      "locHelmet": ["2.5", "3.125"],
+      "locHead": ["2.5", "3.125"]
     }
   }
 }

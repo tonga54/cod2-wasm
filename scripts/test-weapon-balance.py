@@ -8,9 +8,23 @@ import tempfile
 import zipfile
 from weapon_balance import apply_weapon_balance, load_profile, weapon_fields
 from browser_explosives import WEAPONS as EXPLOSIVES
+from browser_player_health import PLAYER_HEALTH
 
 root = Path(__file__).resolve().parent.parent
 profile = load_profile()
+# Up close, at the players' health: the shots that kill to the upper torso and to the head. Every automatic
+# weapon and pistol takes one more to the body than at retail's 100; the bolt-action rifles still kill with one
+# to the body, the semi-automatic rifles and pistols with one to the head, the automatic weapons with two.
+KILL_SHOTS = {
+    'thompson_mp': (4, 2), 'pps42_mp': (4, 2), 'sten_mp': (4, 2), 'ppsh_mp': (5, 2), 'mp40_mp': (4, 2),
+    'greasegun_mp': (4, 2), 'bar_mp': (4, 2), 'bren_mp': (4, 2), 'mp44_mp': (4, 2),
+    'colt_mp': (4, 1), 'webley_mp': (4, 1), 'tt30_mp': (4, 1), 'luger_mp': (4, 1),
+    'm1garand_mp': (2, 1), 'm1carbine_mp': (2, 1), 'svt40_mp': (2, 1), 'g43_mp': (2, 1),
+    'kar98k_mp': (1, 1), 'enfield_mp': (1, 1), 'mosin_nagant_mp': (1, 1), 'springfield_mp': (1, 1),
+    'kar98k_sniper_mp': (1, 1), 'enfield_scope_mp': (1, 1), 'mosin_nagant_sniper_mp': (1, 1),
+}
+# The Trench Gun's damage is a pellet's; the default weapon no class gives.
+UNRATED = {'shotgun_mp', 'defaultweapon_mp'}
 with zipfile.ZipFile(root / 'data/browser/main/cod2_browser_renderer.iwd') as archive:
     current = {n: archive.read(n) for n in archive.namelist() if n.startswith('weapons/mp/')}
 original = {}
@@ -75,9 +89,10 @@ for name, data in sorted(current.items()):
     balanced[name.removeprefix('weapons/mp/')] = after
     metrics.append('{' + initializer(before) + ',' + initializer(after) + ',' +
                    str(int(bool(differences))) + ',' + str(int(name.endswith(('bren_mp', 'mp44_mp', 'bar_mp')))) + ',' +
-                   str(int('damage' in differences)) + ',' + str(int(automatic)) + ',' + str(reviewed) + '}')
-
+                   str(int('damage' in differences)) + ',' + str(int(automatic)) + ',' + str(reviewed) + ',' +
+                   ','.join(map(str, KILL_SHOTS.get(name.removeprefix('weapons/mp/'), (0, 0)))) + '}')
 assert sorted(changed) == sorted(profile['weapons'])
+assert set(KILL_SHOTS) == set(balanced) - UNRATED, sorted(set(KILL_SHOTS) ^ (set(balanced) - UNRATED))
 
 # Congruence: weapons alike in class, damage, rate of fire, zoom and bullet
 # differ only in magazines, reloads and handling, never in how they hurt.
@@ -89,7 +104,7 @@ for name, fields in balanced.items():
 for key, names in twins.items():
     assert len({tuple(balanced[name][k] for k in model_fields) for name in names}) == 1, names
 assert any(len(names) > 1 for names in twins.values())
-# The automatic weapons' rules: two headshots to kill; SMGs falling to 10,
+# The automatic weapons' rules: the helmet as the head; SMGs falling to 10,
 # from 600 to 1,500 units at 700 rounds a minute or more and from 700 to
 # 2,000 below; automatic rifles from 40 to 28 between 1,200 and 2,500, with
 # 0.2 degrees of aimed spread.
@@ -97,7 +112,7 @@ automatics = [name for name, fields in balanced.items() if fields['semiAuto'] !=
 assert len(automatics) == 9, automatics
 for name in automatics:
     fields = balanced[name]
-    assert fields['locHead'] == fields['locHelmet'] == '2', name
+    assert fields['locHead'] == fields['locHelmet'], name
     if fields['weaponClass'] == 'smg':
         expected = ('10', '600', '1500') if 60 / float(fields['fireTime']) >= 700 else ('10', '700', '2000')
         assert (fields['minDamage'], fields['maxDamageRange'], fields['minDamageRange']) == expected, name
@@ -178,13 +193,14 @@ static int Dvar_GetInt(const char *name) {return 0;}
 static int OnSameTeam(gentity_t *a,gentity_t *b) {return 1;}
 '''
 checks = r'''
-typedef struct {WeaponDef retail,balanced;int changed,rangedAutomatic,closeBodyReduced,automatic,reviewed;} Metric;
+typedef struct {WeaponDef retail,balanced;int changed,rangedAutomatic,closeBodyReduced,automatic,reviewed,bodyShots,headShots;} Metric;
 static int shot(WeaponDef *weapon,float distance,int loc) {
  activeWeapon=weapon;hitLocation=loc;receivedDamage=damageCalls=0;
  vec3_t start={0,0,0},end={distance*2,0,0};weaponParms wp={weapon};
  Bullet_Fire_Extended(entities,(gentity_s (*)[16])entities,start,end,1,0,&wp,entities,0);
  assert(damageCalls==(loc!=18));return receivedDamage;
 }
+static int shotsToKill(int damage) {assert(damage>0);return (HEALTH+damage-1)/damage;}
 int main(void) {
  entities[0].s.weapon=1;entities[1].takedamage=1;entities[1].client=&client;
  int cases=0;
@@ -192,34 +208,38 @@ int main(void) {
   Metric *m=metrics+w;int previous[19];for(int i=0;i<19;i++)previous[i]=10000;
   for(int distance=1;distance<=8192;distance+=31) for(int loc=0;loc<19;loc++) {
    int old=shot(&m->retail,distance,loc),now=shot(&m->balanced,distance,loc);
-   assert(now<=old && now<=previous[loc]);previous[loc]=now;
+   /* No hit takes more of the players' health than retail's of its 100,
+    * and none more further away. */
+   assert(now*100<=old*HEALTH && now<=previous[loc]);previous[loc]=now;
    if(!m->changed)assert(now==old);
    if(m->changed && distance<100) {
-    /* A reviewed hit location deals less, an automatic weapon's headshot
-     * still half or more of a life. */
-    if(m->reviewed>>loc&1) {assert(now<old);if(m->automatic&&(loc==1||loc==2))assert(now>=50);}
-    /* Where reviewed, a weaker body shot that still kills in four. */
-    else if(m->closeBodyReduced) {assert(loc==18 ? now==old : now<old);if(loc==4||loc==5)assert(3*now<100 && 4*now>=100);}
+    /* A reviewed hit location deals what it did not. */
+    if(m->reviewed>>loc&1) assert(now!=old);
+    /* Where the damage is reviewed, every hit deals less. */
+    else if(m->closeBodyReduced) assert(loc==18 ? now==old : now<old);
     else assert(now==old);
    }
    /* No automatic weapon kills with one headshot. */
-   if(m->automatic && (loc==1 || loc==2)) assert(now<100);
+   if(m->automatic && (loc==1 || loc==2)) assert(now<HEALTH);
    cases++;
   }
   for(int side=-1;side<=1;side++) for(int loc=0;loc<19;loc++) {
    shot(&m->balanced,m->balanced.fMaxDamageRange+side,loc);
    shot(&m->balanced,m->balanced.fMinDamageRange+side,loc);
   }
+  /* The shots that kill up close, to the upper torso and to the head. */
+  if(m->bodyShots) assert(shotsToKill(shot(&m->balanced,10,4))==m->bodyShots &&
+                          shotsToKill(shot(&m->balanced,10,2))==m->headShots);
   if(m->rangedAutomatic) {assert(shot(&m->balanced,3000,4)==28);assert(shot(&m->balanced,3000,2)==56);}
  }
- printf("PASS: %d original/balanced server bullet/player-damage cases, 19 hit locations, range boundaries, close body damage preserved but where reviewed (four body shots), no automatic one-headshot kill\n",cases);
+ printf("PASS: %d original/balanced server bullet/player-damage cases, 19 hit locations, range boundaries, no hit more of the players' %d health than of retail's 100, the shots that kill up close, no automatic one-headshot kill\n",cases,HEALTH);
  return 0;
 }
 '''
 with tempfile.TemporaryDirectory(prefix='cod2-weapon-balance-') as directory:
     path = Path(directory)
     table = 'static Metric metrics[]={' + ',\n'.join(metrics) + '};\n'
-    checks = checks.replace('int main(void)', table + 'int main(void)')
+    checks = f'#define HEALTH {PLAYER_HEALTH}\n' + checks.replace('int main(void)', table + 'int main(void)')
     (path / 'test.c').write_text(support + body + checks)
     subprocess.run(['cc', '-std=c99', '-O1', '-g', '-fsanitize=address,undefined',
                     str(path / 'test.c'), '-lm', '-o', str(path / 'test')], check=True)
@@ -227,7 +247,7 @@ with tempfile.TemporaryDirectory(prefix='cod2-weapon-balance-') as directory:
 
 output = root / 'out/weapon-balance-audit.json'
 output.parent.mkdir(exist_ok=True)
-output.write_text(json.dumps({'profile': profile['id'], 'healthReference': 100,
+output.write_text(json.dumps({'profile': profile['id'], 'healthReference': PLAYER_HEALTH,
     'note': 'Body/head damage uses the server range curve and hit multipliers. Shotgun damage is per pellet; turret file stats do not assert a player TTK.',
     'weapons': report}, indent=2) + '\n')
 print(f'PASS: {len(report)} packaged weapon definitions audited; only {len(changed)} reviewed definitions changed, '

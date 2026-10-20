@@ -5,6 +5,7 @@ import re
 import subprocess
 import tempfile
 import zipfile
+from browser_player_health import PLAYER_HEALTH
 from weapon_balance import weapon_fields
 
 root = Path(__file__).resolve().parent.parent
@@ -102,12 +103,16 @@ int main(void) {
  entities[0].s.weapon=1;entities[1].takedamage=1;entities[1].client=&client;
  int cases=0;
  for(int w=0;w<sizeof(weapons)/sizeof(weapons[0]);w++) {
-  activeWeapon=weapons+w;int expected=activeWeapon->iMeleeDamage>50 ? 50 : activeWeapon->iMeleeDamage;
+  activeWeapon=weapons+w;
+  int retail=activeWeapon->iMeleeDamage>50 ? 50 : activeWeapon->iMeleeDamage;
+  int expected=(retail*BG_PLAYER_HEALTH+99)/100;
+  /* As many strikes kill a full-health player as killed one of retail's 100. */
+  assert((BG_PLAYER_HEALTH+expected-1)/expected==(100+retail-1)/retail);
   for(hitLocation=0;hitLocation<19;hitLocation++) for(int seed=0;seed<20;seed++) {
-   srand(seed);entities[1].health=100;strike();
-   assert(damageCalls==1 && receivedDamage==expected && entities[1].health==100-expected);
+   srand(seed);entities[1].health=BG_PLAYER_HEALTH;strike();
+   assert(damageCalls==1 && receivedDamage==expected && entities[1].health==BG_PLAYER_HEALTH-expected);
    assert(entities[1].health>0 && triggerDamage==expected && traceCalls==1 && temp.s.otherEntityNum==1);
-   if(expected==50) {strike();assert(entities[1].health==0);}
+   if(retail==50) {strike();assert(entities[1].health<=0);}
    entities[1].health=expected;strike();assert(entities[1].health==0);
    cases++;
   }
@@ -127,8 +132,9 @@ int main(void) {
    assert(receivedDamage==expectedDamage && damageCalls==(expectedDamage>0));
   }
  }
- // A weaker custom weapon is not promoted to 50 damage.
- WeaponDef weak={.iMeleeDamage=35};activeWeapon=&weak;hitLocation=2;entities[1].health=100;strike();assert(entities[1].health==65);
+ // A weaker custom weapon keeps its share of a life, short of the cap's.
+ WeaponDef weak={.iMeleeDamage=35};activeWeapon=&weak;hitLocation=2;entities[1].health=BG_PLAYER_HEALTH;strike();
+ assert(entities[1].health==BG_PLAYER_HEALTH-(35*BG_PLAYER_HEALTH+99)/100);
  printf("PASS: %d melee strikes across %zu packaged weapons and 19 hit locations; two-hit kills, wounded targets, trace/gates, MOD_MELEE and other damage preserved\n",cases,sizeof(weapons)/sizeof(weapons[0]));
 }
 '''
@@ -138,6 +144,8 @@ array += 'static float g_fHitLocDamageMult[19]={' + ','.join(
     for loc in locations) + '};\n'
 variants = [body,
             body.replace('if (damage > 50)\n        damage = 50;', ''),
+            body.replace('    damage = (damage * BG_PLAYER_HEALTH + 99) / 100;\n', ''),
+            body.replace('(damage * BG_PLAYER_HEALTH + 99) / 100', '(damage * BG_PLAYER_HEALTH) / 100'),
             body.replace('damage, 0, 7, tr.partGroup', 'damage + (rand() % 5), 0, 7, tr.partGroup'),
             body.replace('damage, 0, 7, tr.partGroup', 'damage, 7, 0, tr.partGroup'),
             body.replace('if (mod != 7)', 'if (1)')]
@@ -145,11 +153,12 @@ assert len(set(variants)) == len(variants)
 with tempfile.TemporaryDirectory(prefix='cod2-melee-damage-') as directory:
     path = Path(directory)
     for index, variant in enumerate(variants):
-        (path / 'test.c').write_text(support + array + variant + checks)
+        (path / 'test.c').write_text(f'#define BG_PLAYER_HEALTH {PLAYER_HEALTH}\n' + support + array + variant + checks)
         subprocess.run(['cc', '-std=c99', '-O1', '-g', '-fsanitize=address,undefined',
                         str(path / 'test.c'), '-o', str(path / 'test')], check=True)
         result = subprocess.run([str(path / 'test')], capture_output=True, text=True)
         assert (result.returncode == 0) == (index == 0), result.stderr
         if index == 0:
             print(result.stdout, end='')
-print('PASS: removing the cap, restoring random bonus, swapping MOD/flags or applying bullet multipliers all fail')
+print('PASS: removing the cap, not scaling to the players\' health or rounding it down, restoring random bonus, '
+      'swapping MOD/flags or applying bullet multipliers all fail')

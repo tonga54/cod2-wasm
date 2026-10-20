@@ -372,6 +372,14 @@ int main(void){
  clients[1].ps.origin[0]=1200;clients[0].ps.origin[0]=0;svs.time+=1000;
  SV_BotEnableAI(0,1);SV_BotRunAI(0,&clients[0].ps);
  assert(s_botCmdState[0].forwardmove>0);
+ // Below 45% of the full health its mode gives, a bot that sees its enemy
+ // looks for cover: at 56 of 125, not at 57.
+ clients[0].ps.stats[2]=125;
+ for(int health=57;health>=56;health--) {
+  g_entities[0].health=health;s_botAI[0].nextCover=0;svs.time+=50;SV_BotRunAI(0,&clients[0].ps);
+  assert((s_botAI[0].nextCover>svs.time)==(health==56));
+ }
+ g_entities[0].health=100;clients[0].ps.stats[2]=0;
 
  // Detect original ladder material and route both ways. Commands must climb
  // and descend through normal pmove, with no synthetic origin/velocity writes.

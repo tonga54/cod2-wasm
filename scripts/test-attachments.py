@@ -306,17 +306,21 @@ int main(void)
     d = Attached(GARAND, ATT_BIT(ATT_HIGHCAL));
     assert(NEAR(d.locationDamageMultipliers[HITLOC_HEAD], 3.0f) && NEAR(d.locationDamageMultipliers[HITLOC_HELMET], 3.0f));
     assert(NEAR(d.locationDamageMultipliers[4], 1.0f) && NEAR(d.fAdsViewKickPitchMax, 80.5f));
-    /* An automatic rifle's headshot stops a point short of killing alone,
-     * after the server truncates it, and never falls below the gun's own. */
+    /* The BAR's headshot rises by half, to 120 of the players' 125. An
+     * automatic weapon's stops a point short of killing alone, after the
+     * server truncates it, and never falls below the gun's own. */
     d = Attached(BAR, ATT_BIT(ATT_HIGHCAL));
-    assert(NEAR(d.locationDamageMultipliers[HITLOC_HEAD], 99.5f / 40.0f) &&
-           NEAR(d.locationDamageMultipliers[HITLOC_HELMET], 99.5f / 40.0f));
-    assert((int)(40.0f * d.locationDamageMultipliers[HITLOC_HEAD]) == 99);
+    assert(NEAR(d.locationDamageMultipliers[HITLOC_HEAD], 3.0f) && NEAR(d.locationDamageMultipliers[HITLOC_HELMET], 3.0f));
     {
         WeaponDef high = defs[BAR];
-        high.locationDamageMultipliers[HITLOC_HEAD] = 3.0f;
+        high.locationDamageMultipliers[HITLOC_HEAD] = 2.5f;
         BG_ApplyAttachments(&high, ATT_BIT(ATT_HIGHCAL));
-        assert(NEAR(high.locationDamageMultipliers[HITLOC_HEAD], 3.0f));
+        assert(NEAR(high.locationDamageMultipliers[HITLOC_HEAD], (BG_PLAYER_HEALTH - 0.5f) / 40.0f));
+        assert((int)(40.0f * high.locationDamageMultipliers[HITLOC_HEAD]) == BG_PLAYER_HEALTH - 1);
+        high = defs[BAR];
+        high.locationDamageMultipliers[HITLOC_HEAD] = 3.5f;
+        BG_ApplyAttachments(&high, ATT_BIT(ATT_HIGHCAL));
+        assert(NEAR(high.locationDamageMultipliers[HITLOC_HEAD], 3.5f));
     }
     /* An SMG keeps its full damage range; the fall beyond it reaches a
      * quarter further. */
@@ -566,6 +570,7 @@ mutants = [
     (rules_path, '            if (cap > 0.0f && raised > cap)', '            if (0)'),
     (rules_path, 'float cap = !stats->semiAuto && !stats->boltAction &&', 'float cap = !stats->boltAction &&'),
     (rules_path, '                raised = cap > stats->headMultiplier[i] ? cap : stats->headMultiplier[i];', '                raised = cap;'),
+    (rules_path, '? (BG_PLAYER_HEALTH - 0.5f) / (float)stats->damage', '? 99.5f / (float)stats->damage'),
     (rules_path, '            stats->minDamageRange *= 1.25f;\n', '            stats->minDamageRange *= 1.25f;\n            stats->maxDamageRange *= 1.25f;\n'),
     (rules_path, 'return time > 0 ? (int)((float)time / rate + 0.5f) : time;', 'return time > 0 ? (int)((float)time / rate) : time;'),
     (rules_path, '        reach *= kind == ATT_KIND_PISTOL ? 0.85f : 0.7f;', '        reach *= 0.7f;'),

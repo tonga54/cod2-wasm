@@ -1,4 +1,5 @@
 #include "headers/PC/bgame/bg_attachment_rules.h"
+#include "headers/PC/bgame/bg_player_health.h"
 #include <stddef.h>
 #include <string.h>
 
@@ -319,7 +320,9 @@ void BG_ApplyAttachmentStats(const char *weapon, unsigned mask, AttachmentStats 
     if (mask & ATT_BIT(ATT_HIGHCAL)) {
         /* An automatic weapon's headshot stays a point short of killing
          * outright; the server truncates the damage. */
-        float cap = !stats->semiAuto && !stats->boltAction && stats->damage > 0 ? 99.5f / (float)stats->damage : 0.0f;
+        float cap = !stats->semiAuto && !stats->boltAction && stats->damage > 0
+                        ? (BG_PLAYER_HEALTH - 0.5f) / (float)stats->damage
+                        : 0.0f;
 
         for (i = 0; i < 2; i++) {
             float raised = stats->headMultiplier[i] * 1.5f;

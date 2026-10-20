@@ -206,10 +206,16 @@ retail CoD2:
   and uses the running body animation. It also stands up from crouch/prone when
   headroom permits. Sprint currently has no stamina limit.
   Melee moves to V; scoped Hold Breath continues to use Shift.
-- **Melee damage:** butt strikes deal at most 50 damage without random bonuses
-  or bullet hit-location multipliers. Two hits kill a player with 100 health;
-  an injured player can still die from one. Weaker melee weapons retain their
-  original damage. This server rule leaves the retail weapon assets intact.
+- **More health:** players and bots have 125 health instead of retail's 100 in
+  every mode, so a fight takes one more shot from an automatic weapon or a
+  pistol. Bolt-action rifles still kill with one shot to the body, and
+  semi-automatic rifles and pistols with one to the head up close. Health still
+  regenerates to full, and falls hurt in proportion to it.
+- **Melee damage:** butt strikes deal at most 50 of retail's 100 health, scaled
+  to the players' 125 (63), without random bonuses or bullet hit-location
+  multipliers. Two hits kill a player at full health; an injured player can
+  still die from one. Weaker melee weapons keep the same share of a life. This
+  server rule leaves the retail weapon assets intact.
 - **Mounted MG42 overheating:** five seconds of continuous fire fills the heat
   bar, followed by eight seconds of cooling. Heat belongs to the gun and is
   synchronized with its user. Mounted aim also kicks upward and sideways, with
@@ -218,15 +224,17 @@ retail CoD2:
   cadence, magazines, reloads and handling, and gives weapons alike in class,
   damage, rate of fire, zoom and bullet one damage model: the PPS-42 hurts as
   the Thompson does, the Grease Gun as the MP40, and the M1 Garand as the G43
-  and SVT-40. No automatic weapon kills with one headshot (×2 instead of ×3).
-  SMGs firing 700 rounds a minute or more (Thompson, PPS-42, PPSh) keep full
-  damage to 600 units and slower ones to 700, all falling to 10; the automatic
-  rifles (MP44, Bren, BAR) fall from 40 to 28 between 1,200 and 2,500 units,
-  with wider hip fire and 0.2° of aimed spread. The PPSh deals 30 instead of 35
-  up close (four body shots) and kicks higher and wider when aimed. Bolt-action
-  and scoped rifles, pistols, the shotgun, grenades and the mounted MG42 keep
-  their original definitions; the mounted heat/recoil rules are implemented
-  separately.
+  and SVT-40. No automatic weapon kills with one headshot, and two do. With the
+  players' 125 health, the MP40, Grease Gun and pistols deal 40 instead of 45,
+  so every automatic weapon and pistol takes one more shot to the body than in
+  retail; a pistol's headshot (×3.125) still kills up close. SMGs firing 700
+  rounds a minute or more (Thompson, PPS-42, PPSh) keep full damage to 600
+  units and slower ones to 700, all falling to 10; the automatic rifles (MP44,
+  Bren, BAR) fall from 40 to 28 between 1,200 and 2,500 units, with wider hip
+  fire and 0.2° of aimed spread. The PPSh deals 30 instead of 35 up close (five
+  body shots) and kicks higher and wider when aimed. Bolt-action and scoped
+  rifles, the shotgun, grenades and the mounted MG42 keep their original
+  definitions; the mounted heat/recoil rules are implemented separately.
 - **Larger visual effects:** brief muzzle sprites are 40% larger with stronger
   color/alpha; frag fire, smoke and dust are 35% larger. Original effect textures,
   particle counts, lifetimes and grenade damage remain unchanged.
