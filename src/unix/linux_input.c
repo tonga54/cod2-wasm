@@ -167,6 +167,47 @@ static const CCallOfDutyEngine *get_engine(void)
     return (const CCallOfDutyEngine *)linux_engine_storage;
 }
 
+/* SDL posts an event for every scroll the browser reports, its pixels a
+ * hundredth of a step each (preciseY): a trackpad's are a small part of one,
+ * a sideways scroll has none, and the engine takes any step not upward as
+ * downward. A wheel's notch, 40 pixels or more (Chrome's on a Mac, 100 on
+ * Windows), is a step and a quick flick a few at most; smaller scrolls add up
+ * to a step every 100 pixels, starting over when they turn back. */
+#define IN_WHEEL_NOTCH 0.4f
+#define IN_MAX_WHEEL_STEPS 3
+
+static float s_wheelPending;
+
+static void IN_MouseWheel(float precise)
+{
+    Point point = { 0, 0 };
+    float size = precise < 0.0f ? -precise : precise;
+    int steps, i;
+
+    if (!(size > 0.0f))
+        return;
+    if (size >= IN_WHEEL_NOTCH) {
+        steps = (int)(size + 0.5f);
+        if (steps < 1)
+            steps = 1;
+        if (precise < 0.0f)
+            steps = -steps;
+        s_wheelPending = 0.0f;
+    } else {
+        if ((precise < 0.0f && s_wheelPending > 0.0f) || (precise > 0.0f && s_wheelPending < 0.0f))
+            s_wheelPending = 0.0f;
+        s_wheelPending += precise;
+        steps = (int)s_wheelPending;
+        s_wheelPending -= (float)steps;
+    }
+    if (steps > IN_MAX_WHEEL_STEPS)
+        steps = IN_MAX_WHEEL_STEPS;
+    else if (steps < -IN_MAX_WHEEL_STEPS)
+        steps = -IN_MAX_WHEEL_STEPS;
+    for (i = 0; i < steps || i < -steps; ++i)
+        CCallOfDutyEngine_DoMouseWheel(get_engine(), steps, point, 0);
+}
+
 int SDL_PumpInputEvents(void)
 {
     SDL_Event ev;
@@ -204,8 +245,7 @@ int SDL_PumpInputEvents(void)
             break;
         }
         case SDL_MOUSEWHEEL: {
-            Point point = { 0, 0 };
-            CCallOfDutyEngine_DoMouseWheel(get_engine(), ev.wheel.y, point, 0);
+            IN_MouseWheel(ev.wheel.preciseY);
             ++inputEventCount;
             break;
         }

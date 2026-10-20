@@ -4002,3 +4002,23 @@ Validation:
   followed at up to 3.9 degrees a second while the left stick moved, 0.26
   degrees in all, and not at all without stick input. With the keyboard last
   used, the sweep kept 12.25 over it too.
+
+## Mouse wheel scrolling in the browser — 2026-10-19
+
+Scrolling the class and weapon lists jumped about. SDL 2.28 posts an event
+for every scroll the browser reports, with the whole steps accumulated at 100
+pixels a step, so a trackpad's or Mac wheel's small scrolls mostly carried
+none, and a sideways scroll no vertical one; the engine's wheel handler takes
+anything not upward as downward, so scrolling up mostly scrolled down.
+`IN_MouseWheel` (linux_input.c) now reads `preciseY`: a notch of 40 pixels or
+more (Chrome's on a Mac, 100 on Windows) is a step, a quick flick a few, three
+at most; smaller scrolls add up to a step every 100 pixels and start over when
+they turn back; sideways scrolls do nothing. The same steps reach weapon
+switching in a match.
+
+Validation: `scripts/test-mouse-wheel.py` (new) runs the production function
+on scrolls as SDL reports them, with 8 failing mutants, among them the old
+single call. In the browser, small 12.5-pixel scrolls moved the class list a
+row per 100 pixels the way they went, three 40-pixel notches three rows, and
+in the weapon picker four 100-pixel notches went from 12/21 to 16/21 and two
+40-pixel notches up to 14/21.
