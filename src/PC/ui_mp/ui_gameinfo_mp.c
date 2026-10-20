@@ -156,7 +156,8 @@ void UI_LoadArenas(void)
             I_stricmp(mapName, "mp_carentan") != 0 &&
             I_stricmp(mapName, "mp_dawnville") != 0 &&
             I_stricmp(mapName, "mp_burgundy") != 0 &&
-            I_stricmp(mapName, "mp_railyard") != 0)
+            I_stricmp(mapName, "mp_railyard") != 0 &&
+            I_stricmp(mapName, "mp_brecourt") != 0)
             continue;
 #endif
         mapName = String_Alloc(mapName);

@@ -23,9 +23,10 @@ extern int CG_CompassUpdateFriendlies(void);
 extern const dvar_t **dvar_compassPingFadeTime;
 
 #define MINIMAP_TEXTURE_MAX 1024
-/* About 800 texels across the playable area: at the default size and range,
- * Toujane's, Carentan's, Dawnville's, Burgundy's and Stalingrad's texels are
- * under a pixel of a 1080-line screen. */
+/* About 800 texels across the playable area. At the default size and range a
+ * pixel of a 1080-line screen spans about 10 units: Toujane's, Carentan's,
+ * Dawnville's, Burgundy's and Stalingrad's texels are smaller, Brecourt's,
+ * over a larger area, 13.5 units. */
 #define MINIMAP_TARGET_TEXELS 800
 #define MINIMAP_MIN_TEXEL_SIZE 6.0f
 #define MINIMAP_SPAWN_MARGIN 1536.0f

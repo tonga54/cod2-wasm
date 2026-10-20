@@ -1,6 +1,6 @@
 # Call of Duty 2 browser runbook
 
-Status: **Toujane/Carentan/Dawnville/Burgundy/Stalingrad browser port with five multiplayer modes under active development. Chrome and
+Status: **Toujane/Carentan/Dawnville/Burgundy/Stalingrad/Brecourt browser port with five multiplayer modes under active development. Chrome and
 the internal browser have verified movement, aiming, damage, death, respawn and
 synchronized scores, including the normal room. This is two-client coverage,
 not a 64-player load or long-duration stability result.**
@@ -4769,3 +4769,52 @@ Validation:
 
 Not covered: the falling snow, as above. Only TDM ran in the browser on
 Stalingrad, and nobody played a match on it.
+
+## Brecourt enabled — 2026-10-20
+
+The owner asked to enable Brecourt, with its textures, shadows and lighting
+as on the maps added before. Brecourt, France (`mp_brecourt`) is now first in
+Start New Server's Map Select, and so its default, with the retail
+loading-screen picture and a note of its own. The gateway, room supervisor,
+discovery probe and the Pi's post-update check accept it, and rooms rotate
+through all six maps. It uses the American and German Normandy factions.
+
+The private renderer archive gains 115 files, 15 MB (385.4 to 400.4 MB): the
+BSP and map scripts, 15 materials, 29 textures, 17 models and the flies
+effect. Its vegetation, flak guns and uniforms are the other Normandy maps'.
+Its materials add no technique, its textures no format, and every packaged
+effect's flags parse. `site/wasm-game-data.json` is regenerated with this
+commit, and the Pi regenerates the same archives from its retail IWDs, where
+Brecourt's BSP is in `iw_03.iwd`.
+
+Brecourt has 8,558 static models, mostly grass, hedges and trees. In every
+view tested more of them pass culling than the 2,046 entities a scene holds,
+also at the original `r_lodDistanceScale` of 1, so `R_AddStaticModelToScene`
+leaves the rest out and warns once a frame. The cgame adds players, weapons
+and effects before the world, so only static models are left out. The cap is
+the original's: `sceneEnts[2046]` and entity indices below the world's
+`0x800`. The same views at both distance scales looked alike, with no
+missing tree, hedge or wall. Its map CSV, like four other retail maps',
+names a material `american` for `ui_campaign`, which no archive has; the
+client warns, as the original would.
+
+Validation:
+
+- `check-private-assets.py` passes with all six BSPs.
+- `test-map-rotation.py --rounds 12`: a real dedicated server rotated twice
+  through the six maps without an error. Dedicated servers on Brecourt
+  started in all five modes without an error and reported each as their
+  mode, ready in 2.5 s and holding 180 to 222 MiB.
+- `test-room-maps.py`, `test-ui-map-selection.py`, `test-match-menu.py`,
+  `test-web-room-create.cjs` and the gateway's `rooms.test.mjs` pass.
+- The web client builds. A Brecourt TDM room with six bots in the QA stack:
+  - the console showed no other error; two lightmaps loaded, and the minimap
+    built in 227 ms at 13.5 units a texel over the larger map;
+  - screenshots showed the fields, hedges, trees, stone walls, the flak guns
+    under their nets, the tractor, the dead cows, the ruined chimney and a
+    bunker lit by its lantern;
+  - the headless client's 600-frame window held its 60 FPS cap, frame p95
+    16.8 ms, main thread 9.1 ms on average.
+
+Not covered: only TDM ran in the browser on Brecourt, and nobody played a
+match on it.

@@ -44,7 +44,7 @@ async function challenge(room){
   }finally{socket.close();}
  }
 }
-for(const map of ['mp_toujane','mp_carentan','mp_dawnville','mp_burgundy','mp_railyard']){
+for(const map of ['mp_toujane','mp_carentan','mp_dawnville','mp_burgundy','mp_railyard','mp_brecourt']){
  let room;
  try {
   room=await request(manager,'POST',{name:'Automatic update validation',map,gametype:'tdm',botCount:2,botDifficulty:'normal'});
@@ -60,4 +60,4 @@ for(const map of ['mp_toujane','mp_carentan','mp_dawnville','mp_burgundy','mp_ra
   if(room)await request(manager,'DELETE',{id:room.id,ownerToken:room.ownerToken});
  }
 }
-console.log(`PASS: ${mode} build metadata, five maps, two bots/map and native ${mode==='production'?'UDP':'WebSocket'} challenges`);
+console.log(`PASS: ${mode} build metadata, six maps, two bots/map and native ${mode==='production'?'UDP':'WebSocket'} challenges`);
