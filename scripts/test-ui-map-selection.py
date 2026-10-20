@@ -39,8 +39,12 @@ static int Dvar_GetInt(const char *name) {
     if(!strcmp(name,"ui_botCount")) return 8;
     assert(!strcmp(name,"ui_botDifficulty")); return 2;
 }
-void Web_CreateServer(const char *name, const char *map, const char *gameType, int botCount, int botDifficulty) {
-    assert(!strcmp(gameType,"tdm") && botCount==8 && botDifficulty==2);
+static void UI_MatchMenu_Rules(const char *gameType, int *timeLimit, int *scoreLimit) {
+    assert(!strcmp(gameType,"tdm")); *timeLimit=30; *scoreLimit=50;
+}
+void Web_CreateServer(const char *name, const char *map, const char *gameType, int botCount, int botDifficulty,
+                      int timeLimit, int scoreLimit) {
+    assert(!strcmp(gameType,"tdm") && botCount==8 && botDifficulty==2 && timeLimit==30 && scoreLimit==50);
     assert(!strcmp(name,"Test room")); ++calls; snprintf(output,sizeof output,"%s",map);
 }
 static const char *va(const char *format, ...) {

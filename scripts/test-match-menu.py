@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Run the production Start New Server screen (ui_match_menu.c) against a
-recording UI: the match page's Mode and Map boxes, Bots row and Start Match
-box with the focused item's page dimmed beside them; the mode, map and bot
-pages with their panels; keys, pointer and clicks; the room StartServer
-creates and its name from the gametag; the hooks that hide createserver's
-retail menus under it; and the layout's numbers against the WWII captures',
-in Barlow's metrics."""
+recording UI: the match page's Mode and Map boxes, Game Rules and Bots rows
+and Start Match box with the focused item's page dimmed beside them; the
+mode, map, rules and bot pages with their panels; keys, pointer and clicks;
+the room StartServer creates, its rules and its name from the gametag; the
+hooks that hide createserver's retail menus under it; and the layout's
+numbers against the WWII captures', in Barlow's metrics."""
+import importlib.util
 from pathlib import Path
 import re
 import subprocess
@@ -62,6 +63,33 @@ assert (key_event.index('UI_ClassMenu_KeyEvent(') <
 start_server = main.split('if (I_stricmp(name, "StartServer") == 0) {', 1)[1].split('#endif', 1)[0]
 assert 'UI_MatchMenu_RoomName(roomName, sizeof(roomName));' in start_server
 assert 'Web_CreateServer(roomName, ' in start_server and 'sv_hostname' not in start_server
+assert 'UI_MatchMenu_Rules(sharedUiInfo.gameTypes[gameTypeIdx].gameType, &timeLimit, &scoreLimit);' in start_server
+
+# The rules offered are those the gateway and rooms.py accept; each mode's
+# own is among them, Team Deathmatch's server.cfg's; the dvars hold them all.
+times = [int(value) for value in re.search(r's_matchTimeLimits\[\] = \{ ([\d, ]+) \};', source)[1].split(', ')]
+rule_modes = {match[1]: (int(match[2]), int(match[3]), [int(value) for value in match[4].split(', ')])
+              for match in re.finditer(r'\{ "(\w+)", (\d+), (\d+), \{ ([\d, ]+) \}', source)}
+spec = importlib.util.spec_from_file_location('rooms', root / 'downstream/server/rooms.py')
+rooms = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(rooms)
+gateway = (root / 'downstream/gateway/server.mjs').read_text()
+gateway_scores = re.search(r'export const SCORE_LIMITS = \{(.*?)\};', gateway, re.S)[1]
+assert times == list(rooms.TIME_LIMITS) == [
+    int(value) for value in re.search(r'export const TIME_LIMITS = \[([\d, ]+)\];', gateway)[1].split(', ')]
+assert sorted(rule_modes) == sorted(rooms.SUPPORTED_GAMETYPES)
+assert ({gametype: values for gametype, (_, _, values) in rule_modes.items()} ==
+        {gametype: list(values) for gametype, values in rooms.SCORE_LIMITS.items()} ==
+        {match[1]: [int(value) for value in match[2].split(', ')]
+         for match in re.finditer(r'(\w+): \[([\d, ]+)\]', gateway_scores)})
+for gametype, (time_limit, score_limit, values) in rule_modes.items():
+    assert time_limit in times and score_limit in values, gametype
+server_cfg = (root / 'server.cfg').read_text()
+assert rule_modes['tdm'][:2] == (int(re.search(r'set scr_tdm_timelimit "(\d+)"', server_cfg)[1]),
+                                 int(re.search(r'set scr_tdm_scorelimit "(\d+)"', server_cfg)[1]))
+assert main.count(f'Dvar_RegisterInt("ui_matchTimeLimit", -1, -1, {max(times)}, 0x1001);') == 2
+assert main.count(
+    f'Dvar_RegisterInt("ui_matchScoreLimit", -1, -1, {max(max(v) for _, _, v in rule_modes.values())}, 0x1001);') == 2
 # Over createserver, bg shows only its backdrop, as under Create a Class.
 assert 'UI_WWIIMenu_PageOpen(dc)' in function(wwii, 'UI_WWIIMenu_PaintItem')
 
@@ -202,7 +230,7 @@ void CalcScreenPlacement(float *x, float *y, float *w, float *h, int horzAlign, 
 
 static struct { const char *name; int value; char string[64]; } dvars[] = {
     { "ui_netGametype" }, { "ui_netGametypeName" }, { "ui_currentNetMap" }, { "ui_botCount" },
-    { "ui_botDifficulty", 1 }, { "name" } };
+    { "ui_botDifficulty", 1 }, { "ui_matchTimeLimit", -1 }, { "ui_matchScoreLimit", -1 }, { "name" } };
 static int dvarSets;
 static int dvarIndex(const char *name) {
     for (int i = 0; i < (int)(sizeof(dvars) / sizeof(dvars[0])); i++)
@@ -516,8 +544,9 @@ int main(void) {
     cases += 2;
 
     /* The match page: the dark scene, the title and its note, the focused
-     * Mode box in gold with the modes dimmed beside it, the Map box, the Bots
-     * row and the Start Match box; Enter and Escape prompts last. */
+     * Mode box in gold with the modes dimmed beside it, the Map box, the Game
+     * Rules and Bots rows a row apart and the Start Match box; Enter and
+     * Escape prompts last. */
     paint();
     assert(drawn[0].kind == PIC && drawn[0].horz == 4 && drawn[0].vert == 4 && near(drawn[0].w, 640) &&
            near(drawn[0].h, 480) && sameColor(drawn[0].color, shade) && drawn[0].material == &white);
@@ -527,9 +556,10 @@ int main(void) {
     assert(text("MODE", 1, 52.5f, 138.7f, 10.0f, 0, gold) && text("TEAM DEATHMATCH", 0, 52.5f, 150.0f, 6.5f, 0, note));
     assert(box(165.0f, 0) && text("MAP", 1, 52.5f, 192.0f, 9.0f, 0, light));
     assert(text("CARENTAN, FRANCE", 0, 52.5f, 203.3f, 5.5f, 0, note));
-    assert(text("BOTS", 0, 52.5f, 236.6f, 8.3f, 0, idle) && !row(236.6f, 230.8f));
-    assert(box(250.0f, 0) && text("START MATCH", 1, 52.5f, 277.0f, 9.0f, 0, light));
-    assert(text("CREATE YOUR SERVER AND JOIN IT", 0, 52.5f, 288.3f, 5.5f, 0, note));
+    assert(text("GAME RULES", 0, 52.5f, 236.6f, 8.3f, 0, idle) && !row(236.6f, 230.8f));
+    assert(text("BOTS", 0, 52.5f, 268.6f, 8.3f, 0, idle) && !row(268.6f, 230.8f));
+    assert(box(282.0f, 0) && text("START MATCH", 1, 52.5f, 309.0f, 9.0f, 0, light));
+    assert(text("CREATE YOUR SERVER AND JOIN IT", 0, 52.5f, 320.3f, 5.5f, 0, note));
     {
         static const char *const names[5] = { "CAPTURE THE FLAG", "DEATHMATCH", "HEADQUARTERS", "SEARCH AND DESTROY",
                                                "TEAM DEATHMATCH" };
@@ -543,9 +573,10 @@ int main(void) {
     cases++;
 
     /* Down goes to Map, gold and larger, the maps dimmed beside it; then the
-     * Bots row in its frame, gold and Bold further right, its settings
-     * dimmed; then Start Match, what it creates dimmed, its name the gametag
-     * without colors; then round to Mode. Tab and the wheel go too. */
+     * Game Rules row in its frame, gold and Bold further right, Team
+     * Deathmatch's rules dimmed; then the Bots row, its settings dimmed;
+     * then Start Match, what it creates dimmed, its name the gametag without
+     * colors; then round to Mode. Tab and the wheel go too. */
     overs = 0;
     assert(key(0x9b) && s_match.focus[0] == 1 && overs == 1);
     paint();
@@ -555,32 +586,44 @@ int main(void) {
            text("TOUJANE, TUNISIA", 0, 269.0f, baseline(2), 7.5f, 0, dim));
     assert(key(0x09) && s_match.focus[0] == 2);
     paint();
-    assert(row(236.6f, 230.8f) && text("BOTS", 1, 60.8f, 236.6f, 8.3f, 0, gold));
+    assert(row(236.6f, 230.8f) && text("GAME RULES", 1, 60.8f, 236.6f, 8.3f, 0, gold) && !row(268.6f, 230.8f));
+    assert(text("Time Limit", 0, 269.0f, baseline(0), 8.3f, 0, dim) &&
+           text("15 Minutes", 0, centered("15 Minutes", 0, 269.0f), baseline(0), 7.5f, 0, dim));
+    assert(text("Score Limit", 0, 269.0f, baseline(1), 8.3f, 0, dim) &&
+           text("100 Kills", 0, centered("100 Kills", 0, 269.0f), baseline(1), 7.5f, 0, dim));
+    assert(key(0xcd) && s_match.focus[0] == 3);
+    paint();
+    assert(row(268.6f, 230.8f) && text("BOTS", 1, 60.8f, 268.6f, 8.3f, 0, gold) && !row(236.6f, 230.8f));
     assert(text("Bot Count", 0, 269.0f, baseline(0), 8.3f, 0, dim) &&
            text("None", 0, centered("None", 0, 269.0f), baseline(0), 7.5f, 0, dim));
     assert(text("Difficulty", 0, 269.0f, baseline(1), 8.3f, 0, dim) &&
            text("Normal", 0, centered("Normal", 0, 269.0f), baseline(1), 7.5f, 0, dim));
-    assert(key(0xcd) && s_match.focus[0] == 3);
+    assert(key(0x9b) && s_match.focus[0] == 4);
     paint();
-    assert(box(250.0f, 1) && text("START MATCH", 1, 52.5f, 277.0f, 10.0f, 0, gold));
+    assert(box(282.0f, 1) && text("START MATCH", 1, 52.5f, 309.0f, 10.0f, 0, gold));
     assert(text("Mode", 0, 269.0f, baseline(0), 8.3f, 0, dim) &&
            text("Team Deathmatch", 0, centered("Team Deathmatch", 0, 269.0f), baseline(0), 7.5f, 0, dim));
     assert(text("Map", 0, 269.0f, baseline(1), 8.3f, 0, dim) && find("Carentan, France"));
-    assert(text("Bots", 0, 269.0f, baseline(2), 8.3f, 0, dim) && find("None"));
-    assert(text("Server Name", 0, 269.0f, baseline(3), 8.3f, 0, dim) &&
-           text("Tonga", 0, centered("Tonga", 0, 269.0f), baseline(3), 7.5f, 0, dim));
-    assert(key(0x9b) && s_match.focus[0] == 0 && key(0xce) && s_match.focus[0] == 3 && key(0x9a) &&
-           s_match.focus[0] == 2);
+    assert(text("Time Limit", 0, 269.0f, baseline(2), 8.3f, 0, dim) &&
+           text("15 Minutes", 0, centered("15 Minutes", 0, 269.0f), baseline(2), 7.5f, 0, dim));
+    assert(text("Score Limit", 0, 269.0f, baseline(3), 8.3f, 0, dim) &&
+           text("100 Kills", 0, centered("100 Kills", 0, 269.0f), baseline(3), 7.5f, 0, dim));
+    assert(text("Bots", 0, 269.0f, baseline(4), 8.3f, 0, dim) && find("None"));
+    assert(text("Server Name", 0, 269.0f, baseline(5), 8.3f, 0, dim) &&
+           text("Tonga", 0, centered("Tonga", 0, 269.0f), baseline(5), 7.5f, 0, dim));
+    assert(key(0x9b) && s_match.focus[0] == 0 && key(0xce) && s_match.focus[0] == 4 && key(0x9a) &&
+           s_match.focus[0] == 3);
     /* Left, right and characters change nothing here; every key is taken. */
-    assert(key(0x9c) && key(0x9d) && key(0x9d) && key(0x400 | 'a') && s_match.focus[0] == 2 && s_match.page == 0);
+    assert(key(0x9c) && key(0x9d) && key(0x9d) && key(0x400 | 'a') && s_match.focus[0] == 3 && s_match.page == 0);
     assert(DVAR("ui_botCount") == 0 && DVAR("ui_botDifficulty") == 1);
-    assert(UI_MatchMenu_KeyEvent(&dc, &serversettings, 'x', 1) && s_match.focus[0] == 2);
+    assert(DVAR("ui_matchTimeLimit") == -1 && DVAR("ui_matchScoreLimit") == -1);
+    assert(UI_MatchMenu_KeyEvent(&dc, &serversettings, 'x', 1) && s_match.focus[0] == 3);
     cases += 4;
 
     /* Bots: the page's two settings, the focused one's value Bold and white
      * between arrows, the other's idle; the panel names and explains it. */
     clicks = 0;
-    s_match.focus[0] = 2;
+    s_match.focus[0] = 3;
     assert(key(0x0d) && s_match.page == 3 && s_match.focus[3] == 0 && clicks == 1);
     paint();
     assert(text("BOT SETUP", 1, 44.0f, 72.5f, 11.7f, 0.2f, gold) &&
@@ -659,13 +702,94 @@ int main(void) {
     cases += 2;
     /* Escape goes back to the match page, its Bots row focused, which shows
      * the new settings; the bot count at Start Match. */
-    assert(key(0x1b) && s_match.page == 0 && s_match.focus[0] == 2 && closes == 0);
+    assert(key(0x1b) && s_match.page == 0 && s_match.focus[0] == 3 && closes == 0);
     paint();
     assert(text("8", 0, centered("8", 0, 269.0f), baseline(0), 7.5f, 0, dim) && find("Hard"));
-    s_match.focus[0] = 3;
+    s_match.focus[0] = 4;
     paint();
     assert(find("8, Hard"));
     cases++;
+
+    /* Game Rules: Time Limit and Score Limit as Bot Setup's settings, from
+     * Team Deathmatch's own; the panel names the focused one and explains
+     * it. */
+    clicks = 0;
+    s_match.focus[0] = 2;
+    assert(key(0x0d) && s_match.page == 4 && s_match.focus[4] == 0 && clicks == 1);
+    paint();
+    assert(text("GAME RULES", 1, 44.0f, 72.5f, 11.7f, 0.2f, gold) &&
+           find("Set how long the match lasts and the score that wins it"));
+    assert(row(baseline(0), 336.7f) && text("Time Limit", 1, 60.8f, baseline(0), 8.3f, 0, gold));
+    assert(text("15 Minutes", 1, centered("15 Minutes", 1, 52.5f), baseline(0), 7.5f, 0, whiteColor));
+    assert(text("Score Limit", 0, 52.5f, baseline(1), 8.3f, 0, idle) &&
+           text("100 Kills", 0, centered("100 Kills", 0, 52.5f), baseline(1), 7.5f, 0, idle));
+    assert(text("TIME LIMIT", 1, 389.0f, 113.3f, 12.5f, 0.13f, gold));
+    assert(wrapped("The match ends when the time runs out, and whoever leads then wins.", 389.0f, 127.5f, 220.0f) == 2);
+    assert(tris() == 2 && prompts());
+    /* Right steps the minutes up and round to none; Left goes back; Enter
+     * steps on. */
+    {
+        static const int minutes[] = { 20, 30, 45, 60, 0, 5, 10, 15, 20 };
+        for (int i = 0; i < 9; i++)
+            assert(key(0x9d) && DVAR("ui_matchTimeLimit") == minutes[i]);
+        assert(key(0x9c) && DVAR("ui_matchTimeLimit") == 15 && key(0x9c) && DVAR("ui_matchTimeLimit") == 10);
+        assert(key(0x0d) && DVAR("ui_matchTimeLimit") == 15 && clicks == 13);
+    }
+    DVAR("ui_matchTimeLimit") = 0;
+    paint();
+    assert(text("Unlimited", 1, centered("Unlimited", 1, 52.5f), baseline(0), 7.5f, 0, whiteColor));
+    assert(key(0x9c) && DVAR("ui_matchTimeLimit") == 60);
+    /* Score Limit: Team Deathmatch's kills; the panel says what wins. */
+    assert(key(0x9b) && s_match.focus[4] == 1);
+    paint();
+    assert(row(baseline(1), 336.7f) && text("Score Limit", 1, 60.8f, baseline(1), 8.3f, 0, gold));
+    assert(text("100 Kills", 1, centered("100 Kills", 1, 52.5f), baseline(1), 7.5f, 0, whiteColor));
+    assert(text("60 Minutes", 0, centered("60 Minutes", 0, 52.5f), baseline(0), 7.5f, 0, idle));
+    assert(text("SCORE LIMIT", 1, 389.0f, 113.3f, 12.5f, 0.13f, gold));
+    assert(wrapped("The first team to make this many kills wins.", 389.0f, 127.5f, 220.0f) == 1);
+    {
+        static const int kills[] = { 150, 200, 300, 0, 25, 50, 75, 100 };
+        for (int i = 0; i < 8; i++)
+            assert(key(0x9d) && DVAR("ui_matchScoreLimit") == kills[i]);
+        assert(key(0x9c) && DVAR("ui_matchScoreLimit") == 75);
+    }
+    /* What the mode does not offer, stale or another mode's, is its own. */
+    DVAR("ui_matchScoreLimit") = 10;
+    DVAR("ui_matchTimeLimit") = 7;
+    paint();
+    assert(find("100 Kills") && find("15 Minutes") && !find("10 Kills") && !find("7 Minutes"));
+    assert(key(0x9d) && DVAR("ui_matchScoreLimit") == 150);
+    DVAR("ui_matchTimeLimit") = 10;
+    DVAR("ui_matchScoreLimit") = 25;
+    {
+        int timeLimit = 0, scoreLimit = 0;
+        UI_MatchMenu_Rules("tdm", &timeLimit, &scoreLimit);
+        assert(timeLimit == 10 && scoreLimit == 25);
+        UI_MatchMenu_Rules("dm", &timeLimit, &scoreLimit);
+        assert(timeLimit == 10 && scoreLimit == 100);
+        UI_MatchMenu_Rules("sw", &timeLimit, &scoreLimit);
+        assert(timeLimit == -1 && scoreLimit == -1);
+        timeLimit = scoreLimit = 0;
+        UI_MatchMenu_Rules(NULL, &timeLimit, &scoreLimit);
+        assert(timeLimit == -1 && scoreLimit == -1);
+    }
+    /* Escape goes back, Game Rules focused and its preview showing the
+     * rules, as does Start Match's. */
+    assert(key(0x1b) && s_match.page == 0 && s_match.focus[0] == 2);
+    paint();
+    assert(text("10 Minutes", 0, centered("10 Minutes", 0, 269.0f), baseline(0), 7.5f, 0, dim) &&
+           text("25 Kills", 0, centered("25 Kills", 0, 269.0f), baseline(1), 7.5f, 0, dim));
+    s_match.focus[0] = 4;
+    paint();
+    assert(text("10 Minutes", 0, centered("10 Minutes", 0, 269.0f), baseline(2), 7.5f, 0, dim) &&
+           text("25 Kills", 0, centered("25 Kills", 0, 269.0f), baseline(3), 7.5f, 0, dim));
+    /* Opening again keeps them; the page opens on its first rule. */
+    open();
+    assert(DVAR("ui_matchTimeLimit") == 10 && DVAR("ui_matchScoreLimit") == 25);
+    s_match.focus[0] = 2;
+    assert(key(0x0d) && key(0x9b) && s_match.focus[4] == 1 && key(0x1b) && key(0x0d) && s_match.focus[4] == 0);
+    assert(key(0x1b) && s_match.page == 0 && s_match.focus[0] == 2);
+    cases += 5;
 
     /* Mode: the five modes in the arenas' order, the current one focused;
      * the panel names it and gives the retail text, its own when stringed
@@ -712,13 +836,51 @@ int main(void) {
     paint();
     /* MP_GAIN_POINTS_BY_ELIMINATING_NOSCORE is blank. */
     assert(wrapped("Gain points by eliminating other players.", 283.8f, 135.8f, 289.2f) == 1);
-    /* Escape keeps the mode; Enter chooses it as the retail control does. */
+    /* Escape keeps the mode and its rules; Enter chooses it as the retail
+     * control does, another mode starting from its own rules, the same one
+     * keeping them. */
     assert(key(0x1b) && s_match.page == 0 && s_match.focus[0] == 0 && DVAR("ui_netGametype") == 4);
+    assert(DVAR("ui_matchTimeLimit") == 10 && DVAR("ui_matchScoreLimit") == 25);
     assert(key(0x0d) && key(0x9b) && key(0x0d) && s_match.page == 0 && s_match.focus[0] == 0);
     assert(DVAR("ui_netGametype") == 0 && !strcmp(DVAR_STRING("ui_netGametypeName"), "ctf"));
+    assert(DVAR("ui_matchTimeLimit") == -1 && DVAR("ui_matchScoreLimit") == -1);
+    DVAR("ui_matchTimeLimit") = 45;
+    assert(key(0x0d) && key(0x0d) && DVAR("ui_netGametype") == 0 && DVAR("ui_matchTimeLimit") == 45);
+    DVAR("ui_matchTimeLimit") = -1;
     paint();
     assert(text("CAPTURE THE FLAG", 0, 52.5f, 150.0f, 6.5f, 0, note));
     cases += 4;
+    /* Each mode's own rules, its score in its units, and its note. */
+    {
+        static const char *const own[5][3] = {
+            { "30 Minutes", "Unlimited", "The first team to capture the enemy flag this many times wins." },
+            { "30 Minutes", "100 Kills", "The first player to make this many kills wins." },
+            { "30 Minutes", "300 Points", "Teams score a point for every second they hold the radio and 10 for "
+                                          "destroying the enemy's. The first to this many wins." },
+            { "Unlimited", "10 Rounds", "The first team to win this many rounds wins the match." },
+            { "15 Minutes", "100 Kills", "The first team to make this many kills wins." } };
+        static const int lines[5] = { 2, 1, 2, 1, 1 };
+        for (int mode = 0; mode < 5; mode++) {
+            DVAR("ui_netGametype") = mode;
+            s_match.page = 4;
+            s_match.focus[4] = 1;
+            paint();
+            assert(text(own[mode][0], 0, centered(own[mode][0], 0, 52.5f), baseline(0), 7.5f, 0, idle));
+            assert(text(own[mode][1], 1, centered(own[mode][1], 1, 52.5f), baseline(1), 7.5f, 0, whiteColor));
+            assert(wrapped(own[mode][2], 389.0f, 127.5f, 220.0f) == lines[mode]);
+        }
+        /* One capture, then more. */
+        DVAR("ui_netGametype") = 0;
+        assert(key(0x9d) && DVAR("ui_matchScoreLimit") == 1);
+        paint();
+        assert(find("1 Capture") && key(0x9d) && DVAR("ui_matchScoreLimit") == 3);
+        paint();
+        assert(find("3 Captures"));
+        DVAR("ui_matchScoreLimit") = -1;
+        s_match.page = 0;
+        s_match.focus[0] = 0;
+    }
+    cases += 2;
     /* A mode not played on the chosen map moves it to the mode's first. */
     sharedUiInfo.mapList[0].typeBits = ~(1 << 1);
     assert(key(0x0d) && key(0x9b) && key(0x0d) && DVAR("ui_netGametype") == 1 && DVAR("ui_currentNetMap") == 1);
@@ -782,19 +944,23 @@ int main(void) {
     paint();
     paint();
     assert(s_match.focus[0] == 2 && overs == 1);
-    point(150.0f, 270.0f);
+    point(150.0f, 265.0f);
     paint();
     paint();
-    assert(s_match.focus[0] == 3 && overs == 2);
+    assert(s_match.focus[0] == 3 && overs == 2 && row(268.6f, 230.8f));
+    point(150.0f, 300.0f);
+    paint();
+    paint();
+    assert(s_match.focus[0] == 4 && overs == 3 && box(282.0f, 1));
     /* Straight up, onto Map. */
     point(150.0f, 190.0f);
     paint();
-    assert(s_match.focus[0] == 1 && overs == 3);
+    assert(s_match.focus[0] == 1 && overs == 4);
     assert(key(0xc8) && s_match.page == 2 && s_match.focus[0] == 1 && s_match.hover == -1);
     /* The page's hover is gone until it paints: a click does nothing. */
     assert(key(0xc8) && s_match.page == 2);
     assert(key(0xc9) && s_match.page == 0);
-    point(100.0f, 236.0f);
+    point(100.0f, 265.0f);
     paint();
     paint();
     assert(key(0xc8) && s_match.page == 3);
@@ -818,29 +984,48 @@ int main(void) {
     paint();
     paint();
     assert(key(0xc8) && DVAR("ui_botDifficulty") == 0 && s_match.focus[3] == 1);
-    assert(key(0xc9) && s_match.page == 0 && s_match.focus[0] == 2);
+    assert(key(0xc9) && s_match.page == 0 && s_match.focus[0] == 3);
     /* Bot setup opens on its first setting again. */
     assert(key(0x0d) && s_match.page == 3 && s_match.focus[3] == 0 && key(0x1b) && s_match.page == 0);
-    cases += 4;
+    /* The rules take the pointer as Bot Setup does: Deathmatch's 30 minutes
+     * back to 20 and on again, its 100 kills on to 150. */
+    point(100.0f, 236.0f);
+    paint();
+    paint();
+    assert(s_match.focus[0] == 2 && key(0xc8) && s_match.page == 4 && s_match.focus[4] == 0);
+    point(175.0f, baseline(0) - 4.0f);
+    paint();
+    paint();
+    assert(key(0xc8) && DVAR("ui_matchTimeLimit") == 20 && s_match.focus[4] == 0);
+    point(321.0f, baseline(0) - 4.0f);
+    paint();
+    assert(key(0xc8) && DVAR("ui_matchTimeLimit") == 30);
+    point(250.0f, baseline(1) - 4.0f);
+    paint();
+    paint();
+    assert(s_match.focus[4] == 1 && key(0xc8) && DVAR("ui_matchScoreLimit") == 150);
+    assert(key(0xc9) && s_match.page == 0 && s_match.focus[0] == 2);
+    DVAR("ui_matchTimeLimit") = DVAR("ui_matchScoreLimit") = -1;
+    cases += 5;
 
     /* Start Match runs StartServer once, on the chosen map, and says so
      * until the screen opens again. */
-    s_match.focus[0] = 3;
+    s_match.focus[0] = 4;
     DVAR("ui_currentNetMap") = 9;
     clicks = 0;
     assert(key(0x0d) && scripts == 1 && !strcmp(script, "StartServer") && DVAR("ui_currentNetMap") == 0 && clicks == 1);
     paint();
-    assert(text("STARTING YOUR SERVER...", 0, 52.5f, 288.3f, 6.5f, 0, note));
+    assert(text("STARTING YOUR SERVER...", 0, 52.5f, 320.3f, 6.5f, 0, note));
     assert(key(0x0d) && key(0x0d) && scripts == 1);
     open();
     assert(s_match.page == 0 && s_match.focus[0] == 0 && !s_match.starting);
-    s_match.focus[0] = 3;
+    s_match.focus[0] = 4;
     assert(key(0x0d) && scripts == 2);
     /* With no map for the mode, nothing starts. */
     open();
     for (int i = 0; i < 3; i++)
         sharedUiInfo.mapList[i].typeBits = 0;
-    s_match.focus[0] = 3;
+    s_match.focus[0] = 4;
     assert(key(0x0d) && scripts == 2 && !s_match.starting);
     paint();
     assert(text("MAP", 1, 52.5f, 192.0f, 9.0f, 0, light) && find("CREATE YOUR SERVER AND JOIN IT"));
@@ -918,7 +1103,7 @@ int main(void) {
         assert(!strcmp(room, "Ton"));
         snprintf(DVAR_STRING("name"), 64, "!!!");
         open();
-        s_match.focus[0] = 3;
+        s_match.focus[0] = 4;
         paint();
         assert(!find("Server Name") && find("Bots"));
         cases += 2;
@@ -960,7 +1145,31 @@ mutants = [
     [('    s_match.hover = -1;\n    s_match.cursorX', '    s_match.cursorX')],
     [('    Match_SelectMode(Match_Mode());\n}', '}')],
     [('    if (index == s_match.focus[s_match.page])\n        return;\n', '')],
-    [('        if (page == MATCH_PAGE_BOTS)\n            Match_Step', '        Match_Step')],
+    [('        if (page == MATCH_PAGE_BOTS || page == MATCH_PAGE_RULES)\n            Match_Step', '        Match_Step')],
+    [('        if (page == MATCH_PAGE_BOTS || page == MATCH_PAGE_RULES)\n            Match_Step',
+      '        if (page == MATCH_PAGE_BOTS)\n            Match_Step')],
+    [('    if (s_match.page == MATCH_PAGE_BOTS || s_match.page == MATCH_PAGE_RULES) {',
+      '    if (s_match.page == MATCH_PAGE_BOTS) {')],
+    [('            s_match.focus[MATCH_PAGE_RULES] = MATCH_RULE_TIME;\n', '')],
+    [('    if (page == MATCH_PAGE_RULES)\n        Match_StepRule(setting, delta);\n    else if', '    if')],
+    # The rules: a new mode's own, values the mode offers, wrapping, units.
+    [('    if (mode != Dvar_GetInt("ui_netGametype")) {\n        Dvar_SetIntByName("ui_matchTimeLimit", -1);\n'
+      '        Dvar_SetIntByName("ui_matchScoreLimit", -1);\n    }\n', '')],
+    [('    if (mode != Dvar_GetInt("ui_netGametype")) {', '    if (1) {')],
+    [('        if (values[i] == value)\n            return value;', '        if (1)\n            return value;')],
+    [('    return rule == MATCH_RULE_TIME ? s_matchRuleModes[ruleMode].timeLimit : s_matchRuleModes[ruleMode].scoreLimit;',
+      '    return rule == MATCH_RULE_TIME ? s_matchRuleModes[ruleMode].scoreLimit : s_matchRuleModes[ruleMode].timeLimit;')],
+    [('values[(i + delta + count) % count]', 'values[(i + delta) % count]')],
+    [('value == 1 ? s_matchRuleModes[ruleMode].unit : s_matchRuleModes[ruleMode].units',
+      's_matchRuleModes[ruleMode].units')],
+    [('    else if (!value)\n        snprintf(text, (size_t)size, "Unlimited");\n', '')],
+    [('        if (!I_stricmp(gameType, s_matchRuleModes[i].gameType))\n            return i;',
+      '        if (1)\n            return i;')],
+    [('    return -1;\n}\n\nstatic int Match_ModeRules', '    return 1;\n}\n\nstatic int Match_ModeRules')],
+    [('    *scoreLimit = Match_Rule(ruleMode, MATCH_RULE_SCORE);', '    *scoreLimit = Match_Rule(ruleMode, MATCH_RULE_TIME);')],
+    [('s_match.focus[MATCH_PAGE_RULES] == MATCH_RULE_TIME ? MATCH_TIME_NOTE', '0 ? MATCH_TIME_NOTE')],
+    [('            Match_PaintPair(2 + i, s_matchRules[i], value);', '            Match_PaintPair(i, s_matchRules[i], value);')],
+    [('        if (page == MATCH_PAGE_RULES)\n            Match_RuleValue(row, value, sizeof(value));\n        else\n', '')],
     [('            s_match.focus[MATCH_PAGE_MODE] = Match_Mode();\n', '')],
     [('            s_match.focus[MATCH_PAGE_MAP] = i < count ? i : 0;', '            s_match.focus[MATCH_PAGE_MAP] = 0;')],
     [('            s_match.focus[MATCH_PAGE_BOTS] = MATCH_SETTING_BOTS;\n', '')],
@@ -974,7 +1183,10 @@ mutants = [
     [('    I_CleanStr(tag);\n', '')],
     [('        if (line[0] && UI_WWIIMenu_Width(trial, 0, cap, 0.0f) > width) {', '        if (0) {')],
     [('            lines--;\n', '')],
-    [('    return item == MATCH_ITEM_START ? top + MATCH_ROW_H + MATCH_GAP : top;', '    return top + MATCH_ROW_H;')],
+    [('    return rows + (float)(MATCH_ITEM_BOTS - MATCH_ITEM_RULES) * MATCH_ROW_SPACING + MATCH_ROW_H + MATCH_GAP;',
+      '    return rows + MATCH_ROW_H + MATCH_GAP;')],
+    [('        return rows + (float)(item - MATCH_ITEM_RULES) * MATCH_ROW_SPACING;',
+      '        return rows + (float)(item - MATCH_ITEM_RULES) * (MATCH_ROW_H + MATCH_GAP);')],
     [('    if (focus >= *scroll + MATCH_LIST_VISIBLE)\n        *scroll = focus - MATCH_LIST_VISIBLE + 1;\n', '')],
     [('    if (focus < *scroll)\n        *scroll = focus;\n', '')],
     [('    verts[direction > 0 ? 2 : 1].xy[1] = top + 0.5f * h;', '    verts[2].xy[1] = top + 0.5f * h;')],
@@ -990,7 +1202,7 @@ mutants = [
     [('0.0f, MATCH_SHOT_CROP, 1.0f, 1.0f - MATCH_SHOT_CROP,', '0.0f, 0.0f, 1.0f, 1.0f,')],
     [('    if (shot)\n', '    if (1)\n')],
     [('    return text && text[0] ? text : fallback;', '    return text ? text : fallback;')],
-    [('    if (name[0])\n            Match_PaintPair(3,', '    if (1)\n            Match_PaintPair(3,')],
+    [('    if (name[0])\n            Match_PaintPair(5,', '    if (1)\n            Match_PaintPair(5,')],
     [('    return UI_SafeTranslateString(name && name[0] ? name : "EXE_ALL");', '    return name;')],
     [('                         UI_WWIIMenu_Color(focused ? WWII_COLOR_WHITE : WWII_COLOR_IDLE));',
       '                         UI_WWIIMenu_Color(WWII_COLOR_WHITE));')],
@@ -1084,8 +1296,9 @@ with tempfile.TemporaryDirectory(prefix='cod2-match-menu-') as directory:
         caught += 1
 
 print(f'PASS: Start New Server draws WWII\'s MATCH screen over createserver, whose retail menus stay hidden and take '
-      f'neither keys nor the pointer: Mode and Map boxes, a Bots row and a Start Match box, the focused item in gold '
-      f'with its page dimmed beside it; mode, map and bot pages with their panels, levelshots cropped to 16:9 and '
-      f'the retail mode texts; keys, the pointer and clicks; StartServer once, on a map the mode plays, for a room '
-      f'named after the gametag; bg\'s backdrop alone behind it; {cases} cases; the layout within the captures\' '
-      f'measurements; {caught} failing regression mutants')
+      f'neither keys nor the pointer: Mode and Map boxes, Game Rules and Bots rows and a Start Match box, the focused '
+      f'item in gold with its page dimmed beside it; mode, map, rules and bot pages with their panels, each mode\'s '
+      f'time and score limits in its units, levelshots cropped to 16:9 and the retail mode texts; keys, the pointer '
+      f'and clicks; StartServer once, on a map the mode plays, for a room named after the gametag with the rules '
+      f'the gateway and rooms.py accept; bg\'s backdrop alone behind it; {cases} cases; the layout within the '
+      f'captures\' measurements; {caught} failing regression mutants')

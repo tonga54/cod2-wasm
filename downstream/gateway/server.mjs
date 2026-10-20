@@ -7,6 +7,12 @@ import { createUpdateChecker, readBuildInfo } from './updates.mjs';
 import { createMaintenanceCheck } from './maintenance.mjs';
 import { ClassError, createClassStore, defaultClasses, normalizeClasses, playerKey } from './classes.mjs';
 
+// Start New Server's rules, as ui_match_menu.c offers and rooms.py accepts
+// them: minutes, and each mode's score; 0 for none.
+export const TIME_LIMITS = [0, 5, 10, 15, 20, 30, 45, 60];
+export const SCORE_LIMITS = { dm: [0, 10, 20, 30, 50, 75, 100, 150], tdm: [0, 25, 50, 75, 100, 150, 200, 300],
+  ctf: [0, 1, 3, 5, 7, 10, 15, 20], hq: [0, 60, 120, 180, 300, 450, 600, 900], sd: [0, 3, 4, 5, 6, 7, 10, 15] };
+
 export function createGateway({ webHost = 'cod2-web', webPort = 8088,
   udpHost = 'cod2-server', udpPort = 28960, maxClients = 64,
   iconPath = '/game-ui/cod2.ico', startupPath = '/game-ui/cod2-startup.png',
@@ -151,7 +157,12 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
             if (!['easy', 'normal', 'hard'].includes(botDifficulty)) {
               json(response, 400, {error:'Choose Easy, Normal or Hard bots.'}); return;
             }
-            body = {name:body.name, map, gametype, botCount, botDifficulty};
+            const { timeLimit, scoreLimit } = body;
+            if ((timeLimit !== undefined && !TIME_LIMITS.includes(timeLimit)) ||
+                (scoreLimit !== undefined && !SCORE_LIMITS[gametype].includes(scoreLimit))) {
+              json(response, 400, {error:'Choose a supported time and score limit.'}); return;
+            }
+            body = {name:body.name, map, gametype, botCount, botDifficulty, timeLimit, scoreLimit};
           }
         }
         const result = await manager(request.method, body);

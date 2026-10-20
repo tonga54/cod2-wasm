@@ -3,8 +3,8 @@
 
 /* Start New Server in the layout of WWII's MATCH screen: a native screen
  * over the retail createserver menu and the menus its onOpen opens, whose
- * items stay hidden and take no input. Mode, map and bots each open a page
- * of their own, and Start Match runs the menu's StartServer script. */
+ * items stay hidden and take no input. Mode, map, bots and rules each open a
+ * page of their own, and Start Match runs the menu's StartServer script. */
 /* Shows the screen from its first page when createserver opens, after its
  * onOpen has loaded the arenas. */
 void UI_MatchMenu_Opened(displayContextDef_t *dc, menuDef_t *menu);
@@ -19,5 +19,8 @@ void UI_MatchMenu_Paint(displayContextDef_t *dc, menuDef_t *menu);
 /* The room's name: the gametag without its colors, in the letters the room
  * supervisor keeps. */
 void UI_MatchMenu_RoomName(char *name, int size);
+/* The rules chosen for the mode: minutes and its score, 0 for none, or the
+ * mode's own when none were chosen. */
+void UI_MatchMenu_Rules(const char *gameType, int *timeLimit, int *scoreLimit);
 
 #endif

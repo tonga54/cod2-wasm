@@ -3,7 +3,7 @@ import http from 'node:http';
 import dgram from 'node:dgram';
 import { once } from 'node:events';
 import WebSocket from 'ws';
-import { createGateway } from './server.mjs';
+import { createGateway, SCORE_LIMITS, TIME_LIMITS } from './server.mjs';
 
 // Endpoint/capacity contract only; the real dedicated and native UI are tested separately.
 const echo = dgram.createSocket('udp4');
@@ -12,14 +12,15 @@ echo.bind(0, '127.0.0.1'); await once(echo, 'listening');
 const udpPort = echo.address().port;
 let creates = 0, deletes = 0;
 let requestedBots = 0, requestedDifficulty = 'normal', roomBots = 0;
+let requestedGametype = null, requestedRules = {};
 const manager = http.createServer(async (req, res) => {
   assert.equal(req.url, '/rooms');
   res.setHeader('Content-Type', 'application/json');
   if (req.method === 'POST') {
     let body=''; for await (const chunk of req) body += chunk;
     assert.deepEqual(JSON.parse(body), {name:'Second room', map:creates === 0 ? 'mp_toujane' : creates === 2 ? 'mp_dawnville' : 'mp_carentan',
-      gametype:creates < 3 ? 'tdm' : ['dm','tdm','ctf','hq','sd'][creates-3] || 'tdm',
-      botCount:requestedBots, botDifficulty:requestedDifficulty});
+      gametype:requestedGametype ?? (creates < 3 ? 'tdm' : ['dm','tdm','ctf','hq','sd'][creates-3] || 'tdm'),
+      botCount:requestedBots, botDifficulty:requestedDifficulty, ...requestedRules});
     ++creates; res.writeHead(201); res.end(JSON.stringify({id:1, port:udpPort+1}));
   } else if (req.method === 'DELETE') {
     let body=''; for await (const chunk of req) body += chunk;
@@ -90,6 +91,23 @@ try {
   requestedBots=32; requestedDifficulty='hard';
   response=await fetch(origin+'/servers',{method:'POST',headers:{Origin:origin},body:JSON.stringify({name:'Second room',map:'mp_carentan',botCount:32,botDifficulty:'hard'})});
   assert.equal(response.status,201);
+  // Start New Server's rules reach the manager for every mode, "no limit" included.
+  for (const gametype of ['dm','tdm','ctf','hq','sd']) {
+    for (const [timeLimit, scoreLimit] of [[TIME_LIMITS[1], SCORE_LIMITS[gametype].at(-1)], [0, 0]]) {
+      requestedGametype=gametype; requestedRules={timeLimit, scoreLimit};
+      response=await fetch(origin+'/servers',{method:'POST',headers:{Origin:origin},body:JSON.stringify({name:'Second room',map:'mp_carentan',botCount:32,botDifficulty:'hard',gametype,timeLimit,scoreLimit})});
+      assert.equal(response.status,201); assert.deepEqual(await response.json(),{id:1, port:udpPort+1});
+    }
+  }
+  const created=creates;
+  for (const rules of [{timeLimit:7},{timeLimit:'15'},{timeLimit:null},{timeLimit:true},{timeLimit:15.5},
+                       {scoreLimit:10},{gametype:'sd',scoreLimit:100},{gametype:'ctf',scoreLimit:'5'},{gametype:'hq',scoreLimit:-60}]) {
+    response=await fetch(origin+'/servers',{method:'POST',headers:{Origin:origin},body:JSON.stringify({name:'Second room',...rules})});
+    assert.equal(response.status,400);
+    assert.deepEqual(await response.json(),{error:'Choose a supported time and score limit.'});
+  }
+  assert.equal(creates,created);
+  requestedGametype=null; requestedRules={};
   const first=await open(0); await Promise.all(Array.from({length:63},()=>open(0)));
   response=await fetch(origin+'/servers');
   const occupied = (await response.json()).rooms;

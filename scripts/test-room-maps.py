@@ -52,6 +52,27 @@ with tempfile.TemporaryDirectory(prefix='cod2-room-maps-') as directory:
         assert 'set scr_bot_count "8"' in config
         assert 'set scr_bot_difficulty "2"' in config
         assert (profile / 'room-0/raw/maps/mp/browser_bots.gsc').read_text() == (root / 'downstream/server/browser_bots.gsc').read_text()
+        # Start New Server's rules set the room's own mode, after server.cfg
+        # so they win over its TDM limits; without them the mode keeps its own.
+        for gametype in rooms.SUPPORTED_GAMETYPES:
+            time_limit, score_limit = rooms.TIME_LIMITS[1], rooms.SCORE_LIMITS[gametype][-1]
+            created = rooms.start_room(1, 'Rules', 'mp_carentan', gametype,
+                                       time_limit=time_limit, score_limit=score_limit)
+            assert created['timeLimit'] == time_limit and created['scoreLimit'] == score_limit
+            lines = (profile / 'room-1/raw/server.cfg').read_text().splitlines()
+            assert lines[-2:] == [f'set scr_{gametype}_timelimit "{time_limit}"',
+                                  f'set scr_{gametype}_scorelimit "{score_limit}"'], lines[-3:]
+            assert lines.index('set scr_tdm_timelimit "15"') < len(lines) - 2
+        rooms.start_room(1, 'No limit', 'mp_carentan', 'sd', time_limit=0, score_limit=0)
+        assert (profile / 'room-1/raw/server.cfg').read_text().splitlines()[-2:] == [
+            'set scr_sd_timelimit "0"', 'set scr_sd_scorelimit "0"']
+        created = rooms.start_room(1, 'Time only', 'mp_carentan', 'hq', time_limit=45)
+        config = (profile / 'room-1/raw/server.cfg').read_text()
+        assert config.endswith('set scr_hq_timelimit "45"\n') and 'scr_hq_scorelimit' not in config
+        created = rooms.start_room(1, 'Defaults', 'mp_carentan', 'dm')
+        config = (profile / 'room-1/raw/server.cfg').read_text()
+        assert created['timeLimit'] is None and created['scoreLimit'] is None
+        assert 'scr_dm_timelimit' not in config and 'scr_dm_scorelimit' not in config
         before = launch.call_count
         for mapname in ('mp_burgundy', 'mp_carentan;quit', ''):
             try:
@@ -67,6 +88,16 @@ with tempfile.TemporaryDirectory(prefix='cod2-room-maps-') as directory:
                 pass
             else:
                 raise AssertionError('Unsupported mode launched')
+        # Another mode's score, booleans equal to 0 and 1, and numbers as text.
+        for gametype, time_limit, score_limit in (('tdm', 7, None), ('tdm', None, 10), ('sd', None, 100),
+                                                  ('dm', False, None), ('dm', None, True), ('dm', 15.0, None),
+                                                  ('ctf', '15', None), ('ctf', None, -1)):
+            try:
+                rooms.start_room(2, 'Test', 'mp_carentan', gametype, time_limit=time_limit, score_limit=score_limit)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f'Unsupported rules launched: {gametype} {time_limit!r} {score_limit!r}')
         assert launch.call_count == before
 rooms.rooms.clear()
 
@@ -159,6 +190,13 @@ try:
             assert start.call_args.args == (0, 'Bots', 'mp_toujane', 'tdm', 8, difficulty)
         assert post({'name': 'Maximum bots', 'botCount': 32, 'botDifficulty': 'hard'}) == 201
         assert start.call_args.args == (0, 'Maximum bots', 'mp_toujane', 'tdm', 32, 'hard')
+        assert start.call_args.kwargs == {'time_limit': None, 'score_limit': None}
+        for gametype in rooms.SUPPORTED_GAMETYPES:
+            for time_limit, score_limit in zip(rooms.TIME_LIMITS, rooms.SCORE_LIMITS[gametype]):
+                assert post({'name': 'Rules', 'gametype': gametype,
+                             'timeLimit': time_limit, 'scoreLimit': score_limit}) == 201
+                assert start.call_args.args[3] == gametype
+                assert start.call_args.kwargs == {'time_limit': time_limit, 'score_limit': score_limit}
         before = start.call_count
         for mapname in ('mp_burgundy', 'mp_carentan;quit', [], None, 1):
             assert post({'name': 'Invalid', 'map': mapname}) == 400
@@ -168,10 +206,14 @@ try:
             assert post({'name':'Invalid', 'botCount':count}) == 400
         for difficulty in ('expert', 'hard;quit', '', None, [], 1):
             assert post({'name':'Invalid', 'botDifficulty':difficulty}) == 400
+        for rules in ({'timeLimit': 7}, {'timeLimit': '15'}, {'timeLimit': False}, {'timeLimit': 15.5},
+                      {'timeLimit': []}, {'scoreLimit': 10}, {'gametype': 'sd', 'scoreLimit': 100},
+                      {'gametype': 'ctf', 'scoreLimit': True}, {'gametype': 'hq', 'scoreLimit': -60}):
+            assert post({'name': 'Invalid', **rules}) == 400, rules
         assert start.call_count == before
 
     # All three slots belong to user-created games, including the first slot.
-    def create(room_id, name, mapname, gametype, bot_count, bot_difficulty):
+    def create(room_id, name, mapname, gametype, bot_count, bot_difficulty, **rules):
         child = Mock()
         child.poll.return_value = None
         created = {'id': room_id, 'port': rooms.BASE_PORT + room_id,

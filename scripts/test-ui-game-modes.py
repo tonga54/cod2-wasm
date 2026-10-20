@@ -17,15 +17,16 @@ typedef struct {const char *gameType, *gameTypeName;} gameType_t;
 static struct {int numGameTypes,mapCount;gameType_t gameTypes[5];struct {const char *mapLoadName;} mapList[2];} sharedUiInfo;
 static dvar_t gt,map;static dvar_t *ui_netGameType=&gt,*ui_currentNetMap=&map;
 static char selectedName[32];static char *ui_netGameTypeName=selectedName;
-static int botCount=8,botDifficulty=2;
-static int visibilityCalls,selectionCalls,creates;static const char *createdMap,*createdType;
+static int botCount=8,botDifficulty=2,timeRule=15,scoreRule=100;
+static int visibilityCalls,selectionCalls,creates;static const char *createdMap,*createdType,*rulesType;
 static void Dvar_SetInt(dvar_t *var,int value){var->current.integer=value;}
 static void Dvar_SetString(char *var,const char *value){strcpy(var,value);}
 static void UI_MatchMenu_RoomName(char *name,int size){assert(size==64);snprintf(name,(size_t)size,"Mode test");}
 static int Dvar_GetInt(const char *name){if(!strcmp(name,"ui_botCount"))return botCount;assert(!strcmp(name,"ui_botDifficulty"));return botDifficulty;}
 static void UI_UpdateMapVisibility(int value){assert(value==gt.current.integer);visibilityCalls++;}
 static void UI_SelectFirstVisibleMap(int value){assert(value==map.current.integer);selectionCalls++;}
-static void Web_CreateServer(const char *name,const char *mapName,const char *gameType,int count,int difficulty){assert(count==botCount&&difficulty==botDifficulty);assert(!strcmp(name,"Mode test"));createdMap=mapName;createdType=gameType;creates++;}
+static void UI_MatchMenu_Rules(const char *gameType,int *timeLimit,int *scoreLimit){rulesType=gameType;*timeLimit=timeRule;*scoreLimit=scoreRule;}
+static void Web_CreateServer(const char *name,const char *mapName,const char *gameType,int count,int difficulty,int timeLimit,int scoreLimit){assert(count==botCount&&difficulty==botDifficulty);assert(gameType==rulesType&&timeLimit==timeRule&&scoreLimit==scoreRule);rulesType=0;assert(!strcmp(name,"Mode test"));createdMap=mapName;createdType=gameType;creates++;}
 static int UI_IsActionKey(int key)
 '''+key+r'''
 static int selectMode(int key){
@@ -49,8 +50,9 @@ int main(void){
  assert(creates==10);
  for(botCount=0;botCount<=32;botCount++)for(botDifficulty=0;botDifficulty<3;botDifficulty++)createRoom();
  assert(creates==109);
+ timeRule=0;scoreRule=0;createRoom();timeRule=60;scoreRule=900;createRoom();assert(creates==111);
  gt.current.integer=5;createRoom();gt.current.integer=-1;createRoom();
- gt.current.integer=1;map.current.integer=2;createRoom();map.current.integer=-1;createRoom();assert(creates==109);
+ gt.current.integer=1;map.current.integer=2;createRoom();map.current.integer=-1;createRoom();assert(creates==111);
  return 0;
 }
 '''

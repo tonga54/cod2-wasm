@@ -1283,6 +1283,9 @@ void UI_Init(void)
     ui_dedicated = Dvar_RegisterInt("ui_dedicated", 0, 0, 2, 0x1001);
     Dvar_RegisterInt("ui_botCount", 0, 0, 32, 0x1001);
     Dvar_RegisterInt("ui_botDifficulty", 1, 0, 2, 0x1001);
+    /* -1 for the mode's own. */
+    Dvar_RegisterInt("ui_matchTimeLimit", -1, -1, 60, 0x1001);
+    Dvar_RegisterInt("ui_matchScoreLimit", -1, -1, 900, 0x1001);
     ui_currentNetMap = Dvar_RegisterInt("ui_currentNetMap", 0, 0, 0x7fffffff, 0x1001);
     ui_browserShowFull = Dvar_RegisterBool_mac("ui_browserShowFull", 1, 0x1001);
     ui_browserShowEmpty = Dvar_RegisterBool_mac("ui_browserShowEmpty", 1, 0x1001);
@@ -3366,17 +3369,20 @@ void UI_RunMenuScript(const char **args)
 
     if (I_stricmp(name, "StartServer") == 0) {
 #ifdef __EMSCRIPTEN__
-        extern void Web_CreateServer(const char *name, const char *mapName, const char *gameType, int botCount, int botDifficulty);
+        extern void Web_CreateServer(const char *name, const char *mapName, const char *gameType, int botCount,
+                                     int botDifficulty, int timeLimit, int scoreLimit);
         int mapIdx = (ui_currentNetMap)->current.integer;
         int gameTypeIdx = (ui_netGameType)->current.integer;
+        int timeLimit, scoreLimit;
         char roomName[64];
         if (mapIdx < 0 || mapIdx >= sharedUiInfo.mapCount ||
             gameTypeIdx < 0 || gameTypeIdx >= sharedUiInfo.numGameTypes)
             return;
         UI_MatchMenu_RoomName(roomName, sizeof(roomName));
+        UI_MatchMenu_Rules(sharedUiInfo.gameTypes[gameTypeIdx].gameType, &timeLimit, &scoreLimit);
         Web_CreateServer(roomName, sharedUiInfo.mapList[mapIdx].mapLoadName,
                          sharedUiInfo.gameTypes[gameTypeIdx].gameType,
-                         Dvar_GetInt("ui_botCount"), Dvar_GetInt("ui_botDifficulty"));
+                         Dvar_GetInt("ui_botCount"), Dvar_GetInt("ui_botDifficulty"), timeLimit, scoreLimit);
         return;
 #endif
         Dvar_SetBoolByName("cg_thirdPerson", 0);
@@ -5038,6 +5044,9 @@ void UI_Init(void)
     ui_dedicated = Dvar_RegisterInt("ui_dedicated", 0, 0, 2, 0x1001);
     Dvar_RegisterInt("ui_botCount", 0, 0, 32, 0x1001);
     Dvar_RegisterInt("ui_botDifficulty", 1, 0, 2, 0x1001);
+    /* -1 for the mode's own. */
+    Dvar_RegisterInt("ui_matchTimeLimit", -1, -1, 60, 0x1001);
+    Dvar_RegisterInt("ui_matchScoreLimit", -1, -1, 900, 0x1001);
     ui_currentNetMap = Dvar_RegisterInt("ui_currentNetMap", 0, 0, 0x7fffffff, 0x1001);
     ui_browserShowFull = Dvar_RegisterBool_mac("ui_browserShowFull", 1, 0x1001);
     ui_browserShowEmpty = Dvar_RegisterBool_mac("ui_browserShowEmpty", 1, 0x1001);

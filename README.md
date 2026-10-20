@@ -26,10 +26,11 @@ All three maps support the original **Deathmatch, Team Deathmatch, Capture the F
 Headquarters, and Search and Destroy** modes. **Start New Server** is laid out
 as CoD WWII's MATCH screen: **Mode** and **Map** open lists of the modes and
 maps, each described at the right (a map with its loading-screen art),
-**Bots** opens the bot setup, and **Start Match** creates the room and joins
-it. Rooms rotate through Toujane, Carentan and Dawnville while keeping their selected mode. TDM uses
-100 team points or 15 minutes; the other modes use their original scripts and
-settings.
+**Game Rules** sets the time and score limits, **Bots** opens the bot setup,
+and **Start Match** creates the room and joins it. Rooms rotate through
+Toujane, Carentan and Dawnville while keeping their selected mode and rules.
+Unless the creator changes them, TDM uses 100 team points or 15 minutes; the
+other modes use their original scripts and settings.
 
 The host starts with **no rooms**. Users create their own servers, each named
 after its creator's gametag (its letters, digits, spaces and `_|.-`, up to 32),
@@ -39,6 +40,26 @@ remove it immediately. Ownership is stored in that browser and checked with a
 private token; changing browsers or clearing site storage loses that record.
 The slot limit is configuration, not a claim that 64-player matches have been
 load-tested.
+
+## Match rules
+
+In **Start New Server → Game Rules**, set **Time Limit** (Unlimited, 5, 10,
+15, 20, 30, 45 or 60 minutes) and **Score Limit** the same way as the bot
+settings. The score counts what each mode counts, with Unlimited also offered:
+
+| Mode | Score Limit | Without changes |
+|---|---|---|
+| Deathmatch | 10–150 kills by one player | 30 minutes, 100 kills |
+| Team Deathmatch | 25–300 team kills | 15 minutes, 100 kills |
+| Capture the Flag | 1–20 captures | 30 minutes, no capture limit |
+| Headquarters | 60–900 points (one a second holding the radio, 10 for destroying the enemy's) | 30 minutes, 300 points |
+| Search and Destroy | 3–15 rounds won | no time limit, 10 rounds |
+
+Choosing another mode returns to that mode's own rules; the match ends at
+whichever limit comes first, on every map of the room's rotation. For a custom
+room creator, POST `/servers` with `timeLimit` (0, 5, 10, 15, 20, 30, 45 or 60)
+and `scoreLimit` (a value the mode offers, 0 for none); omitted fields keep the
+mode's own.
 
 ## Bots
 
@@ -405,7 +426,7 @@ sheet metal offer less protection than thick masonry or rock. See
 | Quick messages | H |
 | Class screens | Enter selects, F1 renames (edits a Custom class in a match), F2 or a controller's Y customizes a gun's camouflage, Escape goes back; in a match ← → or Tab switch Custom / Standard Issue and 1–5 choose |
 | Pause menu (in a match) | Escape opens and closes; Q / E, Tab or LB / RB change tab; Enter or a click selects; arrows move; F1 edits a custom class; 1–5 choose a class |
-| Start New Server | ↑ ↓ or the pointer choose, Enter or a click opens and selects, ← → change a bot setting, Escape or right-click goes back |
+| Start New Server | ↑ ↓ or the pointer choose, Enter or a click opens and selects, ← → change a rule or bot setting, Escape or right-click goes back |
 | Enter / exit fullscreen | F10 |
 
 Chat keeps mouse capture while typing and displays five wrapped lines for eight

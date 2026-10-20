@@ -134,9 +134,10 @@ extern void UI_RunMenuScript(const char **args);
 /* rooms.py keeps at most this many letters of a room's name. */
 #define MATCH_ROOM_NAME_MAX 32
 
-enum { MATCH_PAGE_MATCH, MATCH_PAGE_MODE, MATCH_PAGE_MAP, MATCH_PAGE_BOTS, MATCH_PAGE_COUNT };
-enum { MATCH_ITEM_MODE, MATCH_ITEM_MAP, MATCH_ITEM_BOTS, MATCH_ITEM_START, MATCH_ITEM_COUNT };
+enum { MATCH_PAGE_MATCH, MATCH_PAGE_MODE, MATCH_PAGE_MAP, MATCH_PAGE_BOTS, MATCH_PAGE_RULES, MATCH_PAGE_COUNT };
+enum { MATCH_ITEM_MODE, MATCH_ITEM_MAP, MATCH_ITEM_RULES, MATCH_ITEM_BOTS, MATCH_ITEM_START, MATCH_ITEM_COUNT };
 enum { MATCH_SETTING_BOTS, MATCH_SETTING_DIFFICULTY, MATCH_SETTING_COUNT };
+enum { MATCH_RULE_TIME, MATCH_RULE_SCORE, MATCH_RULE_COUNT };
 
 typedef struct {
     float x, y, w, h;
@@ -151,7 +152,7 @@ static struct {
     int starting;
 } s_match;
 
-static const char *const s_matchItems[MATCH_ITEM_COUNT] = { "Mode", "Map", "Bots", "Start Match" };
+static const char *const s_matchItems[MATCH_ITEM_COUNT] = { "Mode", "Map", "Game Rules", "Bots", "Start Match" };
 static const char *const s_matchSettings[MATCH_SETTING_COUNT] = { "Bot Count", "Difficulty" };
 /* Every count to 16, then every fourth to the rooms' 32. */
 static const int s_matchBotCounts[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 20, 24, 28, 32 };
@@ -163,6 +164,37 @@ static const char *const s_matchDifficultyNotes[] = {
 };
 #define MATCH_BOT_COUNTS (int)(sizeof(s_matchBotCounts) / sizeof(s_matchBotCounts[0]))
 #define MATCH_DIFFICULTIES (int)(sizeof(s_matchDifficulties) / sizeof(s_matchDifficulties[0]))
+
+static const char *const s_matchRules[MATCH_RULE_COUNT] = { "Time Limit", "Score Limit" };
+/* -1 in either for the mode's own. */
+static const char *const s_matchRuleDvars[MATCH_RULE_COUNT] = { "ui_matchTimeLimit", "ui_matchScoreLimit" };
+/* Minutes, and each mode's score, 0 for none: what rooms.py and the gateway
+ * accept. A mode starts from what its room plays without rules: the retail
+ * limits, but server.cfg's for Team Deathmatch and none for the retail 300
+ * captures. */
+static const int s_matchTimeLimits[] = { 0, 5, 10, 15, 20, 30, 45, 60 };
+#define MATCH_TIME_LIMITS (int)(sizeof(s_matchTimeLimits) / sizeof(s_matchTimeLimits[0]))
+#define MATCH_SCORE_LIMITS 8
+static const struct {
+    const char *gameType;
+    int timeLimit, scoreLimit;
+    int scoreLimits[MATCH_SCORE_LIMITS];
+    const char *unit, *units, *note;
+} s_matchRuleModes[] = {
+    { "dm", 30, 100, { 0, 10, 20, 30, 50, 75, 100, 150 }, "Kill", "Kills",
+      "The first player to make this many kills wins." },
+    { "tdm", 15, 100, { 0, 25, 50, 75, 100, 150, 200, 300 }, "Kill", "Kills",
+      "The first team to make this many kills wins." },
+    { "ctf", 30, 0, { 0, 1, 3, 5, 7, 10, 15, 20 }, "Capture", "Captures",
+      "The first team to capture the enemy flag this many times wins." },
+    { "hq", 30, 300, { 0, 60, 120, 180, 300, 450, 600, 900 }, "Point", "Points",
+      "Teams score a point for every second they hold the radio and 10 for destroying the enemy's. The first to this "
+      "many wins." },
+    { "sd", 0, 10, { 0, 3, 4, 5, 6, 7, 10, 15 }, "Round", "Rounds",
+      "The first team to win this many rounds wins the match." },
+};
+#define MATCH_RULE_MODES (int)(sizeof(s_matchRuleModes) / sizeof(s_matchRuleModes[0]))
+#define MATCH_TIME_NOTE "The match ends when the time runs out, and whoever leads then wins."
 
 /* What the retail strings say of each mode: the serverinfo menus' objective
  * for Deathmatch and Team Deathmatch, the menus' description for the rest. */
@@ -318,6 +350,11 @@ static void Match_SelectMode(int mode)
 
     if (mode < 0 || mode >= sharedUiInfo.numGameTypes)
         return;
+    /* Another mode's score counts something else: it starts from its own. */
+    if (mode != Dvar_GetInt("ui_netGametype")) {
+        Dvar_SetIntByName("ui_matchTimeLimit", -1);
+        Dvar_SetIntByName("ui_matchScoreLimit", -1);
+    }
     Dvar_SetIntByName("ui_netGametype", mode);
     Dvar_SetStringByName("ui_netGametypeName", sharedUiInfo.gameTypes[mode].gameType);
     map = Match_Map();
@@ -346,9 +383,67 @@ static void Match_StepBots(int delta)
     Dvar_SetIntByName("ui_botCount", s_matchBotCounts[(i + MATCH_BOT_COUNTS) % MATCH_BOT_COUNTS]);
 }
 
-static void Match_Step(int setting, int delta)
+/* The gametype's rules; -1 for one without. */
+static int Match_RuleMode(const char *gameType)
 {
-    if (setting == MATCH_SETTING_BOTS)
+    int i;
+
+    for (i = 0; gameType && i < MATCH_RULE_MODES; i++) {
+        if (!I_stricmp(gameType, s_matchRuleModes[i].gameType))
+            return i;
+    }
+    return -1;
+}
+
+static int Match_ModeRules(void)
+{
+    return Match_RuleMode(sharedUiInfo.gameTypes[Match_Mode()].gameType);
+}
+
+static const int *Match_RuleValues(int ruleMode, int rule, int *count)
+{
+    *count = rule == MATCH_RULE_TIME ? MATCH_TIME_LIMITS : MATCH_SCORE_LIMITS;
+    return rule == MATCH_RULE_TIME ? s_matchTimeLimits : s_matchRuleModes[ruleMode].scoreLimits;
+}
+
+/* The chosen value while the mode offers it, else the mode's own; -1 for a
+ * mode without rules. */
+static int Match_Rule(int ruleMode, int rule)
+{
+    const int value = Dvar_GetInt(s_matchRuleDvars[rule]);
+    const int *values;
+    int count, i;
+
+    if (ruleMode < 0)
+        return -1;
+    values = Match_RuleValues(ruleMode, rule, &count);
+    for (i = 0; i < count; i++) {
+        if (values[i] == value)
+            return value;
+    }
+    return rule == MATCH_RULE_TIME ? s_matchRuleModes[ruleMode].timeLimit : s_matchRuleModes[ruleMode].scoreLimit;
+}
+
+/* The next value up or down, wrapping. */
+static void Match_StepRule(int rule, int delta)
+{
+    const int ruleMode = Match_ModeRules(), value = Match_Rule(ruleMode, rule);
+    const int *values;
+    int count, i;
+
+    if (ruleMode < 0)
+        return;
+    values = Match_RuleValues(ruleMode, rule, &count);
+    for (i = 0; i < count && values[i] != value; i++)
+        ;
+    Dvar_SetIntByName(s_matchRuleDvars[rule], values[(i + delta + count) % count]);
+}
+
+static void Match_Step(int page, int setting, int delta)
+{
+    if (page == MATCH_PAGE_RULES)
+        Match_StepRule(setting, delta);
+    else if (setting == MATCH_SETTING_BOTS)
         Match_StepBots(delta);
     else
         Dvar_SetIntByName("ui_botDifficulty", (Match_Difficulty() + delta + MATCH_DIFFICULTIES) % MATCH_DIFFICULTIES);
@@ -365,6 +460,29 @@ static void Match_SettingValue(int setting, char *text, int size)
         snprintf(text, (size_t)size, "%d", count);
     else
         snprintf(text, (size_t)size, "None");
+}
+
+static void Match_RuleValue(int rule, char *text, int size)
+{
+    const int ruleMode = Match_ModeRules(), value = Match_Rule(ruleMode, rule);
+
+    if (value < 0)
+        snprintf(text, (size_t)size, "Default");
+    else if (!value)
+        snprintf(text, (size_t)size, "Unlimited");
+    else if (rule == MATCH_RULE_TIME)
+        snprintf(text, (size_t)size, "%d Minutes", value);
+    else
+        snprintf(text, (size_t)size, "%d %s", value,
+                 value == 1 ? s_matchRuleModes[ruleMode].unit : s_matchRuleModes[ruleMode].units);
+}
+
+void UI_MatchMenu_Rules(const char *gameType, int *timeLimit, int *scoreLimit)
+{
+    const int ruleMode = Match_RuleMode(gameType);
+
+    *timeLimit = Match_Rule(ruleMode, MATCH_RULE_TIME);
+    *scoreLimit = Match_Rule(ruleMode, MATCH_RULE_SCORE);
 }
 
 void UI_MatchMenu_RoomName(char *name, int size)
@@ -411,6 +529,8 @@ static int Match_Count(int page)
         return Match_Maps(maps);
     case MATCH_PAGE_BOTS:
         return MATCH_SETTING_COUNT;
+    case MATCH_PAGE_RULES:
+        return MATCH_RULE_COUNT;
     default:
         return MATCH_ITEM_COUNT;
     }
@@ -462,8 +582,8 @@ static void Match_Activate(int step)
 {
     int focus = s_match.focus[s_match.page], maps[128], count, map, i;
 
-    if (s_match.page == MATCH_PAGE_BOTS) {
-        Match_Step(focus, step);
+    if (s_match.page == MATCH_PAGE_BOTS || s_match.page == MATCH_PAGE_RULES) {
+        Match_Step(s_match.page, focus, step);
         return;
     }
     UI_PlayLocalSoundAliasByName("mouse_click");
@@ -491,6 +611,9 @@ static void Match_Activate(int step)
                 ;
             s_match.page = MATCH_PAGE_MAP;
             s_match.focus[MATCH_PAGE_MAP] = i < count ? i : 0;
+        } else if (focus == MATCH_ITEM_RULES) {
+            s_match.page = MATCH_PAGE_RULES;
+            s_match.focus[MATCH_PAGE_RULES] = MATCH_RULE_TIME;
         } else {
             s_match.page = MATCH_PAGE_BOTS;
             s_match.focus[MATCH_PAGE_BOTS] = MATCH_SETTING_BOTS;
@@ -553,8 +676,8 @@ int UI_MatchMenu_KeyEvent(displayContextDef_t *dc, menuDef_t *menu, int key, int
         break;
     case MATCH_KEY_LEFT:
     case MATCH_KEY_RIGHT:
-        if (page == MATCH_PAGE_BOTS)
-            Match_Step(s_match.focus[page], key == MATCH_KEY_RIGHT ? 1 : -1);
+        if (page == MATCH_PAGE_BOTS || page == MATCH_PAGE_RULES)
+            Match_Step(page, s_match.focus[page], key == MATCH_KEY_RIGHT ? 1 : -1);
         break;
     default:
         break;
@@ -695,13 +818,18 @@ static void Match_Title(const char *title, const char *note)
     Match_Text(note, 0, MATCH_PAGE_X, MATCH_NOTE_BASELINE, MATCH_NOTE_CAP, 0.0f, s_matchNote);
 }
 
-/* The match page's items down the column: its two boxes, the row for bots
- * and the box to start, each the gap after the last. */
+/* The match page's items down the column: its two boxes, the rows for game
+ * rules and bots a row apart, and the box to start, each the gap after the
+ * last. */
 static float Match_ItemTop(int item)
 {
-    float top = MATCH_BOX_TOP + (float)(item < MATCH_ITEM_BOTS ? item : MATCH_ITEM_BOTS) * (MATCH_BOX_H + MATCH_GAP);
+    const float rows = MATCH_BOX_TOP + 2.0f * (MATCH_BOX_H + MATCH_GAP);
 
-    return item == MATCH_ITEM_START ? top + MATCH_ROW_H + MATCH_GAP : top;
+    if (item < MATCH_ITEM_RULES)
+        return MATCH_BOX_TOP + (float)item * (MATCH_BOX_H + MATCH_GAP);
+    if (item < MATCH_ITEM_START)
+        return rows + (float)(item - MATCH_ITEM_RULES) * MATCH_ROW_SPACING;
+    return rows + (float)(MATCH_ITEM_BOTS - MATCH_ITEM_RULES) * MATCH_ROW_SPACING + MATCH_ROW_H + MATCH_GAP;
 }
 
 static void Match_PaintBox(displayContextDef_t *dc, int item, const char *value, int focused)
@@ -770,7 +898,8 @@ static void Match_PaintPair(int row, const char *name, const char *value)
 }
 
 /* Beside the match page's column, the focused item's page, dimmed: the
- * modes, the maps, the bots' settings, or what Start Match creates. */
+ * modes, the maps, the rules, the bots' settings, or what Start Match
+ * creates. */
 static void Match_PaintPreview(int item)
 {
     const float x = MATCH_TEXT_X + MATCH_PREVIEW_SHIFT;
@@ -789,6 +918,12 @@ static void Match_PaintPreview(int item)
             Match_Caps(sharedUiInfo.mapList[maps[i]].mapName, 0, x, MATCH_LIST_TOP + (float)i * MATCH_ROW_SPACING,
                        MATCH_LIST_CAP, 0.0f, s_matchPreview);
         break;
+    case MATCH_ITEM_RULES:
+        for (i = 0; i < MATCH_RULE_COUNT; i++) {
+            Match_RuleValue(i, value, sizeof(value));
+            Match_PaintPair(i, s_matchRules[i], value);
+        }
+        break;
     case MATCH_ITEM_BOTS:
         for (i = 0; i < MATCH_SETTING_COUNT; i++) {
             Match_SettingValue(i, value, sizeof(value));
@@ -799,15 +934,19 @@ static void Match_PaintPreview(int item)
         Match_PaintPair(0, "Mode", Match_ModeName(Match_Mode()));
         i = Match_Map();
         Match_PaintPair(1, "Map", i >= 0 ? sharedUiInfo.mapList[i].mapName : "");
+        for (i = 0; i < MATCH_RULE_COUNT; i++) {
+            Match_RuleValue(i, value, sizeof(value));
+            Match_PaintPair(2 + i, s_matchRules[i], value);
+        }
         if (Dvar_GetInt("ui_botCount") > 0)
             snprintf(value, sizeof(value), "%d, %s", Dvar_GetInt("ui_botCount"),
                      s_matchDifficulties[Match_Difficulty()]);
         else
             snprintf(value, sizeof(value), "None");
-        Match_PaintPair(2, "Bots", value);
+        Match_PaintPair(4, "Bots", value);
         UI_MatchMenu_RoomName(name, sizeof(name));
         if (name[0])
-            Match_PaintPair(3, "Server Name", name);
+            Match_PaintPair(5, "Server Name", name);
         break;
     }
 }
@@ -816,13 +955,14 @@ static void Match_PaintMatch(displayContextDef_t *dc)
 {
     const int focus = s_match.focus[MATCH_PAGE_MATCH];
     const int map = Match_Map();
+    int item;
 
     Match_Title("MATCH", "Customize the game you want to play");
     Match_PaintBox(dc, MATCH_ITEM_MODE, Match_ModeName(Match_Mode()), focus == MATCH_ITEM_MODE);
     Match_PaintBox(dc, MATCH_ITEM_MAP, map >= 0 ? sharedUiInfo.mapList[map].mapName : "", focus == MATCH_ITEM_MAP);
-    Match_PaintRow(dc, MATCH_ITEM_BOTS, s_matchItems[MATCH_ITEM_BOTS], 1,
-                   Match_ItemTop(MATCH_ITEM_BOTS) + MATCH_ROW_ABOVE, MATCH_ROW_CAP, MATCH_ROW_CAP, MATCH_LIST_RIGHT,
-                   focus == MATCH_ITEM_BOTS);
+    for (item = MATCH_ITEM_RULES; item <= MATCH_ITEM_BOTS; item++)
+        Match_PaintRow(dc, item, s_matchItems[item], 1, Match_ItemTop(item) + MATCH_ROW_ABOVE, MATCH_ROW_CAP,
+                       MATCH_ROW_CAP, MATCH_LIST_RIGHT, focus == item);
     Match_PaintBox(dc, MATCH_ITEM_START,
                    s_match.starting ? "Starting your server..." : "Create your server and join it",
                    focus == MATCH_ITEM_START);
@@ -889,21 +1029,26 @@ static void Match_PaintMaps(displayContextDef_t *dc)
                   MATCH_PANEL_NOTE_CAP, MATCH_PANEL_LEADING, MATCH_PANEL_NOTE_LINES, s_matchNote);
 }
 
-static void Match_PaintBots(displayContextDef_t *dc)
+/* Bot setup's or the rules' settings, the focused one's value Bold and white
+ * between arrows; the panel names the focused one, and note explains it. */
+static void Match_PaintSettings(displayContextDef_t *dc, int page, const char *const *names, int count,
+                                const char *note)
 {
-    const int focus = s_match.focus[MATCH_PAGE_BOTS];
+    const int focus = s_match.focus[page];
     const float center = MATCH_TEXT_X + MATCH_VALUE_OFFSET;
-    char value[16];
+    char value[32];
     int row;
 
-    Match_Title("BOT SETUP", "Set the number and difficulty of bots");
-    for (row = 0; row < MATCH_SETTING_COUNT; row++) {
+    for (row = 0; row < count; row++) {
         const float baseline = MATCH_LIST_TOP + (float)row * MATCH_ROW_SPACING;
         const int focused = row == focus;
 
-        Match_PaintRow(dc, row, s_matchSettings[row], 0, baseline, MATCH_SETTING_CAP, MATCH_SETTING_CAP,
+        Match_PaintRow(dc, row, names[row], 0, baseline, MATCH_SETTING_CAP, MATCH_SETTING_CAP,
                        MATCH_SETTING_RIGHT, focused);
-        Match_SettingValue(row, value, sizeof(value));
+        if (page == MATCH_PAGE_RULES)
+            Match_RuleValue(row, value, sizeof(value));
+        else
+            Match_SettingValue(row, value, sizeof(value));
         Match_PaintValue(value, MATCH_TEXT_X, baseline, focused,
                          UI_WWIIMenu_Color(focused ? WWII_COLOR_WHITE : WWII_COLOR_IDLE));
         if (focused) {
@@ -913,14 +1058,32 @@ static void Match_PaintBots(displayContextDef_t *dc)
                         UI_WWIIMenu_Color(WWII_COLOR_TITLE));
         }
     }
-    if (focus < 0 || focus >= MATCH_SETTING_COUNT)
+    if (focus < 0 || focus >= count)
         return;
-    Match_Caps(s_matchSettings[focus], 1, MATCH_BOTS_PANEL_X, MATCH_BOTS_TITLE_BASELINE, MATCH_PANEL_TITLE_CAP,
+    Match_Caps(names[focus], 1, MATCH_BOTS_PANEL_X, MATCH_BOTS_TITLE_BASELINE, MATCH_PANEL_TITLE_CAP,
                MATCH_PANEL_TITLE_TRACKING, UI_WWIIMenu_Color(WWII_COLOR_GOLD));
-    Match_Wrapped(focus == MATCH_SETTING_BOTS ? "Bots join the match on their own. Each one takes a player slot."
-                                              : s_matchDifficultyNotes[Match_Difficulty()],
-                  MATCH_BOTS_PANEL_X, MATCH_BOTS_NOTE_BASELINE, MATCH_BOTS_NOTE_W, MATCH_PANEL_NOTE_CAP,
+    Match_Wrapped(note, MATCH_BOTS_PANEL_X, MATCH_BOTS_NOTE_BASELINE, MATCH_BOTS_NOTE_W, MATCH_PANEL_NOTE_CAP,
                   MATCH_PANEL_LEADING, MATCH_PANEL_NOTE_LINES, s_matchNote);
+}
+
+static void Match_PaintBots(displayContextDef_t *dc)
+{
+    Match_Title("BOT SETUP", "Set the number and difficulty of bots");
+    Match_PaintSettings(dc, MATCH_PAGE_BOTS, s_matchSettings, MATCH_SETTING_COUNT,
+                        s_match.focus[MATCH_PAGE_BOTS] == MATCH_SETTING_BOTS
+                            ? "Bots join the match on their own. Each one takes a player slot."
+                            : s_matchDifficultyNotes[Match_Difficulty()]);
+}
+
+static void Match_PaintRules(displayContextDef_t *dc)
+{
+    const int ruleMode = Match_ModeRules();
+
+    Match_Title("GAME RULES", "Set how long the match lasts and the score that wins it");
+    Match_PaintSettings(dc, MATCH_PAGE_RULES, s_matchRules, MATCH_RULE_COUNT,
+                        s_match.focus[MATCH_PAGE_RULES] == MATCH_RULE_TIME ? MATCH_TIME_NOTE
+                        : ruleMode >= 0                                    ? s_matchRuleModes[ruleMode].note
+                                                                           : "");
 }
 
 void UI_MatchMenu_Paint(displayContextDef_t *dc, menuDef_t *menu)
@@ -947,6 +1110,9 @@ void UI_MatchMenu_Paint(displayContextDef_t *dc, menuDef_t *menu)
         break;
     case MATCH_PAGE_BOTS:
         Match_PaintBots(dc);
+        break;
+    case MATCH_PAGE_RULES:
+        Match_PaintRules(dc);
         break;
     default:
         Match_PaintMatch(dc);

@@ -22,6 +22,13 @@ SUPPORTED_MAPS = ('mp_toujane', 'mp_carentan', 'mp_dawnville')
 SUPPORTED_GAMETYPES = ('dm', 'tdm', 'ctf', 'hq', 'sd')
 MAX_BOTS = 32
 BOT_DIFFICULTIES = ('easy', 'normal', 'hard')
+# Start New Server's rules: minutes, and each mode's score (a player's kills,
+# a team's kills, captures, points for holding the radio, rounds won); 0 for
+# none. ui_match_menu.c and the gateway offer and accept the same.
+TIME_LIMITS = (0, 5, 10, 15, 20, 30, 45, 60)
+SCORE_LIMITS = {'dm': (0, 10, 20, 30, 50, 75, 100, 150), 'tdm': (0, 25, 50, 75, 100, 150, 200, 300),
+                'ctf': (0, 1, 3, 5, 7, 10, 15, 20), 'hq': (0, 60, 120, 180, 300, 450, 600, 900),
+                'sd': (0, 3, 4, 5, 6, 7, 10, 15)}
 DEFAULT_NAME = 'Toujane - Carentan'
 rooms = {}
 lock = threading.Lock()
@@ -70,7 +77,14 @@ def info_for(room):
         return None
 
 
-def start_room(room_id, name, mapname='mp_toujane', gametype='tdm', bot_count=0, bot_difficulty='normal'):
+def valid_limits(gametype, time_limit, score_limit):
+    """Whether the rules are ones Start New Server offers, each None for the mode's own."""
+    return ((time_limit is None or type(time_limit) is int and time_limit in TIME_LIMITS) and
+            (score_limit is None or type(score_limit) is int and score_limit in SCORE_LIMITS[gametype]))
+
+
+def start_room(room_id, name, mapname='mp_toujane', gametype='tdm', bot_count=0, bot_difficulty='normal',
+               time_limit=None, score_limit=None):
     if mapname not in SUPPORTED_MAPS:
         raise ValueError('Unsupported map')
     if gametype not in SUPPORTED_GAMETYPES:
@@ -79,6 +93,8 @@ def start_room(room_id, name, mapname='mp_toujane', gametype='tdm', bot_count=0,
         raise ValueError('Choose between 0 and 32 bots.')
     if bot_difficulty not in BOT_DIFFICULTIES:
         raise ValueError('Choose Easy, Normal or Hard bots.')
+    if not valid_limits(gametype, time_limit, score_limit):
+        raise ValueError('Choose a supported time and score limit.')
     profile = Path('/profile') / f'room-{room_id}'
     raw = profile / 'raw'
     raw.mkdir(parents=True, exist_ok=True)
@@ -99,6 +115,11 @@ def start_room(room_id, name, mapname='mp_toujane', gametype='tdm', bot_count=0,
                      f'set sv_mapRotationCurrent "{rotation}"\n'
                      f'set scr_bot_count "{bot_count}"\n'
                      f'set scr_bot_difficulty "{BOT_DIFFICULTIES.index(bot_difficulty)}"\n')
+        # The rotation keeps the mode, so the rules hold on every map.
+        if time_limit is not None:
+            config.write(f'set scr_{gametype}_timelimit "{time_limit}"\n')
+        if score_limit is not None:
+            config.write(f'set scr_{gametype}_scorelimit "{score_limit}"\n')
     # Names are one console argument. No arbitrary commands, paths,
     # launch options, UDP destinations or shell interpretation are accepted.
     name = re.sub(r'[^A-Za-z0-9 _|.-]', '', name).strip()[:32] or DEFAULT_NAME
@@ -112,7 +133,7 @@ def start_room(room_id, name, mapname='mp_toujane', gametype='tdm', bot_count=0,
     room = {'id': room_id, 'port': BASE_PORT + room_id, 'process': child,
             'last_used': time.monotonic(), 'instance': secrets.token_hex(16),
             'ownerToken': secrets.token_hex(32), 'botCount': bot_count,
-            'botDifficulty': bot_difficulty}
+            'botDifficulty': bot_difficulty, 'timeLimit': time_limit, 'scoreLimit': score_limit}
     rooms[room_id] = room
     return room
 
@@ -178,6 +199,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         bot_difficulty = body.get('botDifficulty', 'normal')
         if not isinstance(bot_difficulty, str) or bot_difficulty not in BOT_DIFFICULTIES:
             return self.reply(400, {'error': 'Choose Easy, Normal or Hard bots.'})
+        time_limit, score_limit = body.get('timeLimit'), body.get('scoreLimit')
+        if not valid_limits(gametype, time_limit, score_limit):
+            return self.reply(400, {'error': 'Choose a supported time and score limit.'})
         with lock:
             if stopping.is_set():
                 return self.reply(503, {'error': 'The host is shutting down.'})
@@ -185,7 +209,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                          if i not in rooms or rooms[i]['process'].poll() is not None]
             if not available:
                 return self.reply(409, {'error': 'Three servers are already running. Join an existing server.'})
-            room = start_room(available[0], name, mapname, gametype, bot_count, bot_difficulty)
+            room = start_room(available[0], name, mapname, gametype, bot_count, bot_difficulty,
+                              time_limit=time_limit, score_limit=score_limit)
         for _ in range(40):
             info = info_for(room)
             if info:
