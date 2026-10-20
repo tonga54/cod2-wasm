@@ -16,14 +16,14 @@ HEAL = b'\t\t\t\tplayers[i].maxhealth = 100;\r\n\t\t\t\tplayers[i].health = play
 
 
 def check(module):
-    """Each mode's players at 125 as they spawn, and HQ's as it heals them; nothing else changed."""
+    """Each mode's players at 105 as they spawn, and HQ's as it heals them; nothing else changed."""
     retail = {f'maps/mp/gametypes/{gametype}.gsc': b'spawnPlayer()\r\n{\r\n' + SPAWN + b'}\r\n'
               for gametype in module.GAMETYPES}
     assert set(retail) == {f'maps/mp/gametypes/{gametype}.gsc' for gametype in ('ctf', 'dm', 'hq', 'sd', 'tdm')}
     retail['maps/mp/gametypes/hq.gsc'] += HEAL + HEAL
     for name, data in retail.items():
         patched = module.apply_player_health(name, data)
-        assert patched == data.replace(b'maxhealth = 100;', b'maxhealth = 125;'), name
+        assert patched == data.replace(b'maxhealth = 100;', b'maxhealth = 105;'), name
         for unexpected in (data.replace(b'maxhealth = 100;', b'maxhealth = 90;', 1), data + SPAWN):
             try:
                 module.apply_player_health(name, unexpected)
@@ -46,7 +46,7 @@ MUTANTS = [
      "        raise ValueError('Unexpected retail health in ' + name)\n", ""),
     ("    if name not in SCRIPTS:\n        return original\n", ""),
     ("GAMETYPES = ('ctf', 'dm', 'hq', 'sd', 'tdm')", "GAMETYPES = ('ctf', 'dm', 'hq', 'tdm')"),
-    ("PLAYER_HEALTH = 125", "PLAYER_HEALTH = 150"),
+    ("PLAYER_HEALTH = 105", "PLAYER_HEALTH = 150"),
 ]
 source = (root / 'scripts/browser_player_health.py').read_text()
 for old, new in MUTANTS:

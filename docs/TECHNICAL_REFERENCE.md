@@ -202,13 +202,12 @@ retail CoD2:
   and uses the running body animation. It also stands up from crouch/prone when
   headroom permits. Sprint currently has no stamina limit.
   Melee moves to V; scoped Hold Breath continues to use Shift.
-- **More health:** players and bots have 125 health instead of retail's 100 in
-  every mode, so a fight takes one more shot from an automatic weapon or a
-  pistol. Bolt-action rifles still kill with one shot to the body, and
+- **More health:** players and bots have 105 health instead of retail's 100 in
+  every mode. Bolt-action rifles still kill with one shot to the body, and
   semi-automatic rifles and pistols with one to the head up close. Health still
   regenerates to full, and falls hurt in proportion to it.
 - **Melee damage:** butt strikes deal at most 50 of retail's 100 health, scaled
-  to the players' 125 (63), without random bonuses or bullet hit-location
+  to the players' 105 (53), without random bonuses or bullet hit-location
   multipliers. Two hits kill a player at full health; an injured player can
   still die from one. Weaker melee weapons keep the same share of a life. This
   server rule leaves the retail weapon assets intact.
@@ -221,13 +220,12 @@ retail CoD2:
   damage, rate of fire, zoom and bullet one damage model: the PPS-42 hurts as
   the Thompson does, the Grease Gun as the MP40, and the M1 Garand as the G43
   and SVT-40. No automatic weapon kills with one headshot, and two do. With the
-  players' 125 health, the MP40, Grease Gun and pistols deal 40 instead of 45,
-  so every automatic weapon and pistol takes one more shot to the body than in
-  retail; a pistol's headshot (×3.125) still kills up close. SMGs firing 700
+  players' 105 health, the MP40, Grease Gun and pistols deal 40 instead of 45,
+  while a pistol's headshot (×3.125) still kills up close. SMGs firing 700
   rounds a minute or more (Thompson, PPS-42, PPSh) keep full damage to 600
   units and slower ones to 700, all falling to 10; the automatic rifles (MP44,
   Bren, BAR) fall from 40 to 28 between 1,200 and 2,500 units, with wider hip
-  fire and 0.2° of aimed spread. The PPSh deals 30 instead of 35 up close (five
+  fire and 0.2° of aimed spread. The PPSh deals 30 instead of 35 up close (four
   body shots) and kicks higher and wider when aimed. Bolt-action and scoped
   rifles, the shotgun, grenades and the mounted MG42 keep their original
   definitions; the mounted heat/recoil rules are implemented separately.

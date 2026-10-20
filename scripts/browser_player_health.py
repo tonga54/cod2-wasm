@@ -1,4 +1,4 @@
-"""The players' full health on the server, in place of retail's 100, so a fight takes a shot more."""
+"""The players' full health on the server, in place of retail's 100, with a small increase over retail."""
 
 GAMETYPES = ('ctf', 'dm', 'hq', 'sd', 'tdm')
 SCRIPTS = {f'maps/mp/gametypes/{gametype}.gsc' for gametype in GAMETYPES}
@@ -7,7 +7,7 @@ RETAIL_HEALTH = b'maxhealth = 100;'
 RETAIL_COUNTS = {'maps/mp/gametypes/hq.gsc': 3}
 # At most 135, the 135 a bolt-action rifle's shot to the body and a semi-automatic's to the head deal, so they
 # still kill alone. bg_player_health.h's BG_PLAYER_HEALTH.
-PLAYER_HEALTH = 125
+PLAYER_HEALTH = 105
 
 
 def apply_player_health(name: str, original: bytes) -> bytes:

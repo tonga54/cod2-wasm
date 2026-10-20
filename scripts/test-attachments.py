@@ -306,7 +306,7 @@ int main(void)
     d = Attached(GARAND, ATT_BIT(ATT_HIGHCAL));
     assert(NEAR(d.locationDamageMultipliers[HITLOC_HEAD], 3.0f) && NEAR(d.locationDamageMultipliers[HITLOC_HELMET], 3.0f));
     assert(NEAR(d.locationDamageMultipliers[4], 1.0f) && NEAR(d.fAdsViewKickPitchMax, 80.5f));
-    /* Raised by half, the BAR's headshot would deal 135 of the players' 125.
+    /* Raised by half, the BAR's headshot would deal 135 of the players' 105.
      * An automatic weapon's stops a point short of killing alone, after the
      * server truncates it, and never falls below the gun's own. */
     d = Attached(BAR, ATT_BIT(ATT_HIGHCAL));
