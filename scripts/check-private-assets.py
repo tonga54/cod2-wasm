@@ -36,7 +36,7 @@ parser.add_argument('--main-dir', type=Path, default=root / 'data/browser/main')
 parser.add_argument('--manifest', type=Path, default=root / 'site/wasm-game-data.json')
 args = parser.parse_args()
 maps = {"mp_toujane": "Toujane, Tunisia", "mp_carentan": "Carentan, France",
-        "mp_dawnville": "Dawnville, France"}
+        "mp_dawnville": "Dawnville, France", "mp_burgundy": "Burgundy, France"}
 gametypes = ("dm", "tdm", "ctf", "hq", "sd")
 balance_profile = load_profile()
 policy = json.loads(args.manifest.read_text())["variants"]["cod2-mp"]
@@ -261,7 +261,7 @@ try:
         prematch_music += ", the owner's end of match music"
     pack = f"the owner's sounds for {len(owner_sounds['aliases'])} aliases" if owner_sounds else "no owner sound pack"
     pictures = f"the owner's {len(owner_pictures)} class pictures" if owner_pictures else "no owner class pictures"
-    print(f"PASS: {len(entries)} private entries, {total} bytes, retail bytes/reviewed overrides, Toujane/Carentan/Dawnville, five retail modes, all three BSPs and factions, {hit_sound} hit sound, {menu_music} menu music, {prematch_music}, {pack}, {pictures}")
+    print(f"PASS: {len(entries)} private entries, {total} bytes, retail bytes/reviewed overrides, Toujane/Carentan/Dawnville/Burgundy, five retail modes, all four BSPs and factions, {hit_sound} hit sound, {menu_music} menu music, {prematch_music}, {pack}, {pictures}")
 finally:
     for archive in originals:
         archive.close()

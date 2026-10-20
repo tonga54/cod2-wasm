@@ -1,6 +1,6 @@
 # Call of Duty 2 browser runbook
 
-Status: **Toujane/Carentan/Dawnville browser port with five multiplayer modes under active development. Chrome and
+Status: **Toujane/Carentan/Dawnville/Burgundy browser port with five multiplayer modes under active development. Chrome and
 the internal browser have verified movement, aiming, damage, death, respawn and
 synchronized scores, including the normal room. This is two-client coverage,
 not a 64-player load or long-duration stability result.**
@@ -4645,3 +4645,56 @@ With that one-minute limit, the next map's countdown held the clock at 1:00
 for a player in the class menu, so the last minute's music restarted every
 1.6 s there. Start New Server offers no limit under 5 minutes, which keeps a
 held clock out of the last minute.
+
+## Burgundy enabled — 2026-10-20
+
+The owner asked to enable Burgundy, with its textures, shadows and lighting
+as on the maps added before. Burgundy, France (`mp_burgundy`) is now in Start
+New Server's Map Select, with the retail loading-screen picture and a note of
+its own. The list is alphabetical, so Burgundy comes first and is the default
+map. The gateway, room supervisor, discovery probe and the Pi's post-update
+check accept it, and rooms rotate through Toujane, Carentan, Dawnville and
+Burgundy. It uses the American and German Normandy factions and all five
+modes.
+
+The private renderer archive gains Burgundy's closure: its BSP, map and FX
+scripts, sun file, 32 materials, 64 textures, 11 models and one fire effect,
+157 files in all (285.7 to 307.1 MB). The audio archive is unchanged: its
+ambience and effects play sounds the other maps already have.
+`site/wasm-game-data.json` is regenerated with this commit. The Pi regenerates
+the same archives from its own retail IWDs, where Burgundy's BSP is in
+`iw_03.iwd` beside Carentan's and Dawnville's.
+
+Nothing in the renderer is specific to a map. Baked shadows, the light grid,
+fog, point lights and materials come from each map's own BSP, sun file and
+scripts. Burgundy's 32 materials use 12 techniques, all of them already used
+by the other three maps, and its textures are DXT1/3/5 like theirs. Its sun
+file has the same sprite, flare and direction as Carentan's.
+
+Validation:
+
+- `check-private-assets.py` passes with all four BSPs' materials.
+  Regenerating the three-map archives reproduces the previous manifest
+  exactly.
+- `test-map-rotation.py --rounds 8`: a real dedicated server rotated twice
+  through the four maps with the new archives, without an error. A server on
+  Burgundy holds 220 MiB, as on the other maps (219 to 221 MiB).
+- Dedicated servers on Burgundy started in all five modes without an error,
+  and reported CTF, HQ and S&D as their mode.
+- `test-room-maps.py`, `test-ui-map-selection.py`, `test-match-menu.py`,
+  `test-web-room-create.cjs` and the gateway's `rooms.test.mjs` pass. The
+  menu test now checks for a note for every map the UI keeps, the gateway
+  accepts and the rooms host. Beltot (`mp_farmhouse`) is now the tests'
+  unsupported map.
+- The web client builds. A Burgundy TDM room with four bots in the QA stack:
+  - the console showed no error of Burgundy's own, the three lightmaps and
+    the light grid loaded, and the minimap built in 257 ms at 7.3 units a
+    texel;
+  - screenshots showed the textures, the baked sun shadows (a tall wall's
+    face and the ground at its foot in shade, the far wall and a tree's crown
+    in sun), dim interiors lit from their doors and windows, the burning
+    Tiger's fire, the trucks and a lit German bot;
+  - Map Select showed Burgundy with its picture and its note in two lines.
+
+Not covered: only TDM ran in the browser on Burgundy, and nobody played a
+match on it.

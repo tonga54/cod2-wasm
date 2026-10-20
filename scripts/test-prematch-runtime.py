@@ -178,7 +178,7 @@ GAMETYPES = {
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--map', choices=['mp_toujane', 'mp_carentan', 'mp_dawnville'], default='mp_toujane')
+    parser.add_argument('--map', choices=['mp_toujane', 'mp_carentan', 'mp_dawnville', 'mp_burgundy'], default='mp_toujane')
     parser.add_argument('--gametype', choices=sorted(GAMETYPES), default='tdm')
     parser.add_argument('--image', default='local/cod2-native-server:dev')
     parser.add_argument('--assets', type=Path, default=ROOT / 'data/browser/main')

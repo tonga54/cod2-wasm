@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare private startup and Toujane/Carentan/Dawnville multiplayer assets."""
+"""Prepare private startup and Toujane/Carentan/Dawnville/Burgundy multiplayer assets."""
 from pathlib import Path
 import argparse
 import hashlib
@@ -28,7 +28,7 @@ parser.add_argument('--manifest', type=Path, default=root / 'site/wasm-game-data
 args = parser.parse_args()
 balance_profile = load_profile()
 maps = {"mp_toujane": "Toujane, Tunisia", "mp_carentan": "Carentan, France",
-        "mp_dawnville": "Dawnville, France"}
+        "mp_dawnville": "Dawnville, France", "mp_burgundy": "Burgundy, France"}
 gametypes = ("dm", "tdm", "ctf", "hq", "sd")
 soldiertypes = ("british_africa", "german_africa", "american_normandy", "german_normandy")
 main = args.main_dir
@@ -398,6 +398,6 @@ policy = {
     }}
 }
 args.manifest.write_text(json.dumps(policy, indent=2) + "\n")
-print(f"Private Toujane/Carentan/Dawnville archives: {sum(item['size'] for item in files)} bytes; "
+print(f"Private Toujane/Carentan/Dawnville/Burgundy archives: {sum(item['size'] for item in files)} bytes; "
       f"asset closure: {len(renderer)} files; gameplay still unverified")
 print(f"Weapon balance: {balance_profile['id']} ({len(balance_profile['weapons'])} weapons)")

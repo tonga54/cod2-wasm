@@ -18,17 +18,18 @@ Raspberry Pi 5; larger matches and lower-end client hardware need broader testin
 
 | Map | Allies | Axis |
 | --- | --- | --- |
+| Burgundy, France (`mp_burgundy`) | American | German Normandy |
 | Carentan, France (`mp_carentan`) | American | German Normandy |
 | Dawnville, France (`mp_dawnville`) | American | German Normandy |
 | Toujane, Tunisia (`mp_toujane`) | British | Afrika Korps |
 
-All three maps support the original **Deathmatch, Team Deathmatch, Capture the Flag,
+All four maps support the original **Deathmatch, Team Deathmatch, Capture the Flag,
 Headquarters, and Search and Destroy** modes. **Start New Server** is laid out
 as CoD WWII's MATCH screen: **Mode** and **Map** open lists of the modes and
 maps, each described at the right (a map with its loading-screen art),
 **Game Rules** sets the time and score limits, **Bots** opens the bot setup,
 and **Start Match** creates the room and joins it. Rooms rotate through
-Toujane, Carentan and Dawnville while keeping their selected mode and rules.
+Toujane, Carentan, Dawnville and Burgundy while keeping their selected mode and rules.
 Unless the creator changes them, TDM uses 100 team points or 15 minutes; the
 other modes use their original scripts and settings.
 

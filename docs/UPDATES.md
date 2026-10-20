@@ -73,7 +73,7 @@ owner's original IWDs, and the optional [hit sound](#owner-hit-sound),
 `~/cod2-original/main` (private, outside Git). It
 validates package checksums, ARM64 image identities and the clean source/build
 revision, regenerates private assets in staging, and checks their exact public
-manifest hashes. A separate Docker project then exercises three maps, two bots
+manifest hashes. A separate Docker project then exercises four maps, two bots
 per map, browser metadata and WebSocket-to-native challenges.
 
 The updater waits while players or pending joins are present. During the brief
@@ -151,8 +151,9 @@ Prepare the owner's files on the build machine:
 python3 scripts/prepare-browser-bootstrap.py
 ```
 
-The current Toujane/Carentan/Dawnville subset is approximately **324 MB** with
-the owner's [sound pack](#owner-sound-pack) (313 MB without it). Each browser
+The current Toujane/Carentan/Dawnville/Burgundy subset is approximately
+**375 MB** with the owner's [sound pack](#owner-sound-pack), music and class
+pictures; Burgundy accounts for 21 MB of it. Each browser
 downloads it from the host over HTTP/HTTPS and stores it in IndexedDB. The
 manifest verifies archive sizes and SHA-256 hashes; a new asset version
 invalidates the old cache. Storage belongs to each browser and origin, so
@@ -304,7 +305,7 @@ numbered 1, 2, 3 in `sequence`, because the engine drops rows of an alias that
 share a sequence number; it then picks among them at random without repeating
 the last. The files go to `sound/browser/owner/` in `cod2_browser_audio.iwd`,
 each once, and original files that only the replaced rows played are left out.
-The generator refuses an alias the three maps never play, a column the alias
+The generator refuses an alias the four maps never play, a column the alias
 table lacks, a missing or malformed file, and an alias the hit sound or menu
 music already replaces. `check-private-assets.py` verifies the rows and that
 the packaged files are the owner's bytes. Without the folder the archive keeps

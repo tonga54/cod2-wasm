@@ -24,8 +24,8 @@ extern const dvar_t **dvar_compassPingFadeTime;
 
 #define MINIMAP_TEXTURE_MAX 1024
 /* About 800 texels across the playable area: at the default size and range,
- * Toujane's, Carentan's and Dawnville's texels are under a pixel of a
- * 1080-line screen. */
+ * Toujane's, Carentan's, Dawnville's and Burgundy's texels are under a pixel
+ * of a 1080-line screen. */
 #define MINIMAP_TARGET_TEXELS 800
 #define MINIMAP_MIN_TEXEL_SIZE 6.0f
 #define MINIMAP_SPAWN_MARGIN 1536.0f

@@ -90,6 +90,12 @@ assert rule_modes['tdm'][:2] == (int(re.search(r'set scr_tdm_timelimit "(\d+)"',
 assert main.count(f'Dvar_RegisterInt("ui_matchTimeLimit", -1, -1, {max(times)}, 0x1001);') == 2
 assert main.count(
     f'Dvar_RegisterInt("ui_matchScoreLimit", -1, -1, {max(max(v) for _, _, v in rule_modes.values())}, 0x1001);') == 2
+# Map Select has a note for every map the UI keeps, the gateway accepts and
+# the rooms host.
+notes = re.findall(r'\{ "(mp_\w+)", "', source.split('s_matchMapNotes[] = {', 1)[1].split('};', 1)[0])
+kept = re.findall(r'I_stricmp\(mapName, "(mp_\w+)"\) != 0', (root / 'src/PC/ui_mp/ui_gameinfo_mp.c').read_text())
+accepted = re.findall(r"'(mp_\w+)'", re.search(r"if \(!\[([^\]]+)\]\.includes\(map\)\)", gateway)[1])
+assert sorted(notes) == sorted(kept) == sorted(accepted) == sorted(rooms.SUPPORTED_MAPS), (notes, kept, accepted)
 # Over createserver, bg shows only its backdrop, as under Create a Class.
 assert 'UI_WWIIMenu_PageOpen(dc)' in function(wwii, 'UI_WWIIMenu_PaintItem')
 
@@ -923,6 +929,12 @@ int main(void) {
         assert(!(drawn[i].kind == PIC && near(drawn[i].x, 284.2f)));
     assert(wrapped("Hillside town in southern Tunisia, fought over by British and Afrika Korps troops across its flat "
                    "rooftops and narrow alleys.", 283.8f, 309.2f, 289.2f) == 2);
+    /* Burgundy's note fits the panel in two lines too. */
+    sharedUiInfo.mapList[2].mapLoadName = "mp_burgundy";
+    paint();
+    assert(wrapped("Farming village in eastern France, fought over by American and German troops among its "
+                   "hedgerows, barns and wrecked tanks.", 283.8f, 309.2f, 289.2f) == 2);
+    sharedUiInfo.mapList[2].mapLoadName = maps[2][0];
     sharedUiInfo.mapList[2].levelShot = &shots[2];
     assert(key(0x0d) && s_match.page == 0 && s_match.focus[0] == 1 && DVAR("ui_currentNetMap") == 2);
     paint();

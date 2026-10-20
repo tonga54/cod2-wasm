@@ -218,6 +218,8 @@ static const struct {
     const char *map;
     const char *text;
 } s_matchMapNotes[] = {
+    { "mp_burgundy", "Farming village in eastern France, fought over by American and German troops among its "
+                     "hedgerows, barns and wrecked tanks." },
     { "mp_carentan", "Normandy town between the Utah and Omaha beachheads, fought over by American and German troops "
                      "through its streets and ruins." },
     { "mp_dawnville", "Normandy village around a church and its walled churchyard, fought over by American and German "
