@@ -532,6 +532,9 @@ updates and troubleshooting. The repository includes a dedicated
 Deployments preserve an existing `~/cod2-edge/compose.security.yaml` overlay for
 HTTPS, password protection and request limits. Use the configured HTTPS address
 on secured installations; credentials and certificates stay outside the repository.
+The game archives can also download from a free Cloudflare Worker through signed
+links, so players do not use the home connection's upload; see
+[Downloads from Cloudflare](docs/RASPBERRY_PI.md#downloads-from-cloudflare).
 The tested host is a Pi 5 with 8 GB RAM and 64-bit Debian; the required host page
 size is 4 KiB. The web/gateway/supervisor run as ARM64 processes;
 only the 32-bit x86 game executable uses QEMU. This preserves the engine's

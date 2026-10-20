@@ -6,6 +6,7 @@ import WebSocket, { WebSocketServer } from 'ws';
 import { createUpdateChecker, readBuildInfo } from './updates.mjs';
 import { createMaintenanceCheck } from './maintenance.mjs';
 import { ClassError, createClassStore, defaultClasses, normalizeClasses, playerKey } from './classes.mjs';
+import { createCdnRedirects, readAssetPolicy } from './cdn.mjs';
 
 // Start New Server's rules, as ui_match_menu.c offers and rooms.py accepts
 // them: minutes, and each mode's score; 0 for none.
@@ -17,7 +18,7 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
   udpHost = 'cod2-server', udpPort = 28960, maxClients = 64,
   iconPath = '/game-ui/cod2.ico', startupPath = '/game-ui/cod2-startup.png',
   roomsEnabled = false, managerPort = 8090, updateChecker, maintenanceCheck = createMaintenanceCheck(),
-  classStore = null, udpSocketFactory = () => dgram.createSocket('udp4') } = {}) {
+  classStore = null, cdnRedirect = null, udpSocketFactory = () => dgram.createSocket('udp4') } = {}) {
   const reservations = new Map();
   const artworkCache = new Map();
   const wsBinaryOptions = Object.freeze({ binary: true, compress: false });
@@ -93,6 +94,21 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
     if (!classStore) { json(response, 503, {error:'Classes are unavailable.'}); return; }
     classStore.put(key, classes);
     json(response, 200, {classes, saved:true});
+  }
+  function proxy(request, response) {
+    const upstream = http.request({ hostname: webHost, port: webPort,
+      method: request.method, path: request.url, headers: request.headers }, reply => {
+      response.writeHead(reply.statusCode, reply.headers);
+      reply.pipe(response);
+      reply.on('error', () => response.destroy());
+    });
+    upstream.on('error', () => {
+      if (!response.headersSent) response.writeHead(502, { 'Content-Type': 'text/plain' });
+      response.end('Game web server unavailable');
+    });
+    request.on('aborted', () => upstream.destroy());
+    response.on('close', () => { if (!response.writableFinished) upstream.destroy(); });
+    request.pipe(upstream);
   }
   const server = http.createServer((request, response) => {
     let url = null;
@@ -208,19 +224,19 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
         updating: maintenanceCheck(), maxClients }));
       return;
     }
-    const upstream = http.request({ hostname: webHost, port: webPort,
-      method: request.method, path: request.url, headers: request.headers }, reply => {
-      response.writeHead(reply.statusCode, reply.headers);
-      reply.pipe(response);
-      reply.on('error', () => response.destroy());
-    });
-    upstream.on('error', () => {
-      if (!response.headersSent) response.writeHead(502, { 'Content-Type': 'text/plain' });
-      response.end('Game web server unavailable');
-    });
-    request.on('aborted', () => upstream.destroy());
-    response.on('close', () => { if (!response.writableFinished) upstream.destroy(); });
-    request.pipe(upstream);
+    const archive = cdnRedirect && request.method === 'GET' && /^\/game-data\/files\/([^/]+)$/.exec(url?.pathname);
+    if (archive) {
+      let key = null;
+      try { key = decodeURIComponent(archive[1]); } catch {}
+      (key ? cdnRedirect(key) : Promise.resolve(null)).catch(() => null).then(location => {
+        if (response.destroyed) return;
+        if (!location) { proxy(request, response); return; }
+        response.writeHead(302, { Location: location, 'Cache-Control': 'no-store' });
+        response.end();
+      });
+      return;
+    }
+    proxy(request, response);
   });
   const wss = new WebSocketServer({ noServer: true, maxPayload: 65507,
     perMessageDeflate: false });
@@ -332,13 +348,17 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   let classStore = null;
   try { classStore = createClassStore(process.env.COD2_CLASSES_DB || '/data/classes.sqlite'); }
   catch (error) { console.error('[gateway] classes unavailable:', error.message); }
+  const webHost = process.env.WEB_HOST || 'cod2-web', webPort = Number(process.env.WEB_PORT || 8088);
   const gateway = createGateway({
-    webHost: process.env.WEB_HOST || 'cod2-web',
-    webPort: Number(process.env.WEB_PORT || 8088),
+    webHost,
+    webPort,
     udpHost: process.env.UDP_HOST || 'cod2-server',
     udpPort: Number(process.env.UDP_PORT || 28960),
     roomsEnabled: true,
     classStore,
+    // Without publish-cdn.py's files in this directory, every archive comes from the Pi.
+    cdnRedirect: createCdnRedirects({ directory: process.env.COD2_CDN_DIR || '/cdn',
+      readPolicy: () => readAssetPolicy(webHost, webPort) }),
   });
   gateway.server.listen(Number(process.env.PORT || 8088), '0.0.0.0',
     () => console.log('[gateway] LAN HTTP/WebSocket endpoint ready'));

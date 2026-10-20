@@ -155,8 +155,9 @@ The current Toujane/Carentan/Dawnville/Burgundy/Stalingrad/Brecourt subset is
 approximately **473 MB** with the owner's [sound pack](#owner-sound-pack),
 music and class pictures; Burgundy accounts for 21 MB of it, Stalingrad, with
 the Soviet and German winter uniforms, for 83 MB and Brecourt for 15 MB. Each
-browser
-downloads it from the host over HTTP/HTTPS and stores it in IndexedDB. The
+browser downloads it from the host over HTTP/HTTPS and stores it in IndexedDB;
+a Pi that publishes the archives to Cloudflare sends browsers there instead
+(see [Downloads from Cloudflare](RASPBERRY_PI.md#downloads-from-cloudflare)). The
 manifest verifies archive sizes and SHA-256 hashes; a new asset version
 invalidates the old cache. Storage belongs to each browser and origin, so
 moving from a Mac URL to a Pi URL requires a fresh initial download.

@@ -35,8 +35,10 @@ docker build --platform linux/arm64 -f downstream/server/Dockerfile.pi \
 docker build --platform linux/arm64 --label "org.opencontainers.image.revision=${revision}" \
   -t "${gateway_image}" downstream/gateway
 python3 scripts/test-pi-updater.py
+python3 scripts/test-publish-cdn.py
 npm ci --prefix downstream/gateway --ignore-scripts --no-audit --no-fund
 npm test --prefix downstream/gateway
+node --test downstream/cdn/worker.test.mjs
 # These source/JS tests need no private IWDs. The Pi then tests real maps/bots.
 for script in test-update-notifier test-fullscreen-control test-web-shell test-engine-version test-input-capture test-web-room-create; do
   node "scripts/${script}.cjs"

@@ -4880,3 +4880,59 @@ Validation:
   build.
 
 Not covered: nobody played with the new numbers in the browser.
+
+## Downloads from Cloudflare — 2026-10-20
+
+The owner wanted players to download the game files from somewhere other than
+the Pi, without paying. The 470 MB of archives went out over the home
+connection's upload to every player, and again whenever an archive changed.
+
+They now download from a Cloudflare Worker on the free plan, which needs no
+payment method. Static asset requests there are free and unlimited, and
+Workers allow 100,000 requests a day. The other options were ruled out:
+- R2 asks for a card even within its free tier.
+- The free CDN in front of the Pi forbids serving large files, and a DuckDNS
+  name cannot be a Cloudflare zone.
+- GitHub would put owner data where it must never go.
+
+- `scripts/publish-cdn.py` runs on the Pi every five minutes and does nothing
+  while the published list matches the checkout's asset manifest. When an
+  archive changes, it waits for an idle server, then copies the archives into
+  24 MiB parts under the updater's lock, checking each against the manifest.
+  Static assets are capped at 25 MiB. Wrangler, pinned at 4.151.2 in a local
+  image, deploys the Worker with the parts and uploads only the ones
+  Cloudflare lacks. The publisher downloads every archive back through a
+  signed link and checks that a part and a badly signed link are refused.
+  Only then does it write `~/cod2-edge/cdn/gateway/published.json`.
+- `downstream/cdn/` is the Worker. Every request runs it first, so the parts
+  are never public. A link signed with the Pi's key streams the parts in
+  order through a `FixedLengthStream`, which sets `Content-Length` for the
+  download progress and fails a body that does not add up to the signed size.
+- `downstream/gateway/cdn.mjs` answers `GET /game-data/files/<key>` with a
+  302 to a link valid for 15 minutes. It does so only while the published copy
+  has the SHA-256 and size of the archive `cod2-web` serves now, which it
+  rereads every ten seconds; anything else goes to the Pi as before. The site's
+  login still applies, because only the gateway signs links.
+- The browser needs no change: the framework's fetch follows the redirect,
+  the Worker sends CORS headers, which the site's
+  `Cross-Origin-Embedder-Policy: require-corp` requires, and the browser
+  still checks each archive's SHA-256.
+- The gateway mounts only the key and the published list, never the
+  Cloudflare token. The update check after an update downloads no archives,
+  so a Cloudflare outage cannot roll an update back.
+
+Validation:
+
+- `worker.test.mjs`: links signed by the gateway, refusals, CORS and broken
+  parts. `cdn.test.mjs`: the redirect rules and the real gateway against a
+  fake web server, including a new published list without a restart.
+  `test-publish-cdn.py`: 17 cases with Docker, Wrangler and the Worker faked.
+  All three check one signature vector. 21 mutants across the three are all
+  caught.
+- The Worker ran in Wrangler 4.151.2's local runtime with a 50 MB archive in
+  three parts. The signed download returned the exact bytes with
+  `Content-Length` and CORS headers. Unsigned, expired and altered links got
+  403, a missing part a 500, and a link signed for more bytes than the parts
+  hold a body cut short. The first run found that a Worker's main module may
+  only export handlers, so the logic moved to `handler.mjs`.
+- The gateway image builds. Without `/cdn` it proxies archives as before.

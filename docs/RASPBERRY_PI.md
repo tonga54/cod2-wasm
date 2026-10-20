@@ -259,6 +259,69 @@ an established game WebSocket. Authentication applies to downloads and WebSocket
 handshakes as well as the main page. This protects application access; it cannot
 prevent an attack from saturating the home's Internet connection.
 
+### Downloads from Cloudflare
+
+The game archives, about 470 MB, can download from a Cloudflare Worker on the
+free plan rather than over the home connection. The Pi uploads an archive once
+when it changes, instead of sending it to every player.
+
+- A logged-in browser asks the gateway for an archive as before. The gateway
+  answers with a redirect to a link it signs, valid for 15 minutes, only while
+  Cloudflare holds exactly the archive the Pi serves. Otherwise, and whenever
+  the files below are missing, the archive comes from the Pi.
+- The Worker refuses unsigned requests, so the archives stay as private as the
+  site. The browser checks each archive's SHA-256 wherever it came from.
+- Static assets are capped at 25 MiB, so `scripts/publish-cdn.py` uploads each
+  archive as 24 MiB parts and the Worker in `downstream/cdn/` joins them back.
+  Static asset requests are free and unlimited, each download counts as one of
+  the free plan's 100,000 Worker requests a day, and no payment method is needed.
+
+To set it up:
+
+1. Create a free Cloudflare account and choose a `workers.dev` subdomain under
+   Workers & Pages. Create an API token from the **Edit Cloudflare Workers**
+   template and note the account ID.
+2. Store them on the Pi, outside the checkout:
+
+   ```sh
+   mkdir -p ~/cod2-edge/cdn/gateway && chmod 700 ~/cod2-edge/cdn
+   printf 'CLOUDFLARE_API_TOKEN=%s\nCLOUDFLARE_ACCOUNT_ID=%s\n' TOKEN ACCOUNT_ID > ~/cod2-edge/cdn/cloudflare.env
+   chmod 600 ~/cod2-edge/cdn/cloudflare.env
+   ```
+
+3. In `~/cod2-edge/compose.security.yaml`, give the `cod2-gateway` service the
+   directory with the signing key and the list of published archives. Never
+   mount the token:
+
+   ```yaml
+       volumes:
+         - /home/tonga/cod2-edge/cdn/gateway:/cdn:ro
+   ```
+
+   Recreate the gateway while nobody is playing:
+   `~/cod2-edge/manage.sh up -d --no-build cod2-gateway`.
+4. Publish once, then install the timer that checks every five minutes:
+
+   ```sh
+   python3 ~/cod2-wasm/scripts/publish-cdn.py
+   python3 ~/cod2-wasm/scripts/publish-cdn.py --install
+   ```
+
+The publisher waits for an idle server and for any update in progress. Wrangler
+uploads only the parts Cloudflare does not have. The publisher downloads every
+archive back through a signed link and checks that unsigned requests are
+refused; only then does it write `gateway/published.json`. Its log is
+`journalctl --user -u cod2-cdn-publish.service`.
+
+To serve everything from the Pi again, run
+`systemctl --user disable --now cod2-cdn-publish.timer` and delete
+`~/cod2-edge/cdn/gateway/published.json`. The gateway stops redirecting on the
+next request.
+
+Cloudflare's terms let it remove content that infringes copyright and suspend
+the account. The archives are made from the retail game's files, which is why
+links are only signed for logged-in players and expire.
+
 On the build computer, fetch the published version, rebuild it, and deploy
 while no players are connected:
 
