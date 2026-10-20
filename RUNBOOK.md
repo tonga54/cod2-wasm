@@ -5651,7 +5651,8 @@ Validation:
   `test-remote-sound-events.py` and `test-footstep-events.py` pass.
 - `cg_ents_mp.c`, `cg_snapshot_mp.c` and `bg_animation_mp.c` compile with
   Emscripten 3.1.64, and `bg_animation_mp.c` with the i386 server's flags
-  (GCC 11.4), without new warnings.
-- Not verified: a full browser build, `test-static.sh`, or two browsers over a
-  real internet link. With `?movementDebug=1`, `held` should stay 0 while a
-  remote player runs.
+  (GCC 11.4), without new warnings. `test-static.sh` passes, against a
+  package built before this change.
+- Not verified: a full browser build, or two browsers over a real internet
+  link. With `?movementDebug=1`, `held` should stay 0 while a remote player
+  runs.
