@@ -118,10 +118,15 @@ static void web_prepare(WebSound *s)
         s->dirty=0;
     }
 }
+/* Miles plays a mono sample's levels at twice their value, as the Mac port's
+ * CSoundObject_set_sample_volume_levels does: the driver gives every mono 2D
+ * sample and stream, the player's own shots included, half its volume per side. */
 static void web_levels(WebSound *s)
 {
-    float maximum=fmaxf(s->left,s->right);
-    web_audio_levels(s->id,maximum,maximum>0?(s->right-s->left)/maximum:0);
+    float scale=s->channels==1?2.0f:1.0f;
+    float left=fminf(1.0f,fmaxf(0.0f,scale*s->left)), right=fminf(1.0f,fmaxf(0.0f,scale*s->right));
+    float maximum=fmaxf(left,right);
+    web_audio_levels(s->id,maximum,maximum>0?(right-left)/maximum:0);
 }
 
 /* Set while the client starts a suppressed shot: the samples begun meanwhile

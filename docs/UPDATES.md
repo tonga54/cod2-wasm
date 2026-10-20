@@ -177,7 +177,8 @@ An optional `hitmarker.wav` beside the original IWDs replaces the sound of
 Like the IWDs it belongs to the owner and is never committed. The generator
 stores it as `sound/browser/hitmarker.wav` in `cod2_browser_audio.iwd`: a
 stereo file unchanged, a mono one as stereo with both channels the same,
-because the engine plays a mono 2D sound at half level on each side. It moves
+because the browser plays a mono 2D sound at about 0.7 of its level on each
+side and each channel of a stereo one at full level. It moves
 the alias to `soundaliases/browser_hitmarker.csv`. The new row keeps the
 original volume, pitch, `auto2d` channel and `all_mp` load spec, but drops the
 original 35 ms start delay. `check-private-assets.py` verifies the alias, and

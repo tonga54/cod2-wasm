@@ -70,9 +70,10 @@ def package_hit_sound(data):
     """The owner's hit sound as the archive holds it, if the engine loads it and it starts at once.
 
     Loaded aliases must be PCM WAV. The sound must reach a tenth of its peak
-    within 50 ms, to land with the hit marker, and last at most 2 s. The engine
-    plays a mono 2D sound at half level on each side and a stereo one at full
-    level, so a mono sound is stored as stereo, both channels the same."""
+    within 50 ms, to land with the hit marker, and last at most 2 s. The browser
+    plays a mono 2D sound at about 0.7 of its level on each side, through the
+    stereo panner's centre, and each channel of a stereo one at full level, so a
+    mono sound is stored as stereo, both channels the same."""
     def invalid(reason):
         return ValueError(f'{HIT_SOUND_OWNER_FILE}: {reason}')
 

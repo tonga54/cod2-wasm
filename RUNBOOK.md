@@ -4973,3 +4973,42 @@ never tries an older code release. During activation, newer code still defers
 it and newer documentation does not. Four of five mutants are caught. The
 fifth makes a commit without files count as documentation, and the
 `code-current` check needs the original behaviour.
+
+## The player's own sounds at full level — 2026-10-20
+
+The owner heard their own weapon quieter than teammates' and enemies' shots.
+The player's sounds are mono 2D aliases:
+- the shots (`*_fire_plr`, `local`);
+- the reloads (`music`);
+- the footsteps, breathing and heartbeat (`shellshock`);
+- the gear rattle (`auto2d`).
+The menu clicks and the announcer are mono 2D too.
+
+The driver gives a mono 2D sample or stream half its volume on each side.
+Miles plays a mono sample's levels at twice their value: the Mac port's
+`CSoundObject_set_sample_volume_levels` doubles them and clamps them at 1.
+The browser's `web_audio.c` did not, so these sounds reached Web Audio at half
+the gain of a 3D sound of the same volume. Other players' shots are 3D
+(`weapon`). The owner's `_plr` files are 3 to 5 dB louder than the `_npc`
+ones, and their volumes about equal, so the player's own shot should be the
+louder one.
+
+`web_levels` now doubles a mono sound's levels before Web Audio. Stereo
+sounds are unchanged: the hit sound, the music, the ambience and the CTF
+streams. So are 3D samples, which set their gain directly. The hit sound
+generator still stores a mono file as stereo. A stereo sound plays each channel
+at full level, and a mono one about 0.7 on each side through the stereo
+panner's centre, so it stays as loud as it was.
+
+Validation:
+
+- `test-web-audio-levels.py` compiles the real `web_audio.c` with recording
+  stubs. A mono 2D sound at the driver's halved levels reaches Web Audio at the
+  gain of a 3D sound of the same volume ahead. Stereo levels, balance, the
+  clamp at full scale, mono streams and the getters, which return the levels
+  the engine set, are covered too. 4 mutants are caught.
+- A Toujane room with four bots, in headless Chrome with a Thompson. The
+  player's shots reached Web Audio at gains of 0.57 to 0.71, centred; before
+  the fix they would have been 0.29 to 0.36. The bots' shots measured 0.09 to
+  0.60, median 0.50.
+- `test-web-audio.cjs` and `test-hit-sound-assets.py` pass.
