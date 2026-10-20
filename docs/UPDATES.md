@@ -203,6 +203,35 @@ frames before the browser decodes it, and last 1 to 240 seconds. The browser
 decodes a stream whole, 384 KB a second at 48 kHz in stereo, while the menu
 is open. Native builds play no streams, so they have no menu music either way.
 
+### Owner countdown music
+
+An optional `prematchmusic.mp3` beside the original IWDs plays through the
+countdown before a match. The client starts it when a player spawns into the
+countdown, from the beginning, keeps it at full volume until 2 seconds after
+the match begins and fades it out over the next 3, so it is gone 5 seconds
+after the start. Like the menu music it belongs to the owner, is never
+committed and needs a byte-identical copy on every host that prepares the
+published build (`data/main/` and `~/cod2-original/main/`).
+
+The game has no countdown music to replace, so the music streams as an alias
+of its own, `browser_prematch_music` in `soundaliases/browser_prematchmusic.csv`,
+on a copy of the retail row of El Daba's opening music: volume 0.8, the
+`music` channel, volume group and speaker map, streamed, now loaded in every
+multiplayer map (`all_mp`) and without its half-second start delay. The
+generator stores the first 65 seconds of the file's frames as
+`sound/browser/prematchmusic.mp3` in `cod2_browser_audio.iwd`, the longest
+countdown a room holds and the 5 seconds after it, and leaves out its ID3
+tags and an encoder's Xing, Info or VBRI frame, which would count frames no
+longer there. The browser then decodes about 25 MB in place of the whole
+song. `check-private-assets.py` verifies the row and that the packaged bytes
+are what the generator makes of the owner file. Without the file the
+countdown is silent.
+
+The file must be MPEG audio layer III throughout and last at least a second.
+On October 19, 2026 the owner's file was 3:12 of 320 kbps stereo at 44.1 kHz
+behind a 3.3 MB tag; the archive keeps 2.6 MB of it and grew from 61.5 to
+64.0 MB.
+
 ### Owner sound pack
 
 An optional `owner_sounds/` folder beside the original IWDs replaces the

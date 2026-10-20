@@ -19,6 +19,17 @@ MENU_MUSIC_FILE = 'browser/menumusic.mp3'
 MENU_MUSIC_TABLE = 'soundaliases/browser_menumusic.csv'
 # The browser decodes a stream whole, 384 KB a second at 48 kHz in stereo.
 MENU_MUSIC_MAX_SECONDS = 240
+# Music of the owner's for the countdown before a match may sit there too,
+# likewise never in Git. It streams as an alias of its own, which takes the
+# columns of the retail mission opening music.
+PREMATCH_MUSIC_OWNER_FILE = 'prematchmusic.mp3'
+PREMATCH_MUSIC_ALIAS = 'browser_prematch_music'
+PREMATCH_MUSIC_SOURCE = 'eldaba_intro_music'
+PREMATCH_MUSIC_FILE = 'browser/prematchmusic.mp3'
+PREMATCH_MUSIC_TABLE = 'soundaliases/browser_prematchmusic.csv'
+# The longest countdown the server holds, 60 s, and the 5 s the music outlasts
+# it: the archive keeps that much of the music, about 25 MB decoded.
+PREMATCH_MUSIC_SECONDS = 65
 # A sound pack of the owner's may sit there too, likewise never in Git: a
 # folder of 16-bit PCM WAVs and a list of the original aliases whose rows they
 # replace, a row a file, with values for any other alias column.
@@ -86,14 +97,14 @@ def package_hit_sound(data):
     return b'RIFF' + struct.pack('<I', len(body)) + body
 
 
-def mp3_frames(data):
-    """An MP3's ID3v2 tag length, rate, channels, frames, seconds and frame bytes, read as the engine's
-    WebAudio_Mp3Info reads them before the browser decodes the stream, or None for a tag it refuses."""
+def mp3_spans(data):
+    """An MP3's ID3v2 tag length, rate, channels and each frame's start, length and seconds, walked as the
+    engine's WebAudio_Mp3Info walks them before the browser decodes the stream, or None for a tag it refuses."""
     rates = (44100, 48000, 32000)
     v1 = (0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0)
     v2 = (0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0)
-    position = tag = rate = channels = frames = covered = 0
-    seconds = 0.0
+    position = tag = rate = channels = 0
+    spans = []
     if len(data) >= 10 and data[:3] == b'ID3':
         if any(byte & 0x80 for byte in data[6:10]):
             return None
@@ -108,13 +119,61 @@ def mp3_frames(data):
         length = (144000 if version == 3 else 72000) * (v1 if version == 3 else v2)[bitrate] // hz + (header >> 9 & 1)
         if length < 4 or length > len(data) - position:
             break
-        if not frames:
+        if not spans:
             rate, channels = hz, 1 if header >> 6 & 3 == 3 else 2
-        seconds += (1152 if version == 3 else 576) / hz
-        frames += 1
-        covered += length
+        spans.append((position, length, (1152 if version == 3 else 576) / hz))
         position += length
-    return tag, rate, channels, frames, seconds, covered
+    return tag, rate, channels, spans
+
+
+def mp3_frames(data):
+    """An MP3's ID3v2 tag length, rate, channels, frames, seconds and frame bytes, read as the engine's
+    WebAudio_Mp3Info reads them before the browser decodes the stream, or None for a tag it refuses."""
+    walked = mp3_spans(data)
+    if walked is None:
+        return None
+    tag, rate, channels, spans = walked
+    seconds = 0.0
+    for _, _, duration in spans:
+        seconds += duration
+    return tag, rate, channels, len(spans), seconds, sum(length for _, length, _ in spans)
+
+
+def vbr_header(data, start):
+    """Whether the frame at start holds an encoder's Xing, Info or VBRI header, which counts the whole file's
+    frames, in place of audio."""
+    header = int.from_bytes(data[start:start + 4], 'big')
+    mono = header >> 6 & 3 == 3
+    side = (17 if mono else 32) if header >> 19 & 3 == 3 else (9 if mono else 17)
+    xing = start + 4 + (0 if header >> 16 & 1 else 2) + side
+    return data[xing:xing + 4] in (b'Xing', b'Info') or data[start + 36:start + 40] == b'VBRI'
+
+
+def package_prematch_music(data):
+    """The owner's countdown music as the archive holds it: its MPEG audio layer III frames for the first
+    PREMATCH_MUSIC_SECONDS, without its tags or an encoder's header frame, which would count frames no longer
+    there."""
+    def invalid(reason):
+        return ValueError(f'{PREMATCH_MUSIC_OWNER_FILE}: {reason}')
+
+    walked = mp3_spans(data)
+    if walked is None or not walked[3]:
+        raise invalid('not an MP3 file')
+    tag, _, _, spans = walked
+    audio = len(data) - tag - (128 if data[-128:-125] == b'TAG' else 0)
+    if sum(length for _, length, _ in spans) * 10 < audio * 9:
+        raise invalid('not MPEG audio layer III throughout')
+    if vbr_header(data, spans[0][0]):
+        spans = spans[1:]
+    kept, seconds = [], 0.0
+    for start, length, duration in spans:
+        if seconds >= PREMATCH_MUSIC_SECONDS:
+            break
+        kept.append(data[start:start + length])
+        seconds += duration
+    if seconds < 1:
+        raise invalid('shorter than 1 s')
+    return b''.join(kept)
 
 
 def check_menu_music(data):
@@ -209,6 +268,13 @@ def menu_music_row(header, fields):
     return [values.get(name, '') for name in header]
 
 
+def prematch_music_row(header, fields):
+    """The retail mission opening music's row, streaming the owner's countdown music at once in every
+    multiplayer map."""
+    values = dict(fields, name=PREMATCH_MUSIC_ALIAS, file=PREMATCH_MUSIC_FILE, loadspec='all_mp', startdelay='')
+    return [values.get(name, '') for name in header]
+
+
 def hit_sound_row(header, fields):
     """An original MP_hit_alert row playing the owner's sound, without its delay."""
     values = dict(fields, file=HIT_SOUND_FILE, startdelay='', secondaryaliasname='')
@@ -261,6 +327,29 @@ def verify_menu_music(entries, original_rows, owner):
             other_header, other_rows = alias_table(data.decode('utf-8'))
             assert all(dict(zip(other_header, row)).get('name', '').lower() not in MENU_MUSIC_ALIASES
                        for row in other_rows), 'Original menu music kept beside the owner\'s: ' + name
+
+
+def verify_prematch_music(entries, source_rows, owner):
+    """Check that a package streams the owner's countdown music, and only it, as its alias.
+
+    source_rows holds (header, fields) for every original row of the mission
+    opening music; owner is the owner's file content, or None without one."""
+    table = entries.get(PREMATCH_MUSIC_TABLE)
+    music = entries.get('sound/' + PREMATCH_MUSIC_FILE)
+    if owner is None:
+        assert table is None and music is None, 'Countdown music packaged without the owner file'
+        return
+    assert music == package_prematch_music(owner), 'Packaged countdown music differs from the owner file'
+    assert table is not None, 'Missing the countdown music alias'
+    header, rows = alias_table(table.decode('utf-8'))
+    assert len(rows) == 1 and any(source_header == header and rows[0] == prematch_music_row(header, fields)
+                                  for source_header, fields in source_rows), \
+        'The countdown music alias differs from the original mission opening music'
+    for name, data in entries.items():
+        if name.startswith('soundaliases/') and name.endswith('.csv') and name != PREMATCH_MUSIC_TABLE:
+            other_header, other_rows = alias_table(data.decode('utf-8'))
+            assert all(dict(zip(other_header, row)).get('name', '').lower() != PREMATCH_MUSIC_ALIAS
+                       for row in other_rows), 'The countdown music alias is in another table: ' + name
 
 
 def verify_owner_sounds(entries, original_rows, owner):
@@ -320,7 +409,7 @@ def add_explosive_aliases(tables, aliases):
 
 
 def collect_sound_assets(root, asset_index, originals, renderer, maps, hit_sound=None, menu_music=None,
-                         owner_sounds=None):
+                         owner_sounds=None, prematch_music=None):
     def read(name):
         path, original_name = asset_index[name]
         return originals[path].read(original_name)
@@ -417,6 +506,18 @@ def collect_sound_assets(root, asset_index, originals, renderer, maps, hit_sound
         files[MENU_MUSIC_TABLE] = output.getvalue().encode('utf-8')
         files['sound/' + MENU_MUSIC_FILE] = check_menu_music(menu_music)
         print(f'Menu music: the owner\'s {MENU_MUSIC_OWNER_FILE} replaces {" and ".join(MENU_MUSIC_ALIASES)}')
+    if prematch_music is not None:
+        if PREMATCH_MUSIC_SOURCE not in aliases:
+            raise ValueError(f'No original {PREMATCH_MUSIC_SOURCE} alias for the owner countdown music to copy')
+        table, _, fields = aliases[PREMATCH_MUSIC_SOURCE][0]
+        header = tables[table][0]
+        output = io.StringIO(newline='')
+        writer = csv.writer(output, lineterminator='\r\n')
+        writer.writerow(header)
+        writer.writerow(prematch_music_row(header, fields))
+        files[PREMATCH_MUSIC_TABLE] = output.getvalue().encode('utf-8')
+        files['sound/' + PREMATCH_MUSIC_FILE] = package_prematch_music(prematch_music)
+        print(f'Countdown music: the owner\'s {PREMATCH_MUSIC_OWNER_FILE} streams as {PREMATCH_MUSIC_ALIAS}')
     if owner_sounds is not None:
         unused = sorted(set(pack) - set(owned))
         if unused:

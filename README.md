@@ -148,6 +148,8 @@ retail CoD2:
   view turns black and white. In place of the HUD it shows the mode and map
   over the mode's retail objective, the viewer's team and, at the right, the
   seconds left. The last five turn red, and color returns over the last two.
+  With the owner's [countdown music](docs/UPDATES.md#owner-countdown-music),
+  it plays from the spawn and is gone, faded out, 5 seconds into the match.
   Whoever joins after the match has begun plays at once. S&D counts down
   through its first round's grace period instead. `cg_hudPrematch 0` hides it
   on a client; the room's `scr_prematch_time` (0 to 60 s, default 15) sets or

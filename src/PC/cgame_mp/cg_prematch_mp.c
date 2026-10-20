@@ -21,6 +21,10 @@ extern const char *UI_GetGameTypeDisplayName(const char *gameType);
 extern const char *SEH_LocalizeTextMessage(const char *msg, const char *context, int errType);
 extern int I_stricmp(const char *s1, const char *s2);
 extern int Com_sprintf(char *dest, int size, const char *fmt, ...);
+extern snd_alias_list_t *Com_FindSoundAlias(const char *name);
+extern snd_alias_t *Com_PickSoundAliasFromList(snd_alias_list_t *aliasList);
+extern void SND_PlayMusicAlias(const snd_alias_t *pAlias, snd_alias_system_t system);
+extern void SND_StopMusic(int fadetime);
 
 /* Virtual units measured on the WWII capture (1.2 pixels a unit): the mode
  * and map over its objective in the top-left corner of the safe area, the
@@ -76,6 +80,12 @@ extern int Com_sprintf(char *dest, int size, const char *fmt, ...);
 #define PREMATCH_GRAY_FADE_MSEC 2000
 /* A longer countdown is not one the server sends. */
 #define PREMATCH_MAX_MSEC 120000
+/* The owner's countdown music, which the audio archive streams as this alias
+ * when they supply it: it is gone 5 seconds after the match begins, faded out
+ * over the last three. */
+#define PREMATCH_MUSIC_ALIAS "browser_prematch_music"
+#define PREMATCH_MUSIC_TAIL_MSEC 5000
+#define PREMATCH_MUSIC_FADE_MSEC 3000
 #define PREMATCH_ARC_SEGMENTS 128
 #define PREMATCH_DISC_SEGMENTS 64
 #define PREMATCH_EMBLEM_MIN_TEXELS 8
@@ -93,6 +103,10 @@ typedef struct {
 typedef struct {
     int start;
     int end;
+    /* The end of the countdown the music started for, and whether it still
+     * plays without its fade. */
+    int musicEnd;
+    int musicPlaying;
     FontHandle boldFont;
     FontHandle regularFont;
     int emblemKind;
@@ -201,9 +215,35 @@ int CG_PrematchActive(void)
     return CG_PrematchRemaining() > 0;
 }
 
+/* The music starts once a countdown, from its beginning for a player who
+ * spawns into the countdown late, whatever the HUD shows. */
+static void CG_PrematchMusic(void)
+{
+    if (s_prematch.end && s_prematch.end != s_prematch.musicEnd && cg->time < s_prematch.end) {
+        snd_alias_list_t *music = Com_FindSoundAlias(PREMATCH_MUSIC_ALIAS);
+
+        if (s_prematch.musicPlaying)
+            SND_StopMusic(0);
+        s_prematch.musicEnd = s_prematch.end;
+        s_prematch.musicPlaying = music != NULL;
+        if (music)
+            SND_PlayMusicAlias(Com_PickSoundAliasFromList(music), SASYS_CGAME);
+    }
+    if (s_prematch.musicPlaying) {
+        int left = s_prematch.musicEnd + PREMATCH_MUSIC_TAIL_MSEC - cg->time;
+
+        if (left <= PREMATCH_MUSIC_FADE_MSEC) {
+            s_prematch.musicPlaying = 0;
+            SND_StopMusic(left > 0 ? left : 0);
+        }
+    }
+}
+
 void CG_PrematchFrame(void)
 {
     int remaining = CG_PrematchActive() ? CG_PrematchRemaining() : 0;
+
+    CG_PrematchMusic();
 
     if (remaining >= PREMATCH_GRAY_FADE_MSEC)
         g_webGrayFrac = 1.0f;

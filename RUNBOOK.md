@@ -3821,3 +3821,38 @@ Validation:
 - In the browser, a second player's Luger hit the player in the back. Before,
   the camera logged the 135° above; after, 0.5° at 3 ms, 8.9° at 103 ms and
   level at 504 ms, against the server's 8.8° at 86 ms and level at 515 ms.
+
+## Music through the countdown before a match — 2026-10-19
+
+The owner asked for a track of theirs to play while the countdown before a
+match runs, and to end 5 seconds after it with a light fade. It is an owner
+file like the menu music, `prematchmusic.mp3` beside the IWDs (see
+docs/UPDATES.md, "Owner countdown music"), streamed as
+`browser_prematch_music`. `cg_prematch_mp.c` starts it once a countdown, as
+the server's `cg_prematch` arrives at a spawn, from the beginning for a late
+spawn too, and calls `SND_StopMusic` with what is left once 3 seconds
+remain of the 5 after the end: the fade runs from 2 to 5 seconds into the
+match. A countdown already over keeps quiet, the same countdown sent again at
+a respawn does not restart it, a new one does, and without the alias nothing
+plays.
+
+Validation:
+
+- `scripts/test-prematch.py` runs the production module: the music starts at
+  the countdown once, fades from 2 s after the end for 3 s, the same whatever
+  the HUD shows, from its start for a spawn a second before the end, quiet for
+  a countdown already over, at once after frames missed past it, again for a
+  new countdown, and silent without the owner's file; 11 more mutants fail
+  (57 in all).
+- `scripts/test-prematch-music-assets.py` (new): the archive keeps the first
+  65 s of frames, without tags or the encoder's Xing, Info or VBRI frame
+  (MPEG-1, -2 and -2.5, mono and stereo, with and without CRC), as the
+  engine's own reader sees them; the alias copies El Daba's opening music in
+  every map without its delay; the checker rejects 13 altered packages; 20
+  mutants fail. `test-menu-music-assets.py` keeps its 19.
+- With the owner's file, `prepare-browser-bootstrap.py` packaged 2.6 MB of it
+  and `check-private-assets.py` passed.
+- In the browser, a Carentan TDM room with no bots: spawning into the 15 s
+  countdown opened `sound/browser/prematchmusic.mp3` and played it at once;
+  its volume held for 17.0 s, fell linearly to 0 between 17.03 and 20.01 s,
+  and the engine freed the stream at 20.02 s.

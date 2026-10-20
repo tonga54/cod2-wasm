@@ -8,7 +8,7 @@ import re
 import struct
 import zipfile
 from browser_sound_assets import (HIT_SOUND_OWNER_FILE, MENU_MUSIC_OWNER_FILE, OWNER_SOUNDS_DIR,
-                                  collect_sound_assets, load_owner_sounds)
+                                  PREMATCH_MUSIC_OWNER_FILE, collect_sound_assets, load_owner_sounds)
 from browser_bot_menu import apply_bot_menu
 from browser_class_menus import add_class_menu, class_menus
 from browser_class_pictures import OWNER_PICTURES_DIR, load_owner_pictures
@@ -346,11 +346,13 @@ try:
     archives["cod2_browser_renderer.iwd"] = renderer
     hit_sound = root / "data/main" / HIT_SOUND_OWNER_FILE
     menu_music = root / "data/main" / MENU_MUSIC_OWNER_FILE
+    prematch_music = root / "data/main" / PREMATCH_MUSIC_OWNER_FILE
     archives["cod2_browser_audio.iwd"] = collect_sound_assets(
         root, asset_index, originals, renderer, maps,
         hit_sound.read_bytes() if hit_sound.is_file() else None,
         menu_music.read_bytes() if menu_music.is_file() else None,
-        load_owner_sounds(root / "data/main" / OWNER_SOUNDS_DIR))
+        load_owner_sounds(root / "data/main" / OWNER_SOUNDS_DIR),
+        prematch_music.read_bytes() if prematch_music.is_file() else None)
     for mapname, longname in maps.items():
         archives["cod2_browser_bootstrap.iwd"][f"mp/{mapname[3:]}.arena"] = (
             f'{{ map "{mapname}" longname "{longname}" gametype "{" ".join(gametypes)}" }}\n'.encode()

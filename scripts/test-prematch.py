@@ -16,6 +16,10 @@ scene = (root / 'src/PC/gfx_d3d/r_scene.c').read_text()
 hud2d = (root / 'src/PC/gfx_d3d/r_hud2d.c').read_text()
 hud2d_header = (root / 'src/headers/PC/gfx_d3d/r_hud2d.h').read_text()
 wwii_fonts = (root / 'src/PC/gfx_d3d/r_font_wwii.c').read_text()
+# The alias the audio archive streams the owner's countdown music as.
+music_alias = re.search(r"^PREMATCH_MUSIC_ALIAS = '(\w+)'$", (root / 'scripts/browser_sound_assets.py').read_text(),
+                        re.M).group(1)
+assert f'#define PREMATCH_MUSIC_ALIAS "{music_alias}"\n' in module
 
 
 def function(text, head):
@@ -312,7 +316,35 @@ int Com_sprintf(char *dest, int size, const char *fmt, ...) {
     va_end(ap);
     return n;
 }
-'''
+/* The music stream: its alias when the owner's music is in the archive, and
+ * when the client starts it and fades it out. */
+typedef struct snd_alias_t { const char *name; } snd_alias_t;
+typedef struct snd_alias_list_t { snd_alias_t *head; } snd_alias_list_t;
+typedef int snd_alias_system_t;
+#define SASYS_CGAME 1
+static snd_alias_t musicAlias = { "MUSIC_ALIAS" };
+static snd_alias_list_t musicList = { &musicAlias };
+static int ownerMusic = 1, musicPlays, musicStops, musicFade = -1, musicPlayTime, musicStopTime;
+snd_alias_list_t *Com_FindSoundAlias(const char *name) {
+    assert(!strcmp(name, "MUSIC_ALIAS"));
+    return ownerMusic ? &musicList : NULL;
+}
+snd_alias_t *Com_PickSoundAliasFromList(snd_alias_list_t *list) {
+    assert(list == &musicList);
+    return list->head;
+}
+void SND_PlayMusicAlias(const snd_alias_t *alias, snd_alias_system_t system) {
+    assert(alias == &musicAlias && system == SASYS_CGAME);
+    ++musicPlays;
+    musicPlayTime = cg->time;
+}
+void SND_StopMusic(int fadetime) {
+    ++musicStops;
+    musicFade = fadetime;
+    musicStopTime = cg->time;
+}
+static void musicReset(void) { musicPlays = musicStops = 0; musicFade = -1; musicPlayTime = musicStopTime = 0; }
+'''.replace('MUSIC_ALIAS', music_alias)
 
 checks = r'''
 static int near(float a, float b) { return fabsf(a - b) < 2e-3f; }
@@ -703,6 +735,104 @@ int main(void) {
     assert(frame(26000) && g_webGrayFrac == 1.0f);
     CG_PrematchInit();
     assert(registrations == 4 && g_webGrayFrac == 0.0f && !CG_PrematchActive() && !frame(26000));
+
+    /* The owner's music starts with the countdown, once, plays on through the
+     * start and is gone 5 s after it, faded out over the last 3. */
+    musicReset();
+    CG_PrematchSetCountdown("20000 35000");
+    frame(20000);
+    assert(musicPlays == 1 && musicPlayTime == 20000 && !musicStops);
+    /* Each spawn into the countdown sends it again; the music plays on. */
+    CG_PrematchSetCountdown("20000 35000");
+    for (int t = 20016; t < 36990; t += 16)
+        frame(t);
+    frame(36999);
+    assert(musicPlays == 1 && !musicStops);
+    frame(37000);
+    assert(musicStops == 1 && musicFade == 3000 && musicStopTime == 37000);
+    for (int t = 37016; t < 60000; t += 16)
+        frame(t);
+    assert(musicPlays == 1 && musicStops == 1);
+    /* Whatever the HUD shows: off, spectating or dead, the music is the same. */
+    CG_PrematchInit();
+    musicReset();
+    prematchDvar.current.enabled = 0;
+    snap.ps.pm_type = 5;
+    CG_PrematchSetCountdown("20000 35000");
+    frame(21000);
+    assert(musicPlays == 1 && musicPlayTime == 21000);
+    frame(37000);
+    assert(musicStops == 1 && musicFade == 3000);
+    prematchDvar.current.enabled = 1;
+    snap.ps.pm_type = 0;
+    /* A player who spawns with a second left hears it from its start, gone at
+     * the same time as everyone's. */
+    CG_PrematchInit();
+    musicReset();
+    CG_PrematchSetCountdown("20000 35000");
+    frame(34000);
+    assert(musicPlays == 1 && musicPlayTime == 34000);
+    frame(36999);
+    assert(!musicStops);
+    frame(37000);
+    assert(musicStops == 1 && musicFade == 3000);
+    /* A countdown over before it arrives keeps quiet. */
+    CG_PrematchInit();
+    musicReset();
+    CG_PrematchSetCountdown("20000 35000");
+    frame(35000);
+    frame(36000);
+    assert(!musicPlays && !musicStops);
+    /* Frames missed past the fade, as in a hidden tab, end it at once. */
+    CG_PrematchInit();
+    musicReset();
+    CG_PrematchSetCountdown("20000 35000");
+    frame(20000);
+    frame(38500);
+    assert(musicStops == 1 && musicFade == 1500);
+    CG_PrematchInit();
+    musicReset();
+    CG_PrematchSetCountdown("20000 35000");
+    frame(20000);
+    frame(41000);
+    assert(musicStops == 1 && musicFade == 0);
+    /* A new countdown while it plays starts it again from the top. */
+    CG_PrematchInit();
+    musicReset();
+    CG_PrematchSetCountdown("20000 35000");
+    frame(20000);
+    CG_PrematchSetCountdown("40000 55000");
+    frame(30000);
+    assert(musicPlays == 2 && musicPlayTime == 30000 && musicStops == 1 && musicFade == 0);
+    frame(56999);
+    assert(musicStops == 1);
+    frame(57000);
+    assert(musicStops == 2 && musicFade == 3000);
+    /* A countdown taken back still lets the music end on time. */
+    CG_PrematchInit();
+    musicReset();
+    CG_PrematchSetCountdown("20000 35000");
+    frame(20000);
+    CG_PrematchSetCountdown("");
+    frame(36999);
+    assert(!musicStops);
+    frame(37000);
+    assert(musicStops == 1 && musicFade == 3000);
+    /* Without the owner's music the countdown is silent. */
+    CG_PrematchInit();
+    musicReset();
+    ownerMusic = 0;
+    CG_PrematchSetCountdown("20000 35000");
+    for (int t = 20000; t < 40000; t += 16)
+        frame(t);
+    assert(!musicPlays && !musicStops);
+    ownerMusic = 1;
+    /* A new map's countdown plays it again. */
+    CG_PrematchInit();
+    musicReset();
+    CG_PrematchSetCountdown("20000 35000");
+    frame(20000);
+    assert(musicPlays == 1);
     puts("PASS");
     return 0;
 }
@@ -776,6 +906,20 @@ mutants = [
     ('    s_prematch.start = start;\n    s_prematch.end = end;\n', '    s_prematch.end = end;\n'),
     ('    memset(&s_prematch, 0, sizeof(s_prematch));\n', ''),
     ('    return offset < 1.0f ? 1.0f : offset;', '    return offset;'),
+    ('    CG_PrematchMusic();\n', ''),
+    ('    if (s_prematch.end && s_prematch.end != s_prematch.musicEnd && cg->time < s_prematch.end) {',
+     '    if (s_prematch.end && cg->time < s_prematch.end) {'),
+    ('    if (s_prematch.end && s_prematch.end != s_prematch.musicEnd && cg->time < s_prematch.end) {',
+     '    if (s_prematch.end && s_prematch.end != s_prematch.musicEnd) {'),
+    ('        if (s_prematch.musicPlaying)\n            SND_StopMusic(0);\n', ''),
+    ('        s_prematch.musicPlaying = music != NULL;', '        s_prematch.musicPlaying = 1;'),
+    ('            s_prematch.musicPlaying = 0;\n            SND_StopMusic(', '            SND_StopMusic('),
+    ('            SND_StopMusic(left > 0 ? left : 0);', '            SND_StopMusic(PREMATCH_MUSIC_FADE_MSEC);'),
+    ('            SND_StopMusic(left > 0 ? left : 0);', '            SND_StopMusic(left);'),
+    ('        int left = s_prematch.musicEnd + PREMATCH_MUSIC_TAIL_MSEC - cg->time;',
+     '        int left = s_prematch.end + PREMATCH_MUSIC_TAIL_MSEC - cg->time;'),
+    ('#define PREMATCH_MUSIC_TAIL_MSEC 5000', '#define PREMATCH_MUSIC_TAIL_MSEC 4000'),
+    ('#define PREMATCH_MUSIC_FADE_MSEC 3000', '#define PREMATCH_MUSIC_FADE_MSEC 2000'),
 ]
 variants = [body] + [mutate(body, old, new) for old, new in mutants]
 with tempfile.TemporaryDirectory(prefix='cod2-prematch-') as directory:
@@ -795,4 +939,5 @@ print('PASS: a player who spawns into the server\'s countdown sees the view in b
       'right the seconds left inside an outer ring that runs out with the countdown and an inner one with each '
       'second, crossed by lines that draw in from 5 s to 2 s, red over a red disc for the last five; spectators, the '
       'dead, followers and deathmatch teams excluded; the emblem built at the drawn size; only valid countdowns '
-      f'accepted; {len(mutants)} failing regression mutants')
+      'accepted; the owner\'s music from the countdown\'s start, once, gone 5 s after the match begins, faded over '
+      f'the last 3, silent without it; {len(mutants)} failing regression mutants')
