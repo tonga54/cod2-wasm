@@ -59,17 +59,20 @@ assert len(names) == slots['R_HUD_IMAGE_COUNT'] and len(set(names)) == len(names
 assert names[slots['R_HUD_IMAGE_ENDGAME']] == '*hud_endgame'
 
 # The five modes hold the intermission as long as the client's timeline, which
-# keeps at least 10 s of scoreboard after the announcement and its handover.
+# keeps at least 15 s of scoreboard after the announcement and its handover;
+# the owner's music the archive keeps outlasts it.
 sys.path.insert(0, str(root / 'scripts'))
 import browser_endgame
+import browser_sound_assets
 timeline = {name: int(value) for name, value in re.findall(r'^#define (ENDGAME_\w+_MSEC) (\d+)$', module, re.M)}
 assert timeline['ENDGAME_INTERMISSION_MSEC'] == browser_endgame.INTERMISSION_SECONDS * 1000
 assert timeline['ENDGAME_INTERMISSION_MSEC'] - timeline['ENDGAME_ANNOUNCE_MSEC'] - timeline['ENDGAME_HANDOVER_MSEC'] \
-    >= 10000
+    >= 15000
+assert browser_sound_assets.ENDGAME_MUSIC_SECONDS > browser_endgame.INTERMISSION_SECONDS
 retail = b'\tsendranks();\r\n\t}\r\n\r\n\twait 10;\r\n\texitLevel(false);\r\n}\r\n'
 for gametype in ('ctf', 'dm', 'hq', 'sd', 'tdm'):
     name = f'maps/mp/gametypes/{gametype}.gsc'
-    assert browser_endgame.apply_endgame_timing(name, retail) == retail.replace(b'wait 10;', b'wait 16;'), name
+    assert browser_endgame.apply_endgame_timing(name, retail) == retail.replace(b'wait 10;', b'wait 24;'), name
     for unexpected in (retail.replace(b'wait 10;', b'wait 12;'), retail + retail):
         try:
             browser_endgame.apply_endgame_timing(name, unexpected)
@@ -617,32 +620,33 @@ int main(void) {
            indexOf(axis) < indexOf(text("VS")) && indexOf(text("VS")) < indexOf(text("TIME LIMIT REACHED")));
     assert(count(TEXT) == 8 && count(TRI) == 4 + 1 + 3 && !count(TABLE) && g_webBackdropFrac == 0.0f);
 
-    /* At 5 s it hands over to the scoreboard with the result over a blurred
+    /* At 8 s it hands over to the scoreboard with the result over a blurred
      * view; half a second later only the scoreboard remains. */
-    assert(frame(1, 25000, 1.0f) && !count(TABLE) && text("ALLIES DEFEAT"));
-    assert(frame(1, 25250, 1.0f) && draws[0].kind == TABLE && near(draws[0].color[3], 0.5f));
+    assert(frame(1, 27900, 1.0f) && !count(TABLE) && dim(0.7f) && text("ALLIES DEFEAT"));
+    assert(frame(1, 28000, 1.0f) && !count(TABLE) && text("ALLIES DEFEAT"));
+    assert(frame(1, 28250, 1.0f) && draws[0].kind == TABLE && near(draws[0].color[3], 0.5f));
     assert(!strcmp(tableResult, "ALLIES DEFEAT") && !strcmp(tableReason, "Time limit reached"));
     assert(dim(0.35f) && centered(text("ALLIES DEFEAT"), 320, 63.3f, 26.7f, &boldFont, 0.5f) &&
            near(g_webBackdropFrac, 0.5f));
-    assert(frame(1, 25500, 1.0f) && drawCount == 1 && draws[0].kind == TABLE && near(draws[0].color[3], 1));
+    assert(frame(1, 28500, 1.0f) && drawCount == 1 && draws[0].kind == TABLE && near(draws[0].color[3], 1));
     assert(near(g_webBackdropFrac, 1.0f));
-    assert(frame(1, 29000, 0.5f) && drawCount == 1 && near(draws[0].color[3], 0.5f) && near(g_webBackdropFrac, 1));
+    assert(frame(1, 32000, 0.5f) && drawCount == 1 && near(draws[0].color[3], 0.5f) && near(g_webBackdropFrac, 1));
     /* The scoreboard's own fade takes the announcement down too. */
     assert(frame(1, 22000, 0.5f) && dim(0.35f) && centered(text("VS"), 320, 231.7f, 25, &boldFont, 0.5f));
     /* The owner's music started with it, once. Out of the intermission it is
      * gone, the music stopped at once and the view sharp again. */
     assert(musicPlays == 1 && musicStops == 0);
-    assert(frame(1, 26000, 1.0f) && near(g_webBackdropFrac, 1));
-    assert(!frame(0, 26050, 1.0f) && !drawCount && g_webBackdropFrac == 0.0f);
+    assert(frame(1, 29000, 1.0f) && near(g_webBackdropFrac, 1));
+    assert(!frame(0, 29050, 1.0f) && !drawCount && g_webBackdropFrac == 0.0f);
     assert(musicPlays == 1 && musicStops == 1 && lastFade == 0);
 
     /* A new intermission starts its own timeline and music, which fades out
-     * over the 3 s before the next map loads, 16 s in, with what is left. */
+     * over the 3 s before the next map loads, 24 s in, with what is left. */
     assert(frame(1, 40000, 1.0f) && !drawCount && musicPlays == 2);
     assert(frame(1, 41000, 1.0f) && text("ALLIES DEFEAT") && !count(TABLE));
-    assert(frame(1, 52999, 1.0f) && musicStops == 1);
-    assert(frame(1, 54000, 1.0f) && musicStops == 2 && lastFade == 2000);
-    assert(frame(1, 55000, 1.0f) && musicStops == 2 && musicPlays == 2);
+    assert(frame(1, 60999, 1.0f) && musicStops == 1);
+    assert(frame(1, 62000, 1.0f) && musicStops == 2 && lastFade == 2000);
+    assert(frame(1, 63000, 1.0f) && musicStops == 2 && musicPlays == 2);
 
     /* The Axis viewer has his side on the left and wins; the scores follow. */
     cg->clientNum = 7;
@@ -684,7 +688,7 @@ int main(void) {
      * message wins; a new map forgets it. */
     CG_EndgameMessage("MP_SCORE_LIMIT_REACHED");
     assert(frame(1, 41000, 1.0f) && text("SCORE LIMIT REACHED"));
-    assert(frame(1, 46000, 1.0f) && !strcmp(tableReason, "Score limit reached"));
+    assert(frame(1, 49000, 1.0f) && !strcmp(tableReason, "Score limit reached"));
     CG_EndgameMessage("MP_ROUND_LIMIT_REACHED");
     assert(frame(1, 41000, 1.0f) && text("ROUND LIMIT REACHED"));
     regularReady = 0;
@@ -693,7 +697,7 @@ int main(void) {
     assert(registrations == 2);
     assert(settle(0, 50000) == 14 && builds == 2);
     assert(frame(1, 50000, 1.0f) && frame(1, 51000, 1.0f) && text("ALLIES DEFEAT") && count(TEXT) == 7);
-    assert(frame(1, 56000, 1.0f) && !tableReason[0] && !strcmp(tableResult, "ALLIES DEFEAT"));
+    assert(frame(1, 59000, 1.0f) && !tableReason[0] && !strcmp(tableResult, "ALLIES DEFEAT"));
     /* Without Regular the reason takes the bold font. */
     CG_EndgameMessage("MP_TIME_LIMIT_REACHED");
     assert(frame(1, 51000, 1.0f) && centered(text("TIME LIMIT REACHED"), 320, 432.5f, 8.3f, &boldFont, 1));
@@ -797,7 +801,7 @@ int main(void) {
     assert(diamond(320, 335.4f, 39, 0.35f, 0.12f) && !text("VS") && !text("Fourth^7") && !text("Spec^7"));
     for (int i = 0; i < drawCount; ++i)
         assert(draws[i].material != &medals);
-    assert(frame(1, 76000, 1.0f) && !strcmp(tableResult, "DEFEAT"));
+    assert(frame(1, 79000, 1.0f) && !strcmp(tableResult, "DEFEAT"));
     /* The stock script names the winner as the server ends a player's name;
      * that is the verdict, whatever the scores, or a tie. */
     snprintf(cg->objectiveText, sizeof(cg->objectiveText), "MP_WINS\x15Me^7");
@@ -859,15 +863,15 @@ int main(void) {
     assert(!frame(0, 80000, 1.0f));
     int plays = musicPlays, stops = musicStops;
     frame(1, 80016, 1.0f);
-    frame(1, 97016, 1.0f);
+    frame(1, 105016, 1.0f);
     assert(musicPlays == plays + 1 && musicStops == stops + 1 && lastFade == 0);
     haveMusic = 0;
-    frame(0, 98000, 1.0f);
+    frame(0, 106000, 1.0f);
     plays = musicPlays;
     stops = musicStops;
-    frame(1, 98016, 1.0f);
-    frame(1, 112016, 1.0f);
-    frame(0, 112100, 1.0f);
+    frame(1, 106016, 1.0f);
+    frame(1, 128016, 1.0f);
+    frame(0, 128100, 1.0f);
     assert(musicPlays == plays && musicStops == stops);
 
     /* The last minute's music: nothing while the stock clock shows more than
@@ -973,8 +977,11 @@ mutants = [
     ('    g_webBackdropGray = g_webMenuBackdrop;\n', ''),
     ('    g_webMenuBackdrop = 0.0f;\n    CG_EndgamePrepare();', '    CG_EndgamePrepare();'),
     ('        g_webBackdropFrac = summary;\n', ''),
-    ('#define ENDGAME_ANNOUNCE_MSEC 5000', '#define ENDGAME_ANNOUNCE_MSEC 4000'),
-    ('#define ENDGAME_INTERMISSION_MSEC 16000', '#define ENDGAME_INTERMISSION_MSEC 15000'),
+    ('#define ENDGAME_ANNOUNCE_MSEC 8000', '#define ENDGAME_ANNOUNCE_MSEC 7000'),
+    ('#define ENDGAME_ANNOUNCE_MSEC 8000', '#define ENDGAME_ANNOUNCE_MSEC 7900'),
+    ('#define ENDGAME_ANNOUNCE_MSEC 8000', '#define ENDGAME_ANNOUNCE_MSEC 9000'),
+    ('#define ENDGAME_INTERMISSION_MSEC 24000', '#define ENDGAME_INTERMISSION_MSEC 23000'),
+    ('#define ENDGAME_INTERMISSION_MSEC 24000', '#define ENDGAME_INTERMISSION_MSEC 25000'),
     ('#define ENDGAME_MUSIC_FADE_MSEC 3000', '#define ENDGAME_MUSIC_FADE_MSEC 1500'),
     ('            SND_StopMusic(left > 0 ? left : 0);', '            SND_StopMusic(ENDGAME_MUSIC_FADE_MSEC);'),
     ('            SND_StopMusic(left > 0 ? left : 0);', '            SND_StopMusic(left);'),
@@ -1076,9 +1083,9 @@ print('PASS: at intermission the WWII end of a match fades in over the darkened 
       'where the capture has it: the viewer\'s team and its victory or defeat (the winner\'s for spectators, a draw '
       'on a tie) over a growing rule and the mode at the map, the viewer\'s side on the left with its arrow, both '
       'emblems as medals built a band of rows a frame when the map starts, VS between its lines, the scores in diamonds and the limit that '
-      'ended it; deathmatch shows the best three, first in the middle, and the server\'s named winner; after 5 s '
+      'ended it; deathmatch shows the best three, first in the middle, and the server\'s named winner; after 8 s '
       'the scoreboard takes over with the result and reason in its header over a blurred view, until the five '
-      'modes load the next map 16 s in; the owner\'s music plays from the start, fades out over the last 3 s and '
+      'modes load the next map 24 s in; the owner\'s music plays from the start, fades out over the last 3 s and '
       'stops with the intermission, silent without it; the last minute\'s music fades in at a minute on the clock, '
       'once a match, waits for a free channel, gives way to the end\'s music or fades out without it, and stays '
       f'silent through the countdown and in S&D; {len(mutants)} failing regression mutants')

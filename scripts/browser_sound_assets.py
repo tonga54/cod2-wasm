@@ -36,9 +36,9 @@ ENDGAME_MUSIC_OWNER_FILE = 'endgamemusic.mp3'
 ENDGAME_MUSIC_ALIAS = 'browser_endgame_music'
 ENDGAME_MUSIC_FILE = 'browser/endgamemusic.mp3'
 ENDGAME_MUSIC_TABLE = 'soundaliases/browser_endgamemusic.csv'
-# The 16 s intermission the server holds (browser_endgame.py) and a margin,
-# about 8 MB decoded.
-ENDGAME_MUSIC_SECONDS = 20
+# The 24 s intermission the server holds (browser_endgame.py) and a margin,
+# about 11 MB decoded.
+ENDGAME_MUSIC_SECONDS = 28
 # Music for the last minute of a match streams the same way as an alias of its
 # own, entering LASTMINUTE_MUSIC_START seconds into the file: the owner's own
 # track for it, likewise never in Git, or else the countdown's.

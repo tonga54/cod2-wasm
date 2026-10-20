@@ -102,12 +102,12 @@ extern int I_stricmp(const char *s0, const char *s1);
 /* Milliseconds into the intermission: the announcement fades in while its
  * rule grows from the middle, stays, then hands over to the scoreboard, which
  * stays until the next map: browser_endgame.py has the five modes' scripts
- * wait 16 s for it. */
+ * wait 24 s for it. */
 #define ENDGAME_FADE_MSEC 400
 #define ENDGAME_RULE_MSEC 600
-#define ENDGAME_ANNOUNCE_MSEC 5000
+#define ENDGAME_ANNOUNCE_MSEC 8000
 #define ENDGAME_HANDOVER_MSEC 500
-#define ENDGAME_INTERMISSION_MSEC 16000
+#define ENDGAME_INTERMISSION_MSEC 24000
 /* The owner's music for the end of a match plays from its start and fades out
  * over the last 3 s before the next map. */
 #define ENDGAME_MUSIC_ALIAS "browser_endgame_music"

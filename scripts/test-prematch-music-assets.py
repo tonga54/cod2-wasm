@@ -247,12 +247,12 @@ def checks(m, archive_path, no_source_path):
             raises(AssertionError, lambda: m.verify_prematch_music(package, source_rows, owner))
         raises(ValueError, lambda: m.verify_prematch_music(owned, source_rows, rejected['under 1 s']))
 
-        # The end of a match's music beside it: its first 20 s as an alias of
+        # The end of a match's music beside it: its first 28 s as an alias of
         # its own, the rest unchanged; the checker takes exactly that.
         both = m.collect_sound_assets(root, index, originals, renderer, maps, prematch_music=OWNER,
                                       endgame_music=OWNER)
         kept = both['sound/' + m.ENDGAME_MUSIC_FILE]
-        assert 20 <= m.mp3_frames(kept)[4] < 20 + OWNER_STEP and OWNER_KEPT.startswith(kept)
+        assert 28 <= m.mp3_frames(kept)[4] < 28 + OWNER_STEP and OWNER_KEPT.startswith(kept)
         table_header, rows = m.alias_table(both[m.ENDGAME_MUSIC_TABLE].decode())
         assert table_header == HEADER and rows == [ENDGAME_ROW]
         assert {name: data for name, data in both.items()
@@ -378,7 +378,8 @@ with tempfile.TemporaryDirectory(prefix='cod2-prematch-music-') as directory:
         ("    assert len(rows) == 1 and any(source_header == header", "    assert any(source_header == header"),
         ("            assert all(dict(zip(other_header, row)).get('name', '').lower() != alias",
          "            assert all(row is not None"),
-        ("ENDGAME_MUSIC_SECONDS = 20", "ENDGAME_MUSIC_SECONDS = 65"),
+        ("ENDGAME_MUSIC_SECONDS = 28", "ENDGAME_MUSIC_SECONDS = 65"),
+        ("ENDGAME_MUSIC_SECONDS = 28", "ENDGAME_MUSIC_SECONDS = 20"),
         ("        writer.writerow(prematch_music_row(header, fields, ENDGAME_MUSIC_ALIAS, ENDGAME_MUSIC_FILE))",
          "        writer.writerow(prematch_music_row(header, fields))"),
         ("package_prematch_music(endgame_music, ENDGAME_MUSIC_SECONDS,\n"

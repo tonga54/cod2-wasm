@@ -3,9 +3,9 @@
 GAMETYPES = ('ctf', 'dm', 'hq', 'sd', 'tdm')
 SCRIPTS = {f'maps/mp/gametypes/{gametype}.gsc' for gametype in GAMETYPES}
 RETAIL_WAIT = b'\twait 10;\r\n\texitLevel(false);'
-# The announcement's 5 s, its half-second handover and 10.5 s of scoreboard
+# The announcement's 8 s, its half-second handover and 15.5 s of scoreboard
 # (ENDGAME_INTERMISSION_MSEC).
-INTERMISSION_SECONDS = 16
+INTERMISSION_SECONDS = 24
 
 
 def apply_endgame_timing(name: str, original: bytes) -> bytes:

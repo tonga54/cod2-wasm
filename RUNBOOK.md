@@ -4608,3 +4608,40 @@ viewer's weapon selection. `test-remote-sound-events.py`, `test-rumble.py` and
 `test-killcam.py` pass, and the web client and the native server build. Not
 checked in the browser: that needs another player's gun of the same kind on
 the ground.
+
+## A longer result and scoreboard at the end of a match — 2026-10-20
+
+The owner asked for the result, with deathmatch's first, second and third
+places, and the final scoreboard to stay up a little longer. `cg_endgame_mp.c`
+now shows the result for 8 s instead of 5, so after its half-second handover
+the scoreboard stays 15.5 s instead of 10.5. `browser_endgame.py` has the five
+modes' private derived scripts wait 24 s instead of 16 before `exitLevel`. The
+owner's end of match music still fades out over the last 3 s, and the archive
+now keeps 28 s of it instead of 20. Both `cod2_browser_renderer.iwd` and
+`cod2_browser_audio.iwd` (67.4 to 67.8 MB) change, and
+`site/wasm-game-data.json` is regenerated with this commit. Nothing new has to
+be copied to the Pi.
+
+Validation:
+
+- `test-endgame.py`, 79 mutants, 3 of them new:
+  - the result is whole at 7.9 s and still alone at 8 s, and the scoreboard
+    has taken over by 8.5 s;
+  - the music holds until 21 s, then fades with what is left of the last 3 s;
+  - the client's 24 s match the scripts' wait and leave at least 15 s of
+    scoreboard, and the music the archive keeps outlasts them.
+- `test-prematch-music-assets.py`, 35 mutants: the end of match music keeps
+  28 s.
+- `test-web-scene-fx.py` passes, the web client builds, the archives are
+  regenerated and `check-private-assets.py` passes.
+- A one-minute Deathmatch on Carentan with three bots in the QA stack, timed
+  from the start of the end of match music:
+  - the podium was up at 3 and 7.4 s;
+  - the scoreboard was up at 9.5, 16 and 23 s;
+  - the music held its volume until 21.5 s and was gone at 24 s;
+  - the server changed to Dawnville at 24.02 s.
+
+With that one-minute limit, the next map's countdown held the clock at 1:00
+for a player in the class menu, so the last minute's music restarted every
+1.6 s there. Start New Server offers no limit under 5 minutes, which keeps a
+held clock out of the last minute.

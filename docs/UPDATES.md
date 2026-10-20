@@ -237,19 +237,19 @@ behind a 3.3 MB tag; the archive keeps 2.6 MB of it and grew from 61.5 to
 ### Owner end of match music
 
 An optional `endgamemusic.mp3` beside the original IWDs plays at the end of a
-match, from the moment the result is announced. It holds full volume for 13
-seconds and fades out over the last 3 of the 16-second intermission, so it is
+match, from the moment the result is announced. It holds full volume for 21
+seconds and fades out over the last 3 of the 24-second intermission, so it is
 gone as the next map loads. Like the countdown music it belongs to the owner,
 is never committed and needs a byte-identical copy on every host that
 prepares the published build (`data/main/` and `~/cod2-original/main/`).
 
 It streams the same way as an alias of its own, `browser_endgame_music` in
 `soundaliases/browser_endgamemusic.csv`, on the same copy of El Daba's opening
-music row. The generator keeps the first 20 seconds of the file's frames as
+music row. The generator keeps the first 28 seconds of the file's frames as
 `sound/browser/endgamemusic.mp3`, without tags or an encoder's header frame,
 and `check-private-assets.py` verifies the row and the bytes. Without the file
 the end of a match is silent. On October 19, 2026 the owner's file was 11.9 MB;
-the archive keeps 0.8 MB of it.
+the archive keeps 1.1 MB of it.
 
 ### Owner last minute music
 
