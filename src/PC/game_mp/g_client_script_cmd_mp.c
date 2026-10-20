@@ -77,6 +77,7 @@ extern void Scr_ObjectError(const char *msg);
 extern void Scr_Error(const char *msg);
 extern void Com_Printf(const char *fmt, ...);
 extern const char *va(const char *fmt, ...);
+extern void Cbuf_ExecuteText(int exec_when, const char *text);
 extern const char *Scr_GetString(unsigned int index);
 extern int GScr_GetScriptMenuIndex(const char *menu);
 extern void SV_GameSendServerCommand(int clientNum, int type, const char *text);
@@ -1075,6 +1076,16 @@ static void PlayerCmd_BotAI(scr_entref_t entref)
     Scr_AddBool(SV_BotEnableAI(entref.entnum, difficulty));
 }
 
+/* Disconnects a test client after the current script frame (botkick, which
+ * spares a slot a human has taken meanwhile), without the temporary ban that
+ * kick() applies. */
+static void PlayerCmd_BotRemove(scr_entref_t entref)
+{
+    if (!PlayerCmd_BotParamCount(0, "USAGE: self botRemove()\n") || !PlayerCmd_GetBotEntity(entref))
+        return;
+    Cbuf_ExecuteText(2, va("botkick %i\n", (int)entref.entnum));
+}
+
 static void PlayerCmd_BotGoal(scr_entref_t entref)
 {
     extern qboolean SV_BotSetGoal(int, const vec_t *, float, int, int);
@@ -1751,6 +1762,7 @@ static const BuiltinMethodDef player_methods[] __attribute__((used)) = {
     { "isbot", (BuiltinMethod)PlayerCmd_BotIsBot, 0 },
     { "botstop", (BuiltinMethod)PlayerCmd_BotStop, 0 },
     { "botai", (BuiltinMethod)PlayerCmd_BotAI, 0 },
+    { "botremove", (BuiltinMethod)PlayerCmd_BotRemove, 0 },
     { "botgoal", (BuiltinMethod)PlayerCmd_BotGoal, 0 },
     { "botcleargoal", (BuiltinMethod)PlayerCmd_BotClearGoal, 0 },
     { "botmovement", (BuiltinMethod)PlayerCmd_BotMovement, 0 },

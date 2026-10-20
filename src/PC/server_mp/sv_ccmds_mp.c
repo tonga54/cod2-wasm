@@ -584,6 +584,7 @@ void SV_RemoveOperatorCommands(void)
     Cmd_RemoveCommand("tempBanClient");
     Cmd_RemoveCommand("unbanUser");
     Cmd_RemoveCommand("clientkick");
+    Cmd_RemoveCommand("botkick");
     Cmd_RemoveCommand("status");
     Cmd_RemoveCommand("serverinfo");
     Cmd_RemoveCommand("systeminfo");
@@ -599,6 +600,17 @@ void SV_RemoveOperatorCommands(void)
     Cmd_RemoveCommand("tell");
     Cmd_RemoveCommand("scriptUsage");
     Cmd_RemoveCommand("stringUsage");
+}
+
+/* Drops the test client browser_bots.gsc's governor chose (self botRemove()).
+ * The command runs after the script frame, so a slot a human has taken since
+ * is left alone. */
+static void SV_BotKick_f(void)
+{
+    client_t *cl = SV_GetPlayerByNum();
+
+    if (cl && cl->state && cl->bIsTestClient && cl->netchan.remoteAddress.type == NA_BOT)
+        SV_DropClient(cl, "EXE_DISCONNECTED");
 }
 
 static void SV_Map_f(void)
@@ -647,6 +659,7 @@ void SV_AddOperatorCommands(void)
     Cmd_AddCommand("tempBanClient", (void (*)(void))SV_TempBanNum_f);
     Cmd_AddCommand("unbanUser", (void (*)(void))SV_Unban_f);
     Cmd_AddCommand("clientkick", (void (*)(void))SV_DropNum_f);
+    Cmd_AddCommand("botkick", (void (*)(void))SV_BotKick_f);
     Cmd_AddCommand("status", (void (*)(void))SV_Status_f);
     Cmd_AddCommand("serverinfo", (void (*)(void))SV_Serverinfo_f);
     Cmd_AddCommand("systeminfo", (void (*)(void))SV_Systeminfo_f);

@@ -37,9 +37,11 @@ static void SV_ArchiveSnapshot(void){archives++;}
 support = support.replace('static struct {int time;}svs;', '')
 support = support.replace('static client_t clients[3];', 'static client_t clients[3];\nstatic struct {int time;client_t *clients;}svs={0,clients};')
 checks = r'''
-static void run(int residual){int frameMsec=tickMsec,i;client_t *cl;
+static int simulated;
+static void run(int residual){int frameMsec=tickMsec,i,simulatedFrames=0;client_t *cl;
  sv.timeResidual=residual;
 LOOP
+ simulated=simulatedFrames;
 }
 int main(void){
  clients[0].state=clients[2].state=4;
@@ -51,6 +53,7 @@ int main(void){
   gameCalls=planCalls=moves=archives=lastMoveTime=svs.time=0;
   run(residual);
   assert(gameCalls==residual/tickMsec&&planCalls==gameCalls&&moves==gameCalls*2);
+  assert(simulated==gameCalls);
   assert(sv.timeResidual==residual%tickMsec&&archives==gameCalls-1);
  }
  }

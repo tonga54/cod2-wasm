@@ -5,6 +5,7 @@ main()
     level.bot_actor_cache = [];
     level thread objectiveState();
     level thread populate();
+    level thread governor();
 }
 
 populate()
@@ -16,6 +17,10 @@ populate()
     if(count < 0) count = 0;
     if(count > 32) count = 32;
     if(difficulty < 0 || difficulty > 2) difficulty = 1;
+    // The count the governor found this host could carry holds for the rest
+    // of the rotation instead of overloading every new map again.
+    if(getCvar("scr_bot_capacity") != "" && getCvarInt("scr_bot_capacity") < count)
+        count = getCvarInt("scr_bot_capacity");
 
     // map_restart and map rotation can retain connected test clients.
     players = getEntArray("player", "classname");
@@ -48,6 +53,92 @@ populate()
         bot = undefined;
         wait .25;
     }
+}
+
+// Keeps a room playable on a slow host. While the server runs behind schedule
+// or uses nearly a whole core (sv_lateFrames, sv_cpuLoad from sv_main_mp.c),
+// one bot leaves every few seconds; after a long calm they come back one at a
+// time, up to the room's bot count.
+governor()
+{
+    level endon("intermission");
+    // Map loading, spawning and the first route planning are not overload.
+    wait 20;
+    busy = 0;
+    calm = 0;
+    cooldown = 0;
+    for(;;)
+    {
+        wait 1;
+        late = getCvarInt("sv_lateFrames");
+        cpu = getCvarInt("sv_cpuLoad");
+        if(late >= 10 || cpu >= 90) { busy++; calm = 0; }
+        else if(late == 0 && cpu <= 70) { calm++; busy = 0; }
+        else { busy = 0; calm = 0; }
+        if(cooldown > 0) cooldown--;
+        // A slow server can run several script seconds before the queued
+        // botkick executes; a bot already leaving is not counted or chosen.
+        bots = [];
+        players = getEntArray("player", "classname");
+        for(i = 0; i < players.size; i++)
+            if(players[i] isBot() && !isDefined(players[i].bot_leaving)) bots[bots.size] = players[i];
+        players = undefined;
+        if(busy >= 3 && bots.size)
+        {
+            setCvar("scr_bot_capacity", bots.size - 1);
+            leaving = governorChoice(bots);
+            println("[bots] governor: late=" + late + "% cpu=" + cpu + "%, removing client " +
+                    (leaving getEntityNumber()) + ", " + (bots.size - 1) + " bots remain");
+            iprintln("Server busy: a bot left to keep the match smooth.");
+            leaving.bot_leaving = true;
+            leaving botRemove();
+            leaving = undefined;
+            busy = 0;
+            cooldown = 60;
+        }
+        else if(calm >= 20 && !cooldown && bots.size < getCvarInt("scr_bot_count"))
+        {
+            difficulty = getCvarInt("scr_bot_difficulty");
+            if(difficulty < 0 || difficulty > 2) difficulty = 1;
+            bot = addTestClient();
+            if(isDefined(bot))
+            {
+                bot.bot_leaving = undefined;
+                setCvar("scr_bot_capacity", bots.size + 1);
+                println("[bots] governor: late=" + late + "% cpu=" + cpu + "%, " + (bots.size + 1) + " bots");
+                bot thread joinGame(difficulty);
+            }
+            bot = undefined;
+            calm = 0;
+        }
+        bots = undefined;
+    }
+}
+
+// A bot from the larger team, one that is not in play if there is one.
+governorChoice(bots)
+{
+    members["allies"] = 0;
+    members["axis"] = 0;
+    players = getEntArray("player", "classname");
+    for(i = 0; i < players.size; i++)
+    {
+        team = players[i].pers["team"];
+        if(isDefined(team) && isDefined(members[team])) members[team]++;
+    }
+    players = undefined;
+    larger = "axis";
+    if(members["allies"] > members["axis"]) larger = "allies";
+    choice = bots[bots.size - 1];
+    best = -1;
+    for(i = 0; i < bots.size; i++)
+    {
+        score = 0;
+        if(isDefined(bots[i].pers["team"]) && bots[i].pers["team"] == larger) score += 2;
+        if(!isAlive(bots[i]) || bots[i].sessionstate != "playing") score += 1;
+        if(score > best) { best = score; choice = bots[i]; }
+    }
+    return choice;
 }
 
 joinGame(difficulty)

@@ -4,7 +4,9 @@
 #include "pb_public.h"
 #include "PC/qcommon/net_hardening.h"
 #include <stdarg.h>
+#include <time.h>
 extern void SV_DelayDropClient(client_t *drop, const char *reason);
+extern dvar_t *Dvar_RegisterInt(const char *dvarName, int defaultValue, int min, int max, int flags);
 extern void MSG_WriteReliableCommandToBuffer(const char *pszCommand, char *pszBuffer, int iBufferSize);
 extern int I_strnicmp(const char *s0, const char *s1, size_t n);
 extern Bool NET_OutOfBandPrint(netsrc_t sock, netadr_t adr, const char *data);
@@ -688,7 +690,6 @@ void SV_ConnectionlessPacket(netadr_t from, msg_t *msg)
     c = MSG_ReadStringLine(msg);
     SV_Cmd_TokenizeString(c);
     c = SV_Cmd_Argv(0);
-    Com_Printf("[cnx] SV_ConnectionlessPacket cmd='%s'\n", c);
 
 #if COD2_IS_PATCH_13
 
@@ -1076,6 +1077,49 @@ void SV_SendServerCommand(client_t *cl, svscmd_type type, const char *fmt, ...)
     ZN10LargeLocalD1Ev(&message_large_local);
 }
 
+/* Load published once a second for browser_bots.gsc: sv_cpuLoad is the share
+ * of one core the process used (QEMU included on the Pi), sv_lateFrames the
+ * share of simulation frames that ran behind schedule, caught up after a slow
+ * frame. 0x1040: read-only, outside serverinfo and systeminfo. */
+static const dvar_t *sv_cpuLoad, *sv_lateFrames;
+static struct { int windowStart, frames, lateFrames; double cpuStart; } s_svLoad;
+
+static double SV_ProcessCpuSeconds(void)
+{
+#if defined(CLOCK_PROCESS_CPUTIME_ID) && !defined(__EMSCRIPTEN__)
+    struct timespec now;
+    if (!clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &now))
+        return now.tv_sec + now.tv_nsec * 1e-9;
+#endif
+    return -1.0;
+}
+
+static void SV_UpdateLoad(int frames, int now)
+{
+    double cpu;
+    int elapsed;
+
+    if (!sv_cpuLoad) {
+        sv_cpuLoad = Dvar_RegisterInt("sv_cpuLoad", 0, 0, 1000, 0x1040);
+        sv_lateFrames = Dvar_RegisterInt("sv_lateFrames", 0, 0, 100, 0x1040);
+        s_svLoad.windowStart = now;
+        s_svLoad.cpuStart = SV_ProcessCpuSeconds();
+    }
+    s_svLoad.frames += frames;
+    s_svLoad.lateFrames += frames - 1;
+    elapsed = now - s_svLoad.windowStart;
+    if (elapsed < 1000)
+        return;
+    cpu = SV_ProcessCpuSeconds();
+    if (cpu >= 0.0 && s_svLoad.cpuStart >= 0.0)
+        Dvar_SetInt(sv_cpuLoad, (int)((cpu - s_svLoad.cpuStart) * 100000.0 / elapsed + 0.5));
+    Dvar_SetInt(sv_lateFrames, s_svLoad.lateFrames * 100 / s_svLoad.frames);
+    s_svLoad.windowStart = now;
+    s_svLoad.cpuStart = cpu;
+    s_svLoad.frames = 0;
+    s_svLoad.lateFrames = 0;
+}
+
 int SV_FrameWaitMilliseconds(void)
 {
     int remaining;
@@ -1088,6 +1132,7 @@ int SV_FrameWaitMilliseconds(void)
 void SV_Frame(int msec)
 {
     int frameMsec;
+    int simulatedFrames;
     int i;
     int connectedCount;
     int dvarModifiedFlags;
@@ -1248,9 +1293,11 @@ void SV_Frame(int msec)
         }
     }
 
+    simulatedFrames = 0;
     do {
         sv.timeResidual -= frameMsec;
         svs.time += frameMsec;
+        ++simulatedFrames;
 
         CL_FlushDebugData(1);
         SV_ResetSkeletonCache();
@@ -1308,6 +1355,7 @@ void SV_Frame(int msec)
     int profileStart=s_botProfile.enabled?Sys_Milliseconds():0;
     SV_SendClientMessages();
     SV_ArchiveSnapshot();
+    SV_UpdateLoad(simulatedFrames, Sys_Milliseconds());
     if(s_botProfile.enabled) {
         int now=Sys_Milliseconds();
         s_botProfile.snapshotMs+=now-profileStart;
