@@ -5392,3 +5392,22 @@ Validation:
   Axis fail the same way with the previous archives and with the 11:52 server
   binary, so they are not this change's.
 - Not yet played in a browser match.
+
+## A little more controller aim assist — 2026-10-20
+
+The owner asked for slightly more aim assist for whoever plays with a
+controller. Over an enemy in sight the right stick now turns 30% slower
+instead of 25%, and while either stick moves the view follows 20% of the
+enemy's motion instead of 15%. The zone, the targets, the smoothing and the
+limit of 90 degrees a second are unchanged. It still applies only to stick
+aiming while the controller is the device in use: the mouse never gets it,
+and nothing turns the view on its own.
+
+Validation:
+
+- `scripts/test-aim-assist.py` checks the new strength: 70% of the stick's
+  turn over an enemy, 85% at the zone's edge and 20% of a runner's angular
+  speed. 34 mutants fail; the two new ones restore the previous 25% and 15%.
+- `scripts/test-gamepad.py` passes unchanged: the client applies what the
+  cgame hands it to the sticks alone.
+- Not yet built into the browser client or played.

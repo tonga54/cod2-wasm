@@ -13,11 +13,11 @@ extern void CG_TraceCapsule(trace_t *result, const vec_t *start, const vec_t *mi
 extern float FX_GetServerVisibility(const vec_t *start, const vec_t *end);
 extern void CL_Gamepad_SetAimAssist(float slowdown, float yawRate, float pitchRate);
 
-/* Over an enemy the right stick turns a quarter slower, and while either stick
- * moves the view follows 15% of the enemy's motion across it. Nothing turns
- * the view on its own or pulls it onto a target. */
-#    define AIM_ASSIST_SLOWDOWN 0.25f
-#    define AIM_ASSIST_TRACKING 0.15f
+/* Over an enemy the right stick turns 30% slower, and while either stick moves
+ * the view follows 20% of the enemy's motion across it. Nothing turns the view
+ * on its own or pulls it onto a target. */
+#    define AIM_ASSIST_SLOWDOWN 0.3f
+#    define AIM_ASSIST_TRACKING 0.2f
 /* Full within the body's half width of its centre line, fading over a further
  * 1.25 degrees, at least 8 units. */
 #    define AIM_ASSIST_RADIUS 16.0f

@@ -422,8 +422,8 @@ dying and melee impacts. **Options → Controller → Vibration** turns it off.
 Chrome and Edge drive both motors; other browsers may not vibrate.
 
 The controller also gets a minimal aim assist: over an enemy in sight the
-right stick turns a quarter slower, and while a stick moves the view follows
-15% of that enemy's motion. It never turns the view on its own or snaps onto
+right stick turns 30% slower, and while a stick moves the view follows 20% of
+that enemy's motion. It never turns the view on its own or snaps onto
 anyone, and the mouse never gets it. **Options → Controller → Aim assist**
 turns it off.
 

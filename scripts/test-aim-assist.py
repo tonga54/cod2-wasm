@@ -139,18 +139,18 @@ int main(void)
     clear();
     look(60.0f, 0.0f);
 
-    /* Over an enemy the right stick keeps three quarters of its turn; over a
-     * teammate, a spectator or nothing, all of it. Without teams everyone
-     * else is an enemy. */
+    /* Over an enemy the right stick keeps 70% of its turn; over a teammate, a
+     * spectator or nothing, all of it. Without teams everyone else is an
+     * enemy. */
     enemy(1, 500, 0, 0, 2, 0);
-    assert(frame(1000) == 0.75f && yawRate == 0.0f && pitchRate == 0.0f);
+    assert(frame(1000) == 0.7f && yawRate == 0.0f && pitchRate == 0.0f);
     cg->bgs.clientinfo[1].team = 1;
     assert(frame(1016) == 1.0f && yawRate == 0.0f);
     cg->bgs.clientinfo[1].team = 3;
     assert(frame(1032) == 1.0f);
     cg->bgs.clientinfo[1].team = 0;
     cg->bgs.clientinfo[0].team = 0;
-    assert(frame(1048) == 0.75f);
+    assert(frame(1048) == 0.7f);
     clear();
     assert(frame(1064) == 1.0f && handed == 5);
 
@@ -162,7 +162,7 @@ int main(void)
     cg->predictedPlayerState.pm_type = 6;
     assert(frame(1096) == 1.0f);
     cg->predictedPlayerState.pm_type = 1;
-    assert(frame(1112) == 0.75f);
+    assert(frame(1112) == 0.7f);
     cg->predictedPlayerState.pm_type = 0;
     snap.ps.clientNum = 5;
     assert(frame(1128) == 1.0f);
@@ -174,27 +174,27 @@ int main(void)
     /* Full within 16 units of the body's centre line, fading over 1.25
      * degrees more (10.9 units at 500), nothing past it. */
     enemy(1, 500, 16, 0, 2, 0);
-    assert(frame(2000) == 0.75f);
+    assert(frame(2000) == 0.7f);
     enemy(1, 500, -21.45f, 0, 2, 0);
-    assert(near(frame(2016), 0.875f, .002f));
+    assert(near(frame(2016), 0.85f, .002f));
     enemy(1, 500, 27, 0, 2, 0);
     assert(frame(2032) == 1.0f);
     enemy(1, 2000, 59, 0, 2, 0);
-    assert(near(frame(2048), 1.0f - .25f * (16 + 43.6f - 59) / 43.6f, .002f));
+    assert(near(frame(2048), 1.0f - .3f * (16 + 43.6f - 59) / 43.6f, .002f));
 
     /* The body runs from over the feet to the head by stance: 26 units over a
      * crouching enemy's head is the zone's edge, a standing one's head is
      * under it; a prone enemy is far under eye height, on a lower crosshair. */
     look(70.0f, 0.0f);
     enemy(1, 500, 0, 0, 2, 4);
-    assert(near(frame(3000), 1.0f - .25f * (26.9f - 26) / 10.9f, .002f));
+    assert(near(frame(3000), 1.0f - .3f * (26.9f - 26) / 10.9f, .002f));
     enemy(1, 500, 0, 0, 2, 0);
-    assert(frame(3008) == 0.75f);
+    assert(frame(3008) == 0.7f);
     look(60.0f, 0.0f);
     enemy(1, 500, 0, 0, 2, 8);
     assert(frame(3016) == 1.0f);
     look(30.0f, 0.0f);
-    assert(frame(3032) == 0.75f);
+    assert(frame(3032) == 0.7f);
     look(100.0f, 0.0f);
     enemy(1, 500, 0, 0, 2, 0);
     assert(frame(3048) == 1.0f);
@@ -219,7 +219,7 @@ int main(void)
     enemy(1, 3100, 0, 0, 2, 0);
     assert(frame(5000) == 1.0f);
     enemy(1, 2900, 0, 0, 2, 0);
-    assert(frame(5016) == 0.75f);
+    assert(frame(5016) == 0.7f);
     enemy(1, 20, 0, 0, 2, 0);
     assert(frame(5032) == 1.0f);
     enemy(1, -500, 0, 0, 2, 0);
@@ -234,24 +234,24 @@ int main(void)
     assert(frame(6016) == 1.0f);
     blockedBy[1] = 0;
     hitsSelf[1] = 1;
-    assert(frame(6032) == 0.75f);
+    assert(frame(6032) == 0.7f);
     smoke[1] = .1f;
     assert(frame(6048) == 1.0f);
     smoke[1] = .3f;
-    assert(frame(6064) == 0.75f);
+    assert(frame(6064) == 0.7f);
 
     /* The enemy nearest the crosshair wins, the next in sight if it is
      * hidden. */
     clear();
     enemy(2, 500, 21.45f, 0, 2, 0);
     enemy(1, 600, 2, 0, 2, 0);
-    assert(frame(7000) == 0.75f);
+    assert(frame(7000) == 0.7f);
     blockedBy[1] = 1022;
-    assert(near(frame(7016), 0.875f, .002f));
+    assert(near(frame(7016), 0.85f, .002f));
     clear();
 
     /* Following an enemy running across the view at 190 units a second, 500
-     * away, with the view kept on them: 15% of their angular speed once the
+     * away, with the view kept on them: 20% of their angular speed once the
      * 0.1 s smoothing has caught up, little at first. */
     {
         int time = 10000;
@@ -269,10 +269,10 @@ int main(void)
             frame(time);
             expected = 500.0f * 190.0f / (500.0f * 500.0f + y * y) * 180.0f / 3.14159265f;
             if (step == 1)
-                assert(yawRate > 0.0f && yawRate < .3f * .15f * expected);
-            assert(near(slowdown, 0.75f, .001f) && near(pitchRate, 0.0f, .05f));
+                assert(yawRate > 0.0f && yawRate < .3f * .2f * expected);
+            assert(near(slowdown, 0.7f, .001f) && near(pitchRate, 0.0f, .05f));
         }
-        assert(near(yawRate, .15f * expected, .05f * .15f * expected));
+        assert(near(yawRate, .2f * expected, .05f * .2f * expected));
         /* The same time again keeps the rate; another target starts over. */
         float kept = yawRate;
         frame(time);
@@ -280,7 +280,7 @@ int main(void)
         enemy(2, 500, y, 0, 2, 0);
         entities[1].nextValid = 0;
         frame(time + 16);
-        assert(yawRate == 0.0f && slowdown == 0.75f);
+        assert(yawRate == 0.0f && slowdown == 0.7f);
         /* So does a gap over 0.2 s. */
         enemy(2, 500, y + 3, 0, 2, 0);
         frame(time + 32);
@@ -297,9 +297,9 @@ int main(void)
                   0, 2, 0);
             look(60.0f, angle);
             frame(time);
-            assert(yawRate <= 90.0f * .15f + .001f);
+            assert(yawRate <= 90.0f * .2f + .001f);
         }
-        assert(yawRate > 88.0f * .15f);
+        assert(yawRate > 88.0f * .2f);
         /* At the zone's edge the following fades with the slowdown: half. */
         clear();
         enemy(1, 500, -21.45f, 0, 2, 0);
@@ -308,7 +308,7 @@ int main(void)
         enemy(1, 500, -21.45f + 3.04f, 0, 2, 0);
         look(60.0f, atan2f(3.04f, 500.0f) * 180.0f / 3.14159265f);
         frame(30016);
-        assert(near(slowdown, 0.875f, .003f) && near(yawRate, .5f * .15f * 21.74f * 16 / 116, .01f));
+        assert(near(slowdown, 0.85f, .003f) && near(yawRate, .5f * .2f * 21.74f * 16 / 116, .01f));
     }
     puts("PASS");
     return 0;
@@ -324,8 +324,10 @@ def mutate(text, old, new):
 body = '\n'.join(line for line in module.splitlines() if not line.lstrip().startswith('#    include')
                  and not line.startswith('#include'))
 mutants = [
-    ('#    define AIM_ASSIST_SLOWDOWN 0.25f', '#    define AIM_ASSIST_SLOWDOWN 0.4f'),
-    ('#    define AIM_ASSIST_TRACKING 0.15f', '#    define AIM_ASSIST_TRACKING 0.3f'),
+    ('#    define AIM_ASSIST_SLOWDOWN 0.3f', '#    define AIM_ASSIST_SLOWDOWN 0.25f'),
+    ('#    define AIM_ASSIST_SLOWDOWN 0.3f', '#    define AIM_ASSIST_SLOWDOWN 0.4f'),
+    ('#    define AIM_ASSIST_TRACKING 0.2f', '#    define AIM_ASSIST_TRACKING 0.15f'),
+    ('#    define AIM_ASSIST_TRACKING 0.2f', '#    define AIM_ASSIST_TRACKING 0.3f'),
     ('#    define AIM_ASSIST_RADIUS 16.0f', '#    define AIM_ASSIST_RADIUS 24.0f'),
     ('#    define AIM_ASSIST_MARGIN_TAN 0.0218f', '#    define AIM_ASSIST_MARGIN_TAN 0.05f'),
     ('#    define AIM_ASSIST_RANGE 3000.0f', '#    define AIM_ASSIST_RANGE 4000.0f'),
@@ -383,9 +385,9 @@ with tempfile.TemporaryDirectory(prefix='cod2-aim-assist-') as directory:
         result = subprocess.run([str(binary)], capture_output=True, text=True)
         assert (result.returncode == 0) == (mutant is None), (index, mutant, result.stdout[-500:],
                                                                result.stderr[-2000:])
-print('PASS: over a visible enemy near the crosshair the right stick keeps 75% of its turn, full within 16 units '
+print('PASS: over a visible enemy near the crosshair the right stick keeps 70% of its turn, full within 16 units '
       'of the body, fading over 1.25 degrees more, by stance; teammates, spectators, the hidden, the dead, walls, '
       'other players between and thick smoke excluded, its own body and thin smoke not; 32 to 3000 units ahead; '
-      'the nearest enemy wins; the view follows 15% of their motion, smoothed over 0.1 s, held to 90 degrees a '
+      'the nearest enemy wins; the view follows 20% of their motion, smoothed over 0.1 s, held to 90 degrees a '
       'second, unaffected by stance, starting over for a new target or after a gap; only for the local player '
       f'alive in their own view; {len(mutants)} failing regression mutants')
