@@ -1122,9 +1122,15 @@ void UI_PauseMenu_Paint(displayContextDef_t *dc, menuDef_t *menu)
         Pause_PaintClass(dc);
         break;
     }
-    /* Pointer motion moves the focus to what it is over now; keys move it
-     * otherwise. */
-    if (moved && (s_pause.hover >> 8) != PAUSE_HOVER_TOGGLE)
+    /* Pointer motion moves the focus to what it is over now, with the retail
+     * menus' mouse_over as it enters another element; keys move it otherwise. */
+    if (moved && (s_pause.hover >> 8) != PAUSE_HOVER_TOGGLE) {
+        int focus[4] = { s_pause.classFocus, s_pause.teamFocus, s_pause.leaveFocus, s_pause.settingsFocus };
+
         Pause_FocusHover();
+        if (focus[0] != s_pause.classFocus || focus[1] != s_pause.teamFocus || focus[2] != s_pause.leaveFocus ||
+            focus[3] != s_pause.settingsFocus)
+            Pause_Sound("mouse_over");
+    }
     Pause_PaintPrompts(gamepad);
 }

@@ -44,7 +44,8 @@ the menus already use, or with [pictures the owner keeps](#pictures).
   controller or the pointer move the focus to another element, and
   `mouse_click` for what acts: choosing, opening a screen, equipping, removing,
   going back and renaming. Typing a name and keys that change nothing are
-  silent.
+  silent. They play in a match too: a map's sound aliases replace the menu's,
+  and keep the menus' own sounds (loadspec `menu`) with them.
 - **Joining a match** opens **Select Class** before anything else, in place of
   the server information and the team choice. Choosing a class puts the player
   on the team the mode's own auto-assign picks (the smaller team, or on a tie

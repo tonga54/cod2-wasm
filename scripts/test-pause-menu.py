@@ -540,11 +540,17 @@ int main(void) {
     point(43.3f + 95.9f + 20.0f, 76.0f); paint(); assert(s_pause.standard == 0);
     chooseCalls = 0; key(0xc8); assert(s_pause.standard == 1 && chooseCalls == 0 && s_pause.open);
     /* A step from one row into the next focuses the row it is over now, not
-     * the one it left, and the focus stays there while the pointer rests. */
+     * the one it left, and the focus stays there while the pointer rests.
+     * Entering another row plays mouse_over; moving within one is silent. */
     s_pause.classFocus = 0;
-    point(20.0f, 98.3f + 3.0f * 29.25f + 10.0f); paint(); assert(s_pause.classFocus == 3);
-    point(20.0f, 98.3f + 4.0f * 29.25f + 10.0f); paint(); assert(s_pause.classFocus == 4);
-    paint(); assert(s_pause.classFocus == 4);
+    {
+        int before = sounds;
+
+        point(20.0f, 98.3f + 3.0f * 29.25f + 10.0f); paint(); assert(s_pause.classFocus == 3 && sounds == before + 1);
+        point(20.0f, 98.3f + 4.0f * 29.25f + 10.0f); paint(); assert(s_pause.classFocus == 4 && sounds == before + 2);
+        paint(); assert(s_pause.classFocus == 4);
+        point(30.0f, 98.3f + 4.0f * 29.25f + 14.0f); paint(); assert(s_pause.classFocus == 4 && sounds == before + 2);
+    }
     key(0xc8); assert(chooseCalls == 1 && chooseIndex == 4 && chooseStandard == 1);
     UI_PauseMenu_Open(&dc); s_pause.tab = PAUSE_TAB_LEAVE;
     point(20.0f, 207.5f + 29.25f + 10.0f); paint(); assert(s_pause.leaveFocus == PAUSE_LEAVE_MATCH);
@@ -601,8 +607,9 @@ mutants = [
      '    { "AUDIO", "Set the volume of the game\'s sound and music", "options_graphics" },'),
     ('    if (s_pause.tab != PAUSE_TAB_OVERVIEW)\n        x +=', '    if (1)\n        x +='),
     ('    if (s_pause.tab == PAUSE_TAB_CLASS && !s_pause.standard && !gamepad)', '    if (s_pause.tab == PAUSE_TAB_CLASS)'),
-    ('    if (moved && (s_pause.hover >> 8) != PAUSE_HOVER_TOGGLE)\n        Pause_FocusHover();',
-     '    if (moved)\n        Pause_FocusHover();'),
+    ('    if (moved && (s_pause.hover >> 8) != PAUSE_HOVER_TOGGLE) {', '    if (moved) {'),
+    ('            focus[3] != s_pause.settingsFocus)\n            Pause_Sound("mouse_over");',
+     '            focus[3] != s_pause.settingsFocus) {\n        }'),
     # The focus from the hover the last frame painted, where the pointer was.
     ('    s_pause.hover = PAUSE_HOVER_NONE;\n    Pause_PaintTabs(dc, gamepad);',
      '    if (moved && (s_pause.hover >> 8) != PAUSE_HOVER_TOGGLE)\n        Pause_FocusHover();\n    moved = 0;\n'
@@ -663,5 +670,6 @@ print('PASS: Escape opens the pause menu over the blurred view on the Class tab 
       'classes choose from either list, F1 edits the player\'s own; teams send the team menu\'s response, an '
       'auto-assign from a side only balances; leaving disconnects; Controls opens the settings list and the other '
       'settings rows their page, each returning to the tab; the tab bar, '
-      'prompts, lists, tiles, overview and pointer follow the captures\' layout; the hooks and menu file are wired; '
+      'prompts, lists, tiles, overview and pointer follow the captures\' layout; the pointer entering another row '
+      'plays mouse_over; the hooks and menu file are wired; '
       f'{len(mutants)} failing regression mutants')

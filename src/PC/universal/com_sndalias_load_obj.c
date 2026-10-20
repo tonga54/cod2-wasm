@@ -887,6 +887,19 @@ static const char *Com_SoundAliasFindInvalidIdentifierChar(const char *text)
     return NULL;
 }
 
+/* Whether the loadspec list names the word, set apart by spaces or a '!'. */
+static int Com_SoundAliasLoadspecNames(const char *list, const char *word)
+{
+    int len = strlen(word);
+    const char *match;
+
+    for (match = strstr(list, word); match; match = strstr(match + 1, word)) {
+        if ((match == list || match[-1] <= '!') && match[len] <= ' ')
+            return 1;
+    }
+    return 0;
+}
+
 static int Com_SoundAliasLoadspecKeep(const char *loadspec, const char *loadspecCurGame, const char *token, const char *sourceFile)
 {
     char loadlist[0x4000];
@@ -924,6 +937,10 @@ static int Com_SoundAliasLoadspecKeep(const char *loadspec, const char *loadspec
     }
 
     if (strcmp(loadspec, "menu") && !strcmp(list, loadspecCurGame))
+        return keep;
+    /* A map's aliases replace the menu's, so the menus' own sounds come
+     * along: the class and pause menus drawn in a match still play them. */
+    if (strcmp(loadspec, "menu") && loadlist[0] != '!' && Com_SoundAliasLoadspecNames(loadlist, "menu"))
         return keep;
 
     return keep ^ 1;

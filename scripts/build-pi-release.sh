@@ -43,7 +43,7 @@ node --test downstream/cdn/worker.test.mjs
 for script in test-update-notifier test-fullscreen-control test-web-shell test-engine-version test-input-capture test-web-room-create; do
   node "scripts/${script}.cjs"
 done
-for script in test-dev-console test-client-update-menu test-browser-main-menu test-respawn-fall-jump test-script-vector-order test-script-native-callbacks test-player-lean test-corner-movement test-reload-cancel test-grenade-lifecycle test-mantle-movement test-mantle-hint test-mantle-view test-usercmd-delta test-hud-rotation test-server-frame-wait test-room-maps test-web-audio-levels test-player-health; do
+for script in test-dev-console test-client-update-menu test-browser-main-menu test-respawn-fall-jump test-script-vector-order test-script-native-callbacks test-player-lean test-corner-movement test-reload-cancel test-grenade-lifecycle test-mantle-movement test-mantle-hint test-mantle-view test-usercmd-delta test-hud-rotation test-server-frame-wait test-room-maps test-web-audio-levels test-player-health test-menu-sound-aliases; do
   python3 "scripts/${script}.py"
 done
 mkdir -p out/pi-release

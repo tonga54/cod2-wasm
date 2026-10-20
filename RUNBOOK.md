@@ -5176,3 +5176,50 @@ Validation:
     killcam to the end of the sample at 108 s, with no restart. Its level
     never fell below 0.54 in the 25 s after the death, and a screenshot 8 s
     after the death shows the killcam.
+
+## Menu sounds in a match — 2026-10-20
+
+The owner found Select Class silent when joining a match and when changing
+class during one. The menus already asked for `mouse_over` and `mouse_click`,
+but no menu sound played in a match, the pause menu's included.
+
+Both aliases are in `iw_code.csv` with the loadspec `menu`. The client's
+interface set loads the `menu` aliases. A map's set, the cgame's, loads those
+for the map and `all_mp`, and replaces the interface set, since the two share
+one hash table. In the browser the client never runs the server, so that
+replacement always happens, and in a match the two aliases did not exist.
+
+`Com_SoundAliasLoadspecKeep` now keeps the aliases whose loadspec list names
+`menu` in a map's set too. Negated lists keep their meaning. Five aliases have
+that loadspec:
+- the two clicks, 2.8 and 23 KB of sound;
+- the main menu music, twice, streamed and not loaded;
+- a horse sound.
+Only `ui_mp/main.menu` loops the music, and it is not loaded in a match. The
+archives do not change.
+
+The pause menu also moved its focus with the pointer silently. It now plays
+`mouse_over` when the pointer enters another row or tile, as Select Class
+does.
+
+Validation:
+
+- `test-menu-sound-aliases.py` (new, also in the Pi release build) compiles
+  the loadspec functions:
+  - the menu keeps its own aliases;
+  - a map keeps its own, `all_mp` and `menu`, alone or in a list, but no
+    longer word that contains it;
+  - negations are unchanged.
+  3 mutants fail, the first being the code before the change.
+- `test-pause-menu.py`: entering another class row plays one `mouse_over`;
+  moving within a row plays none (52 mutants, one new). `test-class-menu-pause.py`
+  passes. The web client builds.
+- In a match in the QA stack, with the client's audio hooked and each sound
+  told apart by its sample count, the following played:
+  - two arrows in Select Class: two `mouse_over`;
+  - Enter: `mouse_click`;
+  - a pause menu tab: `mouse_over`;
+  - the pause menu's class list arrow: `mouse_over`;
+  - the pointer down the rows of either list: one `mouse_over` per row it
+    entered.
+  Before the change, none of these played.
