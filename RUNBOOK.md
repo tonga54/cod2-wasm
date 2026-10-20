@@ -4818,3 +4818,65 @@ Validation:
 
 Not covered: only TDM ran in the browser on Brecourt, and nobody played a
 match on it.
+
+## Weapons and attachments balance review — 2026-10-20
+
+The owner asked for every weapon and attachment to be checked for broken
+damage, for sense and consistency, and for no combination that is too
+strong. The review read the prepared weapon files, with
+`weapon-balance.json` applied, and the attachment rules. It worked out each
+gun's shots and time to kill by distance, a simulation of the Trench Gun's
+pellets on a standing player, and each explosive's kill radius from
+`G_RadiusDamage`'s even fall-off.
+
+The guns themselves hold together. Each family shares one damage model:
+- the SMGs kill in 0.17 to 0.24 s up close, the slower ones keeping more
+  damage at range;
+- the BAR, MP44 and Bren kill in 0.22 to 0.24 s to 1,500 units;
+- the semi-automatic rifles kill in two shots at any range, a headshot in
+  one;
+- the bolt-action and sniper rifles kill in one shot to the body;
+- the pistols kill in three shots up close.
+
+These are retail CoD2's numbers apart from the profile's earlier changes,
+and are left as they are. The attachments and one explosive were changed:
+
+- **PPSh**: no Extended Mag. Half again on its 71-round drum gave 106 rounds
+  at 900 a minute; the drum is its long magazine already.
+- **M1 Garand, M1A1 Carbine, SVT-40, G43**: no Advanced Rifling. Their damage
+  never falls with distance, so it only cost aim time.
+- **MP44**: Advanced Rifling ×1.25, the BAR's, instead of ×1.5; the two share
+  one damage model. The BAR's own attachment kind became the rifles', which
+  behave the same once no gun takes ×1.5.
+- **Trench Gun**: Steady Aim takes a quarter off its hip spread, not 40%. Its
+  hip spread is its pellets' cone, and at 3.6° it was tighter from the hip
+  than aimed through the Reflex Sight, at 4.4°; it is now 4.5°. With
+  Advanced Rifling, the simulated one-shot chance at 600 and 700 units falls
+  from 94% and 40% to 84% and 20%; bare, it is 32% and none.
+- **FMJ**: on a gun whose damage never falls, the semi-automatic, bolt-action
+  and sniper rifles, its range cut cost nothing; there it costs aim time
+  +10% instead. `AttachmentStats` carries `minDamage` for it, and Modify
+  Attachment shows the aim line.
+- **C4**: its blast is 250 to 60 over 256 units, from 330 to 70. It killed
+  within 226 units, 1.75 times a frag's lethal area (171 units), with two
+  charges for every class; it now kills within 202.
+- The gateway's stored classes keep the attachments their gun still takes
+  instead of dropping all of a gun's: a PPSh saved with a Suppressor and an
+  Extended Mag keeps the Suppressor.
+
+Validation:
+
+- `test-attachments.py`, 60 mutants, 6 of them new: the PPSh's and the
+  semi-automatic rifles' lists, the MP44's rifling equal to the BAR's, the
+  Trench Gun's Steady Aim, and FMJ's aim cost where damage never falls.
+- `test-class-data.py` (`classes.json` against the C tables), the gateway's
+  `classes.test.mjs` (with a stored PPSh that drops its Extended Mag) and
+  `rooms.test.mjs`, `test-web-classes.cjs`, `test-view-attachments.py`,
+  `test-browser-attachment-models.py`, `test-owner-class-pictures.py`,
+  `test-class-select.py`, `test-class-menu-pause.py`, `test-class-camo.py`,
+  `test-weapon-balance.py` and `test-weapon-fire-modes.py` pass.
+- The archives are regenerated; only `weapons/mp/c4_mp` changes, and
+  `check-private-assets.py` passes. The web client and the native server
+  build.
+
+Not covered: nobody played with the new numbers in the browser.

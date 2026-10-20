@@ -60,7 +60,7 @@ typedef struct {
     weapOverlayReticle_t overlayReticle;
     float overlayWidth, overlayHeight, fOOPosAnimLength[2];
     int hasDetonator;
-    int damage, bSemiAuto;
+    int damage, minDamage, bSemiAuto;
 } WeaponDef;
 typedef struct { int legsAnim, torsoAnim; } entityState_t;
 typedef struct { playerState_t *ps; struct { int buttons, serverTime; } cmd; } pmove_t;
@@ -183,6 +183,12 @@ int main(void)
     defs[GREASEGUN].damage = defs[GARAND].damage = defs[COLT].damage = defs[WEBLEY].damage = 45;
     defs[BAR].damage = defs[BREN].damage = 40;
     defs[GARAND].bSemiAuto = defs[COLT].bSemiAuto = defs[WEBLEY].bSemiAuto = 1;
+    defs[THOMPSON].minDamage = defs[PPS42].minDamage = defs[GREASEGUN].minDamage = 10;
+    defs[COLT].minDamage = defs[WEBLEY].minDamage = 10;
+    defs[BAR].minDamage = defs[BREN].minDamage = 28;
+    /* The semi-automatic and bolt-action rifles keep their damage at every range. */
+    defs[GARAND].minDamage = 45;
+    defs[KAR98K].damage = defs[KAR98K].minDamage = defs[KAR98K_SNIPER].damage = defs[KAR98K_SNIPER].minDamage = 90;
 
     /* The lists: names, weapons matched without case, WWII's limits. */
     assert(BG_AttachmentFind("suppressor") == ATT_SUPPRESSOR && BG_AttachmentFind("Suppressor") < 0);
@@ -192,6 +198,8 @@ int main(void)
     assert(BG_AttachmentsAllowed("thompson_mp") & ATT_BIT(ATT_SUPPRESSOR));
     assert(!(BG_AttachmentsAllowed("m1garand_mp") & ATT_BIT(ATT_SUPPRESSOR)));
     assert(!(BG_AttachmentsAllowed("webley_mp") & ATT_BIT(ATT_EXTMAG)) && (BG_AttachmentsAllowed("colt_mp") & ATT_BIT(ATT_EXTMAG)));
+    /* The PPSh's drum is its long magazine already. */
+    assert(!(BG_AttachmentsAllowed("ppsh_mp") & ATT_BIT(ATT_EXTMAG)) && (BG_AttachmentsAllowed("pps42_mp") & ATT_BIT(ATT_EXTMAG)));
     assert(!(BG_AttachmentsAllowed("bren_mp") & ATT_BIT(ATT_LENS)) && (BG_AttachmentsAllowed("bren_mp") & ATT_BIT(ATT_OPTIC4X)));
     assert(BG_AttachmentsAllowed("kar98k_sniper_mp") == (ATT_BIT(ATT_OPTIC4X) | ATT_BIT(ATT_CALIBRATION) | ATT_BIT(ATT_FMJ) |
                                                          ATT_BIT(ATT_EXTMAG) | ATT_BIT(ATT_RAPIDFIRE)));
@@ -263,6 +271,9 @@ int main(void)
     assert(NEAR(d.fHipSpreadStandMin, 1.125f) && d.iAdsTransInTime == 242);
     d = Attached(GREASEGUN, ATT_BIT(ATT_STEADYAIM));
     assert(NEAR(d.fHipSpreadStandMin, 0.9f) && NEAR(d.fHipSpreadProneMin, 0.54f) && NEAR(d.hipSpreadProneMax, 3.0f));
+    /* The Trench Gun's pellets a quarter tighter, as through its Reflex Sight. */
+    d = Attached(SHOTGUN, ATT_BIT(ATT_STEADYAIM));
+    assert(NEAR(d.fHipSpreadStandMin, 4.5f) && NEAR(d.hipSpreadStandMax, 3.75f) && d.iAdsTransInTime == 330);
     d = Attached(KAR98K_SNIPER, ATT_BIT(ATT_CALIBRATION));
     assert(NEAR(d.fAdsIdleAmount, 12.0f) && NEAR(d.adsSwayMaxAngle, 2.4f) && NEAR(d.adsSwayVertScale, 1.2f));
     assert(d.iAdsTransInTime == 275);
@@ -286,6 +297,12 @@ int main(void)
     d = Attached(THOMPSON, ATT_BIT(ATT_FMJ));
     assert(d.armorPiercing == 1 && NEAR(d.fMaxDamageRange, 720.0f) && NEAR(d.fMinDamageRange, 1440.0f));
     assert(d.iAdsTransInTime == 220 && NEAR(d.fAdsViewKickPitchMax, 70.0f));
+    /* A gun whose damage never falls pays for it in aim time instead. */
+    d = Attached(GARAND, ATT_BIT(ATT_FMJ));
+    assert(d.armorPiercing == 1 && NEAR(d.fMaxDamageRange, 2000.0f) && NEAR(d.fMinDamageRange, 4000.0f));
+    assert(d.iAdsTransInTime == 330);
+    d = Attached(KAR98K_SNIPER, ATT_BIT(ATT_FMJ));
+    assert(d.armorPiercing == 1 && NEAR(d.fMaxDamageRange, 2000.0f) && d.iAdsTransInTime == 275);
     d = Attached(GARAND, ATT_BIT(ATT_HIGHCAL));
     assert(NEAR(d.locationDamageMultipliers[HITLOC_HEAD], 3.0f) && NEAR(d.locationDamageMultipliers[HITLOC_HELMET], 3.0f));
     assert(NEAR(d.locationDamageMultipliers[4], 1.0f) && NEAR(d.fAdsViewKickPitchMax, 80.5f));
@@ -305,9 +322,29 @@ int main(void)
      * quarter further. */
     d = Attached(THOMPSON, ATT_BIT(ATT_RIFLING));
     assert(NEAR(d.fMaxDamageRange, 800.0f) && NEAR(d.fMinDamageRange, 2000.0f) && d.iAdsTransInTime == 242);
-    assert(NEAR(Attached(GARAND, ATT_BIT(ATT_RIFLING)).fMaxDamageRange, 3000.0f));
-    assert(Attached(GARAND, ATT_BIT(ATT_RIFLING)).iAdsTransInTime == 330);
+    /* The semi-automatic rifles keep full damage at every range: Advanced
+     * Rifling is not theirs and changes nothing on them. */
+    assert(!(BG_AttachmentsAllowed("m1garand_mp") & ATT_BIT(ATT_RIFLING)) &&
+           !(BG_AttachmentsAllowed("m1carbine_mp") & ATT_BIT(ATT_RIFLING)) &&
+           !(BG_AttachmentsAllowed("SVT40_mp") & ATT_BIT(ATT_RIFLING)) &&
+           !(BG_AttachmentsAllowed("g43_mp") & ATT_BIT(ATT_RIFLING)));
+    d = Attached(GARAND, ATT_BIT(ATT_RIFLING));
+    assert(!memcmp(&d, &defs[GARAND], sizeof(d)));
     assert(NEAR(Attached(BAR, ATT_BIT(ATT_RIFLING)).fMaxDamageRange, 1875.0f));
+    /* The MP44 shares the BAR's damage model, and so its rifling. */
+    {
+        AttachmentStats bar, mp44;
+        memset(&bar, 0, sizeof(bar));
+        bar.overlay = "";
+        bar.maxDamageRange = 1200.0f;
+        bar.minDamageRange = 2500.0f;
+        bar.damage = 40;
+        bar.minDamage = 28;
+        mp44 = bar;
+        BG_ApplyAttachmentStats("bar_mp", ATT_BIT(ATT_RIFLING), &bar);
+        BG_ApplyAttachmentStats("mp44_mp", ATT_BIT(ATT_RIFLING), &mp44);
+        assert(NEAR(mp44.maxDamageRange, 1500.0f) && NEAR(mp44.minDamageRange, 3125.0f) && !memcmp(&bar, &mp44, sizeof(bar)));
+    }
     /* WWII's light machine guns take neither Advanced Rifling nor High Caliber, nor its carbine a Lens Sight. */
     assert(NEAR(Attached(BREN, ATT_BIT(ATT_RIFLING)).fMaxDamageRange, 1200.0f));
     assert(NEAR(Attached(BREN, ATT_BIT(ATT_HIGHCAL)).locationDamageMultipliers[HITLOC_HEAD],
@@ -508,12 +545,17 @@ mutants = [
     (rules_path, '(stats->rechamberBoltTime, rate);\n        kick *= 1.15f;\n', '(stats->rechamberBoltTime, rate);\n'),
     (rules_path, '            stats->startAmmo = stats->startAmmo * 3 / 2;\n        }\n        aim *= 1.1f;\n',
      '            stats->startAmmo = stats->startAmmo * 3 / 2;\n        }\n'),
-    (rules_path, '        reach *= 0.9f;\n', ''),
+    (rules_path, '            reach *= 0.9f;\n        else\n', '            ;\n        else\n'),
+    (rules_path, '        if (stats->minDamage < stats->damage)\n', '        if (1)\n'),
+    (rules_path, '        else\n            aim *= 1.1f;\n', '        else\n            ;\n'),
+    (rules_path, 'SMG_ATTACHMENTS & ~A(EXTMAG) }', 'SMG_ATTACHMENTS }'),
+    (rules_path, '#define SEMI_RIFLE_ATTACHMENTS (RIFLE_ATTACHMENTS & ~A(RIFLING))', '#define SEMI_RIFLE_ATTACHMENTS (RIFLE_ATTACHMENTS)'),
+    (glue_path, '    stats->minDamage = def->minDamage;\n', ''),
     (rules_path, '            stats->headMultiplier[i] = raised;\n        }\n        kick *= 1.15f;\n',
      '            stats->headMultiplier[i] = raised;\n        }\n'),
     (rules_path, '            stats->minDamageRange *= scale;\n        }\n        aim *= 1.1f;\n',
      '            stats->minDamageRange *= scale;\n        }\n'),
-    (rules_path, 'kind == ATT_KIND_RIFLE ? 1.5f', 'kind == ATT_KIND_RIFLE ? 2.0f'),
+    (rules_path, 'float scale = kind == ATT_KIND_SHOTGUN ? 1.13f : 1.25f;', 'float scale = kind == ATT_KIND_SHOTGUN ? 1.13f : 1.5f;'),
     (rules_path, '(int)((float)stats->adsTransInTime * aim + 0.5f);', '(int)((float)stats->adsTransInTime * aim);'),
     (rules_path, '    for (i = 0; i < 8; i++)\n        stats->adsKick[i] *= kick;\n',
      '    for (i = 0; i < 2; i++)\n        stats->adsKick[i] *= kick;\n'),
@@ -529,7 +571,9 @@ mutants = [
     (rules_path, '        reach *= kind == ATT_KIND_PISTOL ? 0.85f : 0.7f;', '        reach *= 0.7f;'),
     (rules_path, "int ca = *a >= 'A' && *a <= 'Z' ? *a + 32 : *a, cb = *b >= 'A' && *b <= 'Z' ? *b + 32 : *b;",
      'int ca = *a, cb = *b;'),
-    (rules_path, '        float scale = kind == ATT_KIND_FAST_SMG ? 0.75f : 0.6f;', '        float scale = 0.6f;'),
+    (rules_path, '        float scale = kind == ATT_KIND_FAST_SMG || kind == ATT_KIND_SHOTGUN ? 0.75f : 0.6f;',
+     '        float scale = 0.6f;'),
+    (rules_path, 'kind == ATT_KIND_FAST_SMG || kind == ATT_KIND_SHOTGUN ? 0.75f', 'kind == ATT_KIND_FAST_SMG ? 0.75f'),
     (rules_path, '        if (!stats->overlay || !stats->overlay[0]) {', '        {'),
     (glue_path, '    return (unsigned char)ps->weaponslots[2 + 2 * slot] | (unsigned)(unsigned char)ps->weaponslots[3 + 2 * slot] << 8;',
      '    return (unsigned char)ps->weaponslots[1 + 2 * slot] | (unsigned)(unsigned char)ps->weaponslots[2 + 2 * slot] << 8;'),

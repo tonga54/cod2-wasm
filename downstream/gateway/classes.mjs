@@ -65,8 +65,8 @@ export function normalizeClasses(value) {
 }
 
 // Rows written before a list changed keep their valid fields; the rest
-// come from the slot's default class. A row's attachments that no longer fit
-// its gun are dropped; rows from before attachments have none.
+// come from the slot's default class. A row keeps the attachments its gun
+// still takes; rows from before attachments have none.
 function restore(rows) {
   return classRules.defaults.map((fallback, index) => {
     const row = rows.find(candidate => candidate.slot === index + 1);
@@ -76,7 +76,8 @@ function restore(rows) {
       restored[slot] = row && classRules.camos.includes(row[slot]) ? row[slot] : fallback[slot];
     for (const [gun, field] of guns) {
       const list = !row ? fallback[field] : row[field] ? String(row[field]).split('+') : [];
-      restored[field] = validAttachments(restored[gun], list, gun) ? [...list] : [];
+      const kept = list.filter(item => (classRules.weaponAttachments[restored[gun]] || []).includes(item));
+      restored[field] = validAttachments(restored[gun], kept, gun) ? kept : [];
     }
     return restored;
   });

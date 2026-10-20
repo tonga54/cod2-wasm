@@ -92,7 +92,9 @@ def _bounces(parallel, perpendicular):
 # springs up and it goes off at a standing player's chest (g_missile_mp.c),
 # with the retail minefields' blast over a grenade's. The hand
 # takes 0.85 s to bring it up and draw its pin, and sets it down 0.3 s after.
-# CoD4's C4 sticks where it first hits and waits for its detonator.
+# CoD4's C4 sticks where it first hits and waits for its detonator. Every class
+# carries two, so its blast kills within about 200 units of 256, a little
+# beyond a frag's 171.
 MINE = {
     'displayName': 'BROWSER_LANDMINE', 'gunModel': 'viewmodel_smine',
     'worldModel': 'xmodel/weapon_smine', 'projectileModel': 'xmodel/weapon_smine',
@@ -115,8 +117,8 @@ C4 = {
     'pullbackSound': 'weap_c4_pullout', 'fireSound': 'weap_c4_throw', 'ammoName': 'browser_c4',
     'clipName': 'browser_c4', 'sharedAmmoCapName': 'BROWSER_C4', 'maxAmmo': '2', 'startAmmo': '2',
     'clipSize': '2', 'sharedAmmoCap': '2', 'projectileSpeed': '520', 'projectileSpeedUp': '140',
-    'holdFireTime': '0.35', 'explosionRadius': '256', 'explosionInnerDamage': '330',
-    'explosionOuterDamage': '70', 'projExplosionSound': 'explo_mine', **_bounces('0', '0'),
+    'holdFireTime': '0.35', 'explosionRadius': '256', 'explosionInnerDamage': '250',
+    'explosionOuterDamage': '60', 'projExplosionSound': 'explo_mine', **_bounces('0', '0'),
     # emptyIdleAnim stays the frag's: with no charge left the hand is out of sight.
     **{key: HOLD_ANIM for key in ('idleAnim', 'meleeAnim', 'raiseAnim', 'dropAnim', 'altRaiseAnim', 'altDropAnim')},
 }

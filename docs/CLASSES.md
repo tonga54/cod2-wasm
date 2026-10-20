@@ -86,9 +86,11 @@ gun the list of its WWII class:
 
 | CoD2 weapons | WWII class | Attachments |
 | --- | --- | --- |
-| Thompson, Grease Gun, Sten, PPS-42, PPSh, MP40 | SMG | Reflex Sight, Lens Sight, Quickdraw, Grip, Steady Aim, Rapid Fire, Extended Mag, FMJ, Advanced Rifling, Suppressor |
-| M1 Garand, SVT-40, G43, MP44, BAR | Rifle | Reflex Sight, Lens Sight, 4x Optic, Quickdraw, Grip, Steady Aim, Rapid Fire, Extended Mag, FMJ, High Caliber, Advanced Rifling |
-| M1A1 Carbine | Rifle | The rifle list without the Lens Sight, as WWII's carbine |
+| Thompson, Grease Gun, Sten, PPS-42, MP40 | SMG | Reflex Sight, Lens Sight, Quickdraw, Grip, Steady Aim, Rapid Fire, Extended Mag, FMJ, Advanced Rifling, Suppressor |
+| PPSh | SMG | The SMG list without the Extended Mag: its 71-round drum is the long magazine |
+| MP44, BAR | Rifle | Reflex Sight, Lens Sight, 4x Optic, Quickdraw, Grip, Steady Aim, Rapid Fire, Extended Mag, FMJ, High Caliber, Advanced Rifling |
+| M1 Garand, SVT-40, G43 | Rifle | The rifle list without Advanced Rifling: their damage does not fall with distance |
+| M1A1 Carbine | Rifle | The M1 Garand's list without the Lens Sight, as WWII's carbine |
 | Bren | LMG | Reflex Sight, 4x Optic, Quickdraw, Grip, Steady Aim, Rapid Fire, Extended Mag, FMJ |
 | Springfield; scoped Lee-Enfield, Mosin-Nagant and Kar98k | Sniper | 4x Optic, Ballistic Calibration, Rapid Fire, Extended Mag, FMJ |
 | Lee-Enfield, Mosin-Nagant, Kar98k | Sniper on its Iron Sight | The sniper list |
@@ -110,12 +112,12 @@ published, otherwise this port's; the costs are this port's:
 | Extended Mag | Magazine and reserve +50%, rounded down; the Bren a 100-round drum with 200 in reserve | Aim-in +10% | WWII |
 | Rapid Fire | Fire and rechamber times for +6.38% rate, the Bren and Trench Gun included; +5.4% on bolt-actions | Aimed kick +15% | WWII's RPM tables |
 | Quickdraw | Aim-in time −35% on SMGs, −20% on the Bren, −16% on the others | Aimed kick +15% | WWII for the Bren and the others; the SMGs' ours (WWII's −50%) |
-| Steady Aim | Hip-fire spread −40%, −25% on the Thompson and PPSh | Aim-in +10% | Ours, under WWII's −55% and −35% |
+| Steady Aim | Hip-fire spread −40%; −25% on the Thompson, PPSh and Trench Gun, whose pellets then spread as through its Reflex Sight | Aim-in +10% | Ours, under WWII's −55% and −35% |
 | Grip | Aimed view and gun kick −15% | Aim-in +10% | Ours, over WWII's 7–10% |
-| Advanced Rifling | Damage ranges ×1.5 on rifles, ×1.25 on the BAR and pistols, ×1.13 on the Trench Gun; on SMGs full damage reaches as far and the fall beyond it ×1.25 | Aim-in +10% | WWII; the rifles' ours (WWII's ×2) |
+| Advanced Rifling | Damage ranges ×1.25 on the BAR, MP44 and pistols, ×1.13 on the Trench Gun; on SMGs full damage reaches as far and the fall beyond it ×1.25 | Aim-in +10% | WWII; the MP44 the BAR's |
 | Suppressor | Quiet, no flash, off the minimap | Damage ranges −30% on SMGs, −15% on pistols | WWII |
 | High Caliber | Helmet and head multipliers ×1.5; an automatic weapon's headshot stays a point short of a kill | Aimed kick +15% | WWII; the limit ours |
-| FMJ | Penetrates as armor-piercing: 25% more depth, so less damage lost, through cover | Damage ranges −10% | Ours, on the existing penetration |
+| FMJ | Penetrates as armor-piercing: 25% more depth, so less damage lost, through cover | Damage ranges −10%; aim-in +10% on a gun whose damage does not fall | Ours, on the existing penetration |
 | Ballistic Calibration | Aimed idle sway and sway −40% | Aim-in +10% | WWII |
 | Reflex Sight | View −10% (more zoom), aimed spread −20%, a red dot over the sights | Aim-in +10% | Ours |
 | Lens Sight | View −20%, aimed spread −15%, an amber ring over the sights | Aim-in +15% | Ours |
@@ -287,8 +289,8 @@ Each class carries `primaryAttachments` and `secondaryAttachments`, arrays of
 attachment names; a `PUT` without them saves none. The rows keep them in
 `primary_attachments` and `secondary_attachments`, names joined by `+`. A store
 created before attachments gains the two columns, empty, when the gateway
-opens it, so its classes have none. Stored attachments a class's gun no longer
-takes are dropped and the rest of the row kept.
+opens it, so its classes have none. A stored class keeps its row and the
+attachments its gun still takes; the others are dropped.
 
 ## Server rules
 
@@ -449,6 +451,10 @@ archives are prepared (`scripts/browser_explosives.py`,
 - **C4**, CoD4's charge with CoD2's sticky bomb. G takes out the detonator,
   fire throws a charge that sticks where it lands, and aim sets off every
   charge the player placed, wherever they are.
+- The blasts fall off evenly to their edge. A frag deals 200 to 50 over 256
+  units and kills within 171; the S-Mine 300 to 60 over 192, killing within
+  160; C4 250 to 60 over 256, killing within 202. Every class carries two
+  charges, so C4 reaches a little further than a frag, not much.
 - Both show the **squad emblem** above them, pulsing slowly between faint and
   nearly full every 1.8 s: the Allies' star in its ring, or the Axis' iron
   cross in the same ring. The owner and teammates see it through walls up to

@@ -29,6 +29,9 @@ const AttachmentInfo g_attachments[ATT_COUNT] = {
 #define RIFLE_ATTACHMENTS                                                                                         \
     (A(LENS) | A(QUICKDRAW) | A(GRIP) | A(REFLEX) | A(HIGHCAL) | A(STEADYAIM) | A(FMJ) | A(OPTIC4X) |           \
      A(RAPIDFIRE) | A(EXTMAG) | A(RIFLING))
+/* The semi-automatic rifles keep full damage at every range, so Advanced
+ * Rifling would change nothing on them. */
+#define SEMI_RIFLE_ATTACHMENTS (RIFLE_ATTACHMENTS & ~A(RIFLING))
 #define LMG_ATTACHMENTS                                                                                           \
     (A(QUICKDRAW) | A(GRIP) | A(REFLEX) | A(STEADYAIM) | A(FMJ) | A(OPTIC4X) | A(EXTMAG) | A(RAPIDFIRE))
 #define SNIPER_ATTACHMENTS (A(OPTIC4X) | A(CALIBRATION) | A(FMJ) | A(EXTMAG) | A(RAPIDFIRE))
@@ -41,17 +44,18 @@ const AttachmentWeapon g_attachmentWeapons[] = {
     { "greasegun_mp", ATT_KIND_SMG, ATT_NATION_US, SMG_ATTACHMENTS },
     { "sten_mp", ATT_KIND_SMG, ATT_NATION_UK, SMG_ATTACHMENTS },
     { "PPS42_mp", ATT_KIND_SMG, ATT_NATION_USSR, SMG_ATTACHMENTS },
-    { "ppsh_mp", ATT_KIND_FAST_SMG, ATT_NATION_USSR, SMG_ATTACHMENTS },
+    /* Its 71-round drum is already the long magazine. */
+    { "ppsh_mp", ATT_KIND_FAST_SMG, ATT_NATION_USSR, SMG_ATTACHMENTS & ~A(EXTMAG) },
     { "mp40_mp", ATT_KIND_SMG, ATT_NATION_DE, SMG_ATTACHMENTS },
-    { "m1garand_mp", ATT_KIND_RIFLE, ATT_NATION_US, RIFLE_ATTACHMENTS },
+    { "m1garand_mp", ATT_KIND_RIFLE, ATT_NATION_US, SEMI_RIFLE_ATTACHMENTS },
     /* WWII's M1A1 Carbine has no Lens Sight. */
-    { "m1carbine_mp", ATT_KIND_RIFLE, ATT_NATION_US, RIFLE_ATTACHMENTS & ~A(LENS) },
+    { "m1carbine_mp", ATT_KIND_RIFLE, ATT_NATION_US, SEMI_RIFLE_ATTACHMENTS & ~A(LENS) },
     { "enfield_mp", ATT_KIND_BOLT, ATT_NATION_UK, SNIPER_ATTACHMENTS },
     { "mosin_nagant_mp", ATT_KIND_BOLT, ATT_NATION_USSR, SNIPER_ATTACHMENTS },
-    { "SVT40_mp", ATT_KIND_RIFLE, ATT_NATION_USSR, RIFLE_ATTACHMENTS },
+    { "SVT40_mp", ATT_KIND_RIFLE, ATT_NATION_USSR, SEMI_RIFLE_ATTACHMENTS },
     { "kar98k_mp", ATT_KIND_BOLT, ATT_NATION_DE, SNIPER_ATTACHMENTS },
-    { "g43_mp", ATT_KIND_RIFLE, ATT_NATION_DE, RIFLE_ATTACHMENTS },
-    { "bar_mp", ATT_KIND_BAR, ATT_NATION_US, RIFLE_ATTACHMENTS },
+    { "g43_mp", ATT_KIND_RIFLE, ATT_NATION_DE, SEMI_RIFLE_ATTACHMENTS },
+    { "bar_mp", ATT_KIND_RIFLE, ATT_NATION_US, RIFLE_ATTACHMENTS },
     { "bren_mp", ATT_KIND_LMG, ATT_NATION_UK, LMG_ATTACHMENTS },
     { "mp44_mp", ATT_KIND_RIFLE, ATT_NATION_DE, RIFLE_ATTACHMENTS },
     { "springfield_mp", ATT_KIND_SNIPER, ATT_NATION_US, SNIPER_ATTACHMENTS },
@@ -269,7 +273,9 @@ void BG_ApplyAttachmentStats(const char *weapon, unsigned mask, AttachmentStats 
         aim *= 1.1f;
     }
     if (mask & ATT_BIT(ATT_STEADYAIM)) {
-        float scale = kind == ATT_KIND_FAST_SMG ? 0.75f : 0.6f;
+        /* The Trench Gun's hip spread is its pellets' cone: a quarter off
+         * leaves it as wide as through its Reflex Sight. */
+        float scale = kind == ATT_KIND_FAST_SMG || kind == ATT_KIND_SHOTGUN ? 0.75f : 0.6f;
 
         for (i = 0; i < 6; i++)
             stats->hipSpread[i] *= scale;
@@ -304,7 +310,11 @@ void BG_ApplyAttachmentStats(const char *weapon, unsigned mask, AttachmentStats 
     }
     if (mask & ATT_BIT(ATT_FMJ)) {
         stats->armorPiercing = 1;
-        reach *= 0.9f;
+        /* A gun whose damage never falls pays in aim time. */
+        if (stats->minDamage < stats->damage)
+            reach *= 0.9f;
+        else
+            aim *= 1.1f;
     }
     if (mask & ATT_BIT(ATT_HIGHCAL)) {
         /* An automatic weapon's headshot stays a point short of killing
@@ -326,7 +336,7 @@ void BG_ApplyAttachmentStats(const char *weapon, unsigned mask, AttachmentStats 
              * damage reaches further. */
             stats->minDamageRange *= 1.25f;
         } else {
-            float scale = kind == ATT_KIND_RIFLE ? 1.5f : kind == ATT_KIND_SHOTGUN ? 1.13f : 1.25f;
+            float scale = kind == ATT_KIND_SHOTGUN ? 1.13f : 1.25f;
 
             stats->maxDamageRange *= scale;
             stats->minDamageRange *= scale;

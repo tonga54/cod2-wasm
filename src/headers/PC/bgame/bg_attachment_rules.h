@@ -33,9 +33,8 @@ enum {
     ATT_KIND_SMG,
     /* The Thompson and PPSh, whose Steady Aim WWII made weaker. */
     ATT_KIND_FAST_SMG,
-    /* Semi-automatic rifles and the MP44, WWII's rifle class. */
+    /* Semi-automatic rifles, the BAR and the MP44, WWII's rifle class. */
     ATT_KIND_RIFLE,
-    ATT_KIND_BAR,
     ATT_KIND_LMG,
     /* Bolt-action rifles on their iron sights. */
     ATT_KIND_BOLT,
@@ -77,8 +76,8 @@ typedef struct {
     float headMultiplier[2];
     /* The weapon's own damage and how it fires, which attachments never
      * change: High Caliber leaves an automatic weapon's headshot short of a
-     * kill. */
-    int damage, semiAuto, boltAction;
+     * kill, and FMJ takes aim time from a gun whose damage never falls. */
+    int damage, minDamage, semiAuto, boltAction;
     int armorPiercing;
     int suppressed;
     /* The scope material, or "". */

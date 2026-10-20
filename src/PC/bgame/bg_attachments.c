@@ -91,6 +91,7 @@ static void BG_AttachmentStatsFromDef(const WeaponDef *def, AttachmentStats *sta
     stats->headMultiplier[0] = def->locationDamageMultipliers[HITLOC_HELMET];
     stats->headMultiplier[1] = def->locationDamageMultipliers[HITLOC_HEAD];
     stats->damage = def->damage;
+    stats->minDamage = def->minDamage;
     stats->semiAuto = def->bSemiAuto;
     stats->boltAction = def->bBoltAction;
     stats->armorPiercing = def->armorPiercing;

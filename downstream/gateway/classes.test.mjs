@@ -107,7 +107,7 @@ try {
   assert.deepEqual(store.get('other'), defaultClasses());
   const edited = normalizeClasses(valid);
   edited[4] = { ...edited[4], name: 'Shotty', primary: 'ppsh_mp', secondaryCamo: 'winter',
-    primaryAttachments: ['suppressor', 'extmag'] };
+    primaryAttachments: ['suppressor', 'grip'] };
   store.put('chapu54', edited, 2000);
   assert.deepEqual(store.get('chapu54'), edited);
   assert.deepEqual(store.get('other'), defaultClasses(), 'one player cannot change another');
@@ -134,12 +134,15 @@ try {
   // Stored attachments the gun no longer takes are dropped, the rest of the row kept.
   const raw = new DatabaseSync(path);
   raw.exec(`UPDATE classes SET primary_attachments = 'suppressor', secondary_attachments = 'grip'
-    WHERE player = 'chapu54' AND slot = 2`);
+    WHERE player = 'chapu54' AND slot = 2;
+    UPDATE classes SET primary_attachments = 'suppressor+extmag' WHERE player = 'chapu54' AND slot = 5`);
   raw.close();
   store = createClassStore(path);
   const dropped = store.get('chapu54');
   assert.deepEqual([dropped[1].name, dropped[1].primary, dropped[1].primaryAttachments, dropped[1].secondaryAttachments],
     ['Kar Rusher', 'kar98k_mp', [], []]);
+  // The PPSh's drum takes no Extended Mag: a class saved with one keeps the rest.
+  assert.deepEqual([dropped[4].primary, dropped[4].primaryAttachments], ['ppsh_mp', ['suppressor']]);
   store.put('chapu54', edited, 2000);
 
   // A store from before camouflage gains its columns; its rows keep their

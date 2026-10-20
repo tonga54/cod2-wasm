@@ -435,6 +435,7 @@ static const struct {
     CLASS_RAW("locHelmet", CLASS_RAW_FLOAT, headMultiplier[0]),
     CLASS_RAW("locHead", CLASS_RAW_FLOAT, headMultiplier[1]),
     CLASS_RAW("damage", CLASS_RAW_INT, damage),
+    CLASS_RAW("minDamage", CLASS_RAW_INT, minDamage),
     CLASS_RAW("semiAuto", CLASS_RAW_INT, semiAuto),
     CLASS_RAW("boltAction", CLASS_RAW_INT, boltAction),
     CLASS_RAW("armorPiercing", CLASS_RAW_INT, armorPiercing),
