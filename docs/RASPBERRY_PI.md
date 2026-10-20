@@ -307,8 +307,9 @@ To set it up:
    python3 ~/cod2-wasm/scripts/publish-cdn.py --install
    ```
 
-The publisher waits for an idle server and for any update in progress. Wrangler
-uploads only the parts Cloudflare does not have. The publisher downloads every
+After each update the timer publishes whatever changed, archives or the Worker's
+code. The publisher waits for an idle server and for any update in progress.
+Wrangler uploads only the parts Cloudflare does not have. The publisher downloads every
 archive back through a signed link and checks that unsigned requests are
 refused; only then does it write `gateway/published.json`. Its log is
 `journalctl --user -u cod2-cdn-publish.service`.

@@ -154,7 +154,8 @@ class PublisherTest(unittest.TestCase):
         self.assertEqual((self.config / 'gateway/signing-key').stat().st_mode & 0o777, 0o600)
         self.assertEqual((self.config / 'gateway/published.json').stat().st_mode & 0o777, 0o644)
         self.assertEqual(self.published(), {'url': URL, 'keyId': hashlib.sha256(key.encode()).hexdigest()[:16],
-                                            'files': self.files, 'publishedAt': 1700000000})
+                                            'worker': module.worker_id(self.root), 'files': self.files,
+                                            'publishedAt': 1700000000})
         staged = self.cloud.staged
         self.assertEqual(json.loads(staged['wrangler.json']), module.WRANGLER_CONFIG)
         self.assertTrue(module.WRANGLER_CONFIG['assets']['run_worker_first'], 'the parts are never public')
@@ -185,6 +186,18 @@ class PublisherTest(unittest.TestCase):
         self.assertEqual(self.wrangler_calls(), [('deploy',)])
         self.assertEqual(self.published()['files'], self.files)
         self.assertEqual(len(self.cloud.secrets), 1)
+
+    def test_a_change_to_the_worker_code_redeploys_it(self):
+        self.publisher.publish()
+        before = module.worker_id(self.root)
+        (self.root / 'downstream/cdn/handler.mjs').write_text('// handler.mjs, fixed\n')
+        self.assertNotEqual(module.worker_id(self.root), before)
+        self.cloud.commands.clear()
+        self.assertEqual(self.publisher.publish()['status'], 'published')
+        self.assertEqual(self.wrangler_calls(), [('deploy',)])
+        self.assertEqual(self.cloud.staged['handler.mjs'], b'// handler.mjs, fixed\n')
+        self.assertEqual(self.published()['worker'], module.worker_id(self.root))
+        self.assertEqual(self.publisher.publish()['status'], 'current')
 
     def test_a_new_signing_key_is_sent_to_the_worker(self):
         self.publisher.publish()

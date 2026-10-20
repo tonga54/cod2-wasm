@@ -79,6 +79,14 @@ def split(source, sha256, size, assets, part_bytes=PART_BYTES):
     return index
 
 
+def worker_id(root):
+    """What a deployment runs besides the archives: the Worker's code, its configuration and Wrangler."""
+    digest = hashlib.sha256(json.dumps([WRANGLER, WRANGLER_CONFIG], sort_keys=True).encode())
+    for name in WORKER_SOURCES:
+        digest.update(b'\0' + name.encode() + b'\0' + (root / 'downstream/cdn' / name).read_bytes())
+    return digest.hexdigest()[:16]
+
+
 def sign(secret, sha256, size, expires):
     # downstream/gateway/cdn.mjs signs, and the Worker checks, the same message.
     return hmac.new(secret.encode(), f'{sha256}:{size}:{expires}'.encode(), hashlib.sha256).hexdigest()
@@ -185,8 +193,9 @@ class Publisher:
         published = json.loads(self.published_path.read_text()) if self.published_path.exists() else {}
         secret = self.key()
         key_id = hashlib.sha256(secret.encode()).hexdigest()[:16]
+        worker = worker_id(self.root)
         if not force and published.get('files') == files and published.get('keyId') == key_id \
-                and WORKER_URL.fullmatch(str(published.get('url'))):
+                and published.get('worker') == worker and WORKER_URL.fullmatch(str(published.get('url'))):
             return {'status': 'current', 'url': published['url'], 'files': len(files)}
         if not self.credentials.is_file():
             raise Deferred(f'Cloudflare credentials are missing: {self.credentials}')
@@ -209,7 +218,7 @@ class Publisher:
             if published.get('keyId') != key_id or published.get('url') != url:
                 self.wrangler('secret', 'put', 'SIGNING_KEY', input=secret)
             self.verify(url, secret, files)
-            atomic_write(self.published_path, json.dumps({'url': url, 'keyId': key_id, 'files': files,
+            atomic_write(self.published_path, json.dumps({'url': url, 'keyId': key_id, 'worker': worker, 'files': files,
                                                           'publishedAt': int(self.now())}, indent=2) + '\n', 0o644)
             return {'status': 'published', 'url': url, 'files': len(files), 'parts': parts}
         finally:

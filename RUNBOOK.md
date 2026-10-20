@@ -4926,8 +4926,8 @@ Validation:
 - `worker.test.mjs`: links signed by the gateway, refusals, CORS and broken
   parts. `cdn.test.mjs`: the redirect rules and the real gateway against a
   fake web server, including a new published list without a restart.
-  `test-publish-cdn.py`: 17 cases with Docker, Wrangler and the Worker faked.
-  All three check one signature vector. 21 mutants across the three are all
+  `test-publish-cdn.py`: 18 cases with Docker, Wrangler and the Worker faked.
+  All three check one signature vector. 23 mutants across the three are all
   caught.
 - The Worker ran in Wrangler 4.151.2's local runtime with a 50 MB archive in
   three parts. The signed download returned the exact bytes with
