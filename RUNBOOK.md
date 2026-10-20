@@ -4896,8 +4896,10 @@ Workers allow 100,000 requests a day. The other options were ruled out:
 - GitHub would put owner data where it must never go.
 
 - `scripts/publish-cdn.py` runs on the Pi every five minutes and does nothing
-  while the published list matches the checkout's asset manifest. When an
-  archive changes, it waits for an idle server, then copies the archives into
+  while the published list matches the checkout's asset manifest and Worker
+  code; the list records a hash of the Worker's modules, its configuration and
+  the Wrangler version. When either changes, it waits for an idle server, then
+  copies the archives into
   24 MiB parts under the updater's lock, checking each against the manifest.
   Static assets are capped at 25 MiB. Wrangler, pinned at 4.151.2 in a local
   image, deploys the Worker with the parts and uploads only the ones
