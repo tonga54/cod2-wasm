@@ -124,6 +124,9 @@ try:
     pending.extend(name for name in asset_index if name.endswith(".csv")
                    and (name.count("/") == 1 and name.startswith("fx/")
                         or any(name.startswith(f"fx/maps/mp/{mapname}/") for mapname in maps)))
+    # Controller vibration plays the console rumble graphs by name, from the
+    # weapon files' fire and melee fields and cg_rumble_mp.c's own.
+    pending.extend(name for name in asset_index if name.startswith("rumble/") and name.endswith(".rmb"))
     pending.extend((
         "materials/$raw", "fonts/consolefont", "fonts/smalldevfont",
         "fonts/bigdevfont", "fonts/smalldevfont", "fonts/bigfont",

@@ -9,6 +9,8 @@
 #    define __m128 __m128_cod2
 #    include "common_types.h"
 #    undef __m128
+#    include "headers/PC/cgame_mp/cg_local.h"
+#    include "headers/PC/cgame_mp/cg_rumble.h"
 
 extern int FS_FOpenFileByMode(const char *filename, int *fh, int mode);
 extern int FS_Read(void *buffer, int len, int fh);
@@ -23,13 +25,39 @@ extern void Cmd_AddCommand(const char *cmd, void (*func)(void));
 extern void Cmd_ArgvBuffer(int arg, char *buf, int bufSize);
 extern int Cmd_Argc(void);
 extern int Sys_Milliseconds(void);
+extern WeaponDef *BG_GetWeaponDef(int weaponIndex);
+extern int BG_GetNumWeapons(void);
+extern float Vec3Distance(const vec_t *a, const vec_t *b);
 
 extern void CL_Gamepad_SetRumble(float lowFreq, float highFreq);
 
 #    define MAX_RUMBLE_GRAPH_KNOTS 16
-#    define MAX_RUMBLE_INFOS 32
+/* The retail IWDs ship 39 graph pairs. */
+#    define MAX_RUMBLE_INFOS 64
 #    define MAX_ACTIVE_RUMBLES 32
 #    define RUMBLE_DURATION_MS 1000
+/* One kick a round: an automatic weapon's graph spans its fire interval, so
+ * each shot stands apart instead of blurring into one buzz. Single shots,
+ * bolts and rockets keep a longer tail. */
+#    define RUMBLE_SHOT_MIN_MS 50
+#    define RUMBLE_SEMI_FIRE_MS 250
+#    define RUMBLE_BOLT_FIRE_MS 400
+#    define RUMBLE_ROCKET_FIRE_MS 700
+/* A blast is felt out to three times its damage radius, fading with distance. */
+#    define RUMBLE_EXPLOSION_GRAPH "artillery_quake"
+#    define RUMBLE_EXPLOSION_REACH 3.0f
+/* earthquake() scales of a quarter and up shake the pad fully. */
+#    define RUMBLE_EARTHQUAKE_GAIN 4.0f
+/* The retail damage_light and damage_heavy graphs are the same: the hit's
+ * size sets the strength, from 40% up to full for half the health. */
+#    define RUMBLE_DAMAGE_GRAPH "damage_heavy"
+#    define RUMBLE_DAMAGE_BASE 0.4f
+#    define RUMBLE_DAMAGE_PER_POINT 0.012f
+/* The server reports a melee impact without its attacker: one this close to
+ * the view this soon after the local player's swing is theirs. */
+#    define RUMBLE_MELEE_GRAPH "melee_medium"
+#    define RUMBLE_MELEE_WINDOW_MS 1000
+#    define RUMBLE_MELEE_REACH 128.0f
 
 typedef struct {
     char name[64];
@@ -49,6 +77,8 @@ typedef struct {
     int active;
     int infoIndex;
     int startTime;
+    int duration;
+    float scale;
     int loop;
 } ActiveRumble;
 
@@ -56,6 +86,8 @@ static RumbleInfo g_rumbleInfos[MAX_RUMBLE_INFOS];
 static int g_rumbleInfoCount;
 static ActiveRumble g_activeRumbles[MAX_ACTIVE_RUMBLES];
 static const dvar_t *cg_drawRumbleDebug;
+static int g_rumbleMeleeTime;
+static int g_rumbleMeleeWeapon;
 
 static int I_stricmp_local(const char *a, const char *b);
 
@@ -203,7 +235,7 @@ int CG_LoadRumble(const char *name)
 
     idx = CG_GetRumbleInfoIndexFromName(name);
     if (idx >= 0)
-        return idx;
+        return g_rumbleInfos[idx].loaded ? idx : -1;
 
     if (g_rumbleInfoCount >= MAX_RUMBLE_INFOS) {
         Com_Printf("^1No more room to allocate anymore rumble infos\n");
@@ -227,13 +259,11 @@ int CG_LoadRumble(const char *name)
         lowName[n + 2] = '\0';
     }
 
-    info = &g_rumbleInfos[g_rumbleInfoCount];
+    /* A missing graph keeps its entry, so it is looked for and reported once
+     * rather than on every shot. */
+    idx = g_rumbleInfoCount++;
+    info = &g_rumbleInfos[idx];
     memset(info, 0, sizeof(*info));
-    if (!CG_LoadRumbleGraph(info, highName, lowName)) {
-        Com_Printf("^1Could not load rumble info file '%s'\n", name);
-        return -1;
-    }
-
     {
         int n = 0;
         const char *p = name;
@@ -242,8 +272,12 @@ int CG_LoadRumble(const char *name)
         }
         info->name[n] = '\0';
     }
+    if (!CG_LoadRumbleGraph(info, highName, lowName)) {
+        Com_Printf("^1Could not load rumble info file '%s'\n", name);
+        return -1;
+    }
     info->loaded = 1;
-    return g_rumbleInfoCount++;
+    return idx;
 }
 
 void CG_InvalidateActiveRumble(int index)
@@ -273,7 +307,7 @@ static int CG_FindClosestToDyingActiveRumble(void)
             return i;
         if (g_activeRumbles[i].loop)
             continue;
-        remaining = RUMBLE_DURATION_MS - (now - g_activeRumbles[i].startTime);
+        remaining = g_activeRumbles[i].duration - (now - g_activeRumbles[i].startTime);
         if (remaining < bestRemaining) {
             bestRemaining = remaining;
             best = i;
@@ -290,7 +324,7 @@ void CG_RemoveInactiveRumbles(void)
             continue;
         if (g_activeRumbles[i].loop)
             continue;
-        if (now - g_activeRumbles[i].startTime >= RUMBLE_DURATION_MS)
+        if (now - g_activeRumbles[i].startTime >= g_activeRumbles[i].duration)
             CG_InvalidateActiveRumble(i);
     }
 }
@@ -331,7 +365,7 @@ void CG_CalcActiveRumbles(void)
             continue;
         info = &g_rumbleInfos[ar->infoIndex];
 
-        t = (float)(now - ar->startTime) / (float)RUMBLE_DURATION_MS;
+        t = (float)(now - ar->startTime) / (float)ar->duration;
         if (ar->loop) {
             t = t - (float)((int)t);
             if (t < 0.0f)
@@ -340,8 +374,8 @@ void CG_CalcActiveRumbles(void)
             t = 1.0f;
         }
 
-        high += CG_EvalRumbleGraph(&info->high, t);
-        low += CG_EvalRumbleGraph(&info->low, t);
+        high += CG_EvalRumbleGraph(&info->high, t) * ar->scale;
+        low += CG_EvalRumbleGraph(&info->low, t) * ar->scale;
     }
 
     if (low > 1.0f)
@@ -367,36 +401,167 @@ void CG_UpdateRumble(void)
     CG_CalcActiveRumbles();
 }
 
-static void CG_PlayRumbleInternal(const char *name, int loop)
+/* Plays a graph stretched over the duration at a fraction of its strength;
+ * returns whether it started. */
+static int CG_PlayRumbleInternal(const char *name, int loop, int duration, float scale)
 {
     int infoIndex, slot;
 
-    if (!name || !name[0])
-        return;
+    if (!name || !name[0] || duration <= 0 || !(scale > 0.0f))
+        return 0;
 
     infoIndex = CG_LoadRumble(name);
-    if (infoIndex < 0) {
-        Com_Printf("^1Could not play rumble asset '%s'\n", name);
-        return;
-    }
+    if (infoIndex < 0)
+        return 0;
 
     slot = CG_FindClosestToDyingActiveRumble();
     if (slot < 0)
-        return;
+        return 0;
 
     g_activeRumbles[slot].active = 1;
     g_activeRumbles[slot].infoIndex = infoIndex;
     g_activeRumbles[slot].startTime = Sys_Milliseconds();
+    g_activeRumbles[slot].duration = duration;
+    g_activeRumbles[slot].scale = scale < 1.0f ? scale : 1.0f;
     g_activeRumbles[slot].loop = loop;
+    return 1;
 }
 
 void CG_PlayRumble(const char *name)
 {
-    CG_PlayRumbleInternal(name, 0);
+    CG_PlayRumbleInternal(name, 0, RUMBLE_DURATION_MS, 1.0f);
 }
 void CG_PlayLoopRumble(const char *name)
 {
-    CG_PlayRumbleInternal(name, 1);
+    CG_PlayRumbleInternal(name, 1, RUMBLE_DURATION_MS, 1.0f);
+}
+
+/* The local player's own view: not a killcam, nor a player they follow. */
+static int CG_RumbleOwnView(void)
+{
+    return cg->nextSnap && cg->nextSnap->ps.clientNum == cg->clientNum;
+}
+
+static const WeaponDef *CG_RumbleWeaponDef(int weapon)
+{
+    if (weapon <= 0 || weapon > BG_GetNumWeapons())
+        return NULL;
+    return BG_GetWeaponDef(weapon);
+}
+
+/* The retail turrets and Panzerschreck name no fire rumble although their
+ * graphs ship; any other gun without one feels the default weapon's. */
+static const char *CG_FireRumbleName(const WeaponDef *weapDef)
+{
+    static const struct {
+        const char *prefix;
+        const char *rumble;
+    } unnamed[] = {
+        { "mg42", "mg42_fire" },
+        { "30cal", "30cal_fire" },
+        { "panzerschreck", "panzerschreck_fire" },
+    };
+    int i;
+
+    if (weapDef->fireRumble && weapDef->fireRumble[0])
+        return weapDef->fireRumble;
+    for (i = 0; i < (int)(sizeof(unnamed) / sizeof(unnamed[0])); ++i) {
+        if (weapDef->szInternalName &&
+            !strncmp(weapDef->szInternalName, unnamed[i].prefix, strlen(unnamed[i].prefix)))
+            return unnamed[i].rumble;
+    }
+    return "defaultweapon_fire";
+}
+
+static int CG_FireRumbleDuration(const WeaponDef *weapDef)
+{
+    if (weapDef->weapClass == WEAPCLASS_ROCKETLAUNCHER)
+        return RUMBLE_ROCKET_FIRE_MS;
+    if (weapDef->bBoltAction)
+        return RUMBLE_BOLT_FIRE_MS;
+    if (weapDef->bSemiAuto)
+        return RUMBLE_SEMI_FIRE_MS;
+    if (weapDef->iFireTime < RUMBLE_SHOT_MIN_MS)
+        return RUMBLE_SHOT_MIN_MS;
+    return weapDef->iFireTime < RUMBLE_SEMI_FIRE_MS ? weapDef->iFireTime : RUMBLE_SEMI_FIRE_MS;
+}
+
+/* Every round the local player fires, from their own gun or the turret they
+ * man; grenades and placed explosives kick only when they go off. */
+void CG_RumbleFireEvent(const entityState_t *es)
+{
+    const snapshot_t *snap = cg->nextSnap;
+    const WeaponDef *weapDef;
+
+    if (!CG_RumbleOwnView())
+        return;
+    if (es->eType == 9 ? !(snap->ps.eFlags & 0x300) || snap->ps.viewlocked_entNum != es->number
+                       : es->number != cg->clientNum)
+        return;
+    weapDef = CG_RumbleWeaponDef(es->weapon);
+    if (!weapDef || (weapDef->weapType != WEAPTYPE_BULLET && weapDef->weapClass != WEAPCLASS_ROCKETLAUNCHER))
+        return;
+    CG_PlayRumbleInternal(CG_FireRumbleName(weapDef), 0, CG_FireRumbleDuration(weapDef), 1.0f);
+}
+
+/* A grenade, S-Mine, C4 or rocket going off near the view; smoke, which
+ * deals no damage, has no radius and stays still. */
+void CG_RumbleExplosion(const vec_t *origin, int weapon)
+{
+    const WeaponDef *weapDef = CG_RumbleWeaponDef(weapon);
+
+    if (!weapDef || weapDef->iExplosionRadius <= 0 || !CG_RumbleOwnView())
+        return;
+    CG_PlayRumbleInternal(RUMBLE_EXPLOSION_GRAPH, 0, RUMBLE_DURATION_MS,
+                          1.0f - Vec3Distance(origin, cg->refdef.vieworg) /
+                                     ((float)weapDef->iExplosionRadius * RUMBLE_EXPLOSION_REACH));
+}
+
+void CG_RumbleEarthquake(const vec_t *origin, float intensity, int duration, float radius)
+{
+    if (!(radius > 0.0f) || !CG_RumbleOwnView())
+        return;
+    CG_PlayRumbleInternal(RUMBLE_EXPLOSION_GRAPH, 0, duration,
+                          intensity * RUMBLE_EARTHQUAKE_GAIN *
+                              (1.0f - Vec3Distance(origin, cg->refdef.vieworg) / radius));
+}
+
+void CG_RumbleDamage(int damage)
+{
+    if (damage <= 0 || !CG_RumbleOwnView())
+        return;
+    CG_PlayRumbleInternal(RUMBLE_DAMAGE_GRAPH, 0, RUMBLE_DURATION_MS,
+                          RUMBLE_DAMAGE_BASE + (float)damage * RUMBLE_DAMAGE_PER_POINT);
+}
+
+/* The killing hit sends no damage feedback (P_DamageFeedback skips the dead):
+ * dying, from playing (pm_type below 4) to dead (above 5), kicks fully. */
+void CG_RumbleTransition(const playerState_t *ps, const playerState_t *ops)
+{
+    if (ps->clientNum == ops->clientNum && ops->pm_type < 4 && ps->pm_type > 5 && CG_RumbleOwnView())
+        CG_PlayRumbleInternal(RUMBLE_DAMAGE_GRAPH, 0, RUMBLE_DURATION_MS, 1.0f);
+}
+
+void CG_RumbleMeleeSwing(const entityState_t *es)
+{
+    if (es->number != cg->clientNum || !CG_RumbleOwnView())
+        return;
+    g_rumbleMeleeTime = Sys_Milliseconds();
+    g_rumbleMeleeWeapon = es->weapon;
+}
+
+void CG_RumbleMeleeImpact(const vec_t *origin)
+{
+    const WeaponDef *weapDef = CG_RumbleWeaponDef(g_rumbleMeleeWeapon);
+
+    if (!weapDef || Sys_Milliseconds() - g_rumbleMeleeTime > RUMBLE_MELEE_WINDOW_MS || !CG_RumbleOwnView() ||
+        Vec3Distance(origin, cg->refdef.vieworg) > RUMBLE_MELEE_REACH)
+        return;
+    g_rumbleMeleeWeapon = 0;
+    CG_PlayRumbleInternal(weapDef->meleeImpactRumble && weapDef->meleeImpactRumble[0]
+                              ? weapDef->meleeImpactRumble
+                              : RUMBLE_MELEE_GRAPH,
+                          0, RUMBLE_DURATION_MS, 1.0f);
 }
 
 void CG_StopRumble(const char *name)
@@ -419,18 +584,25 @@ static void CG_PlayRumble_f(void)
         return;
     }
     Cmd_ArgvBuffer(1, arg, sizeof(arg));
-    CG_PlayRumble(arg);
+    if (!CG_PlayRumbleInternal(arg, 0, RUMBLE_DURATION_MS, 1.0f))
+        Com_Printf("^1Could not play rumble asset '%s'\n", arg);
 }
 
 void CG_InitRumble(void)
 {
+    static int commandAdded;
     int i;
     g_rumbleInfoCount = 0;
+    g_rumbleMeleeWeapon = 0;
     for (i = 0; i < MAX_ACTIVE_RUMBLES; ++i)
         CG_InvalidateActiveRumble(i);
 
     cg_drawRumbleDebug = Dvar_RegisterBool_mac("cg_drawrumbledebug", 0, 0x0);
-    Cmd_AddCommand("playrumble", CG_PlayRumble_f);
+    /* Every map starts the cgame again; the command outlives it. */
+    if (!commandAdded) {
+        Cmd_AddCommand("playrumble", CG_PlayRumble_f);
+        commandAdded = 1;
+    }
 }
 
 void CG_ShutdownRumble(void)

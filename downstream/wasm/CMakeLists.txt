@@ -36,6 +36,7 @@ list(APPEND COD2_CLIENT_SOURCES
   "${CMAKE_CURRENT_LIST_DIR}/web_platform.c"
   "${CMAKE_CURRENT_LIST_DIR}/web_net.c"
   "${CMAKE_CURRENT_LIST_DIR}/web_audio.c"
+  "${CMAKE_CURRENT_LIST_DIR}/web_haptics.c"
   "${COD2_ROOT}/build/native_gen/data32.c"
   "${COD2_ROOT}/build/native_gen/literals32.c"
   "${COD2_ROOT}/build/native_gen/import_pointers_native.c"
@@ -54,7 +55,7 @@ target_compile_definitions(cod2_client_objects PRIVATE
   COD2_FEATURE_PUNKBUSTER=0
   COD2_FEATURE_SCRIPT_DEBUGGER=0
   COD2_FEATURE_GAMEPAD=1
-  COD2_FEATURE_RUMBLE=0
+  COD2_FEATURE_RUMBLE=1
   COD2_FEATURE_SPLITSCREEN=0
   GL_GLEXT_PROTOTYPES=1
   SDL_DISABLE_IMMINTRIN_H=1)
@@ -86,6 +87,7 @@ target_link_options(cod2_client PRIVATE
   "SHELL:-s USE_SDL=2"
   "SHELL:-s USE_ZLIB=1"
   "SHELL:--pre-js ${CMAKE_CURRENT_LIST_DIR}/web_audio.js"
+  "SHELL:--pre-js ${CMAKE_CURRENT_LIST_DIR}/web_haptics.js"
   # SDL2 in Emscripten 3.1.64 addresses Module.canvas with the #canvas alias.
   # The framework owns that element and uses its own DOM id.
   "SHELL:-s DISABLE_DEPRECATED_FIND_EVENT_TARGET_BEHAVIOR=0"
@@ -121,6 +123,7 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(COD2_GL_PATCH "${COD2_ROOT}/scripts/patch-emscripten-gl.py")
 set_property(TARGET cod2_client APPEND PROPERTY LINK_DEPENDS "${COD2_GL_PATCH}")
 set_property(TARGET cod2_client APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/web_audio.js")
+set_property(TARGET cod2_client APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/web_haptics.js")
 add_custom_command(TARGET cod2_client POST_BUILD
   COMMAND "${Python3_EXECUTABLE}" "${COD2_GL_PATCH}" "$<TARGET_FILE:cod2_client>"
   COMMENT "Repairing pinned Emscripten legacy-GL texture-call generation"

@@ -4,6 +4,7 @@
 #include "headers/PC/cgame_mp/cg_hitmarker.h"
 #include "headers/PC/cgame_mp/cg_killcam.h"
 #include "headers/PC/cgame_mp/cg_killfeed.h"
+#include "headers/PC/cgame_mp/cg_rumble.h"
 #include "bytematch.h"
 #include "cod2_grenade.h"
 
@@ -1004,6 +1005,9 @@ void CG_EntityEvent(centity_t *cent, int event)
 
                 CG_PlayEntitySoundAlias(es->number, alias);
             }
+#if COD2_FEATURE_RUMBLE
+            CG_RumbleMeleeSwing(es);
+#endif
             return;
         }
 
@@ -1034,6 +1038,9 @@ void CG_EntityEvent(centity_t *cent, int event)
         {
             CG_PlayEntitySoundAlias(es->otherEntityNum,
                                     cgs->media.meleeHit);
+#if COD2_FEATURE_RUMBLE
+            CG_RumbleMeleeImpact((const vec_t *)position);
+#endif
             return;
         }
 
@@ -1041,6 +1048,9 @@ void CG_EntityEvent(centity_t *cent, int event)
         {
             CG_PlaySoundAlias(es->otherEntityNum, position,
                               cgs->media.meleeHitOther);
+#if COD2_FEATURE_RUMBLE
+            CG_RumbleMeleeImpact((const vec_t *)position);
+#endif
             return;
         }
 
@@ -1153,6 +1163,9 @@ void CG_EntityEvent(centity_t *cent, int event)
                     CG_PlaySoundAlias(0x3fe, position, sndAlias);
                 }
             }
+#if COD2_FEATURE_RUMBLE
+            CG_RumbleExplosion((const vec_t *)position, es->weapon);
+#endif
             return;
         }
 
@@ -1199,6 +1212,9 @@ void CG_EntityEvent(centity_t *cent, int event)
             }
 
             cg->nomarks = 0;
+#if COD2_FEATURE_RUMBLE
+            CG_RumbleExplosion((const vec_t *)position, es->weapon);
+#endif
             return;
         }
 
@@ -1245,6 +1261,9 @@ void CG_EntityEvent(centity_t *cent, int event)
             }
 
             cg->nomarks = 0;
+#if COD2_FEATURE_RUMBLE
+            CG_RumbleExplosion((const vec_t *)position, es->weapon);
+#endif
             return;
         }
 
@@ -1308,10 +1327,14 @@ void CG_EntityEvent(centity_t *cent, int event)
 
         case 0xc4:
         {
-            int duration = es->angles2[1];
-            int esTime = es->time;
+            /* earthquake(): the server sends its scale and radius as floats,
+             * its duration in time. */
             float intensity = es->angles2[0];
-            CG_StartShakeCamera(intensity, esTime, (const vec_t *)position, *(float *)&duration);
+            float radius = es->angles2[1];
+            CG_StartShakeCamera(intensity, es->time, (const vec_t *)position, radius);
+#if COD2_FEATURE_RUMBLE
+            CG_RumbleEarthquake((const vec_t *)position, intensity, es->time, radius);
+#endif
             return;
         }
 

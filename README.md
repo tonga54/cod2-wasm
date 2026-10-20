@@ -351,8 +351,8 @@ button to let the browser detect it. Open **Options → Controller**, choose
 then press the desired controller button or
 trigger. Controller assignments are saved in this browser independently of
 keyboard/mouse bindings. Escape cancels an assignment; Backspace clears it.
-The same page adjusts sensitivity, stick deadzone and inverted vertical look,
-and restores controller defaults. Left stick moves/navigates; right stick looks.
+The same page adjusts sensitivity, stick deadzone, inverted vertical look and
+vibration, and restores controller defaults. Left stick moves/navigates; right stick looks.
 By default, RT/R2 fires, LT/L2 aims, A/Cross jumps, B/Circle toggles crouch/stand
 on a short press and goes prone when held for 300 ms (tap again to stand),
 X/Square uses/reloads, Y/Triangle changes weapons, LB/L1 throws smoke,
@@ -365,6 +365,12 @@ While aiming, hold L3 to hold breath. Directional navigation highlights the
 selected menu item, including team and weapon choices.
 Use a browser that exposes the controller through the Gamepad API (HTTPS or
 localhost).
+
+While the controller is the device in use it vibrates with the original
+console rumble: a kick for every round fired, one per bullet on automatic too,
+nearby grenade, S-Mine, C4 and rocket blasts fading with distance, hits taken,
+dying and melee impacts. **Options → Controller → Vibration** turns it off.
+Chrome and Edge drive both motors; other browsers may not vibrate.
 
 Bullets can penetrate thin cover according to its collision material, thickness
 and the weapon's power, losing damage with each layer. Wood, glass, plaster and

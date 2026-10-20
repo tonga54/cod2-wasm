@@ -74,9 +74,11 @@ def controller_menu():
                   'dvarFloat "cl_gamepadDeadzone" .2 0 .9', page=0)
     result += row('invert', 'Invert vertical look', 248, 'ITEM_TYPE_YESNO',
                   'dvar "cl_gamepadInvertY"', page=0)
-    result += row('move_help', 'Left stick: move / navigate.', 288,
+    result += row('rumble', 'Vibration', 278, 'ITEM_TYPE_YESNO',
+                  'dvar "cl_gamepadRumble"', page=0)
+    result += row('move_help', 'Left stick: move / navigate.', 304,
                   'ITEM_TYPE_TEXT', 'decoration', page=0, scale='.23')
-    result += row('look_help', 'Right stick: look.', 310,
+    result += row('look_help', 'Right stick: look.', 322,
                   'ITEM_TYPE_TEXT', 'decoration', page=0, scale='.23')
     for i, (label, command) in enumerate(actions):
         result += row(f'pad_bind_{i}', label, 158 + (i % 8) * 22,

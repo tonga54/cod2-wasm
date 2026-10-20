@@ -3856,3 +3856,92 @@ Validation:
   countdown opened `sound/browser/prematchmusic.mp3` and played it at once;
   its volume held for 17.0 s, fell linearly to 0 between 17.03 and 20.01 s,
   and the engine freed the stream at 20.02 s.
+
+## Controller vibration — 2026-10-19
+
+The owner asked for haptics for whoever plays with a controller: a kick for
+every round fired, and vibration when a grenade, a mine and the like go off
+nearby. CoD2's console rumble survives in the PC game: the retail IWDs ship
+its 39 graph pairs (`rumble/<name>_h.rmb` for the weak, high-frequency motor,
+`_l` for the strong one) and every MP weapon file names a `fireRumble` and a
+`meleeImpactRumble`. `cg_rumble_mp.c` mixed them, but nothing played one, and
+the browser build had `COD2_FEATURE_RUMBLE` off: SDL 2.28's emscripten
+joystick driver answers `SDL_Unsupported` to rumble.
+
+The browser now drives the motors through the Gamepad API. `web_haptics.js`
+(a pre-js, `Module.cod2CreateHaptics`) sends
+`vibrationActuator.playEffect('dual-rumble')`, or Firefox's
+`hapticActuators[0].pulse` with the stronger motor, to the pad held or used
+last, and keeps a burst on its pad. Each command lasts 120 ms and steady
+motors are refreshed every 50 ms, so they never gap and a page that stops
+calling goes still by itself; still motors are reset once.
+`CL_Gamepad_SetRumble` sends only while the controller is the device in use
+(a button or, now, a trigger pulled since the last key or mouse movement), in
+a focused page, with `cl_gamepadEnable` and the new archived
+`cl_gamepadRumble` on (Options → Controller → Vibration, on by default and
+restored by the controller defaults).
+
+The cgame plays, in the local player's own view only (never a followed
+player's or the killcam's):
+
+- Every fire event of theirs or of the turret they man: the weapon's
+  `fireRumble` (the retail turrets and Panzerschreck leave it empty, so
+  `mg42_fire`, `30cal_fire` and `panzerschreck_fire`; any other gun without
+  one `defaultweapon_fire`). An automatic weapon's graph spans its fire
+  interval, so each round is a kick that ends before the next; 1000 ms, the
+  old fixed span, blurred automatic fire into one buzz. Semi-automatics take
+  250 ms, bolts and the shotgun 400, rockets 700.
+- Grenade, S-Mine and C4 explosions (0xbc) and rocket impacts (0xbd/0xbe):
+  `artillery_quake` over 1 s, full at the blast and fading linearly to nothing
+  at three times the weapon's explosion radius. Smoke has no radius.
+- `earthquake()` (0xc4): the same graph at four times its scale within its
+  radius, for its duration. The event's camera shake took the radius as an
+  int reinterpreted as a float; it takes the float now. No stock MP map calls
+  `earthquake()`.
+- Hits taken: `damage_heavy` (the retail `damage_light` is the same graph) at
+  40% plus 1.2% a point of health, full from half the health. The killing hit
+  sends no damage feedback (`P_DamageFeedback` skips the dead), so dying, from
+  playing to dead, kicks fully.
+- Their own melee impacts: the swing's weapon's `meleeImpactRumble`, once a
+  swing, for an impact event within 128 units of the view within 1 s of the
+  swing; the server's event names the victim, not the attacker.
+
+A missing graph is reported and looked for once, not on every shot; the
+table holds 64 graphs; `playrumble` is added once for all maps. The browser
+gets the graphs in `cod2_browser_renderer.iwd`: `prepare-browser-bootstrap.py`
+now adds every `rumble/*.rmb` (78 files, 15.7 kB), and the manifest changed
+for that archive only. The host's update builds it from the original files,
+so the Pi needs nothing new.
+
+Validation:
+
+- `scripts/test-rumble.py` (new) checks the hooks and the build wiring, that
+  the local package carries all 32 graphs the cgame can play (from the mixer
+  and 39 weapon files) for both motors, and runs the production module on
+  synthetic graphs: ten automatic rounds give ten kicks, each still before
+  the next; spans by action; the unnamed graphs; turrets only while manned;
+  nothing for other players, followed players, the killcam, grenades thrown
+  or binoculars; blasts by distance and radius, smoke never; earthquakes;
+  hits by size; dying, and not staying dead, respawning, spectating or the
+  intermission; melee once a swing, never far, late or someone else's; slot
+  reuse by each graph's own end. It compiles the 0xc4 case on its own for the
+  radius. 43 mutants fail.
+- `scripts/test-web-haptics.cjs` (new): commands at once for 120 ms, a
+  refresh every 50 ms, one reset when still and no pad queries while idle;
+  the held or latest pad, kept for a burst, moving on when it is unplugged;
+  Firefox pulses; rejected and thrown refusals contained. 12 mutants fail.
+- `scripts/test-gamepad.py` runs `cl_gamepad.c` with rumble on: nothing
+  before the pad is in use, clamped motors, still motors told once, and the
+  setting, the controller switch, focus, the keyboard and an unplugged pad
+  each silencing it; triggers mark the pad in use. 10 mutants fail. The
+  settings page fits with the Vibration row and no row overlaps another.
+- In the browser, Carentan TDM with a scripted standard pad whose actuator
+  records commands: mouse fire and a keyboard `kill` sent nothing; holding RT
+  with the Thompson fired 12 rounds and gave 12 kicks 84–93 ms apart, each
+  starting at the retail graph's 0.5/0.58 and reset before the next; one
+  Kar98k round held the strong motor full for 73 ms and the weak one faded by
+  398 ms; frags at about 70 and 400 units gave 0.91 and 0.47 of
+  `artillery_quake`; one at the feet saturated both motors with the death
+  kick; a rifle butt against a tree played `melee_medium`; Options →
+  Controller → Vibration off silenced a shot, on again restored it.
+- Physical controller hardware has not been verified.

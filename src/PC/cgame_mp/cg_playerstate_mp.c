@@ -1,6 +1,7 @@
 #include "common_types.h"
 #include "imports.h"
 #include "headers/PC/cgame_mp/cg_local.h"
+#include "headers/PC/cgame_mp/cg_rumble.h"
 
 extern const dvar_t *cg_hudDamageIconTime;
 
@@ -232,6 +233,9 @@ void CG_DamageFeedback(int yawByte, int pitchByte, int damage)
     CG_INT(cg, CG_OFF_2BED4) = CG_INT(snap, 8);
 
     CG_MenuShowNotify(0);
+#if COD2_FEATURE_RUMBLE
+    CG_RumbleDamage(damage);
+#endif
 }
 
 void CG_TransitionPlayerState(playerState_t *ps, playerState_t *ops)
@@ -241,6 +245,9 @@ void CG_TransitionPlayerState(playerState_t *ps, playerState_t *ops)
     int idx;
     int event;
 
+#if COD2_FEATURE_RUMBLE
+    CG_RumbleTransition(ps, ops);
+#endif
     if (ps->damageEvent != ops->damageEvent) {
 
         if (ps->damageCount != 0) {

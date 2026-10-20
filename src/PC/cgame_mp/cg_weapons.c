@@ -103,6 +103,7 @@ static EffectTemplate *CG_EnhanceMuzzleFlash(const EffectTemplate *original)
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_wwiiscope.h"
 #include "headers/PC/cgame_mp/cg_attachmodels.h"
+#include "headers/PC/cgame_mp/cg_rumble.h"
 
 extern const dvar_t *cg_weaponCycleDelay;
 extern const dvar_t *loc_warnings;
@@ -781,6 +782,9 @@ void CG_FireWeapon(centity_t *cent, int event, int barrel)
         }
 #endif
     }
+#if COD2_FEATURE_RUMBLE
+    CG_RumbleFireEvent(ent);
+#endif
 
     CG_PlayFireWeaponEffect(cent, ent, barrel);
 

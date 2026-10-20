@@ -219,6 +219,85 @@ int main(void){
 ''', 'controller hotplug, saved mapping migration, click-to-sprint/cancellation, raw capture, bumpers for a menu '
      'that takes every key, triggers, focus, analog sticks and repeat')
 
+# Vibration reaches the pad only while it is the device being played with, in
+# a focused page, with the controller and its vibration both enabled; still
+# motors are told once.
+rumble_prefix = prefix.replace('#define COD2_FEATURE_RUMBLE 0', '#define COD2_FEATURE_RUMBLE 1') + r'''
+static float hapticStrong=-1,hapticWeak=-1;static int hapticCalls;
+void WebHaptics_Rumble(float strong,float weak){hapticStrong=strong;hapticWeak=weak;hapticCalls++;}
+'''
+rumble_main = r'''
+static void press(void){
+ pad.buttons[SDL_CONTROLLER_BUTTON_A]=1;CL_Gamepad_Frame();pad.buttons[SDL_CONTROLLER_BUTTON_A]=0;CL_Gamepad_Frame();
+}
+/* Turning motors stop once the condition holds, and stay still while it does. */
+static void silenced(void (*apply)(int)){
+ int calls=hapticCalls;
+ CL_Gamepad_SetRumble(.8f,.4f);assert(hapticCalls==calls+1&&hapticStrong==.8f&&hapticWeak==.4f);
+ apply(1);
+ CL_Gamepad_SetRumble(.8f,.4f);assert(hapticCalls==calls+2&&!hapticStrong&&!hapticWeak);
+ CL_Gamepad_SetRumble(.8f,.4f);assert(hapticCalls==calls+2);
+ apply(0);
+}
+static void setting(int on){var("cl_gamepadRumble")->current.enabled=!on;}
+static void controller(int on){var("cl_gamepadEnable")->current.enabled=!on;}
+static void blur(int on){focused=!on;}
+static void keyboard(int on){if(on)CL_Gamepad_NoteKbmActive();else press();}
+static void unplug(int on){
+ CL_Gamepad_HandleDeviceEvent(on?SDL_CONTROLLERDEVICEREMOVED:SDL_CONTROLLERDEVICEADDED,0);if(!on)press();
+}
+int main(void){
+ client.cgameSensitivity=1;CL_Gamepad_Init();
+ assert(var("cl_gamepadRumble")->current.enabled);
+ CL_Gamepad_SetRumble(1,.5f);CL_Gamepad_SetRumble(0,0);assert(hapticCalls==0);
+ press();
+ CL_Gamepad_SetRumble(1,.5f);assert(hapticCalls==1&&hapticStrong==1&&hapticWeak==.5f);
+ CL_Gamepad_SetRumble(2,-1);assert(hapticCalls==2&&hapticStrong==1&&hapticWeak==0);
+ CL_Gamepad_SetRumble(NAN,.25f);assert(hapticCalls==3&&hapticStrong==0&&hapticWeak==.25f);
+ CL_Gamepad_SetRumble(0,0);assert(hapticCalls==4&&!hapticStrong&&!hapticWeak);
+ CL_Gamepad_SetRumble(0,0);CL_Gamepad_SetRumble(-1,0);assert(hapticCalls==4);
+ silenced(setting);silenced(controller);silenced(blur);silenced(keyboard);silenced(unplug);
+ CL_Gamepad_SetRumble(.8f,.4f);assert(hapticStrong==.8f&&hapticWeak==.4f);
+ // Firing with a trigger after touching the mouse is controller play too.
+ for(int axis=4;axis<=5;axis++){
+  CL_Gamepad_NoteKbmActive();assert(!CL_Gamepad_IsActiveDevice());
+  pad.axes[axis]=32767;CL_Gamepad_Frame();assert(CL_Gamepad_IsActiveDevice());
+  pad.axes[axis]=0;CL_Gamepad_Frame();
+ }
+ CL_Gamepad_Shutdown();return 0;
+}
+'''
+run(rumble_prefix + source + rumble_main, 'vibration only from the pad in use, in a focused page, with the controller '
+    'and its vibration on; clamped motors, told once when still')
+
+
+def passes(code):
+    with tempfile.TemporaryDirectory(prefix='cod2-gamepad-') as directory:
+        path = Path(directory)
+        (path / 'test.c').write_text(code)
+        subprocess.run(['cc', '-std=c11', '-w', '-fsanitize=address,undefined', str(path / 'test.c'), '-lm',
+                        '-o', str(path / 'test')], check=True)
+        return subprocess.run([str(path / 'test')], capture_output=True).returncode == 0
+
+
+rumble_mutants = [
+    ('!cl_gamepadRumble->current.enabled ||', ''),
+    ('!CL_Gamepad_IsActiveDevice() || ', ''),
+    (' || !Gamepad_HasFocus()))', '))'),
+    ('!g_gamepadInit || !cl_gamepadEnable->current.enabled || ', '!g_gamepadInit || '),
+    ('    if (lowFreq == 0.0f && highFreq == 0.0f && !g_rumbleSent)\n        return;\n', ''),
+    ('    g_rumbleSent = lowFreq > 0.0f || highFreq > 0.0f;', '    g_rumbleSent = 1;'),
+    ('    if (!(lowFreq > 0.0f))', '    if (lowFreq < 0.0f)'),
+    ('    else if (lowFreq > 1.0f)\n        lowFreq = 1.0f;\n', ''),
+    ('        if ((ltrig && !g_buttonDown[K_BUTTON_LTRIG]) || (rtrig && !g_buttonDown[K_BUTTON_RTRIG]))\n'
+     '            g_gamepadActiveDevice = 1;\n', ''),
+    ('(ltrig && !g_buttonDown[K_BUTTON_LTRIG]) || ', ''),
+]
+for old, new in rumble_mutants:
+    assert source.count(old) == 1, old
+    assert not passes(rumble_prefix + source.replace(old, new) + rumble_main), old
+print(f'PASS: {len(rumble_mutants)} vibration gating mutants fail')
+
 def input_function(name):
     text = (root / 'src/PC/client_mp/cl_input.c').read_text()
     match = re.search(r'^[^\n;]*\b' + name + r'\([^;]*?\)\n\{', text, re.M)
@@ -378,3 +457,17 @@ for item in rows:
         page_bindings[page] += 1
 assert page_bindings == [0, 8, 8]
 print('PASS: all controller pages fit the original safe area; at most eight assignments per page')
+
+# The settings page has the vibration switch, and none of its rows overlap.
+def rect(item):
+    return tuple(map(float, re.search(r'\brect\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)', item).groups()))
+rumble = [item for item in rows if 'dvar "cl_gamepadRumble"' in item]
+assert len(rumble) == 1 and 'type ITEM_TYPE_YESNO' in rumble[0]
+assert 'dvarTest "ui_gamepadPage" showDvar { "0" }' in rumble[0]
+settings = [item for item in rows if ('dvarTest "ui_gamepadPage" showDvar { "0" }' in item and 'name "tab_' not in item)
+            or 'dvarTest' not in item]
+for i, a in enumerate(settings):
+    for b in settings[i + 1:]:
+        (ax, ay, aw, ah), (bx, by, bw, bh) = rect(a), rect(b)
+        assert ax + aw <= bx or bx + bw <= ax or ay + ah <= by or by + bh <= ay, (a, b)
+print('PASS: the settings page offers vibration with no overlapping rows')

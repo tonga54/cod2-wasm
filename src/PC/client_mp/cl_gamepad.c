@@ -161,6 +161,7 @@ static const dvar_t *cl_gamepadEnable;
 static const dvar_t *cl_gamepadLookSensitivity;
 static const dvar_t *cl_gamepadDeadzone;
 static const dvar_t *cl_gamepadInvertY;
+static const dvar_t *cl_gamepadRumble;
 
 static int g_buttonLayoutSouthpaw;
 
@@ -342,6 +343,7 @@ void CL_Gamepad_Init(void)
     cl_gamepadLookSensitivity = Dvar_RegisterFloat("cl_gamepadLookSensitivity", 8.0f, 0.1f, 50.0f, 0x1);
     cl_gamepadDeadzone = Dvar_RegisterFloat("cl_gamepadDeadzone", 0.20f, 0.0f, 0.9f, 0x1);
     cl_gamepadInvertY = Dvar_RegisterBool_mac("cl_gamepadInvertY", 0, 0x1);
+    cl_gamepadRumble = Dvar_RegisterBool_mac("cl_gamepadRumble", 1, 0x1);
 
     if (SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) != 0) {
         Com_Printf("Gamepad: SDL_INIT_GAMECONTROLLER failed: %s\n", SDL_GetError());
@@ -615,8 +617,14 @@ void CL_Gamepad_Frame(void)
             Gamepad_SendKey(key, down);
         }
     }
-    Gamepad_SendKey(K_BUTTON_LTRIG, Gamepad_RawAxis(gc, PHYS_LTRIG) > 0.5f);
-    Gamepad_SendKey(K_BUTTON_RTRIG, Gamepad_RawAxis(gc, PHYS_RTRIG) > 0.5f);
+    /* Pulling a trigger, as firing after touching the mouse, is controller play too. */
+    {
+        int ltrig = Gamepad_RawAxis(gc, PHYS_LTRIG) > 0.5f, rtrig = Gamepad_RawAxis(gc, PHYS_RTRIG) > 0.5f;
+        if ((ltrig && !g_buttonDown[K_BUTTON_LTRIG]) || (rtrig && !g_buttonDown[K_BUTTON_RTRIG]))
+            g_gamepadActiveDevice = 1;
+        Gamepad_SendKey(K_BUTTON_LTRIG, ltrig);
+        Gamepad_SendKey(K_BUTTON_RTRIG, rtrig);
+    }
     if (catchers & 8) Gamepad_MenuStick(gc);
 }
 
@@ -705,30 +713,41 @@ void CL_Gamepad_Move(usercmd_t *cmd)
 }
 
 #    if COD2_FEATURE_RUMBLE
+#        ifdef __EMSCRIPTEN__
+/* SDL 2.28's browser joystick driver cannot rumble (web_haptics.js). */
+extern void WebHaptics_Rumble(float strong, float weak);
+#        endif
+static int g_rumbleSent;
+
+/* The low-frequency motor is the strong one. Vibration reaches the pad only
+ * while it is the device being played with, in a focused page. */
 void CL_Gamepad_SetRumble(float lowFreq, float highFreq)
 {
-    SDL_GameController *gc;
-    Uint16 lo, hi;
-
-    if (!g_gamepadInit)
-        return;
-    gc = Gamepad_ActivePad();
-    if (!gc)
-        return;
-
-    if (lowFreq < 0.0f)
+    if (!(lowFreq > 0.0f))
         lowFreq = 0.0f;
     else if (lowFreq > 1.0f)
         lowFreq = 1.0f;
-    if (highFreq < 0.0f)
+    if (!(highFreq > 0.0f))
         highFreq = 0.0f;
     else if (highFreq > 1.0f)
         highFreq = 1.0f;
+    if ((lowFreq > 0.0f || highFreq > 0.0f) &&
+        (!g_gamepadInit || !cl_gamepadEnable->current.enabled || !cl_gamepadRumble->current.enabled ||
+         !CL_Gamepad_IsActiveDevice() || !Gamepad_HasFocus()))
+        lowFreq = highFreq = 0.0f;
+    if (lowFreq == 0.0f && highFreq == 0.0f && !g_rumbleSent)
+        return;
+    g_rumbleSent = lowFreq > 0.0f || highFreq > 0.0f;
 
-    lo = (Uint16)(lowFreq * 65535.0f);
-    hi = (Uint16)(highFreq * 65535.0f);
-
-    SDL_GameControllerRumble(gc, lo, hi, 250);
+#        ifdef __EMSCRIPTEN__
+    WebHaptics_Rumble(lowFreq, highFreq);
+#        else
+    {
+        SDL_GameController *gc = Gamepad_ActivePad();
+        if (gc)
+            SDL_GameControllerRumble(gc, (Uint16)(lowFreq * 65535.0f), (Uint16)(highFreq * 65535.0f), 250);
+    }
+#        endif
 }
 #    endif
 
