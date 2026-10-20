@@ -283,7 +283,8 @@ typedef int qboolean;
 typedef struct {int duration,initialLerp,flags,noteType;float moveSpeed;long long movetype;char *name;} animation_t;
 typedef struct {animation_t *animation;int animationNumber,animationTime,oldFrameSnapshotTime;float oldFramePos[3],animSpeedScale;} lerpFrame_t;
 typedef struct {lerpFrame_t legs,torso;void *pXAnimTree;int stanceTransitionTime,clientNum,leftHandGun,dobjDirty;} clientInfo_t;
-typedef struct {int eFlags;struct {float trBase[3];}pos;} entityState_t;
+enum {TR_STATIONARY,TR_INTERPOLATE,TR_LINEAR,TR_LINEAR_STOP};
+typedef struct {int eFlags;struct {int trType,trTime;float trBase[3];}pos;} entityState_t;
 typedef struct {int clientNum,eFlags;float fWeaponPosFrac;} playerState_t;
 typedef struct {playerState_t *ps;struct {int buttons,forwardmove,rightmove;}cmd;} pmove_t;
 typedef struct {int playerAnimType,weapClass;} WeaponDef;
@@ -370,6 +371,39 @@ int main(void) {
     /* Bodies first seen after the death has ended still use the final pose. */
     clientInfo_t finished={0};es.eFlags=0;clipTimes[3]=0;
     BG_RunLerpFrameRate(&finished,&finished.legs,3,&es);assert(clipTimes[3]==1);
+    /* A smoothed runner's snapshots carry none, one or several of its
+     * commands; its stride keeps the pace of its command time. */
+    {
+        const int commands[]={33,16,50,0,33,17,49,66,0,33,16,17};
+        clientInfo_t ci={0};ci.legs.animationNumber=1;ci.legs.animation=&a[1];
+        entityState_t run={0};run.pos.trType=TR_LINEAR_STOP;
+        int command=1000;bgs->latestSnapshotTime=1000;run.pos.trTime=command;
+        BG_RunLerpFrameRate(&ci,&ci.legs,1,&run);
+        for(int i=0;i<120;i++) {
+            float before=ci.legs.animSpeedScale;
+            bgs->latestSnapshotTime+=33;command+=commands[i%12];
+            run.pos.trTime=command;run.pos.trBase[0]=190*.001f*(command-1000);
+            BG_RunLerpFrameRate(&ci,&ci.legs,1,&run);
+            if(commands[i%12]) assert(fabsf(ci.legs.animSpeedScale-1)<.001f);
+            else assert(ci.legs.animSpeedScale==before);
+        }
+        /* Unsmoothed positions keep measuring over snapshot time, and a switch
+         * to command time restarts the measurement instead of reversing it. */
+        run.pos.trType=TR_INTERPOLATE;run.pos.trTime=0;
+        bgs->latestSnapshotTime+=33;BG_RunLerpFrameRate(&ci,&ci.legs,1,&run);
+        for(int i=0;i<10;i++) {
+            int gap=i%2?66:33;
+            bgs->latestSnapshotTime+=gap;run.pos.trBase[0]+=190*.001f*gap;
+            BG_RunLerpFrameRate(&ci,&ci.legs,1,&run);
+            assert(fabsf(ci.legs.animSpeedScale-1)<.001f);
+        }
+        run.pos.trType=TR_LINEAR_STOP;run.pos.trTime=bgs->latestSnapshotTime-100;
+        run.pos.trBase[0]+=500;BG_RunLerpFrameRate(&ci,&ci.legs,1,&run);
+        assert(fabsf(ci.legs.animSpeedScale-1)<.001f);
+        run.pos.trTime+=33;run.pos.trBase[0]+=190*.001f*33;
+        BG_RunLerpFrameRate(&ci,&ci.legs,1,&run);
+        assert(fabsf(ci.legs.animSpeedScale-1)<.001f);
+    }
     return 0;
 }
 '''
@@ -378,7 +412,10 @@ check(anim_source, (anim_source.replace('lf->animationTime = anim != NULL && ani
                                         'lf->animationTime = -1; (void)(anim != NULL && anim->moveSpeed != 0.0f ? 120 :')
                             .replace('oldAnimation != NULL && oldAnimation->moveSpeed != 0.0f ? 250 : 170;',
                                      'oldAnimation != NULL && oldAnimation->moveSpeed != 0.0f ? 250 : 170);'),
-                    anim_source.replace('XAnimSetTime(pAnimTree, animNum, 0.0f);', '')))
+                    anim_source.replace('XAnimSetTime(pAnimTree, animNum, 0.0f);', ''),
+                    anim_source.replace('sampleTime = es->pos.trType == TR_LINEAR_STOP ? es->pos.trTime : bgs->latestSnapshotTime;',
+                                        'sampleTime = bgs->latestSnapshotTime;'),
+                    anim_source.replace('} else if (lf->oldFrameSnapshotTime - sampleTime > 0) {', '} else if (0) {')))
 
 prepare = (root / 'scripts/prepare-browser-bootstrap.py').read_text()
 start = prepare.index('default_cfg = archives[')
@@ -390,4 +427,4 @@ exec(prepare[start:end], {'archives': archives})
 cfg = archives['cod2_browser_bootstrap.iwd']['default_mp.cfg']
 assert b'bind c\t\t"togglecrouch"' in cfg
 assert b'bind SPACE\t"+gostand"' in cfg
-print('PASS: posture inputs/transitions, movement directions and blends, six recycled death clips with 20 continuous fall frames each and completed death poses; five mutants fail')
+print('PASS: posture inputs/transitions, movement directions and blends, six recycled death clips with 20 continuous fall frames each and completed death poses, strides at the pace of irregular command times; eight mutants fail')

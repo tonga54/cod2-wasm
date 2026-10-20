@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
+#include <limits.h>
 extern scr_const_t scr_const;
 
 extern void DObjUpdateClientInfo(struct DObj_s *obj, float timescale);
@@ -65,6 +66,7 @@ extern const vec_t Vec3DistanceSq(const vec_t *p1, const vec_t *p2);
 extern const vec_t Vec3Normalize(vec_t *v);
 extern void CG_Player(centity_t *cent);
 extern void CG_Corpse(centity_t *cent);
+extern int com_frameTime;
 
 extern const int boxVerts[24][3];
 
@@ -327,13 +329,48 @@ void CG_AddCEntityToScene(const GfxEntity *ent, const struct DObj_s *obj, const 
     }
 }
 
-static int CG_PlayerTrajectorySampleTime(const trajectory_t *tr, int snapshotTime)
-{
-    int endTime = tr->trTime + tr->trDuration;
-    if (snapshotTime < tr->trTime)
-        return tr->trTime;
-    return snapshotTime > endTime ? endTime : snapshotTime;
-}
+/* A snapshot carries each remote player's position at their latest command
+ * time, which trails the snapshot by that player's round trip and their own
+ * interpolation (a bot's command carries the snapshot time itself). At the
+ * snapshot clock a player on the internet would run past their newest sample
+ * every snapshot, so each player plays back from its own samples, behind the
+ * newest by a delay that follows how late new samples have been arriving. */
+#define CG_REMOTE_SAMPLES 16
+#define CG_REMOTE_LEADS 32
+#define CG_REMOTE_HEADROOM 2.0f
+#define CG_REMOTE_MAX_DELAY 500.0f
+#define CG_REMOTE_MAX_GAP 1000
+#define CG_REMOTE_BRIDGE 50
+#define CG_REMOTE_FORGET 5000
+
+typedef struct {
+    int time;
+    vec3_t origin;
+    vec3_t velocity;
+    vec3_t angles;
+    float moveDir;
+    float lean;
+} cgRemoteSample_t;
+
+typedef struct {
+    cgRemoteSample_t samples[CG_REMOTE_SAMPLES];
+    int newest;
+    int count;
+    int teleport;
+    int serverTime;
+    int leads[CG_REMOTE_LEADS];
+    int leadCount;
+    int leadNext;
+    int leadFrame;
+    int frameTime;
+    int frameRealTime;
+    int lastFrameTime;
+    float delay;
+    float targetDelay;
+    qboolean delayKnown;
+} cgRemotePlayback_t;
+
+static cgRemotePlayback_t cg_remotePlayback[64];
 
 static float CG_PlayerMotionBlend(float a, float b, float va, float vb, float seconds, float f)
 {
@@ -357,62 +394,215 @@ static float CG_PlayerMotionBlend(float a, float b, float va, float vb, float se
          + (f3 - f2) * tb;
 }
 
-static qboolean CG_InterpolateRemotePlayerPosition(centity_t *cent, const float *current, const float *next)
+static qboolean CG_RemoteSampleJumped(const cgRemoteSample_t *newest, const entityState_t *es, int gap)
 {
-    const trajectory_t *a = &cent->currentState.pos;
-    const trajectory_t *b = &cent->nextState.pos;
-    int t0, t1, i;
-    float f;
+    float dx = es->pos.trBase[0] - newest->origin[0];
+    float dy = es->pos.trBase[1] - newest->origin[1];
+    float dz = es->pos.trBase[2] - newest->origin[2];
+    float dist2 = dx * dx + dy * dy + dz * dz;
+    /* Faster than 2000 units/s is a move the teleport bit did not flag,
+     * such as entering or leaving a killcam. */
+    float reach = (float)gap * 2.0f;
 
-    if (cent->currentState.eType != 1 || cent->nextState.eType != 1 ||
-        cent->currentState.number != cent->nextState.number || (unsigned)cent->nextState.number >= 64 ||
-        cent->nextState.number == cg->nextSnap->ps.clientNum ||
-        ((cent->currentState.eFlags | cent->nextState.eFlags) & 0x20300) ||
-        ((cent->currentState.eFlags ^ cent->nextState.eFlags) & 2) ||
-        a->trType != TR_LINEAR_STOP || b->trType != TR_LINEAR_STOP ||
-        a->trDuration <= 0 || b->trDuration <= 0 ||
-        a->trTime > cg->snap->serverTime || b->trTime > cg->nextSnap->serverTime)
-        return 0;
+    return dist2 > 64.0f * 64.0f && dist2 > reach * reach;
+}
 
-    /* A stopped trajectory's endpoint is stamped commandTime + duration,
-     * often earlier than its containing snapshot. Using snapshot times for
-     * those endpoints turns uneven command arrivals into uneven running speed. */
-    t0 = CG_PlayerTrajectorySampleTime(a, cg->snap->serverTime);
-    t1 = CG_PlayerTrajectorySampleTime(b, cg->nextSnap->serverTime);
-    if (t1 < t0)
+static float CG_RemoteTargetDelay(const cgRemotePlayback_t *pb)
+{
+    int lowest = INT_MAX;
+    int second = INT_MAX;
+    int i;
+    float delay;
+
+    for (i = 0; i < pb->leadCount; ++i) {
+        if (pb->leads[i] < lowest) {
+            second = lowest;
+            lowest = pb->leads[i];
+        } else if (pb->leads[i] < second) {
+            second = pb->leads[i];
+        }
+    }
+    /* Bridge the single latest sample of the last second rather than
+     * delaying every frame for it. */
+    delay = CG_REMOTE_HEADROOM - (float)(pb->leadCount >= CG_REMOTE_LEADS / 2 ? second : lowest);
+    if (delay < 0.0f)
+        return 0.0f;
+    return delay > CG_REMOTE_MAX_DELAY ? CG_REMOTE_MAX_DELAY : delay;
+}
+
+void CG_RecordRemotePlayerSample(const centity_t *cent, int serverTime, int viewClientNum)
+{
+    const entityState_t *es = &cent->nextState;
+    cgRemotePlayback_t *pb;
+    cgRemoteSample_t *sample;
+    int i;
+
+    if ((unsigned)es->number >= 64 || es->number == viewClientNum)
+        return;
+    pb = &cg_remotePlayback[es->number];
+    if (serverTime < pb->serverTime || serverTime - pb->serverTime > CG_REMOTE_FORGET)
+        memset(pb, 0, sizeof(*pb));
+    if (es->eType != 1 || es->pos.trType != TR_LINEAR_STOP || (es->eFlags & 0x20300)) {
+        pb->count = 0;
+        return;
+    }
+    if (pb->count) {
+        const cgRemoteSample_t *newest = &pb->samples[pb->newest];
+        int gap = es->pos.trTime - newest->time;
+
+        if ((es->eFlags & 2) != pb->teleport || gap < 0 || gap > CG_REMOTE_MAX_GAP ||
+            CG_RemoteSampleJumped(newest, es, gap)) {
+            pb->count = 0;
+        } else if (!gap) {
+            pb->serverTime = serverTime;
+            return;
+        } else if (pb->leadFrame != cg->time) {
+            /* How far the newest sample led the last frame drawn without this one. */
+            int drawn = pb->frameTime == cg->time ? pb->lastFrameTime : pb->frameTime;
+
+            if (drawn && cg->time - drawn < 250) {
+                pb->leads[pb->leadNext] = newest->time - drawn;
+                pb->leadNext = (pb->leadNext + 1) % CG_REMOTE_LEADS;
+                if (pb->leadCount < CG_REMOTE_LEADS)
+                    ++pb->leadCount;
+                pb->leadFrame = cg->time;
+                pb->targetDelay = CG_RemoteTargetDelay(pb);
+            }
+        }
+    }
+    if (!pb->delayKnown) {
+        float delay = (float)(serverTime - es->pos.trTime) + 20.0f;
+
+        pb->delay = delay < 0.0f ? 0.0f : delay > CG_REMOTE_MAX_DELAY ? CG_REMOTE_MAX_DELAY : delay;
+        pb->targetDelay = pb->delay;
+        pb->delayKnown = 1;
+    }
+    pb->newest = (pb->newest + 1) % CG_REMOTE_SAMPLES;
+    if (pb->count < CG_REMOTE_SAMPLES)
+        ++pb->count;
+    sample = &pb->samples[pb->newest];
+    sample->time = es->pos.trTime;
+    for (i = 0; i < 3; ++i) {
+        sample->origin[i] = es->pos.trBase[i];
+        sample->velocity[i] = es->pos.trDelta[i];
+        sample->angles[i] = es->apos.trBase[i];
+    }
+    sample->moveDir = es->angles2[1];
+    sample->lean = es->leanf;
+    pb->teleport = es->eFlags & 2;
+    pb->serverTime = serverTime;
+}
+
+static qboolean CG_PlayRemotePlayer(centity_t *cent, vec3_t angles, float *moveDir, float *lean)
+{
+    const entityState_t *es = &cent->nextState;
+    cgRemotePlayback_t *pb;
+    const cgRemoteSample_t *newest;
+    const cgRemoteSample_t *newer;
+    const cgRemoteSample_t *older;
+    float ahead;
+    int i, j;
+
+    if (es->eType != 1 || (unsigned)es->number >= 64 || es->number == cg->nextSnap->ps.clientNum ||
+        es->pos.trType != TR_LINEAR_STOP || (es->eFlags & 0x20300))
         return 0;
-    if (cg->time >= t1) {
-        int ahead = cg->time - t1;
-        /* Bridge at most one server interval after the trajectory endpoint;
-         * never coast indefinitely on stale velocity. The authoritative server
-         * movement and hitboxes, local prediction and the clock stay intact. */
-        if (ahead > 50) ahead = 50;
-        for (i = 0; i < 3; ++i)
-            cent->lerpOrigin[i] = next[i] + b->trDelta[i] * ((float)ahead * 0.001f);
+    pb = &cg_remotePlayback[es->number];
+    if (!pb->count || pb->samples[pb->newest].time != es->pos.trTime)
+        return 0;
+    newest = &pb->samples[pb->newest];
+
+    if (pb->frameTime != cg->time) {
+        int elapsed = cg->time - pb->frameTime;
+        int real = com_frameTime - pb->frameRealTime;
+
+        pb->lastFrameTime = pb->frameTime;
+        pb->frameTime = cg->time;
+        pb->frameRealTime = com_frameTime;
+        if (pb->lastFrameTime && elapsed > 0 && elapsed < 250) {
+            float headroom;
+
+            /* Advance at the frame's real pace: the network clock's own
+             * millisecond corrections join the delay and converge with it. */
+            if (real > 0 && abs(elapsed - real) <= 50) {
+                pb->delay += (float)(elapsed - real);
+                if (pb->delay < 0.0f)
+                    pb->delay = 0.0f;
+                elapsed = real;
+            }
+            /* Converge by playing a few percent slower or faster. A player
+             * clearly past its newest sample slows harder, even beyond the
+             * target, so a stalled link costs less of a jump when it resumes. */
+            headroom = (float)(newest->time - cg->time) + pb->delay;
+            if (headroom < -CG_REMOTE_HEADROOM) {
+                pb->delay += 0.25f * (float)elapsed;
+                if (pb->delay > CG_REMOTE_MAX_DELAY)
+                    pb->delay = CG_REMOTE_MAX_DELAY;
+            } else if (pb->delay < pb->targetDelay) {
+                pb->delay += 0.08f * (float)elapsed;
+                if (pb->delay > pb->targetDelay)
+                    pb->delay = pb->targetDelay;
+            } else {
+                pb->delay -= 0.03f * (float)elapsed;
+                if (pb->delay < pb->targetDelay)
+                    pb->delay = pb->targetDelay;
+            }
+        }
+    }
+
+    /* Times stay integer until differenced: float milliseconds since a long
+     * running server started would round to whole frames. */
+    ahead = (float)(cg->time - newest->time) - pb->delay;
+    if (ahead >= 0.0f) {
+        /* Bridge at most one server interval past the newest sample; never
+         * coast indefinitely on stale velocity. */
+        float seconds = (ahead < (float)CG_REMOTE_BRIDGE ? ahead : (float)CG_REMOTE_BRIDGE) * 0.001f;
+
+        for (i = 0; i < 3; ++i) {
+            cent->lerpOrigin[i] = newest->origin[i] + newest->velocity[i] * seconds;
+            angles[i] = newest->angles[i];
+        }
+        *moveDir = newest->moveDir;
+        *lean = newest->lean;
         return 1;
     }
-    if (t1 == t0 || cg->time <= t0) {
-        memcpy(cent->lerpOrigin, current, sizeof(vec3_t));
-        return 1;
+    newer = newest;
+    for (i = 1; i < pb->count; ++i) {
+        older = &pb->samples[(pb->newest - i + CG_REMOTE_SAMPLES) % CG_REMOTE_SAMPLES];
+        if ((float)(older->time - newest->time) <= ahead) {
+            float span = (float)(newer->time - older->time);
+            float f = (ahead - (float)(older->time - newest->time)) / span;
+
+            for (j = 0; j < 3; ++j) {
+                cent->lerpOrigin[j] = CG_PlayerMotionBlend(older->origin[j], newer->origin[j],
+                    older->velocity[j], newer->velocity[j], span * 0.001f, f);
+                angles[j] = LerpAngle(older->angles[j], newer->angles[j], f);
+            }
+            *moveDir = LerpAngle(older->moveDir, newer->moveDir, f);
+            *lean = LerpAngle(older->lean, newer->lean, f);
+            return 1;
+        }
+        newer = older;
     }
-    f = (float)(cg->time - t0) / (float)(t1 - t0);
-    for (i = 0; i < 3; ++i)
-        cent->lerpOrigin[i] = CG_PlayerMotionBlend(current[i], next[i],
-            a->trDelta[i], b->trDelta[i], (float)(t1 - t0) * 0.001f, f);
+    /* Before the first sample since the player appeared or teleported. */
+    memcpy(cent->lerpOrigin, newer->origin, sizeof(vec3_t));
+    memcpy(angles, newer->angles, sizeof(vec3_t));
+    *moveDir = newer->moveDir;
+    *lean = newer->lean;
     return 1;
 }
 
 static void CG_TraceRemoteMotion(const centity_t *cent)
 {
-    typedef struct { int lastTime, startTime, frames, moving, held; vec3_t origin; float maxStep; } motionTrace_t;
+    typedef struct { int lastTime, startTime, frames, moving, held, bridged; vec3_t origin; float maxStep; } motionTrace_t;
     static motionTrace_t traces[64];
     static int enabled = -1;
+    const cgRemotePlayback_t *pb = &cg_remotePlayback[cent->nextState.number];
+    const cgRemoteSample_t *newest = &pb->samples[pb->newest];
     motionTrace_t *trace;
     float step2 = 0.0f, speed2 = 0.0f;
     int i;
     if (enabled < 0) enabled = getenv("PTRACE") != NULL;
-    if (!enabled || cent->nextState.eType != 1 || (unsigned)cent->nextState.number >= 64 ||
-        cent->nextState.number == cg->nextSnap->ps.clientNum)
+    if (!enabled)
         return;
     trace = &traces[cent->nextState.number];
     if (!trace->lastTime || cg->time < trace->lastTime || cg->time - trace->lastTime > 250 ||
@@ -432,14 +622,14 @@ static void CG_TraceRemoteMotion(const centity_t *cent)
             ++trace->moving;
             if (step2 < 0.000001f) ++trace->held;
         }
+        if ((float)(cg->time - newest->time) >= pb->delay) ++trace->bridged;
         if (step2 > trace->maxStep * trace->maxStep) trace->maxStep = sqrtf(step2);
         if (cg->time - trace->startTime >= 1000) {
-            Com_Printf("[remote-motion] time=%d entity=%d snapshots=%d/%d commands=%d/%d frames=%d moving=%d held=%d maxStep=%.3f\n",
-                cg->time, cent->nextState.number, cg->snap->serverTime, cg->nextSnap->serverTime,
-                cent->currentState.pos.trTime, cent->nextState.pos.trTime,
-                trace->frames, trace->moving, trace->held, trace->maxStep);
+            Com_Printf("[remote-motion] time=%d entity=%d lag=%d delay=%.1f target=%.1f frames=%d moving=%d held=%d bridged=%d maxStep=%.3f\n",
+                cg->time, cent->nextState.number, pb->serverTime - newest->time, pb->delay, pb->targetDelay,
+                trace->frames, trace->moving, trace->held, trace->bridged, trace->maxStep);
             trace->startTime = cg->time;
-            trace->frames = trace->moving = trace->held = 0;
+            trace->frames = trace->moving = trace->held = trace->bridged = 0;
             trace->maxStep = 0.0f;
         }
     }
@@ -452,16 +642,30 @@ static void CG_InterpolateEntityPosition(centity_t *cent)
     clientInfo_t *ci;
     vec3_t current;
     vec3_t next;
+    vec3_t angles;
+    float moveDir;
+    float lean;
     float f = cg->frameInterpolation;
+
+    if (CG_PlayRemotePlayer(cent, angles, &moveDir, &lean)) {
+        CG_TraceRemoteMotion(cent);
+        ci = &cg->bgs.clientinfo[cent->nextState.clientNum];
+        ci->lerpMoveDir = moveDir;
+        ci->playerAngles[0] = angles[0];
+        ci->playerAngles[1] = angles[1];
+        ci->playerAngles[2] = angles[2];
+        cent->lerpAngles[0] = 0.0f;
+        cent->lerpAngles[1] = angles[1];
+        cent->lerpAngles[2] = 0.0f;
+        ci->lerpLean = lean;
+        return;
+    }
 
     BG_EvaluateTrajectory(&cent->currentState.pos, cg->snap->serverTime, current);
     BG_EvaluateTrajectory(&cent->nextState.pos, cg->nextSnap->serverTime, next);
-    if (!CG_InterpolateRemotePlayerPosition(cent, current, next)) {
-        cent->lerpOrigin[0] = current[0] + (next[0] - current[0]) * f;
-        cent->lerpOrigin[1] = current[1] + (next[1] - current[1]) * f;
-        cent->lerpOrigin[2] = current[2] + (next[2] - current[2]) * f;
-    }
-    CG_TraceRemoteMotion(cent);
+    cent->lerpOrigin[0] = current[0] + (next[0] - current[0]) * f;
+    cent->lerpOrigin[1] = current[1] + (next[1] - current[1]) * f;
+    cent->lerpOrigin[2] = current[2] + (next[2] - current[2]) * f;
 
     BG_EvaluateTrajectory(&cent->currentState.apos, cg->snap->serverTime, current);
     BG_EvaluateTrajectory(&cent->nextState.apos, cg->nextSnap->serverTime, next);

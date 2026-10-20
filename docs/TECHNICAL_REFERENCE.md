@@ -593,10 +593,13 @@ The authoritative simulation is configured at **30 Hz** (33 ms simulation
 steps), with clients requesting **30 snapshots/s**, up to **60 input packets/s**
 and a 25 KB/s client rate. Actual snapshot delivery remains subject to bandwidth
 limits and server load. The higher tick rate increases simulation work; validate
-CPU and packet cadence with the intended player count before deployment. Remote motion
-interpolation uses
-sample timestamps/velocities, smooths sample boundaries and allows bounded
-50 ms extrapolation across short gaps. The server preserves fractional player
+CPU and packet cadence with the intended player count before deployment. Other
+players play back from their own movement samples, each snapshot's position at
+that player's command time, with its velocity. Each plays behind its newest
+sample by a delay that follows how late that player's samples arrive, at the
+frame's real pace, so a player over the internet does not stop between
+snapshots; past the newest sample, motion continues for at most 50 ms. Their
+stride keeps the pace of the same command times. The server preserves fractional player
 positions so integer rounding does not introduce small speed changes between
 rendered frames; the existing snapshot format carries these coordinates.
 Command time stays monotonic after

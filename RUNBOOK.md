@@ -5502,3 +5502,82 @@ Validation:
   one row for `weap_mine_click` (the owner's file, 100 to 750 units, `auto`),
   changed. `check-private-assets.py` passes.
 - Not yet heard in a browser.
+
+## Other players run smoothly online — 2026-10-20
+
+The owner saw other people run in small, regular cuts in online matches; bots
+ran smoothly. A snapshot carries each player's origin at that player's latest
+command time, and a browser stamps its commands one snapshot interval and 5 ms
+behind its newest snapshot and sends them 60 times a second. A human's position
+therefore trails the snapshot by about 40 to 90 ms on the LAN (80 ms at 20 Hz in
+the 2026-10-09 traces), plus the round trip over the internet; a bot's commands
+carry the server frame's time. The client drew everyone at the snapshot clock
+and, past the newest sample, bridged 50 ms on its velocity and then held. Past
+about 85 ms of lag that happened every snapshot, so a human online moved in
+steps at the 30 Hz snapshot rate. The same drawing ran up to about 100 ms of
+movement ahead of where the server rewinds a shot (`SV_GetClientPositionAtTime`
+at the shooter's command time).
+
+`CG_SetNextSnap` now records each snapshot's sample of every remote player
+(command time, origin, velocity, view angles, movement direction, lean), and
+`CG_PlayRemotePlayer` draws the player at the render time less a delay of its
+own, with the existing monotone Hermite between samples. The delay keeps 2 ms
+over the second-latest arrival among the last 32 new samples (about a second),
+each measured as the newest sample's lead on the last frame drawn without the
+next one: one late sample a second is bridged rather than delaying every frame
+for it. The playback advances at the frame's real pace (`com_frameTime`), so the
+network clock's millisecond corrections, on about a quarter of all frames, join
+the delay instead of the motion. It converges by playing 8% slower or 3%
+faster; a player more than 2 ms past its newest sample plays 25% slower, beyond
+the target, so a stalled link costs less of a jump when it resumes. Bridging
+stays at most 50 ms. The parity bit, a move faster than 2000 units/s (such as
+entering a killcam), a gap over a second and a map change restart the samples;
+dead, mounted, followed and local players keep the snapshot interpolation.
+Times stay integer until differenced. `?movementDebug=1` prints each remote
+player's lag, delay and held and bridged frames once a second.
+
+The stride had the same fault: `BG_RunLerpFrameRate` divided the distance
+between two command-time origins by the snapshot interval, and a snapshot can
+carry none, one or several of a player's commands, so a steady runner's legs
+alternated between 0.1 and 2 times their speed. A `TR_LINEAR_STOP` player's
+distance is now measured over its command time, and a snapshot without a new
+command keeps the rate. The server's hitbox animation shares the function.
+
+Validation:
+
+- `scripts/test-remote-player-motion.py` replays 30 Hz snapshots from the
+  production export through the browser's network clock
+  (`CL_AdjustTimeDelta`), the cgame's order of reading snapshots and the
+  production recorder and playback, with a remote browser sending 60 packets a
+  second, jitter on both links and late server frames. Off speed counts frames
+  drawn below 90% or above 106% of the runner's speed over the frame's real
+  time; the previous code went through the same replay:
+
+  | Link | Held frames, before → now | Off speed, before → now | Drawn against the shot rewind, before → now |
+  |---|---:|---:|---|
+  | LAN, 120 Hz | 0 → 0 of 3,485 | 845 → 21 | 48 ms ahead → 5 ms behind |
+  | LAN bot, 120 Hz | 0 → 0 of 3,485 | 845 → 0 | 0 → 1 ms behind |
+  | 60 ms internet, 120 Hz | 336 → 0 of 3,486 | 1,932 → 17 | 108 ms ahead → 8 ms behind |
+  | 150 ms internet, 60 Hz | 915 → 0 of 1,796 | 1,699 → 27 | 117 ms ahead → 10 ms behind |
+  | Loaded Pi, 300 ms, 144 Hz | 3,441 → 0 of 4,233 | 4,233 → 23 | 116 ms ahead → 24 ms behind |
+  | 60 ms with a 150 ms stall every 4 s | 465 → 56 of 3,485 | 1,973 → 146 | 105 ms ahead → 14 ms behind |
+
+  The frames now off speed are the rare ones played 25% slower. A server up
+  28 hours replays the same as the 60 ms link. The test also checks exported
+  fractional origins at 20, 30 and 50 Hz, stops without overshoot, 50 ms of
+  bridging, teleports beside the old position, a killcam jump, map changes,
+  the delay's choice and every guard; ten broken variants fail.
+- `scripts/test-player-stance-animations.py`: a runner whose snapshots carry
+  0 to 66 ms of commands keeps a stride rate of 1; unsmoothed entities still
+  measure over snapshot time, and a switch to command time restarts the
+  measurement. The two new mutants fail with the file's six others.
+- `test-packet-entity-positions.py`, `test-client-corpses.py`,
+  `test-predicted-shot-effects.py`, `test-remote-player-controllers.py`,
+  `test-client-clock-recoil.py`, `test-player-lean.py`,
+  `test-remote-sound-events.py` and `test-footstep-events.py` pass.
+- `cg_ents_mp.c`, `cg_snapshot_mp.c` and `bg_animation_mp.c` compile with
+  Emscripten 3.1.64, and `bg_animation_mp.c` with the i386 server's flags
+  (GCC 11.4), without new warnings.
+- Not verified: a full browser build, `test-static.sh`, or two browsers over a
+  real internet link. With `?movementDebug=1`, `held` should stay 0 while a
+  remote player runs.

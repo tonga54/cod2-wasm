@@ -14,6 +14,7 @@ extern int I_stricmp(const char *s1, const char *s2);
 extern void I_strncpyz(char *dest, const char *src, int destsize);
 extern void CL_ResetSkeletonCache(int val);
 extern void CG_SetFrameInterpolation(void);
+extern void CG_RecordRemotePlayerSample(const centity_t *cent, int serverTime, int viewClientNum);
 extern void CG_ExecuteNewServerCommands(int serverCommandSequence);
 extern void CG_CheckOpenWaitingScriptMenu(void);
 extern void CG_Respawn(void);
@@ -530,6 +531,11 @@ void CG_SetNextSnap(snapshot_t *snap_param)
 
                 CG_ResetEntity(cent);
             }
+
+            /* Every snapshot passes here, including those a late frame
+             * transitions through at once. */
+            CG_RecordRemotePlayerSample((centity_t *)cent, ((snapshot_t *)snap)->serverTime,
+                                        ((snapshot_t *)snap)->ps.clientNum);
         }
     }
 

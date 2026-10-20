@@ -576,6 +576,7 @@ static void __attribute_regparm__(3) BG_RunLerpFrameRate(clientInfo_t *ci, lerpF
     int hadNoAnimation;
     qboolean oldAnimationUsesZOnly;
     float startTime;
+    int sampleTime;
 
     oldAnimation = lf->animation;
     oldAnimationUsesZOnly = (oldAnimation != NULL && (oldAnimation->flags & 2) != 0);
@@ -722,11 +723,19 @@ static void __attribute_regparm__(3) BG_RunLerpFrameRate(clientInfo_t *ci, lerpF
     }
 
     anim = lf->animation;
+    /* A smoothed player's trBase is its origin at its command time, and a
+     * snapshot or server frame can carry none, one or several of its
+     * commands: measure the distance against that time. */
+    sampleTime = es->pos.trType == TR_LINEAR_STOP ? es->pos.trTime : bgs->latestSnapshotTime;
     if (anim == NULL || anim->moveSpeed == 0.0f || lf->oldFrameSnapshotTime == 0) {
         lf->animSpeedScale = 1.0f;
-        lf->oldFrameSnapshotTime = bgs->latestSnapshotTime;
+        lf->oldFrameSnapshotTime = sampleTime;
         BG_CopyLerpFramePosition(lf, es);
-    } else if (lf->oldFrameSnapshotTime != bgs->latestSnapshotTime) {
+    } else if (lf->oldFrameSnapshotTime - sampleTime > 0) {
+        /* Switched from snapshot to command time: restart the measurement. */
+        lf->oldFrameSnapshotTime = sampleTime;
+        BG_CopyLerpFramePosition(lf, es);
+    } else if (lf->oldFrameSnapshotTime != sampleTime) {
         int deltaMsec;
         float dist;
         float seconds;
@@ -737,10 +746,10 @@ static void __attribute_regparm__(3) BG_RunLerpFrameRate(clientInfo_t *ci, lerpF
             dist = Vec3Distance(lf->oldFramePos, es->pos.trBase);
         }
 
-        deltaMsec = bgs->latestSnapshotTime - lf->oldFrameSnapshotTime;
+        deltaMsec = sampleTime - lf->oldFrameSnapshotTime;
         seconds = (float)deltaMsec * 0.0010000000474974513f;
         lf->animSpeedScale = (dist / seconds) / anim->moveSpeed;
-        lf->oldFrameSnapshotTime = bgs->latestSnapshotTime;
+        lf->oldFrameSnapshotTime = sampleTime;
         BG_CopyLerpFramePosition(lf, es);
 
         if (lf->animSpeedScale < 0.10000000149011612f) {
