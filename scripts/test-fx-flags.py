@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Run the production EFX flag parser on the flags retail effects name: each key takes its own table's names and
 then the other table's, each entry setting its own word, so the snow, fires and barrel explosion that name
-cheapOrgCalc under spawnFlags load; unknown names still fail the segment."""
+cheapOrgCalc under spawnFlags load; unknown names still fail the segment. impactFx alone sets the impact bit and not
+usePhysics, as CoD2MP_s.exe's table does: the snow grenade's ring names it without an effect to play, and colliding
+would play the Missing FX sprite."""
 from pathlib import Path
 import re
 import subprocess
@@ -108,6 +110,15 @@ int main(void)
     assert(parse("linear disableFarPlaneCulling", 1, &a, &s) && a == (0x4000000u | 0x2000000u) && s == 0);
     assert(parse("CHEAPORGCALC EVENDISTRIBUTION", 1, &a, &s) && a == 0 && s == (0x040u | 0x200u));
     cases += 7;
+    /* impactFx is the impact bit alone under either key; only an impactfx
+     * list adds usePhysics. grenadeExp_snow's ring_outter names it with no
+     * list, so its flakes never trace the world for an effect to play. */
+    assert(parse("impactFx", 0, &a, &s) && a == 0x800u && s == 0);
+    assert(parse("impactFx", 1, &a, &s) && a == 0x800u && s == 0);
+    assert(parse("impactKills impactFx useAlpha useRandomColors useRandomAlpha useRandomSize", 0, &a, &s) &&
+           a == (0x400u | 0x800u | 0x080u | 0x2000u | 0x4000u | 0x8000u) && !(a & 0x020u) && s == 0);
+    assert(parse("usePhysics impactKills impactFx", 0, &a, &s) && a == (0x020u | 0x400u | 0x800u) && s == 0);
+    cases += 4;
     /* Names neither table knows still fail the line, and so the segment. */
     for (int key = 0; key < 2; ++key) {
         assert(!parse("rgbComponentInterpolation", key, &a, &s));
@@ -132,16 +143,18 @@ mutants = [
      '        if (!entry)\n            continue;\n'),
     ('        if (!stricmp(flagEntries[entryIndex].flag, flag))\n            return &flagEntries[entryIndex];\n',
      '        if (!strcmp(flagEntries[entryIndex].flag, flag))\n            return &flagEntries[entryIndex];\n'),
+    ('{ "impactFx", { 0x000800, 0 } },', '{ "impactFx", { 0x000820, 0 } },'),
+    ('{ "impactFx", { 0x800, 0 } },', '{ "impactFx", { 0x820, 0 } },'),
 ]
 
 with tempfile.TemporaryDirectory(prefix='cod2-fx-flags-') as directory:
     path, binary = Path(directory) / 'flags.c', Path(directory) / 'flags'
     for index, (old, new) in enumerate([(None, None)] + mutants):
-        code = parser
+        code = tables + parser
         if old is not None:
             assert code.count(old) == 1, old
             code = code.replace(old, new)
-        path.write_text(support + tables + code + checks)
+        path.write_text(support + code + checks)
         subprocess.run(['cc', '-std=c99', '-O1', '-g', '-fsanitize=address,undefined', '-fno-sanitize-recover=all',
                         '-Wall', '-Werror' if index == 0 else '-w', str(path), '-o', str(binary)], check=True)
         result = subprocess.run([str(binary)], capture_output=True, text=True)
@@ -152,5 +165,5 @@ with tempfile.TemporaryDirectory(prefix='cod2-fx-flags-') as directory:
             assert result.returncode != 0, f'mutant survived: {old!r} -> {new!r}'
 
 print(f'PASS: the production EFX flag parser takes every name retail effects put under flags and spawnFlags, the '
-      f'snow, fires and barrel explosion\'s cheapOrgCalc among them, sets each entry\'s own word and still refuses '
-      f'unknown names ({cases} cases); all {len(mutants)} mutants fail')
+      f'snow, fires and barrel explosion\'s cheapOrgCalc among them, sets each entry\'s own word, leaves usePhysics '
+      f'out of impactFx and still refuses unknown names ({cases} cases); all {len(mutants)} mutants fail')

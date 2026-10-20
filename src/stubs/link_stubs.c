@@ -504,7 +504,7 @@ struct {
     { "relative", { 0x000002, 0 } },
     { "blocksSight", { 0x001000, 0 } },
     { "disableFarPlaneCulling", { 0x2000000, 0 } },
-    { "impactFx", { 0x000820, 0 } },
+    { "impactFx", { 0x000800, 0 } },
     { "linear", { 0x4000000, 0 } },
 };
 
@@ -524,7 +524,7 @@ struct {
     { "orgOnCylinder", { 0, 0x004 } },
     { "axisFromSphere", { 0, 0x002 } },
     { "randrotaroundfwd", { 0, 0x100 } },
-    { "impactFx", { 0x820, 0 } },
+    { "impactFx", { 0x800, 0 } },
     { "deathFx", { 0x200, 0 } },
     { "emitFx", { 0x100, 0 } },
 };
