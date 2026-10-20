@@ -253,17 +253,18 @@ void BG_ApplyAttachmentStats(const char *weapon, unsigned mask, AttachmentStats 
         }
     }
     if (mask & ATT_BIT(ATT_QUICKDRAW)) {
-        /* Community measurements: 60% off an SMG's aim time, 20% off the
-         * others'. */
-        float scale = kind == ATT_KIND_SMG || kind == ATT_KIND_FAST_SMG ? 0.4f
-                      : kind == ATT_KIND_PISTOL                         ? 0.6f
-                                                                        : 0.8f;
+        /* WWII's: half an SMG's aim time off, a fifth of the machine gun's,
+         * a sixth of the others'. */
+        float scale = kind == ATT_KIND_SMG || kind == ATT_KIND_FAST_SMG ? 0.5f
+                      : kind == ATT_KIND_LMG                            ? 0.8f
+                                                                        : 0.84f;
 
         stats->adsTransInTime = (int)((float)stats->adsTransInTime * scale + 0.5f);
     }
     if (mask & ATT_BIT(ATT_GRIP)) {
+        /* WWII's grip takes 7 to 10% off the kick. */
         for (i = 0; i < 8; i++)
-            stats->adsKick[i] *= 0.65f;
+            stats->adsKick[i] *= 0.9f;
     }
     if (mask & ATT_BIT(ATT_STEADYAIM)) {
         float scale = kind == ATT_KIND_FAST_SMG ? 0.65f : 0.45f;
@@ -272,40 +273,55 @@ void BG_ApplyAttachmentStats(const char *weapon, unsigned mask, AttachmentStats 
             stats->hipSpread[i] *= scale;
     }
     if (mask & ATT_BIT(ATT_CALIBRATION)) {
-        stats->adsIdleAmount *= 0.5f;
+        stats->adsIdleAmount *= 0.6f;
         for (i = 0; i < 5; i++)
-            stats->adsSway[i] *= 0.5f;
+            stats->adsSway[i] *= 0.6f;
     }
     if (mask & ATT_BIT(ATT_RAPIDFIRE)) {
         /* WWII's increases in rounds per minute. */
-        float rate = kind == ATT_KIND_LMG                                 ? 1.0989f
-                     : kind == ATT_KIND_SHOTGUN                           ? 1.42f
-                     : kind == ATT_KIND_BOLT || kind == ATT_KIND_SNIPER ? 1.054f
-                                                                          : 1.0638f;
+        float rate = kind == ATT_KIND_BOLT || kind == ATT_KIND_SNIPER ? 1.054f : 1.0638f;
 
         stats->fireTime = BG_AttachmentScaledTime(stats->fireTime, rate);
         stats->rechamberTime = BG_AttachmentScaledTime(stats->rechamberTime, rate);
         stats->rechamberBoltTime = BG_AttachmentScaledTime(stats->rechamberBoltTime, rate);
     }
     if (mask & ATT_BIT(ATT_EXTMAG)) {
-        stats->clipSize = stats->clipSize * 3 / 2;
-        stats->maxAmmo = stats->maxAmmo * 3 / 2;
-        stats->startAmmo = stats->startAmmo * 3 / 2;
+        if (kind == ATT_KIND_LMG) {
+            /* WWII's machine gun drum: 100 rounds, two in reserve. */
+            stats->clipSize = 100;
+            stats->maxAmmo = stats->startAmmo = 200;
+        } else {
+            stats->clipSize = stats->clipSize * 3 / 2;
+            stats->maxAmmo = stats->maxAmmo * 3 / 2;
+            stats->startAmmo = stats->startAmmo * 3 / 2;
+        }
     }
     if (mask & ATT_BIT(ATT_FMJ))
         stats->armorPiercing = 1;
     if (mask & ATT_BIT(ATT_HIGHCAL)) {
-        stats->headMultiplier[0] *= 1.5f;
-        stats->headMultiplier[1] *= 1.5f;
+        /* An automatic weapon's headshot stays a point short of killing
+         * outright; the server truncates the damage. */
+        float cap = !stats->semiAuto && !stats->boltAction && stats->damage > 0 ? 99.5f / (float)stats->damage : 0.0f;
+
+        for (i = 0; i < 2; i++) {
+            float raised = stats->headMultiplier[i] * 1.5f;
+
+            if (cap > 0.0f && raised > cap)
+                raised = cap > stats->headMultiplier[i] ? cap : stats->headMultiplier[i];
+            stats->headMultiplier[i] = raised;
+        }
     }
     if (mask & ATT_BIT(ATT_RIFLING)) {
-        float scale = kind == ATT_KIND_RIFLE                                  ? 2.0f
-                      : kind == ATT_KIND_SMG || kind == ATT_KIND_FAST_SMG     ? 1.3f
-                      : kind == ATT_KIND_SHOTGUN                              ? 1.13f
-                                                                              : 1.25f;
+        if (kind == ATT_KIND_SMG || kind == ATT_KIND_FAST_SMG) {
+            /* WWII's SMGs keep their first range: the fall to minimum
+             * damage reaches further. */
+            stats->minDamageRange *= 1.25f;
+        } else {
+            float scale = kind == ATT_KIND_RIFLE ? 2.0f : kind == ATT_KIND_SHOTGUN ? 1.13f : 1.25f;
 
-        stats->maxDamageRange *= scale;
-        stats->minDamageRange *= scale;
+            stats->maxDamageRange *= scale;
+            stats->minDamageRange *= scale;
+        }
     }
     if (mask & ATT_BIT(ATT_SUPPRESSOR)) {
         float scale = kind == ATT_KIND_PISTOL ? 0.85f : 0.7f;

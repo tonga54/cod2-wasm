@@ -100,16 +100,16 @@ numbers are WWII's where they are published, otherwise this port's:
 
 | Attachment | Effect | Source |
 | --- | --- | --- |
-| Extended Mag | Magazine and reserve +50%, rounded down | WWII |
-| Rapid Fire | Fire and rechamber times for +6.38% rate; +9.89% on the Bren, +5.4% on bolt-actions, +42% on the Trench Gun | WWII's RPM tables |
-| Quickdraw | Aim-in time −60% on SMGs, −40% on pistols, −20% on the others | Community measurements; pistols ours |
+| Extended Mag | Magazine and reserve +50%, rounded down; the Bren a 100-round drum with 200 in reserve | WWII |
+| Rapid Fire | Fire and rechamber times for +6.38% rate, the Bren and Trench Gun included; +5.4% on bolt-actions | WWII's RPM tables |
+| Quickdraw | Aim-in time −50% on SMGs, −20% on the Bren, −16% on the others | WWII after its 2018 updates |
 | Steady Aim | Hip-fire spread −55%, −35% on the Thompson and PPSh | WWII (M1928, PPSh-41) |
-| Grip | Aimed view and gun kick −35% | Ours |
-| Advanced Rifling | Damage ranges ×2 on rifles, ×1.3 on SMGs, ×1.25 on the BAR and pistols, ×1.13 on the Trench Gun | WWII |
+| Grip | Aimed view and gun kick −10% | WWII (7–10%) |
+| Advanced Rifling | Damage ranges ×2 on rifles, ×1.25 on the BAR and pistols, ×1.13 on the Trench Gun; on SMGs full damage reaches as far and the fall beyond it ×1.25 | WWII |
 | Suppressor | Damage ranges −30% on SMGs, −15% on pistols; quiet, no flash, off the minimap | WWII |
-| High Caliber | Helmet and head multipliers ×1.5 | WWII |
+| High Caliber | Helmet and head multipliers ×1.5; an automatic weapon's headshot stays a point short of a kill | WWII; the limit ours |
 | FMJ | Penetrates as armor-piercing: 25% more depth, so less damage lost, through cover | Ours, on the existing penetration |
-| Ballistic Calibration | Aimed idle sway and sway −50% | Ours |
+| Ballistic Calibration | Aimed idle sway and sway −40% | WWII |
 | Reflex Sight | View −10% (more zoom), aimed spread −25%, a red dot over the sights | Ours |
 | Lens Sight | View −20%, aimed spread −15%, an amber ring over the sights | Ours |
 | 4x Optic | A 23.7° view, four times an 80° one; an iron-sighted gun takes its nation's sniper scope | Ours; on a sniper rifle, WWII's lower-zoom scope |
@@ -124,11 +124,17 @@ WWII, only the Suppressor changes a shot's sound; Rapid Fire is heard in the
 faster shots, and the other attachments leave it as it is. A 4x
 Optic brings the sniper scope's rules: the gun hides at full zoom, the breath can
 be held and shots follow the scope's view. Two attachments that change the same
-value multiply: a Suppressor on Advanced Rifling leaves an SMG 9% short of its
-range, as in WWII.
+value multiply: on an SMG, a Suppressor with Advanced Rifling keeps the
+suppressed full-damage range, and the fall to minimum damage ends an eighth
+short of the gun's own.
 
-WWII's Extended Mag gives the Bren a 100-round pan; here it takes the +50% of
-the others, as its longer box magazine shows.
+WWII's Extended Mag gives the Bren a 100-round drum, and here it holds as many,
+with two more in reserve, though the gun still shows the longer box magazine.
+
+High Caliber raises the helmet and head multipliers by half, but an automatic
+weapon's headshot stops one point short of killing on its own, so the rule
+that no automatic weapon kills with one headshot (`weapon-balance.json`)
+holds with the attachment too.
 
 A gun dropped on death or swapped keeps its camouflage and attachments: on the
 ground it shows its paint, and whoever picks it up gets them on it, its longer
@@ -146,9 +152,15 @@ for the limits and suppressors, the Call of Duty Wiki's
 [Extended Mags](https://callofduty.fandom.com/wiki/Extended_Mags) and
 [Silencer](https://callofduty.fandom.com/wiki/Silencer) pages, the
 [WWII wiki's attachment page](https://w.atwiki.jp/cod_wwiiwiki/pages/35.html)
-for Advanced Rifling and High Caliber, and
+for Advanced Rifling and High Caliber,
 [a hip-fire measurement](https://game-hashirigaki.site/fps/cod-ww2-steady/) for
-Steady Aim.
+Steady Aim, the Chinese Call of Duty wiki's
+[Quickdraw](https://cod.huijiwiki.com/wiki/Quickdraw%EF%BC%88%E4%BA%8C%E6%88%98%EF%BC%89),
+[Grip](https://cod.huijiwiki.com/wiki/Grip%EF%BC%88%E4%BA%8C%E6%88%98%EF%BC%89),
+[Ballistic Calibration](https://cod.huijiwiki.com/wiki/Ballistic_Calibration) and
+[Advanced Rifling](https://cod.huijiwiki.com/wiki/Advanced_Rifling%EF%BC%88%E4%BA%8C%E6%88%98%EF%BC%89)
+pages, and [code-level weapon stats](https://denkirson.proboards.com/thread/8401/cod-wwii-code-level-stats?page=5)
+for the machine gun's Rapid Fire.
 
 ### How they reach the game
 

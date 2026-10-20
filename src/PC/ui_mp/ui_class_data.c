@@ -434,6 +434,9 @@ static const struct {
     CLASS_RAW("minDamageRange", CLASS_RAW_FLOAT, minDamageRange),
     CLASS_RAW("locHelmet", CLASS_RAW_FLOAT, headMultiplier[0]),
     CLASS_RAW("locHead", CLASS_RAW_FLOAT, headMultiplier[1]),
+    CLASS_RAW("damage", CLASS_RAW_INT, damage),
+    CLASS_RAW("semiAuto", CLASS_RAW_INT, semiAuto),
+    CLASS_RAW("boltAction", CLASS_RAW_INT, boltAction),
     CLASS_RAW("armorPiercing", CLASS_RAW_INT, armorPiercing),
 #undef CLASS_RAW
 };
@@ -589,8 +592,14 @@ int ClassData_AttachmentEffects(const AttachmentStats *base, const AttachmentSta
     if (attached->maxDamageRange != base->maxDamageRange && base->maxDamageRange > 0.0f)
         CLASS_EFFECT(CLASS_SIGN(attached->maxDamageRange, base->maxDamageRange), "Damage range %+d%%",
                      ClassData_Percent(attached->maxDamageRange / base->maxDamageRange));
+    /* Where the fall to minimum damage reaches unlike full damage. */
+    if (base->maxDamageRange > 0.0f && base->minDamageRange > 0.0f &&
+        fabsf(attached->minDamageRange / base->minDamageRange - attached->maxDamageRange / base->maxDamageRange) >
+            1e-3f)
+        CLASS_EFFECT(CLASS_SIGN(attached->minDamageRange, base->minDamageRange), "Falloff range %+d%%",
+                     ClassData_Percent(attached->minDamageRange / base->minDamageRange));
     if (attached->headMultiplier[1] != base->headMultiplier[1])
-        CLASS_EFFECT(CLASS_SIGN(attached->headMultiplier[1], base->headMultiplier[1]), "Head damage x%g, from x%g",
+        CLASS_EFFECT(CLASS_SIGN(attached->headMultiplier[1], base->headMultiplier[1]), "Head damage x%.3g, from x%.3g",
                      (double)attached->headMultiplier[1], (double)base->headMultiplier[1]);
     if (attached->armorPiercing && !base->armorPiercing)
         CLASS_EFFECT(1, "Keeps more damage through cover");

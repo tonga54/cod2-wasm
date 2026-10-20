@@ -54,6 +54,7 @@ unsigned BG_GetWeaponAttachments(const playerState_t *ps, int weapon)
 
 static void BG_AttachmentStatsFromDef(const WeaponDef *def, AttachmentStats *stats)
 {
+    memset(stats, 0, sizeof(*stats));
     stats->clipSize = def->iClipSize;
     stats->maxAmmo = def->iMaxAmmo;
     stats->startAmmo = def->iStartAmmo;
@@ -89,6 +90,9 @@ static void BG_AttachmentStatsFromDef(const WeaponDef *def, AttachmentStats *sta
     stats->minDamageRange = def->fMinDamageRange;
     stats->headMultiplier[0] = def->locationDamageMultipliers[HITLOC_HELMET];
     stats->headMultiplier[1] = def->locationDamageMultipliers[HITLOC_HEAD];
+    stats->damage = def->damage;
+    stats->semiAuto = def->bSemiAuto;
+    stats->boltAction = def->bBoltAction;
     stats->armorPiercing = def->armorPiercing;
     stats->suppressed = 0;
     stats->overlay = def->szOverlayMaterial;

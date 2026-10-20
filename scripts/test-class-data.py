@@ -401,16 +401,34 @@ int main(void)
                                 ATT_BIT(ATT_STEADYAIM), &attached);
         count = ClassData_AttachmentEffects(&stats.raw, &attached.raw, lines, tones, 8);
         assert(count == 4);
-        assert(!strcmp(lines[0], "Aims in 88 ms, from 220") && tones[0] == 1);
+        assert(!strcmp(lines[0], "Aims in 110 ms, from 220") && tones[0] == 1);
         assert(!strcmp(lines[1], "Hip-fire spread -35%") && tones[1] == 1);
         assert(!strcmp(lines[2], "Damage range -30%") && tones[2] == -1);
         assert(!strcmp(lines[3], "Quiet, no flash, off the minimap") && tones[3] == 1);
         assert(attached.value[CLASS_STAT_RANGE] == 560.0f);
-        ClassData_AttachedStats(&stats, "m1garand_mp", ATT_BIT(ATT_HIGHCAL) | ATT_BIT(ATT_FMJ) | ATT_BIT(ATT_GRIP), &attached);
+        /* Advanced Rifling keeps an SMG's full damage range and its bar; the
+         * fall beyond reaches a quarter further. */
+        ClassData_AttachedStats(&stats, "thompson_mp", ATT_BIT(ATT_RIFLING), &attached);
         count = ClassData_AttachmentEffects(&stats.raw, &attached.raw, lines, tones, 8);
-        assert(count == 3 && !strcmp(lines[0], "Aimed recoil -35%") && !strcmp(lines[1], "Head damage x3, from x2"));
-        assert(!strcmp(lines[2], "Keeps more damage through cover"));
-        assert(ClassData_AttachmentEffects(&stats.raw, &attached.raw, lines, tones, 1) == 1);
+        assert(count == 1 && !strcmp(lines[0], "Falloff range +25%") && tones[0] == 1);
+        assert(attached.value[CLASS_STAT_RANGE] == 800.0f && attached.raw.minDamageRange == 1875.0f);
+        /* High Caliber: a semi-automatic rifle's headshot x3; an automatic
+         * one stops a point short of a kill. */
+        {
+            ClassStats rifle;
+            ClassData_ReadStats("WEAPONFILE\\damage\\45\\semiAuto\\1\\maxDamageRange\\2000\\minDamageRange\\3000"
+                                "\\fireTime\\0.135\\adsViewKickPitchMax\\70\\locHead\\2\\locHelmet\\2", &rifle);
+            ClassData_AttachedStats(&rifle, "m1garand_mp", ATT_BIT(ATT_HIGHCAL) | ATT_BIT(ATT_FMJ) | ATT_BIT(ATT_GRIP),
+                                    &attached);
+            count = ClassData_AttachmentEffects(&rifle.raw, &attached.raw, lines, tones, 8);
+            assert(count == 3 && !strcmp(lines[0], "Aimed recoil -10%") && !strcmp(lines[1], "Head damage x3, from x2"));
+            assert(!strcmp(lines[2], "Keeps more damage through cover"));
+            assert(ClassData_AttachmentEffects(&rifle.raw, &attached.raw, lines, tones, 1) == 1);
+        }
+        assert(stats.raw.damage == 35 && !stats.raw.semiAuto && !stats.raw.boltAction);
+        ClassData_AttachedStats(&stats, "mp44_mp", ATT_BIT(ATT_HIGHCAL), &attached);
+        count = ClassData_AttachmentEffects(&stats.raw, &attached.raw, lines, tones, 8);
+        assert(count == 1 && !strcmp(lines[0], "Head damage x2.84, from x2") && tones[0] == 1);
         /* A 4x Optic scopes the rifle: its fifth for a scope, and 4x zoom. */
         ClassData_AttachedStats(&stats, "m1garand_mp", ATT_BIT(ATT_OPTIC4X), &attached);
         assert(fabsf(attached.value[CLASS_STAT_ACCURACY] - 1.2f / 0.75f) < 1e-4f && attached.raw.overlay[0]);

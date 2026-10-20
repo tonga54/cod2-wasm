@@ -75,6 +75,10 @@ typedef struct {
     float maxDamageRange, minDamageRange;
     /* Helmet and head multipliers. */
     float headMultiplier[2];
+    /* The weapon's own damage and how it fires, which attachments never
+     * change: High Caliber leaves an automatic weapon's headshot short of a
+     * kill. */
+    int damage, semiAuto, boltAction;
     int armorPiercing;
     int suppressed;
     /* The scope material, or "". */

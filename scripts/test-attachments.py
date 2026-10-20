@@ -60,6 +60,7 @@ typedef struct {
     weapOverlayReticle_t overlayReticle;
     float overlayWidth, overlayHeight, fOOPosAnimLength[2];
     int hasDetonator;
+    int damage, bSemiAuto;
 } WeaponDef;
 typedef struct { int legsAnim, torsoAnim; } entityState_t;
 typedef struct { playerState_t *ps; struct { int buttons, serverTime; } cmd; } pmove_t;
@@ -178,6 +179,10 @@ int main(void)
     Define(WEBLEY, "webley_mp", 6, 18, 135, 100, 275, 80.0f, 1.0f, 3.0f, 384.0f, "");
     Define(PPS42, "pps42_mp", 35, 210, 85, 100, 220, 65.0f, 0.5f, 1.5f, 1000.0f, "");
     bg_iNumWeapons = PPS42;
+    defs[THOMPSON].damage = defs[PPS42].damage = 35;
+    defs[GREASEGUN].damage = defs[GARAND].damage = defs[COLT].damage = defs[WEBLEY].damage = 45;
+    defs[BAR].damage = defs[BREN].damage = 40;
+    defs[GARAND].bSemiAuto = defs[COLT].bSemiAuto = defs[WEBLEY].bSemiAuto = 1;
 
     /* The lists: names, weapons matched without case, WWII's limits. */
     assert(BG_AttachmentFind("suppressor") == ATT_SUPPRESSOR && BG_AttachmentFind("Suppressor") < 0);
@@ -228,26 +233,31 @@ int main(void)
     assert(d.iClipSize == 10 && d.iMaxAmmo == 31);
     d = Attached(WEBLEY, ATT_BIT(ATT_EXTMAG));
     assert(d.iClipSize == 6 && d.iMaxAmmo == 18);
+    /* The Bren's 100-round drum, with two in reserve. */
+    d = Attached(BREN, ATT_BIT(ATT_EXTMAG));
+    assert(d.iClipSize == 100 && d.iMaxAmmo == 200 && d.iStartAmmo == 200);
     d = Attached(THOMPSON, ATT_BIT(ATT_RAPIDFIRE));
     assert(d.iFireTime == 80 && d.iRechamberTime == 94);
+    /* The Bren and Trench Gun gain the rifles' and SMGs' 6.38%. */
     d = Attached(BREN, ATT_BIT(ATT_RAPIDFIRE));
-    assert(d.iFireTime == 109);
+    assert(d.iFireTime == 113);
     d = Attached(SHOTGUN, ATT_BIT(ATT_RAPIDFIRE));
-    assert(d.iFireTime == 199 && d.iRechamberTime == 516 && d.iRechamberBoltTime == 258);
+    assert(d.iFireTime == 266 && d.iRechamberTime == 689 && d.iRechamberBoltTime == 344);
     d = Attached(KAR98K_SNIPER, ATT_BIT(ATT_RAPIDFIRE));
     assert(d.iFireTime == 313 && d.iRechamberTime == 949);
     d = Attached(THOMPSON, ATT_BIT(ATT_QUICKDRAW));
-    assert(d.iAdsTransInTime == 88 && NEAR(d.fOOPosAnimLength[0], 1.0f / 88.0f) && NEAR(d.fOOPosAnimLength[1], 1.0f / 400.0f));
-    assert(Attached(GARAND, ATT_BIT(ATT_QUICKDRAW)).iAdsTransInTime == 240);
-    assert(Attached(COLT, ATT_BIT(ATT_QUICKDRAW)).iAdsTransInTime == 160);
-    assert(Attached(SHOTGUN, ATT_BIT(ATT_QUICKDRAW)).iAdsTransInTime == 240);
+    assert(d.iAdsTransInTime == 110 && NEAR(d.fOOPosAnimLength[0], 1.0f / 110.0f) && NEAR(d.fOOPosAnimLength[1], 1.0f / 400.0f));
+    assert(Attached(BREN, ATT_BIT(ATT_QUICKDRAW)).iAdsTransInTime == 240);
+    assert(Attached(GARAND, ATT_BIT(ATT_QUICKDRAW)).iAdsTransInTime == 252);
+    assert(Attached(COLT, ATT_BIT(ATT_QUICKDRAW)).iAdsTransInTime == 224);
+    assert(Attached(SHOTGUN, ATT_BIT(ATT_QUICKDRAW)).iAdsTransInTime == 252);
     d = Attached(THOMPSON, ATT_BIT(ATT_GRIP));
-    assert(NEAR(d.fAdsViewKickPitchMax, 45.5f) && NEAR(d.fAdsViewKickYawMin, -13.0f) && NEAR(d.fAdsGunKickPitchMin, 26.0f));
+    assert(NEAR(d.fAdsViewKickPitchMax, 63.0f) && NEAR(d.fAdsViewKickYawMin, -18.0f) && NEAR(d.fAdsGunKickPitchMin, 36.0f));
     assert(NEAR(Attached(THOMPSON, ATT_BIT(ATT_STEADYAIM)).fHipSpreadStandMin, 0.975f));
     d = Attached(GREASEGUN, ATT_BIT(ATT_STEADYAIM));
     assert(NEAR(d.fHipSpreadStandMin, 0.675f) && NEAR(d.fHipSpreadProneMin, 0.405f) && NEAR(d.hipSpreadProneMax, 2.25f));
     d = Attached(KAR98K_SNIPER, ATT_BIT(ATT_CALIBRATION));
-    assert(NEAR(d.fAdsIdleAmount, 10.0f) && NEAR(d.adsSwayMaxAngle, 2.0f) && NEAR(d.adsSwayVertScale, 1.0f));
+    assert(NEAR(d.fAdsIdleAmount, 12.0f) && NEAR(d.adsSwayMaxAngle, 2.4f) && NEAR(d.adsSwayVertScale, 1.2f));
     d = Attached(THOMPSON, ATT_BIT(ATT_REFLEX));
     assert(NEAR(d.fAdsZoomFov, 58.5f) && NEAR(d.fAdsSpread, 0.375f) && !d.szOverlayMaterial[0]);
     d = Attached(THOMPSON, ATT_BIT(ATT_LENS));
@@ -264,8 +274,22 @@ int main(void)
     d = Attached(GARAND, ATT_BIT(ATT_HIGHCAL));
     assert(NEAR(d.locationDamageMultipliers[HITLOC_HEAD], 3.0f) && NEAR(d.locationDamageMultipliers[HITLOC_HELMET], 3.0f));
     assert(NEAR(d.locationDamageMultipliers[4], 1.0f));
+    /* An automatic rifle's headshot stops a point short of killing alone,
+     * after the server truncates it, and never falls below the gun's own. */
+    d = Attached(BAR, ATT_BIT(ATT_HIGHCAL));
+    assert(NEAR(d.locationDamageMultipliers[HITLOC_HEAD], 99.5f / 40.0f) &&
+           NEAR(d.locationDamageMultipliers[HITLOC_HELMET], 99.5f / 40.0f));
+    assert((int)(40.0f * d.locationDamageMultipliers[HITLOC_HEAD]) == 99);
+    {
+        WeaponDef high = defs[BAR];
+        high.locationDamageMultipliers[HITLOC_HEAD] = 3.0f;
+        BG_ApplyAttachments(&high, ATT_BIT(ATT_HIGHCAL));
+        assert(NEAR(high.locationDamageMultipliers[HITLOC_HEAD], 3.0f));
+    }
+    /* An SMG keeps its full damage range; the fall beyond it reaches a
+     * quarter further. */
     d = Attached(THOMPSON, ATT_BIT(ATT_RIFLING));
-    assert(NEAR(d.fMaxDamageRange, 1040.0f) && NEAR(d.fMinDamageRange, 2080.0f));
+    assert(NEAR(d.fMaxDamageRange, 800.0f) && NEAR(d.fMinDamageRange, 2000.0f));
     assert(NEAR(Attached(GARAND, ATT_BIT(ATT_RIFLING)).fMaxDamageRange, 4000.0f));
     assert(NEAR(Attached(BAR, ATT_BIT(ATT_RIFLING)).fMaxDamageRange, 1875.0f));
     /* WWII's light machine guns take neither Advanced Rifling nor High Caliber, nor its carbine a Lens Sight. */
@@ -279,8 +303,10 @@ int main(void)
     assert(NEAR(Attached(SHOTGUN, ATT_BIT(ATT_RIFLING)).fMaxDamageRange, 433.92f));
     assert(NEAR(Attached(THOMPSON, ATT_BIT(ATT_SUPPRESSOR)).fMaxDamageRange, 560.0f));
     assert(NEAR(Attached(COLT, ATT_BIT(ATT_SUPPRESSOR)).fMaxDamageRange, 326.4f));
-    /* WWII's net 9% loss for a suppressor on rifling. */
-    assert(NEAR(Attached(THOMPSON, ATT_BIT(ATT_SUPPRESSOR) | ATT_BIT(ATT_RIFLING)).fMaxDamageRange, 728.0f));
+    /* A suppressor on rifling: full damage as suppressed, the fall an
+     * eighth short of the gun's own. */
+    d = Attached(THOMPSON, ATT_BIT(ATT_SUPPRESSOR) | ATT_BIT(ATT_RIFLING));
+    assert(NEAR(d.fMaxDamageRange, 560.0f) && NEAR(d.fMinDamageRange, 1400.0f));
     /* Nothing a weapon cannot take, and nothing on an unknown weapon. */
     d = Attached(GARAND, ATT_BIT(ATT_SUPPRESSOR) | ATT_BIT(ATT_CALIBRATION));
     assert(!memcmp(&d, &defs[GARAND], sizeof(d)));
@@ -335,7 +361,7 @@ int main(void)
         def = BG_GetPlayerWeaponDef(&ps, THOMPSON);
         assert(def->iClipSize == (mask & ATT_BIT(ATT_EXTMAG) ? 30 : 20));
         assert(def->iFireTime == (mask & ATT_BIT(ATT_RAPIDFIRE) ? 80 : 85));
-        assert(def->iAdsTransInTime == (mask & ATT_BIT(ATT_QUICKDRAW) ? 88 : 220));
+        assert(def->iAdsTransInTime == (mask & ATT_BIT(ATT_QUICKDRAW) ? 110 : 220));
     }
     /* Weapons reload with each map: copies follow the new definitions. */
     BG_SetSlotAttachments(&ps, 1, ATT_BIT(ATT_EXTMAG));
@@ -389,7 +415,7 @@ int main(void)
         ps = Holding(THOMPSON, ATT_BIT(ATT_QUICKDRAW), COLT, 0);
         ps.pm_flags = 0x40;
         PM_UpdateAimDownSightLerp(&pm, &pml);
-        assert(NEAR(ps.fWeaponPosFrac, 0.5f));
+        assert(NEAR(ps.fWeaponPosFrac, 0.4f));
         BG_SetSlotAttachments(&ps, 1, 0);
         ps.fWeaponPosFrac = 0.0f;
         PM_UpdateAimDownSightLerp(&pm, &pml);
@@ -401,7 +427,7 @@ int main(void)
         ps = Holding(THOMPSON, ATT_BIT(ATT_GRIP), COLT, 0);
         ps.fWeaponPosFrac = 1.0f;
         BG_WeaponFireRecoil(&ps, gun, kick);
-        assert(NEAR(kick[0], -42.25f) && NEAR(gun[0], 26.0f));
+        assert(NEAR(kick[0], -58.5f) && NEAR(gun[0], 36.0f));
         BG_SetSlotAttachments(&ps, 1, 0);
         gun[0] = 0.0f;
         BG_WeaponFireRecoil(&ps, gun, kick);
@@ -450,7 +476,16 @@ mutants = [
      '    return BG_AttachmentCount(mask) <= max &&'),
     (rules_path, '    mask &= entry->allowed;\n', ''),
     (rules_path, '        stats->clipSize = stats->clipSize * 3 / 2;', '        stats->clipSize = stats->clipSize * 2;'),
-    (rules_path, ': kind == ATT_KIND_PISTOL                         ? 0.6f', ': kind == ATT_KIND_PISTOL                         ? 0.8f'),
+    (rules_path, ': kind == ATT_KIND_LMG                            ? 0.8f', ': kind == ATT_KIND_LMG                            ? 0.84f'),
+    (rules_path, 'kind == ATT_KIND_SMG || kind == ATT_KIND_FAST_SMG ? 0.5f', 'kind == ATT_KIND_SMG || kind == ATT_KIND_FAST_SMG ? 0.4f'),
+    (rules_path, '            stats->adsKick[i] *= 0.9f;', '            stats->adsKick[i] *= 0.65f;'),
+    (rules_path, '        stats->adsIdleAmount *= 0.6f;', '        stats->adsIdleAmount *= 0.5f;'),
+    (rules_path, '? 1.054f : 1.0638f;', '? 1.054f : kind == ATT_KIND_LMG ? 1.0989f : 1.0638f;'),
+    (rules_path, '            stats->clipSize = 100;', '            stats->clipSize = stats->clipSize * 3 / 2;'),
+    (rules_path, '            if (cap > 0.0f && raised > cap)', '            if (0)'),
+    (rules_path, 'float cap = !stats->semiAuto && !stats->boltAction &&', 'float cap = !stats->boltAction &&'),
+    (rules_path, '                raised = cap > stats->headMultiplier[i] ? cap : stats->headMultiplier[i];', '                raised = cap;'),
+    (rules_path, '            stats->minDamageRange *= 1.25f;\n', '            stats->minDamageRange *= 1.25f;\n            stats->maxDamageRange *= 1.25f;\n'),
     (rules_path, 'return time > 0 ? (int)((float)time / rate + 0.5f) : time;', 'return time > 0 ? (int)((float)time / rate) : time;'),
     (rules_path, '        float scale = kind == ATT_KIND_PISTOL ? 0.85f : 0.7f;', '        float scale = 0.7f;'),
     (rules_path, "int ca = *a >= 'A' && *a <= 'Z' ? *a + 32 : *a, cb = *b >= 'A' && *b <= 'Z' ? *b + 32 : *b;",
@@ -467,6 +502,7 @@ mutants = [
     (glue_path, '    if (def->iAdsTransInTime > 0)\n        def->fOOPosAnimLength[0] = 1.0f / (float)def->iAdsTransInTime;\n', ''),
     (glue_path, '    return BG_GetAttachedWeaponDef(weapon, mask)->iClipSize;', '    return BG_GetAmmoClipSize(bg_weaponDefs[weapon]->iClipIndex);'),
     (glue_path, '    s_attachedDefCount = 0;\n', ''),
+    (glue_path, '    stats->semiAuto = def->bSemiAuto;\n', ''),
     (glue_path, '    es->torsoAnim = (int)((attachments >> 10 & 0x3f) | (unsigned)(camo & 0xf) << 6);',
      '    es->torsoAnim = (int)((unsigned)(camo & 0xf) << 6);'),
     (glue_path, '    return (int)((unsigned)es->torsoAnim >> 6 & 0xf);', '    return (int)((unsigned)es->torsoAnim >> 6);'),

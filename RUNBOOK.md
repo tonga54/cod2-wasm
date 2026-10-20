@@ -4197,3 +4197,47 @@ Validation:
 - `check-private-assets.py`, `test-weapon-fire-modes.py`,
   `test-ads-transitions.py`, `test-melee-damage.py` and
   `test-bullet-penetration.py` pass.
+
+## Attachments closer to WWII — 2026-10-20
+
+A research pass on WWII's post-2018 attachments found the lists already
+matching, but several effects off. The owner chose to fix the figures
+credited to WWII that were wrong, bring this port's own figures closer to
+WWII's, and keep High Caliber from letting an automatic weapon kill with one
+headshot. `bg_attachment_rules.c` now has:
+
+- Rapid Fire: +6.38% for the Bren and the Trench Gun as for the rest. WWII's
+  code-level stats give the MG 42 alone its 9.9%, and the Trench Gun's +42%
+  came from a fire-rate bug WWII patched in May 2018 (58 to 61–62 rounds a
+  minute since). Bolt-actions keep +5.4%.
+- Extended Mag: the Bren takes WWII's 100-round drum with 200 in reserve,
+  though it still shows the longer box magazine; the rest keep +50%.
+- Quickdraw: aim-in time −50% on SMGs, −20% on the Bren, −16% on the rest
+  (it was −60%, −20% and −40% on pistols).
+- Grip: kick −10%, the top of WWII's 7–10% (it was −35%).
+- Ballistic Calibration: sway −40% (it was −50%).
+- Advanced Rifling on SMGs: WWII leaves an SMG's first range as it is, so
+  full damage reaches as far and the fall to minimum damage ends ×1.25 as far
+  (it was ×1.3 on both). Create a Class shows it as "Falloff range +25%"
+  whenever the fall moves unlike full damage; the range bar, which is full
+  damage, stays.
+- High Caliber: the helmet and head multipliers still rise by half, but on an
+  automatic weapon only so far that its headshot, truncated by the server,
+  deals 99. The MP44 and BAR, the automatic weapons that take it, go from ×2
+  to ×2.49 rather than ×3; semi-automatic rifles still go from ×3 to ×4.5 and
+  pistols from ×2.5 to ×3.75. `AttachmentStats` carries the weapon's damage and whether it fires
+  semi-automatically or by bolt for this; it now starts zeroed.
+
+Validation:
+
+- `scripts/test-attachments.py` runs the production rules and weapon code:
+  the Bren's drum, Rapid Fire and Quickdraw; the new Quickdraw, Grip and
+  Calibration figures through aim-in, recoil and sway; an automatic rifle's
+  headshot at 99 and never below the gun's own multiplier, a semi-automatic
+  rifle's at ×3; the SMG falloff with and without a suppressor. 11 more
+  mutants fail (38).
+- `scripts/test-class-data.py`: the menus' effect lines, "Falloff range +25%"
+  with the range bar unchanged, "Head damage x2.84, from x2" on an automatic
+  rifle and x3 on a semi-automatic one, from the weapon files' `damage`,
+  `semiAuto` and `boltAction`.
+- `test-class-select.py` and `test-class-camo.py` pass.
