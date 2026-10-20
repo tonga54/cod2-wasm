@@ -5457,3 +5457,48 @@ on `main` before this change. A local stack with this compose file (hardening
 and sysctl applied) downloaded, verified and mounted the archives in a browser,
 joined an 8-bot Carentan room and loaded the map through both on-demand paths.
 Not tested on the Pi itself, nor in Firefox, Safari or Windows.
+
+## The S-Mine's click heard only near it — 2026-10-20
+
+The owner reported that the whole map heard an S-Mine click when an enemy
+stepped by it. The mine played the retail minefields' `minefield_click`:
+`dist_min` 500 and an empty `dist_max`, which the alias loader makes five
+times `dist_min` (`com_sndalias_load_obj.c`). The click played at full volume
+within 500 units and faded linearly to silence at 2500. Its temp entity is
+broadcast, as `playSound`'s is, so every client received it and only that
+range limited it. The six maps' spawn points span 3146 to 7667 units, so from
+the middle of Toujane or Burgundy all of the map heard it, at half volume
+1500 units away. The browser's driver attenuates 3D sounds as the retail
+engine does (rolloff factor 0, `SND_Attenuate` alone); the client was right.
+
+The S-Mine's trigger sound is now an alias of its own, `weap_mine_click`
+(`browser_explosives.py`): the retail click's rows with `dist_min` 100 and
+`dist_max` 750. `ALIAS_COLUMNS` gives a new alias columns over its source's,
+and the generator refuses a column its source's table lacks. The click plays
+at full volume within 100 units, 86% at the blast's 192-unit edge and 54% at
+400, and not at all from 750: the client starts no 3D sound beyond its
+`dist_max`. The retail minefields keep `minefield_click` as it was.
+
+The owner's sound pack replaced `minefield_click` with the Bouncing Betty's
+activation click (`g/mine_click.wav`). Its list now gives `weap_mine_click`
+that file and volume (0.851 to 1.0) too, so the mine sounds as before, only
+near it. The Pi's `~/cod2-original/main/owner_sounds/aliases.csv` needs the
+same line before this change reaches it, or the updater stops at "Prepared
+owner assets differ from the published build".
+
+Validation:
+
+- `scripts/test-owner-sound-pack.py`: the click plays the retail rows heard
+  from 100 to 750 units, whatever alias the mine's weapon file names; the pack
+  keeps that range; a map's minefield script still packages the retail row;
+  a column the table lacks is refused. 3 more mutants fail (36): the columns
+  dropped, the refusal removed and the mine back on `minefield_click`.
+- `test-hit-sound-assets.py`, `test-menu-music-assets.py`,
+  `test-prematch-music-assets.py`, `test-browser-smine.py`,
+  `test-class-data.py`, `test-weapon-balance.py`, `test-weapon-fire-modes.py`
+  and `test-browser-attachment-models.py` pass.
+- The private archives were regenerated. Against the previous ones only
+  `weapons/mp/mine_mp`, its `triggerSound`, and `soundaliases/browser_owner.csv`,
+  one row for `weap_mine_click` (the owner's file, 100 to 750 units, `auto`),
+  changed. `check-private-assets.py` passes.
+- Not yet heard in a browser.

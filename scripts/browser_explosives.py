@@ -39,16 +39,24 @@ WEAPONS = ('mine_mp', 'c4_mp')
 DEPENDENCIES = (STICKY_MODEL, ICON_TEMPLATE, 'materials/' + MATERIAL, MK2_MODEL, 'xanim/' + HOLD_ANIM,
                 MK2_PULLPIN, MK2_MATERIAL)
 
-# Each new alias starts from the rows of the retail alias it names.
+# Each new alias starts from the rows of the retail alias it names, with any
+# columns of its own from ALIAS_COLUMNS.
 ALIASES = {
     'weap_mine_pullout': 'weap_fraggrenade_pin',
     'weap_mine_throw': 'weap_fraggrenade_fire',
     'weap_mine_land': 'grenade_bounce_default',
     'weap_mine_arm': 'weap_fraggrenade_pin',
+    'weap_mine_click': 'minefield_click',
     'weap_c4_pullout': 'weap_fraggrenade_pin',
     'weap_c4_throw': 'weap_fraggrenade_fire',
     'weap_c4_land': 'grenade_bounce_default',
     'weap_c4_detonate': 'weap_fraggrenade_pin',
+}
+# The retail minefields' click leaves dist_max empty, which the engine makes
+# five times dist_min: full volume to 500 units and heard to 2500, across most
+# of a map. The S-Mine's is loud over its blast and silent beyond 750.
+ALIAS_COLUMNS = {
+    'weap_mine_click': {'dist_min': '100', 'dist_max': '750'},
 }
 ALIAS_TABLE = 'soundaliases/browser_explosives.csv'
 STRINGS = 'localizedstrings/browser.str'
@@ -109,7 +117,7 @@ MINE = {
 }
 MINE_KEYS = {
     'proximityRadius': '40', 'proximityArmTime': '1.2', 'proximityDelay': '0.3',
-    'bounceSound': 'weap_mine_land', 'armSound': 'weap_mine_arm', 'triggerSound': 'minefield_click',
+    'bounceSound': 'weap_mine_land', 'armSound': 'weap_mine_arm', 'triggerSound': 'weap_mine_click',
 }
 C4 = {
     'displayName': 'BROWSER_C4', 'weaponClass': 'item', 'offhandClass': 'None', 'gunModel': 'viewmodel_c4',
@@ -442,15 +450,21 @@ def explosive_assets(read):
 
 
 def alias_rows(header, rows_of):
-    """The new aliases' rows: each source alias's rows under the new name, for
-    the table header given; rows_of(alias) lists the source's field dicts."""
+    """The new aliases' rows: each source alias's rows under the new name with
+    the new alias's own columns, for the table header given; rows_of(alias)
+    lists the source's field dicts."""
     rows = []
     for alias, source in ALIASES.items():
         fields = rows_of(source)
         if not fields:
             raise ValueError(f'No original {source} alias for {alias}')
+        own = ALIAS_COLUMNS.get(alias, {})
+        unknown = sorted(set(own) - set(header))
+        if unknown:
+            raise ValueError(f'{alias} sets {", ".join(unknown)}, not a column of its source\'s table')
         for row in fields:
-            rows.append([alias if column == 'name' else row.get(column, '') for column in header])
+            values = dict(row, **own, name=alias)
+            rows.append([values.get(column, '') for column in header])
     return rows
 
 

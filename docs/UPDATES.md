@@ -327,6 +327,11 @@ music already replaces. `check-private-assets.py` verifies the rows and that
 the packaged files are the owner's bytes. Without the folder the archive keeps
 the original sounds.
 
+The explosives' own aliases (`weap_mine_*`, `weap_c4_*`) start from retail
+rows and are listed like the originals. The S-Mine's click is
+`weap_mine_click`, heard up to 750 units away; `minefield_click` is only the
+retail minefields' click.
+
 On October 18, 2026 the owner's pack of 213 files replaced 215 aliases: first-
 and third-person fire, reloads and bolt cycles of every weapon, the mounted
 MG42 and .30 cal loops and cooldowns, grenade pins, throws, bounces and

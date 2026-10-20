@@ -5,6 +5,7 @@ import contextlib
 import io
 import struct
 import subprocess
+import sys
 import tempfile
 import types
 import zipfile
@@ -14,6 +15,8 @@ from browser_explosives import ALIASES as EXPLOSIVE_ALIASES
 root = Path(__file__).resolve().parent.parent
 module_path = root / 'scripts/browser_sound_assets.py'
 module_source = module_path.read_text()
+explosives_path = root / 'scripts/browser_explosives.py'
+explosives_source = explosives_path.read_text()
 
 HEADER = ['Name', 'sequence', 'file', 'vol_min', 'vol_max', 'vol_mod', 'pitch_min', 'pitch_max',
           'dist_min', 'dist_max', 'channel', 'type', 'probability', 'loop', 'masterslave', 'loadspec',
@@ -150,9 +153,18 @@ int main(int argc,char **argv){
 '''
 
 
-def load(source):
+def load(source, explosives=explosives_source):
+    """browser_sound_assets from source, importing the explosives' generator from its own source."""
+    generator = types.ModuleType('browser_explosives')
+    exec(compile(explosives, str(explosives_path), 'exec'), generator.__dict__)
     module = types.ModuleType('browser_sound_assets')
-    exec(compile(source, str(module_path), 'exec'), module.__dict__)
+    stock = sys.modules['browser_explosives']
+    sys.modules['browser_explosives'] = generator
+    try:
+        exec(compile(source, str(module_path), 'exec'), module.__dict__)
+    finally:
+        sys.modules['browser_explosives'] = stock
+    module.explosives = generator
     return module
 
 
@@ -328,6 +340,30 @@ def checks(m, archive_path, folder):
         m.verify_owner_sounds(replaced, dict(original_rows, weap_mine_arm=[(LOWER, dict(zip(LOWER, derived)))]),
                               mine_pack)
         raises(AssertionError, lambda: m.verify_owner_sounds(replaced, original_rows, mine_pack))
+
+        # The S-Mine's click, whatever its file names, plays the retail minefield click's rows heard from 100
+        # to 750 units, not as far as their dist_max; the pack keeps that range, and the minefields their click.
+        trigger = m.explosives.MINE_KEYS['triggerSound'].encode()
+        clicking = dict(renderer, **{'weapons/mp/mine_mp': b'WEAPONFILE\\triggerSound\\' + trigger})
+        minefield = GRENADE['minefield_click']
+        click = ['weap_mine_click' if column == 'name' else '100' if column == 'dist_min' else
+                 '750' if column == 'dist_max' else value for column, value in zip(LOWER, minefield)]
+        clicked = m.collect_sound_assets(root, index, originals, clicking, maps)
+        table_header, rows = m.alias_table(clicked[m.ALIAS_TABLE].decode())
+        assert table_header == LOWER and rows == [click]
+        assert clicked.get('soundaliases/test_grenades.csv') == stock.get('soundaliases/test_grenades.csv')
+        click_pack = pack_with(LISTING + 'weap_mine_click,w/reload.wav\n')
+        replaced = m.collect_sound_assets(root, index, originals, clicking, maps, owner_sounds=click_pack)
+        _, rows = m.alias_table(replaced[m.OWNER_SOUNDS_TABLE].decode())
+        assert rows == [owner_row(click, 'w/reload.wav')]
+        both = m.collect_sound_assets(root, index, originals, dict(clicking, **{
+            'maps/mp/_minefields.gsc': b'\tself playsound ("minefield_click");\n'}), maps)
+        assert minefield in m.alias_table(both['soundaliases/test_grenades.csv'].decode())[1]
+        assert m.alias_table(both[m.ALIAS_TABLE].decode())[1] == [click]
+        # A column of the alias's own must be one of its source's table.
+        narrow = [column for column in LOWER if not column.startswith('dist_')]
+        raises(ValueError, lambda: m.explosive_alias_table(
+            {source: [(narrow, dict(zip(LOWER, values)))] for source, values in GRENADE.items()}), 'weap_mine_click')
         # No package without the rows they start from.
         bare = {name: entry for name, entry in index.items() if name != 'soundaliases/test_grenades.csv'}
         raises(ValueError, lambda: m.collect_sound_assets(root, bare, originals, renderer, maps),
@@ -415,12 +451,26 @@ with tempfile.TemporaryDirectory(prefix='cod2-owner-sounds-') as directory:
         except (AssertionError, ValueError, IndexError, KeyError, TypeError):
             continue
         raise AssertionError(f'mutant survived: {old!r} -> {new!r}')
+    explosive_mutants = [
+        ("            values = dict(row, **own, name=alias)\n", "            values = dict(row, name=alias)\n"),
+        ("        if unknown:\n            raise ValueError(", "        if False:\n            raise ValueError("),
+        ("'triggerSound': 'weap_mine_click'", "'triggerSound': 'minefield_click'"),
+    ]
+    for old, new in explosive_mutants:
+        assert explosives_source.count(old) == 1, old
+        try:
+            check(load(module_source, explosives_source.replace(old, new)), archive_path,
+                  folder / f'explosive_mutant{explosive_mutants.index((old, new))}')
+        except (AssertionError, ValueError, IndexError, KeyError, TypeError):
+            continue
+        raise AssertionError(f'mutant survived: {old!r} -> {new!r}')
 
 print(f'PASS: without the owner pack the retail rows stay; with it each listed alias plays only the owner\'s files, '
       f'one row a file cycling the alias\'s own rows and columns, several rows numbered for the engine\'s '
       f'duplicate check, its secondary alias still followed, unplayed '
       f'retail files dropped and the rest of the archive unchanged; an explosive\'s alias plays its retail source\'s '
-      f'rows under its own name and the pack replaces it; {len(accepted)} accepted and {len(rejected)} '
+      f'rows under its own name and the pack replaces it; the S-Mine\'s click is heard to 750 units, the pack '
+      f'keeping that range and the minefields their own click; {len(accepted)} accepted and {len(rejected)} '
       f'rejected WAVs and {len(BAD_LISTINGS) + 1} rejected lists, the accepted WAVs read alike by the engine '
-      f'parser under ASan/UBSan; the checker rejects {COUNTS["packages"]} altered packages; all {len(mutants)} '
-      f'mutants fail')
+      f'parser under ASan/UBSan; the checker rejects {COUNTS["packages"]} altered packages; all '
+      f'{len(mutants) + len(explosive_mutants)} mutants fail')
