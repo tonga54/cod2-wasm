@@ -5,11 +5,12 @@
 
 /* Scoped rifles as Call of Duty: WWII draws them in the browser: the rifle
  * stays on screen while it is raised to the eye, the eyepiece's glass becomes
- * a window onto the magnified world, the world around the eyepiece is blurred
- * and blacked out while the breath is held, and the reticle turns with the
- * scope as the bolt is worked. A 4x Optic on a gun without a scope of its
- * own is drawn the same way. Through a Reflex or Lens Sight the world shows
- * in the sight's ring with nothing of the rest of the gun over it.
+ * a window onto the magnified world in a round ring of worn metal, the world
+ * around the eyepiece is blurred and blacked out while the breath is held,
+ * and the reticle turns with the scope as the bolt is worked. A 4x Optic on
+ * a gun without a scope of its own is drawn the same way. Through a Reflex
+ * or Lens Sight the world shows in the sight's ring with nothing of the rest
+ * of the gun over it.
  * cg_wwiiScope 0, a rifle whose eyepiece is not known or a browser without
  * the scene compositor keep the stock overlay and sights. */
 
@@ -28,6 +29,12 @@ typedef struct CgWwiiScopeGlass {
     /* Degrees the stock ADS pose cants the scope clockwise at full aim; aiming
      * turns the rifle back so the reticle is level. */
     float roll;
+    /* The rim of the rifle's eyepiece that stands furthest out round the
+     * glass from the eye at full aim: how far it stands behind the glass's
+     * rim, towards the eye, and its radius; 0 for a glass without one. Seen
+     * that close, a low-poly rim fills much of the screen with its facets;
+     * the drawn eyepiece takes its place. */
+    float bell[2];
 } CgWwiiScopeGlass;
 
 /* The glass as seen this frame, in normalized device coordinates (x right,
@@ -47,6 +54,12 @@ typedef struct CgWwiiScopeLens {
     float projection[2];
     /* The rifle's near clip distance, or 0 for the view's. */
     float nearClip;
+    /* The outline the rifle is kept off as off the glass, centre and
+     * half-axes as the glass's, all 0 for none: over the zoom it opens from
+     * the glass's to that of its own eyepiece's bell, which gives way to the
+     * world round the drawn eyepiece. */
+    float bellCenter[2];
+    float bellAxes[2][2];
 } CgWwiiScopeLens;
 
 #define CG_WWIISCOPE_GLASS_COUNT 4

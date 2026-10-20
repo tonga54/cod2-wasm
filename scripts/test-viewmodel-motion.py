@@ -114,9 +114,10 @@ void WebSceneFx_Compose(const float *params, const float *mesh)
     memcpy(composed, params, sizeof(composed));
     assert(mesh == s_vmMesh);
 }
-void WebSceneFx_ScopeStencil(const float *scope)
+void WebSceneFx_ScopeStencil(const float *scope, const float *bell)
 {
     (void)scope;
+    (void)bell;
 }
 void WebSceneFx_ScopeMask(int on)
 {
@@ -387,7 +388,7 @@ int main(void)
     /* A raised WWII scope draws the rifle with its own 1.7 x 3 projection and
      * 0.8 near clip: the mesh and the smear follow where it is drawn. */
     {
-        const float scope[13] = {0, 0, 0.5f, 0, 0, 0.9f, 1, 1, 0, 0, 1.7f, 3.0f, 0.8f};
+        const float scope[SCENE_FX_SCOPE_LENS_FLOATS] = {0, 0, 0.5f, 0, 0, 0.9f, 1, 1, 0, 0, 1.7f, 3.0f, 0.8f};
         WebSceneFx_SetScope(scope);
         begin(10, 0.34f, 161.5f); quad(&keyA, 20, 0, 0); present();
         begin(10, 0.34f, 161.5f); quad(&keyA, 20, 0.5f, 0); present();

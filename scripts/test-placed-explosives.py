@@ -8,8 +8,10 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+from browser_explosives import MINE_KEYS
 
 root = Path(__file__).resolve().parent.parent
+mine_radius = float(MINE_KEYS['proximityRadius'])
 missiles = (root / 'src/PC/game_mp/g_missile_mp.c').read_text()
 team = (root / 'src/PC/game_mp/g_team_mp.c').read_text()
 weapons = (root / 'src/PC/bgame/bg_weapons.c').read_text()
@@ -182,7 +184,7 @@ static void reset(void){
  explosions=radiusCalls=bounces=sounds=tempCount=0;lastAttacker=NULL;hit=(trace_t){.fraction=1,.entityNum=1023};
  for(int i=1;i<4;i++){defs[i].weapType=WEAPTYPE_GRENADE;defs[i].offhandClass=1;defs[i].iMaxAmmo=2;
   for(int s=0;s<32;s++)defs[i].parallelBounce[s]=defs[i].perpendicularBounce[s]=.5f;}
- defs[MINE].proximityRadius=40;defs[MINE].iProximityArmTime=1200;defs[MINE].iProximityDelay=300;
+ defs[MINE].proximityRadius=MINE_RADIUS;defs[MINE].iProximityArmTime=1200;defs[MINE].iProximityDelay=300;
  defs[MINE].iExplosionRadius=192;defs[MINE].iExplosionInnerDamage=300;defs[MINE].iExplosionOuterDamage=60;
  defs[MINE].szArmSound="arm";defs[MINE].szTriggerSound="click";defs[MINE].szBounceSound="land";
  defs[MINE].szPickupSound="pickup";defs[MINE].iClipIndex=5;defs[MINE].iClipSize=2;
@@ -242,10 +244,10 @@ int main(void){
  frame(m,50);assert(m->nextthink==due&&m->s.pos.trTime==launch&&m->s.pos.trType==0);
  while(!explosions&&level.time<due+100)frame(m,50);
  assert(explosions==1&&level.time>=due&&level.time<due+50);cases++;
- /* Only a living, playing, connected enemy's feet within 40 units across and
-  * 24 below to 48 above. */
+ /* Only a living, playing, connected enemy's feet within the weapon file's
+  * radius across and 24 below to 48 above. */
  struct {int who,dead,state,connected;float x,z;int fires;} steps[]={
-  {1,0,0,2,39.9f,0,1},{1,0,0,2,40.1f,0,0},{1,0,0,2,0,48,1},{1,0,0,2,0,48.5f,0},{1,0,0,2,0,-24,1},
+  {1,0,0,2,MINE_RADIUS-.1f,0,1},{1,0,0,2,MINE_RADIUS+.1f,0,0},{1,0,0,2,0,48,1},{1,0,0,2,0,48.5f,0},{1,0,0,2,0,-24,1},
   {1,0,0,2,0,-24.5f,0},{2,0,0,2,0,0,0},{0,0,0,2,0,0,0},{1,1,0,2,0,0,0},{1,0,2,2,0,0,0},{1,0,0,0,0,0,0}};
  for(unsigned i=0;i<sizeof(steps)/sizeof(steps[0]);i++){
   reset();owner=player(0,2);enemy=player(1,1);mate=player(2,2);m=armedMine(owner);
@@ -254,6 +256,14 @@ int main(void){
   if(who!=owner)who->client->sess.connected=steps[i].connected;
   at(owner,500,0,0);if(who==owner)at(owner,0,0,0);if(who!=mate)at(mate,500,500,0);if(who!=enemy)at(enemy,-500,0,0);
   frame(m,50);assert(!!(m->spawnflags&2)==steps[i].fires);cases++;
+ }
+ /* Walking or sprinting by a step to its side, 50 units off, an enemy clicks
+  * it as he passes; 64 units off he goes by. */
+ struct {float off,speed;int fires;} walks[]={{50,190,1},{50,275.5f,1},{64,190,0},{64,275.5f,0}};
+ for(unsigned i=0;i<sizeof(walks)/sizeof(walks[0]);i++){
+  reset();owner=player(0,2);enemy=player(1,1);m=armedMine(owner);at(owner,500,0,0);
+  for(float x=-200;x<=200&&!(m->spawnflags&2);x+=walks[i].speed*.05f){at(enemy,x,walks[i].off,0);frame(m,50);}
+  assert(!!(m->spawnflags&2)==walks[i].fires);cases++;
  }
  /* Free-for-all: anyone but the owner, even on top of it. */
  reset();owner=player(0,0);enemy=player(1,0);m=armedMine(owner);at(owner,0,0,0);frame(m,50);assert(!(m->spawnflags&2));
@@ -462,7 +472,7 @@ int main(void){
   reset();owner=player(0,2);at(owner,500,0,0);s_mineShotBy[level.num_entities]=2;m=place(owner,MINE);rest(m,0,0);
   frame(m,50);frame(m,50);assert(!explosions&&m->s.eType==4&&m->r.inuse);cases++;
  }
- printf("PASS: %d server cases: a mine arms 1.2 s after it lies still, clicks under an enemy's feet within 40 units and 24 below to 48 above, springs up 300 ms later, turning and through players, and goes off at its top 44 units up for its owner, once, never for teammates, its owner, the dead, spectators or the disconnected; anyone in free-for-all; C4 sticks flat to walls, floors, ceilings and slopes, bounces off players, and goes off only by its owner's detonator, anywhere, in flight too; two of each kind per owner; both go with an owner who leaves or changes sides; neither is thrown back; the S-Mine is set down upright a step ahead of its owner's feet, short of walls, down steps, falling over drops and steep slopes; only its owner takes it back, holding Use half a second within reach, in sight, where no other hint is offered, the nearer first, with a full kit or none too, refunded only into room in a kit that carries it; a resting one is sent to its owner and teammates within 1600 units wherever it lies, never to enemies, spectators or others in free-for-all; an enemy's bullet within 5 units of a resting mine's can, along its own path, sets the nearer of two off on the mine's next frame, armed or arming, never a teammate's or its owner's, nor C4, a falling or clicked mine, the first shooter's blast unless they left\n",cases);
+ printf("PASS: %d server cases: a mine arms 1.2 s after it lies still, clicks under an enemy's feet within %g units and 24 below to 48 above, for one walking or sprinting by 50 units off but not 64, springs up 300 ms later, turning and through players, and goes off at its top 44 units up for its owner, once, never for teammates, its owner, the dead, spectators or the disconnected; anyone in free-for-all; C4 sticks flat to walls, floors, ceilings and slopes, bounces off players, and goes off only by its owner's detonator, anywhere, in flight too; two of each kind per owner; both go with an owner who leaves or changes sides; neither is thrown back; the S-Mine is set down upright a step ahead of its owner's feet, short of walls, down steps, falling over drops and steep slopes; only its owner takes it back, holding Use half a second within reach, in sight, where no other hint is offered, the nearer first, with a full kit or none too, refunded only into room in a kit that carries it; a resting one is sent to its owner and teammates within 1600 units wherever it lies, never to enemies, spectators or others in free-for-all; an enemy's bullet within 5 units of a resting mine's can, along its own path, sets the nearer of two off on the mine's next frame, armed or arming, never a teammate's or its owner's, nor C4, a falling or clicked mine, the first shooter's blast unless they left\n",cases,(double)MINE_RADIUS);
  return 0;
 }
 '''
@@ -715,13 +725,16 @@ int main(void){
 '''
 
 programs = {
-    'server': (defines(missiles, 'GMISSILE_') + server_support + header + server_body + server_checks),
+    'server': (f'#define MINE_RADIUS {mine_radius!r}f\n' + defines(missiles, 'GMISSILE_') + server_support + header +
+               server_body + server_checks),
     'snapshot': (snapshot_support + snapshot_body + snapshot_checks),
     'pmove': (pmove_support + header + pmove_constants + pmove_body + pmove_checks),
     'loader': (loader_support + header + loader_body + loader_checks),
     'hud': (hud_support + header + hud_body + hud_checks),
 }
 mutants = [
+    # Clicking for an enemy a step beside it.
+    ('server', f'#define MINE_RADIUS {mine_radius!r}f\n', '#define MINE_RADIUS 40.0f\n'),
     ('server', 'OnSameTeam(owner, other))', '0)'),
     ('server', 'if (!other->r.inuse || !other->client || other == owner ||', 'if (!other->r.inuse || !other->client ||'),
     ('server', '(weapDef->iProximityArmTime > 0 ? weapDef->iProximityArmTime : 1)', '1'),

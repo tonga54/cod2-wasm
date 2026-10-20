@@ -12,12 +12,21 @@
  * sniper viewmodels' xmodelsurfs: the rim of the glass dome nearest the
  * muzzle (+x), centred on the scope's axis. The Mosin-Nagant's glass is the
  * inner disk within its brass ring. The eye positions and cants are those of
- * the last frame of each rifle's ADS up anim, the pose it holds at full aim. */
+ * the last frame of each rifle's ADS up anim, the pose it holds at full aim.
+ * The bells are the rings of the eyepieces' front-facing vertices that stand
+ * furthest out from that eye, and from the 4x Optics' further back, their
+ * radii 2 percent wider: the Kar98k's and the Lee-Enfield's rear lips, the
+ * rear of the Springfield's long eyepiece and the Mosin-Nagant's rubber
+ * eyecup. */
 const CgWwiiScopeGlass cg_wwiiScopeGlasses[CG_WWIISCOPE_GLASS_COUNT] = {
-    { "viewmodel_kar98_scope", { -6.116f, -0.057f, 2.996f }, 0.612f, { 1.713f, 0.004f, 0.041f }, 1.72f },
-    { "viewmodel_springfield", { -5.968f, 0.255f, 3.675f }, 0.578f, { 2.706f, 0.147f, -0.171f }, 0.0f },
-    { "viewmodel_enfield_scope", { -5.70f, 1.504f, 2.382f }, 0.635f, { 2.003f, -0.010f, 0.019f }, 0.12f },
-    { "viewmodel_mosinnagant_cloth", { -5.24f, -0.022f, 3.111f }, 0.265f, { 3.434f, -0.130f, 0.123f }, 0.0f },
+    { "viewmodel_kar98_scope", { -6.116f, -0.057f, 2.996f }, 0.612f, { 1.713f, 0.004f, 0.041f }, 1.72f,
+      { 0.37f, 0.675f } },
+    { "viewmodel_springfield", { -5.968f, 0.255f, 3.675f }, 0.578f, { 2.706f, 0.147f, -0.171f }, 0.0f,
+      { 1.25f, 0.675f } },
+    { "viewmodel_enfield_scope", { -5.70f, 1.504f, 2.382f }, 0.635f, { 2.003f, -0.010f, 0.019f }, 0.12f,
+      { 0.42f, 0.755f } },
+    { "viewmodel_mosinnagant_cloth", { -5.24f, -0.022f, 3.111f }, 0.265f, { 3.434f, -0.130f, 0.123f }, 0.0f,
+      { 0.05f, 0.83f } },
 };
 
 extern int I_stricmp(const char *s0, const char *s1);
@@ -127,6 +136,9 @@ extern const dvar_t *cg_fovMin;
 /* Over this part of the raise a Reflex or Lens Sight's window comes in. */
 #define CG_WWIISCOPE_WINDOW_START 0.6f
 #define CG_WWIISCOPE_WINDOW_END 0.85f
+/* A rim seen off its axis spreads a little past the ends of its projected
+ * diameters: the bell's outline is kept this much wider. */
+#define CG_WWIISCOPE_BELL_MARGIN 1.05f
 
 typedef struct CgWwiiScopeImage {
     MaterialHandle overlay;
@@ -144,7 +156,7 @@ typedef struct CgWwiiScopeBolt {
 } CgWwiiScopeBolt;
 
 /* Read by R_RenderScene: the floats of this frame's CgWwiiScopeLens. */
-float g_webScopeLens[13];
+float g_webScopeLens[19];
 
 static const unsigned char s_sights[CG_WWIISCOPE_SIGHTS] = { ATT_OPTIC4X, ATT_REFLEX, ATT_LENS };
 /* How many times its opening each sight's ring reaches: the generator's
@@ -204,6 +216,21 @@ static const CgWwiiScopeGlass *CG_WwiiScopeWeaponGlass(int weapon)
     return s_glassIndex[weapon] >= 0 ? &cg_wwiiScopeGlasses[s_glassIndex[weapon]] : NULL;
 }
 
+/* A 4x Optic is a scoped rifle's scope moved onto another gun, its glass that
+ * rifle's radius: its eyepiece is that rifle's too. */
+static void CG_WwiiScopeOpticBell(CgWwiiScopeGlass *glass)
+{
+    int i;
+
+    for (i = 0; i < CG_WWIISCOPE_GLASS_COUNT; i++) {
+        if (fabsf(cg_wwiiScopeGlasses[i].radius - glass->radius) < 0.0005f) {
+            glass->bell[0] = cg_wwiiScopeGlasses[i].bell[0];
+            glass->bell[1] = cg_wwiiScopeGlasses[i].bell[1];
+            return;
+        }
+    }
+}
+
 /* The glass of the gun's sight attachment, where the archives place one on
  * it. */
 static const CgWwiiScopeGlass *CG_WwiiScopeSightGlass(int weapon, int sight)
@@ -219,6 +246,8 @@ static const CgWwiiScopeGlass *CG_WwiiScopeSightGlass(int weapon, int sight)
             snprintf(name, sizeof(name), "glass/%s__%s", weapDef->szGunXModel, g_attachments[s_sights[sight]].name);
             if (FS_ReadFile(name, &file) > 0 && file && CG_WwiiScopeParseGlass((const char *)file, glass)) {
                 glass->gunModel = weapDef->szGunXModel;
+                if (sight == CG_WWIISCOPE_SIGHT_OPTIC)
+                    CG_WwiiScopeOpticBell(glass);
                 s_sightKnown[weapon][sight] = 1;
             }
             if (file)
@@ -571,6 +600,33 @@ int CG_WwiiScopeProjectGlass(const CgWwiiScopeGlass *glass, const vec3_t *boneAx
     return fabsf(lens->axes[0][0] * lens->axes[1][1] - lens->axes[1][0] * lens->axes[0][1]) > 1e-6f;
 }
 
+/* The outline the rifle is kept off about the glass of lens, once its
+ * projection and opening are set: the glass's, opening with the zoom to
+ * that of the rifle's own eyepiece's bell, so the eyepiece draws back as the
+ * eye meets it. A bell that faces away or reaches behind the eye is left to
+ * the rifle. */
+static void CG_WwiiScopeBell(const CgWwiiScopeGlass *glass, const vec3_t *boneAxis, const vec_t *boneOrigin,
+                             const vec_t *eye, const vec3_t *viewAxis, CgWwiiScopeLens *lens)
+{
+    CgWwiiScopeGlass bell;
+    CgWwiiScopeLens outline;
+    float open = CG_WwiiScopeClamp01(lens->open);
+    int i;
+
+    if (!(glass->bell[1] > 0.0f))
+        return;
+    bell = *glass;
+    bell.rim[0] -= glass->bell[0];
+    bell.radius = glass->bell[1] * CG_WWIISCOPE_BELL_MARGIN;
+    if (!CG_WwiiScopeProjectGlass(&bell, boneAxis, boneOrigin, eye, viewAxis, lens->projection, &outline))
+        return;
+    for (i = 0; i < 2; i++) {
+        lens->bellCenter[i] = lens->center[i] + (outline.center[i] - lens->center[i]) * open;
+        lens->bellAxes[0][i] = lens->axes[0][i] + (outline.axes[0][i] - lens->axes[0][i]) * open;
+        lens->bellAxes[1][i] = lens->axes[1][i] + (outline.axes[1][i] - lens->axes[1][i]) * open;
+    }
+}
+
 /* The j_gun bone's axes and origin in the rifle's own space this frame,
  * from the skeleton CG_UpdateViewWeaponAnim built. */
 static int CG_WwiiScopeGunBoneModel(struct DObj_s *obj, float (*axis)[3], vec_t *origin)
@@ -745,6 +801,8 @@ qboolean CG_WwiiScopeUpdate(const playerState_t *ps, int weapon, qboolean drawGu
                 lens->nearClip = CG_WWIISCOPE_NEAR_CLIP * lens->presence;
                 lens->open = CG_WwiiScopeZoom(ps, weapon);
                 lens->blur = lens->open;
+                CG_WwiiScopeBell(glass, (const vec3_t *)boneAxis, boneOrigin, cg->refdef.vieworg,
+                                 (const vec3_t *)cg->refdef.viewaxis, lens);
                 /* A window closed for more than a frame starts over in the light. */
                 if (cg->time - s_darkTime > 100 || cg->time < s_darkTime)
                     s_dark = 0.0f;

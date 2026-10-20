@@ -793,7 +793,7 @@ void R_RenderScene(const refdef_t *refdef)
     extern float g_webAdsViewmodelEnd;
     extern float g_webAdsNearEnd;
     extern void WebSceneFx_SetScope(const float *);
-    extern float g_webScopeLens[13];
+    extern float g_webScopeLens[19];
     WebPointLights_SetScene(scene.dlights, scene.dlightCount);
     WebPointLights_SetShadowCasters(scene.def.entities, scene.def.entityCount, rg_p->viewOrg);
     {

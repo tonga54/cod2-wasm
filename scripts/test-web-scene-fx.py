@@ -111,6 +111,23 @@ assert 'var lensPresence = H[o + 48], lensBlur = H[o + 50];' in compositor
 assert 'gl.uniform4f(C.u_lens, (H[o + 42] + 1) * 0.5 * w, (H[o + 43] + 1) * 0.5 * h, lensPresence, H[o + 49]);' in compositor
 assert 'var ax = H[o + 44], ay = H[o + 45], bx = H[o + 46], by = H[o + 47];' in compositor
 assert 'gl.uniform4f(C.u_lensFx, lensBlur, H[o + 51],' in compositor
+# A scope's glass, drawn with the rifle's projection (52), comes in with its
+# drawn eyepiece; a sight's window has none.
+assert 'gl.uniform4f(C.u_lensFx, lensBlur, H[o + 51], Math.min(1.5 / Math.max(radius, 1), 0.5),\n' \
+    '                    H[o + 52] > 0 ? lensPresence : 0);' in compositor
+# The stencil marks the outline the rifle is kept off about the glass after
+# the glass's own, when it has area.
+stencil = compositor[compositor.index('EM_JS(void, WebSceneFx_ScopeStencil'):compositor.index('EM_JS(void, WebSceneFx_ScopeMask')]
+assert stencil.index('gl.drawArrays(gl.TRIANGLE_FAN, 0, 66);\n'
+                     '    if (HEAPF32[b + 2] * HEAPF32[b + 5] - HEAPF32[b + 4] * HEAPF32[b + 3] !== 0) {') < \
+    stencil.index('gl.uniform2f(L.u_center, HEAPF32[b], HEAPF32[b + 1]);') < \
+    stencil.index('gl.uniformMatrix2fv(L.u_axes, false, HEAPF32.subarray(b + 2, b + 6));') < \
+    stencil.index('gl.stencilMask(0);')
+# The eyepiece is laid over the glass's reflection, under the glow, the grade
+# and a held breath's blackout.
+assert compose_shader.index('col = mix(col, glass, lensIn * (1.0 - u_lens.w));') < \
+    compose_shader.index('if (u_lens.z > 0.0 && u_lensFx.w > 0.0) {') < compose_shader.index('if (u_glow.x > 0.0)') < \
+    compose_shader.index('col *= 1.0 - u_lensFx.y * (1.0 - lensIn);')
 # The view weapon's draws, and only those, get its projection and the
 # stencil that keeps it off the glass; every way out of the depth hack
 # lifts the stencil, and only leaving for another entity restores the
@@ -136,8 +153,9 @@ assert backend.index('            if (depthRangePrev == 8)\n                WebS
     backend.index('            RB_SetDepthRange(0.0f, 1.0f);\n            depthRangePrev = 0;', world)
 assert 'WebSceneFx_SetScope(g_webScopeLens);' in scene and \
     scene.index('WebSceneFx_SetBackdrop(g_webBackdropFrac') < scene.index('WebSceneFx_SetScope(g_webScopeLens);')
-# The cgame's lens, the floats R_RenderScene hands over and the compositor's
-# scope floats are the same thirteen.
+# The cgame's lens and the floats R_RenderScene hands over are the same
+# nineteen: the compositor's thirteen scope floats, then the outline about
+# the glass.
 lens_struct = (root / 'src/headers/PC/cgame_mp/cg_wwiiscope.h').read_text()
 lens_struct = lens_struct[lens_struct.index('typedef struct CgWwiiScopeLens {'):lens_struct.index('} CgWwiiScopeLens;')]
 lens_floats = 0
@@ -146,9 +164,9 @@ for dims in re.findall(r'^\s+float \w+((?:\[\d+\])*);$', lens_struct, re.M):
     for dim in re.findall(r'\[(\d+)\]', dims):
         count *= int(dim)
     lens_floats += count
-assert lens_floats == 13, lens_floats
-assert 'extern float g_webScopeLens[13];' in scene
-assert 'float g_webScopeLens[13];' in (root / 'src/PC/cgame_mp/cg_wwiiscope_mp.c').read_text()
+assert lens_floats == 19, lens_floats
+assert 'extern float g_webScopeLens[19];' in scene
+assert 'float g_webScopeLens[19];' in (root / 'src/PC/cgame_mp/cg_wwiiscope_mp.c').read_text()
 
 emscripten = '#define EM_JS(ret, name, params, ...) ret name params;\ndouble emscripten_get_now(void);\n'
 common_types = r'''
@@ -194,11 +212,12 @@ void WebSceneFx_Compose(const float *params, const float *mesh)
     assert(mesh == s_vmMesh);
 }
 static int stencils, masks, maskOn;
-static float stenciled[SCENE_FX_SCOPE_FLOATS];
-void WebSceneFx_ScopeStencil(const float *scope)
+static float stenciled[SCENE_FX_SCOPE_FLOATS], stenciledBell[SCENE_FX_SCOPE_BELL_FLOATS];
+void WebSceneFx_ScopeStencil(const float *scope, const float *bell)
 {
     ++stencils;
     memcpy(stenciled, scope, sizeof(stenciled));
+    memcpy(stenciledBell, bell, sizeof(stenciledBell));
 }
 void WebSceneFx_ScopeMask(int on)
 {
@@ -573,15 +592,17 @@ int main(void)
     WebSceneFx_EndFrame();
     assert(!binds && !composes);
 
-    /* A scope's window: CgWwiiScopeLens's thirteen floats, last, after the
-     * viewmodel's motion. */
+    /* A scope's window: CgWwiiScopeLens's first thirteen floats, last, after
+     * the viewmodel's motion; the outline about its glass, its last six, goes
+     * to the stencil alone. */
     assert(SCENE_FX_SCOPE == 42 && SCENE_FX_SCOPE_AXES == 44 && SCENE_FX_SCOPE_PRESENCE == 48 &&
            SCENE_FX_SCOPE_OPEN == 49 && SCENE_FX_SCOPE_BLUR == 50 && SCENE_FX_SCOPE_DARK == 51 &&
            SCENE_FX_SCOPE_PROJECTION == 52 && SCENE_FX_SCOPE_NEAR_CLIP == 54 && SCENE_FX_SCOPE_FLOATS == 13 &&
-           SCENE_FX_SCOPE_FLOATS == SCENE_FX_PARAM_COUNT - SCENE_FX_SCOPE);
+           SCENE_FX_SCOPE_FLOATS == SCENE_FX_PARAM_COUNT - SCENE_FX_SCOPE && SCENE_FX_SCOPE_LENS_FLOATS == 19);
     {
-        const float lens[13] = {0.05f, -0.02f, 0.585f, -0.01f, 0.01f, 1.04f, 1, 0.5f, 0.5f, 0.25f, 1.7f, 3.0f, 0.8f};
-        float bad[13];
+        const float lens[19] = {0.05f, -0.02f, 0.585f, -0.01f, 0.01f, 1.04f, 1, 0.5f, 0.5f, 0.25f, 1.7f, 3.0f, 0.8f,
+                                0.06f, -0.03f, 0.82f, -0.01f, 0.015f, 1.45f};
+        float bad[19];
         const float *projection;
 
         defaults();
@@ -603,7 +624,8 @@ int main(void)
         /* The stencil is drawn once per view, before the rifle's first draw;
          * each of its draws is masked and unmasked. */
         WebSceneFx_BeginViewmodel();
-        assert(stencils == 1 && masks == 1 && maskOn == 1 && !memcmp(stenciled, lens, sizeof(lens)));
+        assert(stencils == 1 && masks == 1 && maskOn == 1 && !memcmp(stenciled, lens, sizeof(stenciled)) &&
+               !memcmp(stenciledBell, lens + SCENE_FX_SCOPE_FLOATS, sizeof(stenciledBell)));
         WebSceneFx_EndViewmodel();
         assert(masks == 2 && maskOn == 0);
         WebSceneFx_EndViewmodel();
@@ -613,7 +635,7 @@ int main(void)
         /* A view that ends while the rifle draws still lifts the mask. */
         WebSceneFx_EndView();
         assert(masks == 4 && maskOn == 0 && composes == 1);
-        for (int i = 0; i < 13; ++i)
+        for (int i = 0; i < SCENE_FX_SCOPE_FLOATS; ++i)
             assert(composed[SCENE_FX_SCOPE + i] == lens[i]);
         /* The rifle's depth is linearized with the near clip it was drawn with. */
         assert(composed[SCENE_FX_NEAR_CLIP] == 0.8f);
@@ -623,7 +645,7 @@ int main(void)
          * drawn over it, every other material of the rifle is kept off it,
          * and nothing is left masked after the rifle. */
         {
-            float sight[13];
+            float sight[19];
             int savedStencils = stencils, savedMasks = masks;
 
             memcpy(sight, lens, sizeof(sight));
@@ -649,6 +671,10 @@ int main(void)
             WebSceneFx_ViewmodelMaterial("mtl_browser_att_blued");
             assert(masks == 4);
             WebSceneFx_EndFrame();
+            /* A sight's window, drawn with the view's projection, keeps no
+             * outline about it. */
+            for (int i = 0; i < SCENE_FX_SCOPE_BELL_FLOATS; ++i)
+                assert(stenciledBell[i] == 0);
             /* A scope's glass keeps the attachments off it too. */
             WebSceneFx_SetScope(lens);
             WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 4.0f);
@@ -686,7 +712,7 @@ int main(void)
         /* Finite and bounded: the fractions clamp, an outline without area
          * closes the window, a non-positive projection is dropped and the
          * near clip stays within the depth hack's range. */
-        for (int i = 0; i < 13; ++i)
+        for (int i = 0; i < SCENE_FX_SCOPE_LENS_FLOATS; ++i)
             bad[i] = NAN;
         WebSceneFx_SetScope(bad);
         binds = 0;
@@ -721,6 +747,23 @@ int main(void)
         WebSceneFx_SetScope(bad);
         frame(0, 1280, 0.1f);
         assert(composed[SCENE_FX_SCOPE_PROJECTION] == 0 && composed[SCENE_FX_SCOPE_PROJECTION + 1] == 0);
+        /* The outline about the glass stays finite, and one without area is
+         * dropped. */
+        memcpy(bad, lens, sizeof(bad));
+        bad[13] = NAN;
+        WebSceneFx_SetScope(bad);
+        WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 4.0f);
+        WebSceneFx_BeginViewmodel();
+        assert(stenciledBell[0] == 0 && stenciledBell[1] == lens[14] && stenciledBell[2] == lens[15]);
+        WebSceneFx_EndFrame();
+        memcpy(bad, lens, sizeof(bad));
+        bad[15] = bad[16] = 0;
+        WebSceneFx_SetScope(bad);
+        WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 4.0f);
+        WebSceneFx_BeginViewmodel();
+        for (int i = 0; i < SCENE_FX_SCOPE_BELL_FLOATS; ++i)
+            assert(stenciledBell[i] == 0);
+        WebSceneFx_EndFrame();
         /* Without a composed target, after a failed bind or under
          * r_fullbright, the cgame keeps the stock overlay. */
         WebSceneFx_SetScope(lens);
@@ -741,7 +784,7 @@ int main(void)
         frame(0, 1280, 0.1f);
         assert(!binds);
     }
-    puts("PASS: 600 composed frames, single compose per frame before Present, partial/fullbright/disabled views drawn directly, bounded glow, viewmodel and near world focus parameters, camera motion reprojected over a 10 ms exposure with aim fade, cuts and still cameras, a bounded menu backdrop and its gray, scenes rendered at r_sceneHeight lines and the screen's aspect on taller screens, a scope window composed with its rifle projection and near clip and a stencil drawn once per view and lifted on every exit, bounded window floats and the stock overlay without a composed target");
+    puts("PASS: 600 composed frames, single compose per frame before Present, partial/fullbright/disabled views drawn directly, bounded glow, viewmodel and near world focus parameters, camera motion reprojected over a 10 ms exposure with aim fade, cuts and still cameras, a bounded menu backdrop and its gray, scenes rendered at r_sceneHeight lines and the screen's aspect on taller screens, a scope window composed with its rifle projection and near clip and a stencil drawn once per view and lifted on every exit, bounded window floats, the outline a scope's rifle is kept off handed to the stencil and none for a sight's window, and the stock overlay without a composed target");
     return 0;
 }
 '''
@@ -784,6 +827,15 @@ mutants = [
      '        s_scope[SCENE_FX_SCOPE_PRESENCE - SCENE_FX_SCOPE] = 0.0f;\n', ''),
     ('    if (!(projection[0] > 0.0f) || !(projection[1] > 0.0f))\n        projection[0] = projection[1] = 0.0f;\n', ''),
     ('    *nearClip = WebSceneFx_Clamp(*nearClip, 0.0f, 16.0f);\n', ''),
+    ('        s_scopeBell[i] = isfinite(scope[SCENE_FX_SCOPE_FLOATS + i]) ? scope[SCENE_FX_SCOPE_FLOATS + i] : 0.0f;',
+     '        s_scopeBell[i] = scope[SCENE_FX_SCOPE_FLOATS + i];'),
+    ('    if (!(projection[0] > 0.0f) || !(fabsf(bellAxes[0] * bellAxes[3] - bellAxes[2] * bellAxes[1]) > 1e-6f))\n'
+     '        memset(s_scopeBell, 0, sizeof(s_scopeBell));\n', ''),
+    ('    if (!(projection[0] > 0.0f) || !(fabsf(bellAxes[0] * bellAxes[3] - bellAxes[2] * bellAxes[1]) > 1e-6f))',
+     '    if (!(fabsf(bellAxes[0] * bellAxes[3] - bellAxes[2] * bellAxes[1]) > 1e-6f))'),
+    ('    if (!(projection[0] > 0.0f) || !(fabsf(bellAxes[0] * bellAxes[3] - bellAxes[2] * bellAxes[1]) > 1e-6f))',
+     '    if (!(projection[0] > 0.0f))'),
+    ('        WebSceneFx_ScopeStencil(s_scope, s_scopeBell);', '        WebSceneFx_ScopeStencil(s_scope, s_scope);'),
     ('    return scope > nearClip ? scope : nearClip;', '    return scope;'),
     ('    return s_active ? WebSceneFx_ScopeNearClip(nearClip) : nearClip;',
      '    return WebSceneFx_ScopeNearClip(nearClip);'),

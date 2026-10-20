@@ -446,7 +446,7 @@ archives are prepared (`scripts/browser_explosives.py`,
   look. It takes about two seconds with a rifle. The hand animations are the
   Mk 2 grenade's pull-pin, with the left arm reaching for the S-Mine's pin and
   a held pose and setting down added. The mine arms after 1.2 s; an enemy's
-  feet within 40 units click it, a click heard only within 750 units of the
+  feet within 56 units click it, a click heard only within 750 units of the
   mine, and 0.3 s later it springs straight up,
   turning, to a standing player's chest, 44 units, where it goes off about
   0.65 s after the click: long enough to see it rise, too soon to run clear of
