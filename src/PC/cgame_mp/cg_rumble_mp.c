@@ -36,13 +36,22 @@ extern void CL_Gamepad_SetRumble(float lowFreq, float highFreq);
 #    define MAX_RUMBLE_INFOS 64
 #    define MAX_ACTIVE_RUMBLES 32
 #    define RUMBLE_DURATION_MS 1000
-/* One kick a round: an automatic weapon's graph spans its fire interval, so
- * each shot stands apart instead of blurring into one buzz. Single shots,
- * bolts and rockets keep a longer tail. */
+/* One kick a round: an automatic weapon's graph spans its fire interval.
+ * Single shots, bolts and rockets keep a longer tail. */
 #    define RUMBLE_SHOT_MIN_MS 50
 #    define RUMBLE_SEMI_FIRE_MS 250
 #    define RUMBLE_BOLT_FIRE_MS 400
 #    define RUMBLE_ROCKET_FIRE_MS 700
+/* Under the kicks the motors keep a floor. An automatic weapon's lasts until
+ * a little after its next round is due, so a burst buzzes without a break
+ * until it stops: a reload, an empty magazine, the trigger let go. A single
+ * shot's holds the strong motor long enough to spin up and be felt. */
+#    define RUMBLE_BURST_LOW 0.4f
+#    define RUMBLE_BURST_HIGH 0.3f
+#    define RUMBLE_BURST_SLACK_MS 60
+#    define RUMBLE_KICK_LOW 0.7f
+#    define RUMBLE_KICK_HIGH 0.5f
+#    define RUMBLE_KICK_MS 100
 /* A blast is felt out to three times its damage radius, fading with distance. */
 #    define RUMBLE_EXPLOSION_GRAPH "artillery_quake"
 #    define RUMBLE_EXPLOSION_REACH 3.0f
@@ -88,6 +97,9 @@ static ActiveRumble g_activeRumbles[MAX_ACTIVE_RUMBLES];
 static const dvar_t *cg_drawRumbleDebug;
 static int g_rumbleMeleeTime;
 static int g_rumbleMeleeWeapon;
+/* The fire floor's motors and the Sys_Milliseconds it ends at. */
+static float g_rumbleFloorLow, g_rumbleFloorHigh;
+static int g_rumbleFloorEnd;
 
 static int I_stricmp_local(const char *a, const char *b);
 
@@ -294,6 +306,7 @@ void CG_StopAllRumbles(void)
     int i;
     for (i = 0; i < MAX_ACTIVE_RUMBLES; ++i)
         CG_InvalidateActiveRumble(i);
+    g_rumbleFloorLow = g_rumbleFloorHigh = 0.0f;
     CL_Gamepad_SetRumble(0.0f, 0.0f);
 }
 
@@ -376,6 +389,10 @@ void CG_CalcActiveRumbles(void)
 
         high += CG_EvalRumbleGraph(&info->high, t) * ar->scale;
         low += CG_EvalRumbleGraph(&info->low, t) * ar->scale;
+    }
+    if (now - g_rumbleFloorEnd < 0) {
+        low = fmaxf(low, g_rumbleFloorLow);
+        high = fmaxf(high, g_rumbleFloorHigh);
     }
 
     if (low > 1.0f)
@@ -502,6 +519,15 @@ void CG_RumbleFireEvent(const entityState_t *es)
     if (!weapDef || (weapDef->weapType != WEAPTYPE_BULLET && weapDef->weapClass != WEAPCLASS_ROCKETLAUNCHER))
         return;
     CG_PlayRumbleInternal(CG_FireRumbleName(weapDef), 0, CG_FireRumbleDuration(weapDef), 1.0f);
+    if (!weapDef->bSemiAuto && !weapDef->bBoltAction && weapDef->weapClass != WEAPCLASS_ROCKETLAUNCHER) {
+        g_rumbleFloorLow = RUMBLE_BURST_LOW;
+        g_rumbleFloorHigh = RUMBLE_BURST_HIGH;
+        g_rumbleFloorEnd = Sys_Milliseconds() + weapDef->iFireTime + RUMBLE_BURST_SLACK_MS;
+    } else {
+        g_rumbleFloorLow = RUMBLE_KICK_LOW;
+        g_rumbleFloorHigh = RUMBLE_KICK_HIGH;
+        g_rumbleFloorEnd = Sys_Milliseconds() + RUMBLE_KICK_MS;
+    }
 }
 
 /* A grenade, S-Mine, C4 or rocket going off near the view; smoke, which
@@ -594,6 +620,7 @@ void CG_InitRumble(void)
     int i;
     g_rumbleInfoCount = 0;
     g_rumbleMeleeWeapon = 0;
+    g_rumbleFloorLow = g_rumbleFloorHigh = 0.0f;
     for (i = 0; i < MAX_ACTIVE_RUMBLES; ++i)
         CG_InvalidateActiveRumble(i);
 

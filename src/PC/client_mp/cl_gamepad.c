@@ -642,6 +642,29 @@ static float Gamepad_LookDelta(float axis, float seconds, float sensitivity, flo
     return delta;
 }
 
+/* A thumb on a stick drifts a few degrees off the line it means, and a run
+ * should not drift with it. Within GAMEPAD_MOVE_SNAP_DEG of forward, back,
+ * left or right the move takes that line exactly; the rest of each quarter
+ * stretches to fill it, so halfway between two lines is still 45 degrees.
+ * The stick's push, the move's speed, stays as it is. */
+#    define GAMEPAD_MOVE_SNAP_DEG 15.0f
+
+static void Gamepad_SnapMove(float *x, float *y)
+{
+    const float quarter = 1.57079633f, snap = GAMEPAD_MOVE_SNAP_DEG * 0.0174532925f;
+    float length = sqrtf(*x * *x + *y * *y), angle, line, off;
+
+    if (!(length > 0.0f))
+        return;
+    /* 0 is forward, the stick's -y; a quarter turn is right. */
+    angle = atan2f(*x, -*y);
+    line = floorf(angle / quarter + 0.5f) * quarter;
+    off = fabsf(angle - line);
+    off = off <= snap ? 0.0f : copysignf((off - snap) * (0.5f * quarter) / (0.5f * quarter - snap), angle - line);
+    *x = length * sinf(line + off);
+    *y = -length * cosf(line + off);
+}
+
 /* The cgame's aim assist (cg_aimassist_mp.c), given every frame: the share of
  * the right stick's turn to keep and the degrees a second to follow. Its last
  * word lapses after 100 ms, as when the cgame stops drawing. */
@@ -686,6 +709,7 @@ void CL_Gamepad_Move(usercmd_t *cmd)
     lookY = Gamepad_VirtualAxis(gc, VIRT_LOOK_Y);
     mx = Gamepad_VirtualAxis(gc, VIRT_MOVE_X);
     my = Gamepad_VirtualAxis(gc, VIRT_MOVE_Y);
+    Gamepad_SnapMove(&mx, &my);
     /* For stick aiming alone: the right stick slows over an enemy, and the view
      * follows a little of their motion only while a stick moves. */
     if (cl_gamepadAimAssist->current.enabled && CL_Gamepad_IsActiveDevice() &&

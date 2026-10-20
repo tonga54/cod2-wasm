@@ -314,8 +314,9 @@ int main(void)
     snap.ps.clientNum = 3;
     cg->nextSnap = &snap;
 
-    /* Automatic fire: each round's graph spans the fire interval, so the
-     * motors kick at every shot and are still before the next one. */
+    /* Automatic fire: each round kicks with its graph, spanning the fire
+     * interval, over a floor held until 60 ms after the next round is due, so
+     * a burst buzzes without a break and stops soon after its last round. */
     restart(1000);
     int edges = 0, wasOn = 0;
     for (int shot = 0; shot < 10; ++shot) {
@@ -329,25 +330,43 @@ int main(void)
             wasOn = on;
             if (t == start)
                 assert(near(outLow, 0.5f) && near(outHigh, 0.6f));
-            if (t >= start + 75)
-                assert(outLow == 0.0f && outHigh == 0.0f);
+            assert(outLow >= 0.4f && outHigh >= 0.3f);
         }
     }
-    assert(edges == 10);
-    frame(1000 + 10 * 86);
-    assert(activeCount() == 0 && outLow == 0.0f && outHigh == 0.0f);
+    assert(edges == 1);
+    frame(1000 + 9 * 86 + 86 + 59);
+    assert(outLow == 0.4f && outHigh == 0.3f && activeCount() == 0);
+    frame(1000 + 9 * 86 + 86 + 60);
+    assert(outLow == 0.0f && outHigh == 0.0f);
 
     /* A burst's span by action: single shots and bolts keep longer tails. */
     assert(CG_FireRumbleDuration(&weapons[THOMPSON]) == 86 && CG_FireRumbleDuration(&weapons[MG42]) == 50);
     assert(CG_FireRumbleDuration(&weapons[CAL30]) == 100 && CG_FireRumbleDuration(&weapons[FASTGUN]) == 50);
     assert(CG_FireRumbleDuration(&weapons[SLOWAUTO]) == 250 && CG_FireRumbleDuration(&weapons[GARAND]) == 250);
     assert(CG_FireRumbleDuration(&weapons[KAR98K]) == 400 && CG_FireRumbleDuration(&weapons[PANZERSCHRECK]) == 700);
+    /* A single shot holds the strong motor at 0.7 and the weak at 0.5 for
+     * 100 ms, under its graph: a short graph is still felt. */
     restart(3000);
     fire(3, 1, KAR98K);
     frame(3080);
-    assert(near(outLow, 0.75f) && near(outHigh, 0.4f));
+    assert(near(outLow, 0.75f) && outHigh == 0.5f);
+    frame(3099);
+    assert(outLow == 0.7f && outHigh == 0.5f);
+    frame(3100);
+    assert(outLow == 0.0f && near(outHigh, 0.375f));
     frame(3400);
     assert(activeCount() == 0);
+    restart(3500);
+    fire(3, 1, GARAND);
+    frame(3590);
+    assert(outLow == 0.7f && outHigh == 0.5f);
+    /* A new map, or the cgame shutting down, leaves no floor behind. */
+    restart(3591);
+    assert(outLow == 0.0f && outHigh == 0.0f);
+    fire(3, 1, THOMPSON);
+    CG_ShutdownRumble();
+    frame(3592);
+    assert(outLow == 0.0f && outHigh == 0.0f);
 
     /* The retail turrets and Panzerschreck name no fire rumble; their graphs
      * still play, and a gun with none feels the default weapon's. */
@@ -596,6 +615,18 @@ def mutate(text, old, new):
 body = '\n'.join(line for line in module.splitlines() if not line.lstrip().startswith('#    include')
                  and not line.startswith('#include'))
 mutants = [
+    # No floor, a burst's ending with its next round or long after, a single
+    # shot's floor as a burst's or none, and floors that outlive a map.
+    ('    if (now - g_rumbleFloorEnd < 0) {', '    if (0) {'),
+    ('Sys_Milliseconds() + weapDef->iFireTime + RUMBLE_BURST_SLACK_MS', 'Sys_Milliseconds() + weapDef->iFireTime'),
+    ('#    define RUMBLE_BURST_SLACK_MS 60', '#    define RUMBLE_BURST_SLACK_MS 600'),
+    ('    if (!weapDef->bSemiAuto && !weapDef->bBoltAction && weapDef->weapClass',
+     '    if (!weapDef->bBoltAction && weapDef->weapClass'),
+    ('        g_rumbleFloorEnd = Sys_Milliseconds() + RUMBLE_KICK_MS;', '        g_rumbleFloorEnd = Sys_Milliseconds();'),
+    ('    g_rumbleFloorLow = g_rumbleFloorHigh = 0.0f;\n    for (i = 0; i < MAX_ACTIVE_RUMBLES; ++i)\n        CG_InvalidateActiveRumble(i);\n\n',
+     '    for (i = 0; i < MAX_ACTIVE_RUMBLES; ++i)\n        CG_InvalidateActiveRumble(i);\n\n'),
+    ('    g_rumbleFloorLow = g_rumbleFloorHigh = 0.0f;\n    CL_Gamepad_SetRumble(0.0f, 0.0f);',
+     '    CL_Gamepad_SetRumble(0.0f, 0.0f);'),
     ('    return weapDef->iFireTime < RUMBLE_SEMI_FIRE_MS ? weapDef->iFireTime : RUMBLE_SEMI_FIRE_MS;',
      '    return RUMBLE_DURATION_MS;'),
     ('        t = (float)(now - ar->startTime) / (float)ar->duration;',
@@ -673,8 +704,9 @@ with tempfile.TemporaryDirectory(prefix='cod2-rumble-') as directory:
         result = subprocess.run([str(binary)], capture_output=True, text=True)
         assert (result.returncode == 0) == (mutant is None), (index, mutant, result.stdout[-500:],
                                                                result.stderr[-2000:])
-print('PASS: the local player feels every round apart (an automatic gun\'s graph spans its fire interval, single '
-      'shots 250 ms, bolts 400, rockets 700), turrets they man, the Panzerschreck and guns naming no graph included; '
+print('PASS: the local player feels every round (an automatic gun\'s graph spans its fire interval over a floor held '
+      'until 60 ms past its next round, so a burst never gaps; single shots 250 ms over a 100 ms kick, bolts 400, '
+      'rockets 700), turrets they man, the Panzerschreck and guns naming no graph included; '
       'blasts full at the centre and fading to nothing at three radii, smoke never; earthquake() by its scale, '
       'radius and duration, its camera shake taking the radius as sent; hits by their size, dying fully; their own melee '
       'impacts once a swing; nothing for other players, followed players or the killcam; missing graphs reported '

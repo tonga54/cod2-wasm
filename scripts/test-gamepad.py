@@ -375,6 +375,60 @@ for old, new in assist_mutants:
     assert not passes(prefix + source.replace(old, new) + assist_main), old
 print(f'PASS: {len(assist_mutants)} aim assist application mutants fail')
 
+# The left stick holds a run to its line: within 15 degrees of forward, back,
+# left or right the move is exactly that way; past it the rest of each quarter
+# stretches, from the line out to 45 degrees, which stays 45; the push keeps
+# its speed.
+move_main = r'''
+static void move(int x,int y,int *side,int *forward){
+ usercmd_t cmd={0};
+ pad.axes[0]=x;pad.axes[1]=y;CL_Gamepad_Move(&cmd);
+ *side=cmd.rightmove;*forward=cmd.forwardmove;
+ pad.axes[0]=pad.axes[1]=0;
+}
+/* The stick pushed a share of the way at a bearing in degrees, 0 forward, 90 right. */
+static void bearing(float degrees,float push,int *side,int *forward){
+ float r=degrees*0.0174532925f;
+ move((int)(32767*push*sinf(r)),(int)(-32767*push*cosf(r)),side,forward);
+}
+static int about(int value,float expected){return fabsf((float)value-expected)<=1.0f;}
+int main(void){
+ int side,forward;
+ client.cgameSensitivity=1;CL_Gamepad_Init();cls.frametime=10;cls.realtime=1000;
+ /* A full push truncates to 126 or 127; the other way is exactly still. */
+ for(float d=-15;d<=15;d+=1){
+  bearing(d,1,&side,&forward);assert(side==0&&forward>=126);
+  bearing(180+d,1,&side,&forward);assert(side==0&&forward<=-126);
+  bearing(90+d,1,&side,&forward);assert(side>=126&&forward==0);
+  bearing(-90+d,1,&side,&forward);assert(side<=-126&&forward==0);
+ }
+ bearing(16,1,&side,&forward);assert(side>0&&side<=4&&forward==126);
+ bearing(30,1,&side,&forward);assert(about(side,127*sinf(0.3926991f))&&about(forward,127*cosf(0.3926991f)));
+ bearing(-30,1,&side,&forward);assert(about(side,-127*sinf(0.3926991f))&&about(forward,127*cosf(0.3926991f)));
+ bearing(150,1,&side,&forward);assert(about(side,127*sinf(0.3926991f))&&about(forward,-127*cosf(0.3926991f)));
+ bearing(45,1,&side,&forward);assert(about(side,89.8f)&&about(forward,89.8f));
+ bearing(-135,1,&side,&forward);assert(about(side,-89.8f)&&about(forward,-89.8f));
+ /* Half the way past the 20% deadzone is 37.5% speed, still straight. */
+ bearing(10,0.5f,&side,&forward);assert(side==0&&about(forward,127*0.375f));
+ CL_Gamepad_Shutdown();return 0;
+}
+'''
+run(prefix + source + move_main, 'the left stick runs straight within 15 degrees of a line, stretches the rest of '
+    'each quarter out to 45 degrees, and keeps its push')
+move_mutants = [
+    ('    Gamepad_SnapMove(&mx, &my);\n', ''),
+    ('#    define GAMEPAD_MOVE_SNAP_DEG 15.0f', '#    define GAMEPAD_MOVE_SNAP_DEG 5.0f'),
+    ('copysignf((off - snap) * (0.5f * quarter) / (0.5f * quarter - snap), angle - line)',
+     'copysignf(off, angle - line)'),
+    ('(0.5f * quarter - snap), angle - line);', '(0.5f * quarter - snap), line - angle);'),
+    ('    line = floorf(angle / quarter + 0.5f) * quarter;', '    line = floorf(angle / quarter) * quarter;'),
+    ('    *y = -length * cosf(line + off);', '    *y = length * cosf(line + off);'),
+]
+for old, new in move_mutants:
+    assert source.count(old) == 1, old
+    assert not passes(prefix + source.replace(old, new) + move_main), old
+print(f'PASS: {len(move_mutants)} stick snap mutants fail')
+
 def input_function(name):
     text = (root / 'src/PC/client_mp/cl_input.c').read_text()
     match = re.search(r'^[^\n;]*\b' + name + r'\([^;]*?\)\n\{', text, re.M)

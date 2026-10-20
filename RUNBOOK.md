@@ -4392,3 +4392,42 @@ Validation: `test-viewmodel-motion.py` (31 and 7 mutants),
 `test-web-scene-fx.py` (46), `test-web-scene-fx.mjs` (107 WebGL2 checks),
 `test-web-scene-fx-scale.cjs` and `test-web-point-lights.cjs`; the web client
 builds; a screencast of a reload, a switch and a sprint in the QA stack.
+
+## A straight run on the stick, and vibration that holds — 2026-10-20
+
+The owner found running forward on the left stick hard to keep straight, the
+smallest drift turning the run sideways, and the vibration patchy: an
+automatic weapon held down buzzed, stopped and buzzed again, and the pistol
+did not seem to vibrate at all.
+
+The stick's move kept its exact angle, so a thumb 10 degrees off ran 10
+degrees off. `Gamepad_SnapMove` (`cl_gamepad.c`) now runs exactly along
+forward, back, left or right within 15 degrees of them, and stretches the
+rest of each quarter so 45 degrees stays 45 and nothing jumps at the edge.
+The push, the speed, is unchanged.
+
+The vibration followed its design too closely. An automatic weapon's graph
+spans its fire interval, and the Thompson's falls to nothing before the next
+round: a recording of the commands the page sent showed about ten
+`playEffect` calls and one `reset()` for every round, twelve times a second,
+which a pad cannot follow. The Colt's strong motor ran for about 60 ms, the
+rest on the weak one, which many pads barely show. Now:
+
+- `cg_rumble_mp.c` keeps a floor under the kicks. An automatic weapon's
+  (strong 0.4, weak 0.3) lasts until 60 ms after its next round is due, so a
+  burst never gaps and stops soon after its last round, at a reload or an
+  empty magazine; a single shot's (0.7, 0.5) lasts 100 ms. A new map or the
+  cgame shutting down clears it.
+- `web_haptics.js` sends each command for 150 ms and refreshes steady motors
+  every 60 ms; a change goes out at most every 30 ms unless it rises by 0.15
+  or more, as a round's kick does.
+
+Validation: `test-gamepad.py` (the snap from -15 to 15 degrees of all four
+lines, the stretch at 16, 30, 45, 150 and -135 degrees, a half push; 6
+mutants), `test-rumble.py` (a ten-round burst on from its first round to 60
+ms past its last, single shots' 100 ms kick, nothing left after a new map or
+a shutdown; 7 more mutants) and `test-web-haptics.cjs` (14 mutants); the web
+client builds. A recording pad in the QA stack: a 1.2 s Thompson burst sent 27
+commands, each round's kick (0.5, 0.58) back to the floor (0.4, 0.3), at most
+67 ms apart, and one `reset()` after the trigger was let go; each Colt shot
+held the strong motor at 0.92 to 0.7 for about 100 ms and reset after 230 ms.

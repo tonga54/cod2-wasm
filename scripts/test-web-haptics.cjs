@@ -24,7 +24,7 @@ function pad(index, { timestamp = 0, held = false, kind = 'chrome', fail = false
     hapticActuators: kind === 'firefox' ? [{ pulse(value, ms) { log.push(['pulse', value, ms]); return result(true); } }] : undefined,
   };
 }
-const effect = (strong, weak) => ['play', 'dual-rumble', { startDelay: 0, duration: 120, strongMagnitude: strong, weakMagnitude: weak }];
+const effect = (strong, weak) => ['play', 'dual-rumble', { startDelay: 0, duration: 150, strongMagnitude: strong, weakMagnitude: weak }];
 
 async function scenario(source) {
   const clock = { now: 1000, queries: 0 };
@@ -35,21 +35,29 @@ async function scenario(source) {
   const output = scope.Module.cod2CreateHaptics();
   unhandled = 0;
 
-  // Each change plays at once for 120 ms; the same motors refresh every 50 ms
-  // so a steady rumble never gaps, smaller changes than 0.03 wait for it.
+  // Each command plays for 150 ms. A change of 0.1 or more goes out 30 ms
+  // after the last command at the soonest, a smaller one waits for the 60 ms
+  // refresh that keeps a steady rumble from gapping, and a rise of 0.15 or
+  // more, a round's kick, goes out at once.
   output.rumble(1, 0.5);
   assert.deepEqual(pads[0].log, [effect(1, 0.5)]);
-  clock.now += 20; output.rumble(1, 0.5); output.rumble(0.98, 0.52);
+  clock.now += 20; output.rumble(1, 0.5); output.rumble(0.95, 0.55); output.rumble(0.85, 0.5);
   assert.equal(pads[0].log.length, 1);
-  output.rumble(0.9, 0.5);
-  assert.deepEqual(pads[0].log[1], effect(0.9, 0.5));
-  clock.now += 49; output.rumble(0.9, 0.5);
+  clock.now += 10; output.rumble(0.85, 0.5);
+  assert.deepEqual(pads[0].log[1], effect(0.85, 0.5));
+  clock.now += 35; output.rumble(0.8, 0.52);
   assert.equal(pads[0].log.length, 2);
-  clock.now += 1; output.rumble(0.9, 0.5);
-  assert.deepEqual(pads[0].log[2], effect(0.9, 0.5));
+  clock.now += 5; output.rumble(0.8, 0.72);
+  assert.deepEqual(pads[0].log[2], effect(0.8, 0.72));
+  clock.now += 5; output.rumble(0.8, 0.92);
+  assert.deepEqual(pads[0].log[3], effect(0.8, 0.92));
+  clock.now += 59; output.rumble(0.8, 0.92);
+  assert.equal(pads[0].log.length, 4);
+  clock.now += 1; output.rumble(0.8, 0.92);
+  assert.deepEqual(pads[0].log[4], effect(0.8, 0.92));
   // Out-of-range and invalid values are held to 0..1.
   output.rumble(2, -1); output.rumble(NaN, 0.25);
-  assert.deepEqual(pads[0].log.slice(3), [effect(1, 0), effect(0, 0.25)]);
+  assert.deepEqual(pads[0].log.slice(5), [effect(1, 0), effect(0, 0.25)]);
   // Still motors are reset once; while still nothing asks for the pads.
   output.rumble(0, 0);
   assert.deepEqual(pads[0].log.at(-1), ['reset']);
@@ -86,7 +94,7 @@ async function scenario(source) {
   // Firefox's single actuator pulses the stronger motor, and stops at zero.
   pads = [pad(0, { kind: 'firefox' })];
   output.rumble(0.4, 0.9); output.rumble(0, 0);
-  assert.deepEqual(pads[0].log, [['pulse', 0.9, 120], ['pulse', 0, 0]]);
+  assert.deepEqual(pads[0].log, [['pulse', 0.9, 150], ['pulse', 0, 0]]);
 
   // Refusals, rejected or thrown, never escape; no pads at all is fine.
   pads = [pad(0, { fail: true })];
@@ -100,9 +108,11 @@ async function scenario(source) {
 }
 
 const mutants = [
-  ['EFFECT_MS = 120', 'EFFECT_MS = 1000'],
-  ['REFRESH_MS = 50', 'REFRESH_MS = 500'],
-  ['STEP = 0.03', 'STEP = 0'],
+  ['EFFECT_MS = 150', 'EFFECT_MS = 1000'],
+  ['REFRESH_MS = 60', 'REFRESH_MS = 600'],
+  ['STEP = 0.1', 'STEP = 0'],
+  ['MIN_GAP_MS = 30', 'MIN_GAP_MS = 0'],
+  ['KICK = 0.15', 'KICK = 1'],
   ['if (result && typeof result.catch === \'function\') result.catch(() => {});', ''],
   ['pad.connected !== false && ', ''],
   ['(active && !bestBusy) || ', ''],
@@ -122,7 +132,8 @@ const mutants = [
     const survived = await scenario(production.replace(before, after)).then(() => true, () => false);
     assert(!survived, `mutant survived: ${before}`);
   }
-  console.log('PASS: controller vibration plays each change at once for 120 ms, refreshes steady motors every 50 ms, '
+  console.log('PASS: controller vibration plays each command for 150 ms, a kick at once and other changes 30 ms '
+    + 'apart at the soonest, refreshes steady motors every 60 ms, '
     + 'resets once when still and stays idle after; the pad held or latest used, kept for a burst; Firefox pulses; '
     + `refusals contained; ${mutants.length} failing regression mutants`);
 })().catch(error => { console.error(error); process.exit(1); });
