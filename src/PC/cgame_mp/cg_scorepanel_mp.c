@@ -495,6 +495,18 @@ const char *CG_ScorePanelClock(vec4_t color)
     return retail.clock ? CG_GetHudElemTimer(retail.clock, color) : NULL;
 }
 
+int CG_ScorePanelClockEnd(void)
+{
+    CG_ScorePanelRetail retail;
+
+    if (!cg->snap)
+        return 0;
+    CG_ScorePanelFindRetail(&cg->snap->ps, &retail);
+    if (!retail.clock || (retail.clock->type != HE_TYPE_TIMER_DOWN && retail.clock->type != HE_TYPE_TENTHS_TIMER_DOWN))
+        return 0;
+    return retail.clock->time;
+}
+
 void CG_DrawScorePanel(void)
 {
     CG_ScorePanelRetail retail;

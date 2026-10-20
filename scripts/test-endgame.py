@@ -90,12 +90,15 @@ for include in ('#include "common_types.h"\n', '#include "imports.h"\n', '#inclu
     assert body.count(include) == 1, include
     body = body.replace(include, '')
 for include, text in (('#include "headers/PC/cgame_mp/cg_endgame.h"\n', header),
-                      ('#include "headers/PC/cgame_mp/cg_scoretable.h"\n', table_header)):
+                      ('#include "headers/PC/cgame_mp/cg_scoretable.h"\n', table_header),
+                      ('#include "headers/PC/cgame_mp/cg_prematch.h"\n', ''),
+                      ('#include "headers/PC/cgame_mp/cg_scorepanel.h"\n', '')):
     assert body.count(include) == 1, include
     body = body.replace(include, text)
 
 support = r'''
 #include <assert.h>
+#include <ctype.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -161,8 +164,15 @@ typedef int snd_alias_system_t;
 #define SASYS_CGAME 1
 static snd_alias_t endgameMusic = { "browser_endgame_music" };
 static snd_alias_list_t endgameMusicList = { &endgameMusic };
+static snd_alias_t lastMinuteMusic = { "browser_lastminute_music" };
+static snd_alias_list_t lastMinuteMusicList = { &lastMinuteMusic };
 static int haveMusic = 1, musicPlays, musicStops, lastFade = -1;
+static int haveLastMinute = 1, lastMinuteLookups, channelBusy, fadeIns, lastFadeIn = -1;
 snd_alias_list_t *Com_FindSoundAlias(const char *name) {
+    if (!strcmp(name, "browser_lastminute_music")) {
+        ++lastMinuteLookups;
+        return haveLastMinute ? &lastMinuteMusicList : NULL;
+    }
     assert(!strcmp(name, "browser_endgame_music"));
     return haveMusic ? &endgameMusicList : NULL;
 }
@@ -171,7 +181,26 @@ void SND_PlayMusicAlias(const snd_alias_t *alias, snd_alias_system_t system) {
     assert(alias == &endgameMusic && system == SASYS_CGAME);
     ++musicPlays;
 }
+/* The music channel takes it unless something still plays there. */
+int SND_FadeInMusicAlias(const snd_alias_t *alias, int fade, snd_alias_system_t system) {
+    assert(alias == &lastMinuteMusic && system == SASYS_CGAME);
+    if (channelBusy)
+        return 0;
+    ++fadeIns;
+    lastFadeIn = fade;
+    return 1;
+}
 void SND_StopMusic(int fade) { ++musicStops; lastFade = fade; }
+/* The countdown, and when the stock clock reaches zero, 0 without one. */
+static int prematchActive, clockEnd;
+int CG_PrematchActive(void) { return prematchActive; }
+int CG_ScorePanelClockEnd(void) { return clockEnd; }
+int I_stricmp(const char *a, const char *b) {
+    for (; tolower((unsigned char)*a) == tolower((unsigned char)*b); ++a, ++b)
+        if (!*a)
+            return 0;
+    return tolower((unsigned char)*a) - tolower((unsigned char)*b);
+}
 
 /* The table's lettering: the fonts' capitals and baselines in font units. */
 typedef struct { float cap; float base; } Metrics;
@@ -840,6 +869,92 @@ int main(void) {
     frame(1, 112016, 1.0f);
     frame(0, 112100, 1.0f);
     assert(musicPlays == plays && musicStops == stops);
+
+    /* The last minute's music: nothing while the stock clock shows more than
+     * a minute; at a minute it fades in over 4 s, once for that clock, which
+     * ticks within a second. */
+    haveMusic = 1;
+    snprintf(cgs->gametype, sizeof(cgs->gametype), "tdm");
+    plays = musicPlays;
+    stops = musicStops;
+    clockEnd = 300000;
+    frame(0, 239999, 1.0f);
+    assert(!fadeIns && !lastMinuteLookups);
+    frame(0, 240000, 1.0f);
+    assert(fadeIns == 1 && lastFadeIn == 4000 && lastMinuteLookups == 1);
+    clockEnd = 300400;
+    frame(0, 250000, 1.0f);
+    frame(0, 299000, 1.0f);
+    assert(fadeIns == 1 && musicStops == stops && lastMinuteLookups == 1);
+    /* The match ends: the end's music takes over from it at once, and the
+     * same clock after the intermission does not bring it back. */
+    frame(1, 300500, 1.0f);
+    assert(musicStops == stops + 1 && lastFade == 0 && musicPlays == plays + 1);
+    frame(0, 301000, 1.0f);
+    assert(fadeIns == 1 && musicStops == stops + 2);
+    /* Another match's clock: its last minute brings the music again, and
+     * without the end's music the match's end fades it out over 2 s. */
+    clockEnd = 500000;
+    frame(0, 430000, 1.0f);
+    assert(fadeIns == 1);
+    frame(0, 450000, 1.0f);
+    assert(fadeIns == 2);
+    haveMusic = 0;
+    stops = musicStops;
+    frame(1, 500100, 1.0f);
+    assert(musicStops == stops + 1 && lastFade == 2000);
+    frame(0, 516200, 1.0f);
+    haveMusic = 1;
+    /* A clock moved by more than a second while it plays is another match's:
+     * the music fades out over 2 s and waits for that match's last minute. */
+    clockEnd = 600000;
+    frame(0, 550000, 1.0f);
+    assert(fadeIns == 3);
+    stops = musicStops;
+    clockEnd = 700000;
+    frame(0, 560000, 1.0f);
+    assert(musicStops == stops + 1 && lastFade == 2000 && fadeIns == 3);
+    frame(0, 640000, 1.0f);
+    assert(fadeIns == 4);
+    /* A music channel still busy, as with the countdown's music fading out,
+     * delays it to the first free frame. */
+    clockEnd = 800000;
+    channelBusy = 1;
+    frame(0, 750000, 1.0f);
+    frame(0, 751000, 1.0f);
+    assert(fadeIns == 4);
+    channelBusy = 0;
+    frame(0, 752000, 1.0f);
+    assert(fadeIns == 5);
+    /* Nothing through the countdown, in S&D, past the clock's end, or without
+     * the owner's track, which is looked for once for the clock. */
+    stops = musicStops;
+    frame(1, 800100, 1.0f);
+    frame(0, 816200, 1.0f);
+    prematchActive = 1;
+    clockEnd = 900000;
+    frame(0, 850000, 1.0f);
+    assert(fadeIns == 5);
+    prematchActive = 0;
+    snprintf(cgs->gametype, sizeof(cgs->gametype), "sd");
+    frame(0, 851000, 1.0f);
+    assert(fadeIns == 5);
+    snprintf(cgs->gametype, sizeof(cgs->gametype), "SD");
+    frame(0, 852000, 1.0f);
+    assert(fadeIns == 5);
+    snprintf(cgs->gametype, sizeof(cgs->gametype), "tdm");
+    frame(0, 900000, 1.0f);
+    frame(0, 901000, 1.0f);
+    assert(fadeIns == 5);
+    clockEnd = 1000000;
+    haveLastMinute = 0;
+    int lookups = lastMinuteLookups;
+    frame(0, 950000, 1.0f);
+    frame(0, 960000, 1.0f);
+    assert(fadeIns == 5 && lastMinuteLookups == lookups + 1);
+    clockEnd = 0;
+    frame(0, 970000, 1.0f);
+    assert(lastMinuteLookups == lookups + 1);
     puts("PASS");
     return 0;
 }
@@ -925,6 +1040,26 @@ mutants = [
      '    if (!s_endgame.intermission || !CG_EndgameEnabled() || localClient > ENDGAME_MAX_CLIENTS)'),
     ('    s_endgame.regularFont = R_RegisterWwiiFont("$regularfont");\n', ''),
     ('    memset(&s_endgame, 0, sizeof(s_endgame));\n', ''),
+    ('#define ENDGAME_LAST_MINUTE_MSEC 60000', '#define ENDGAME_LAST_MINUTE_MSEC 59000'),
+    ('#define ENDGAME_LAST_MINUTE_FADE_IN_MSEC 4000', '#define ENDGAME_LAST_MINUTE_FADE_IN_MSEC 0'),
+    ('#define ENDGAME_LAST_MINUTE_FADE_OUT_MSEC 2000', '#define ENDGAME_LAST_MINUTE_FADE_OUT_MSEC 0'),
+    ('            SND_StopMusic(music ? 0 : ENDGAME_LAST_MINUTE_FADE_OUT_MSEC);',
+     '            SND_StopMusic(ENDGAME_LAST_MINUTE_FADE_OUT_MSEC);'),
+    ('        if (s_endgame.lastMinutePlaying) {\n            s_endgame.lastMinutePlaying = 0;\n'
+     '            SND_StopMusic(music ? 0 : ENDGAME_LAST_MINUTE_FADE_OUT_MSEC);\n        }\n', ''),
+    ('    if (intermission || CG_PrematchActive() || !I_stricmp(cgs->gametype, "sd"))',
+     '    if (intermission || CG_PrematchActive())'),
+    ('    if (intermission || CG_PrematchActive() || !I_stricmp(cgs->gametype, "sd"))',
+     '    if (intermission || !I_stricmp(cgs->gametype, "sd"))'),
+    ('lastMinuteEnd) > ENDGAME_CLOCK_SLACK_MSEC) {', 'lastMinuteEnd) > 0) {'),
+    ('    if (!music) {\n        s_endgame.lastMinuteEnd = end;\n        return;\n    }\n',
+     '    if (!music)\n        return;\n'),
+    ('        s_endgame.lastMinuteEnd = end;\n        s_endgame.lastMinutePlaying = 1;\n',
+     '        s_endgame.lastMinutePlaying = 1;\n'),
+    (' || left <= 0 ||', ' ||'),
+    ('    CG_EndgameLastMinute(intermission);\n', ''),
+    ('        s_endgame.lastMinutePlaying = 0;\n        SND_StopMusic(ENDGAME_LAST_MINUTE_FADE_OUT_MSEC);\n',
+     '        s_endgame.lastMinutePlaying = 0;\n'),
 ]
 variants = [body] + [mutate(body, old, new) for old, new in mutants]
 with tempfile.TemporaryDirectory(prefix='cod2-endgame-') as directory:
@@ -944,4 +1079,6 @@ print('PASS: at intermission the WWII end of a match fades in over the darkened 
       'ended it; deathmatch shows the best three, first in the middle, and the server\'s named winner; after 5 s '
       'the scoreboard takes over with the result and reason in its header over a blurred view, until the five '
       'modes load the next map 16 s in; the owner\'s music plays from the start, fades out over the last 3 s and '
-      f'stops with the intermission, silent without it; {len(mutants)} failing regression mutants')
+      'stops with the intermission, silent without it; the last minute\'s music fades in at a minute on the clock, '
+      'once a match, waits for a free channel, gives way to the end\'s music or fades out without it, and stays '
+      f'silent through the countdown and in S&D; {len(mutants)} failing regression mutants')

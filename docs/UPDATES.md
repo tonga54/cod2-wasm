@@ -66,7 +66,9 @@ private IWDs and credentials never enter GitHub Actions or releases.
 `scripts/update-pi.py` checks every five minutes through a user systemd timer.
 It requires a clean `main` checkout, a fast-forward source update, and the
 owner's original IWDs, and the optional [hit sound](#owner-hit-sound),
-[menu music](#owner-menu-music), [sound pack](#owner-sound-pack) and
+[menu music](#owner-menu-music), [countdown music](#owner-countdown-music),
+[end of match music](#owner-end-of-match-music),
+[last minute music](#owner-last-minute-music), [sound pack](#owner-sound-pack) and
 [class pictures](#owner-class-pictures), in
 `~/cod2-original/main` (private, outside Git). It
 validates package checksums, ARM64 image identities and the clean source/build
@@ -248,6 +250,35 @@ music row. The generator keeps the first 20 seconds of the file's frames as
 and `check-private-assets.py` verifies the row and the bytes. Without the file
 the end of a match is silent. On October 19, 2026 the owner's file was 11.9 MB;
 the archive keeps 0.8 MB of it.
+
+### Owner last minute music
+
+When the match clock shows a minute left, music plays from 30 seconds into
+the owner's track. It fades in over 4 seconds and stops as the match ends, giving
+way at once to the end of match music, or fading out over 2 seconds without
+it. The track is an optional `lastminutemusic.mp3` beside the original IWDs,
+or else the countdown's `prematchmusic.mp3`. Like the other music it belongs
+to the owner, is never committed and needs a byte-identical copy on every
+host that prepares the published build (`data/main/` and
+`~/cod2-original/main/`). Adding `lastminutemusic.mp3` on one host but not
+the other stops the Pi's updates.
+
+The client follows the stock clock, the one the score panel shows. It plays
+the music once per clock, after the countdown, which holds the clock. A clock
+that moves by more than a second belongs to another match: the music fades
+out and waits for that match's last minute. Search and Destroy has none,
+because its clock is a round's. If the countdown's music is still fading on
+the music channel, the last minute's music starts once that channel is free.
+
+The music streams as `browser_lastminute_music` in
+`soundaliases/browser_lastminutemusic.csv`, on the same copy of El Daba's
+opening music row. The generator stores 65 seconds of the track's frames,
+from the first frame 30 seconds in, as `sound/browser/lastminutemusic.mp3`,
+without tags or an encoder's header frame. It cuts at a frame boundary, so the
+music enters within 26 ms of the 30-second mark, and the fade-in covers the
+first frames, which reach back into frames left out. `check-private-assets.py`
+verifies the row and the bytes. On October 20, 2026 the owner's countdown
+track served for both. The audio archive grew from 64.8 to 67.4 MB.
 
 ### Owner sound pack
 

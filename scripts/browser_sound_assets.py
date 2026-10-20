@@ -39,6 +39,16 @@ ENDGAME_MUSIC_TABLE = 'soundaliases/browser_endgamemusic.csv'
 # The 16 s intermission the server holds (browser_endgame.py) and a margin,
 # about 8 MB decoded.
 ENDGAME_MUSIC_SECONDS = 20
+# Music for the last minute of a match streams the same way as an alias of its
+# own, entering LASTMINUTE_MUSIC_START seconds into the file: the owner's own
+# track for it, likewise never in Git, or else the countdown's.
+LASTMINUTE_MUSIC_OWNER_FILE = 'lastminutemusic.mp3'
+LASTMINUTE_MUSIC_ALIAS = 'browser_lastminute_music'
+LASTMINUTE_MUSIC_FILE = 'browser/lastminutemusic.mp3'
+LASTMINUTE_MUSIC_TABLE = 'soundaliases/browser_lastminutemusic.csv'
+LASTMINUTE_MUSIC_START = 30
+# The minute it plays and 5 s more, about 25 MB decoded.
+LASTMINUTE_MUSIC_SECONDS = 65
 # A sound pack of the owner's may sit there too, likewise never in Git: a
 # folder of 16-bit PCM WAVs and a list of the original aliases whose rows they
 # replace, a row a file, with values for any other alias column.
@@ -158,10 +168,19 @@ def vbr_header(data, start):
     return data[xing:xing + 4] in (b'Xing', b'Info') or data[start + 36:start + 40] == b'VBRI'
 
 
-def package_prematch_music(data, limit=PREMATCH_MUSIC_SECONDS, owner=PREMATCH_MUSIC_OWNER_FILE):
+def lastminute_owner_file(main):
+    """The owner's track for the last minute of a match in the folder main: their lastminutemusic.mp3, else the
+    countdown's prematchmusic.mp3; None without either."""
+    for name in (LASTMINUTE_MUSIC_OWNER_FILE, PREMATCH_MUSIC_OWNER_FILE):
+        if (main / name).is_file():
+            return main / name
+    return None
+
+
+def package_prematch_music(data, limit=PREMATCH_MUSIC_SECONDS, owner=PREMATCH_MUSIC_OWNER_FILE, skip=0):
     """The owner's countdown music, or other owner music given its limit and file name, as the archive holds it:
-    its MPEG audio layer III frames for the first limit seconds, without its tags or an encoder's header frame,
-    which would count frames no longer there."""
+    its MPEG audio layer III frames for limit seconds from the first frame skip seconds in, without its tags or an
+    encoder's header frame, which would count frames no longer there."""
     def invalid(reason):
         return ValueError(f'{owner}: {reason}')
 
@@ -174,14 +193,17 @@ def package_prematch_music(data, limit=PREMATCH_MUSIC_SECONDS, owner=PREMATCH_MU
         raise invalid('not MPEG audio layer III throughout')
     if vbr_header(data, spans[0][0]):
         spans = spans[1:]
-    kept, seconds = [], 0.0
+    kept, seconds, skipped = [], 0.0, 0.0
     for start, length, duration in spans:
+        if skipped < skip:
+            skipped += duration
+            continue
         if seconds >= limit:
             break
         kept.append(data[start:start + length])
         seconds += duration
     if seconds < 1:
-        raise invalid('shorter than 1 s')
+        raise invalid(f'shorter than {skip + 1} s')
     return b''.join(kept)
 
 
@@ -338,7 +360,7 @@ def verify_menu_music(entries, original_rows, owner):
                        for row in other_rows), 'Original menu music kept beside the owner\'s: ' + name
 
 
-def verify_owner_music(entries, source_rows, owner, table_name, file_name, alias, limit, owner_file, what):
+def verify_owner_music(entries, source_rows, owner, table_name, file_name, alias, limit, owner_file, what, skip=0):
     """Check that a package streams the owner's music, and only it, as its alias.
 
     source_rows holds (header, fields) for every original row of the mission
@@ -348,7 +370,7 @@ def verify_owner_music(entries, source_rows, owner, table_name, file_name, alias
     if owner is None:
         assert table is None and music is None, f'{what} packaged without the owner file'
         return
-    assert music == package_prematch_music(owner, limit, owner_file), f'Packaged {what} differs from the owner file'
+    assert music == package_prematch_music(owner, limit, owner_file, skip), f'Packaged {what} differs from the owner file'
     assert table is not None, f'Missing the {what} alias'
     header, rows = alias_table(table.decode('utf-8'))
     assert len(rows) == 1 and any(source_header == header and rows[0] == prematch_music_row(header, fields, alias,
@@ -370,6 +392,12 @@ def verify_prematch_music(entries, source_rows, owner):
 def verify_endgame_music(entries, source_rows, owner):
     verify_owner_music(entries, source_rows, owner, ENDGAME_MUSIC_TABLE, ENDGAME_MUSIC_FILE, ENDGAME_MUSIC_ALIAS,
                        ENDGAME_MUSIC_SECONDS, ENDGAME_MUSIC_OWNER_FILE, 'end of match music')
+
+
+def verify_lastminute_music(entries, source_rows, owner):
+    verify_owner_music(entries, source_rows, owner, LASTMINUTE_MUSIC_TABLE, LASTMINUTE_MUSIC_FILE,
+                       LASTMINUTE_MUSIC_ALIAS, LASTMINUTE_MUSIC_SECONDS, LASTMINUTE_MUSIC_OWNER_FILE,
+                       'last minute music', LASTMINUTE_MUSIC_START)
 
 
 def verify_owner_sounds(entries, original_rows, owner):
@@ -429,7 +457,7 @@ def add_explosive_aliases(tables, aliases):
 
 
 def collect_sound_assets(root, asset_index, originals, renderer, maps, hit_sound=None, menu_music=None,
-                         owner_sounds=None, prematch_music=None, endgame_music=None):
+                         owner_sounds=None, prematch_music=None, endgame_music=None, lastminute_music=None):
     def read(name):
         path, original_name = asset_index[name]
         return originals[path].read(original_name)
@@ -551,6 +579,20 @@ def collect_sound_assets(root, asset_index, originals, renderer, maps, hit_sound
         files['sound/' + ENDGAME_MUSIC_FILE] = package_prematch_music(endgame_music, ENDGAME_MUSIC_SECONDS,
                                                                       ENDGAME_MUSIC_OWNER_FILE)
         print(f'End of match music: the owner\'s {ENDGAME_MUSIC_OWNER_FILE} streams as {ENDGAME_MUSIC_ALIAS}')
+    if lastminute_music is not None:
+        if PREMATCH_MUSIC_SOURCE not in aliases:
+            raise ValueError(f'No original {PREMATCH_MUSIC_SOURCE} alias for the owner last minute music to copy')
+        table, _, fields = aliases[PREMATCH_MUSIC_SOURCE][0]
+        header = tables[table][0]
+        output = io.StringIO(newline='')
+        writer = csv.writer(output, lineterminator='\r\n')
+        writer.writerow(header)
+        writer.writerow(prematch_music_row(header, fields, LASTMINUTE_MUSIC_ALIAS, LASTMINUTE_MUSIC_FILE))
+        files[LASTMINUTE_MUSIC_TABLE] = output.getvalue().encode('utf-8')
+        files['sound/' + LASTMINUTE_MUSIC_FILE] = package_prematch_music(
+            lastminute_music, LASTMINUTE_MUSIC_SECONDS, LASTMINUTE_MUSIC_OWNER_FILE, LASTMINUTE_MUSIC_START)
+        print(f'Last minute music: the owner\'s track streams as {LASTMINUTE_MUSIC_ALIAS} '
+              f'from {LASTMINUTE_MUSIC_START} s in')
     if owner_sounds is not None:
         unused = sorted(set(pack) - set(owned))
         if unused:

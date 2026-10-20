@@ -4549,3 +4549,42 @@ Validation:
     its centre;
   - the iron sights ended at the ring's edge;
   - no mount showed inside the opening.
+
+## Music for the last minute — 2026-10-20
+
+The owner asked for "No Mission Too Difficult" to play when a match has a
+minute left, from 30 seconds into the song with a fade-in, ending with the
+match. The track is byte for byte the owner's countdown music, which the Pi
+already holds.
+
+`cg_endgame_mp.c` watches the stock clock (`CG_ScorePanelClockEnd`). At a
+minute or less it starts `browser_lastminute_music` once for that clock, with
+a 4-second fade-in from `SND_FadeInMusicAlias`. That new function starts the
+engine's background stream from silence, as `SND_StartBackground` already
+could. As the intermission begins, the end of match music takes over at once,
+or the last minute's music fades out over 2 seconds when there is none. Search
+and Destroy, whose clock is a round's, and the countdown are left out.
+
+The generator stores 65 seconds of the track from the first frame 30 seconds
+in. The track is an optional `lastminutemusic.mp3`, or else `prematchmusic.mp3`,
+so nothing has to be copied to the Pi. Only `cod2_browser_audio.iwd` changes
+(64.8 to 67.4 MB), and `site/wasm-game-data.json` is regenerated with this
+commit. Details are in docs/UPDATES.md, "Owner last minute music".
+
+Validation:
+
+- `test-endgame.py`, 76 mutants, 13 of them new:
+  - the start at exactly a minute, once per clock, ticking within a second;
+  - the hand-over to the end of match music, or a 2-second fade without it;
+  - another match's clock, and a busy music channel;
+  - nothing through the countdown, in S&D, past the clock's end, or without
+    the alias.
+- `test-prematch-music-assets.py`, 34 mutants: the 30-second cut, the alias,
+  the checker, and the choice of track.
+- Builds and archives: the web client and the native server build; the
+  archives are regenerated twice with the same manifest, and
+  `check-private-assets.py` passes.
+- A 90-second TDM match in the QA stack:
+  - the music decoded at a minute left and rose from 0 to 0.54 in 4 s;
+  - it played until the match ended 60.6 s later;
+  - it gave way to the end of match music at 0.54 at once.

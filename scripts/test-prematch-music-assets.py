@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the owner's countdown music in the private audio archive: the first 65 s of its frames, streamed as an
-alias of its own that takes the retail mission opening music's columns."""
+alias of its own that takes the retail mission opening music's columns; and beside it the end of a match's music
+and the last minute's, 65 s of it from 30 s in."""
 from pathlib import Path
 import contextlib
 import io
@@ -39,6 +40,8 @@ PACKAGED_ROW = row(name='browser_prematch_music', **dict(INTRO, file='browser/pr
                                                           startdelay=''))
 ENDGAME_ROW = row(name='browser_endgame_music', **dict(INTRO, file='browser/endgamemusic.mp3', loadspec='all_mp',
                                                        startdelay=''))
+LASTMINUTE_ROW = row(name='browser_lastminute_music', **dict(INTRO, file='browser/lastminutemusic.mp3',
+                                                             loadspec='all_mp', startdelay=''))
 
 
 def csv_text(rows):
@@ -93,6 +96,9 @@ def kept(frame_list, frame_seconds, start, limit=65):
 OWNER_FRAMES, OWNER_STEP = frames(192, encoder=b'Info')
 OWNER = id3(b'APIC' + bytes(40000)) + b''.join(OWNER_FRAMES) + b'TAG' + bytes(125)
 OWNER_KEPT = kept(OWNER_FRAMES, OWNER_STEP, 1)
+# The last minute's music: 65 s from the first frame 30 s into the audio.
+LASTMINUTE_SKIPPED = int(-(-30 // OWNER_STEP))
+LASTMINUTE_KEPT = kept(OWNER_FRAMES, OWNER_STEP, 1 + LASTMINUTE_SKIPPED)
 
 # name: (file, what the archive keeps, rate, channels)
 cases = {
@@ -259,6 +265,43 @@ def checks(m, archive_path, no_source_path):
         for package, owner in ((owned, OWNER), (both, None), (longer, OWNER)):
             raises(AssertionError, lambda: m.verify_endgame_music(package, source_rows, owner))
 
+        # The last minute's music beside them: 65 s of its frames from the
+        # first 30 s in, the rest unchanged; the checker takes exactly that.
+        all_three = m.collect_sound_assets(root, index, originals, renderer, maps, prematch_music=OWNER,
+                                           endgame_music=OWNER, lastminute_music=OWNER)
+        assert (LASTMINUTE_SKIPPED - 1) * OWNER_STEP < 30 <= LASTMINUTE_SKIPPED * OWNER_STEP
+        assert all_three['sound/' + m.LASTMINUTE_MUSIC_FILE] == LASTMINUTE_KEPT
+        assert 65 <= m.mp3_frames(LASTMINUTE_KEPT)[4] < 65 + OWNER_STEP
+        table_header, rows = m.alias_table(all_three[m.LASTMINUTE_MUSIC_TABLE].decode())
+        assert table_header == HEADER and rows == [LASTMINUTE_ROW]
+        assert {name: data for name, data in all_three.items()
+                if name not in (m.LASTMINUTE_MUSIC_TABLE, 'sound/' + m.LASTMINUTE_MUSIC_FILE)} == both
+        m.verify_lastminute_music(all_three, source_rows, OWNER)
+        m.verify_endgame_music(all_three, source_rows, OWNER)
+        m.verify_lastminute_music(both, source_rows, None)
+        from_start = dict(all_three)
+        from_start['sound/' + m.LASTMINUTE_MUSIC_FILE] = OWNER_KEPT
+        for package, owner in ((both, OWNER), (all_three, None), (from_start, OWNER)):
+            raises(AssertionError, lambda: m.verify_lastminute_music(package, source_rows, owner))
+        # A track that ends before a second past its entry is refused.
+        brief, _ = frames(30.5)
+        raises(ValueError, lambda: m.collect_sound_assets(root, index, originals, renderer, maps,
+                                                          lastminute_music=b''.join(brief)))
+        # The last minute's track is the owner's own for it, else the
+        # countdown's; a folder by either name is neither.
+        with tempfile.TemporaryDirectory(prefix='cod2-lastminute-') as folder:
+            main = Path(folder)
+            assert m.lastminute_owner_file(main) is None
+            (main / m.LASTMINUTE_MUSIC_OWNER_FILE).mkdir()
+            assert m.lastminute_owner_file(main) is None
+            (main / m.PREMATCH_MUSIC_OWNER_FILE).write_bytes(b'countdown')
+            assert m.lastminute_owner_file(main) == main / m.PREMATCH_MUSIC_OWNER_FILE
+            (main / m.LASTMINUTE_MUSIC_OWNER_FILE).rmdir()
+            (main / m.LASTMINUTE_MUSIC_OWNER_FILE).write_bytes(b'own')
+            assert m.lastminute_owner_file(main) == main / m.LASTMINUTE_MUSIC_OWNER_FILE
+            (main / m.PREMATCH_MUSIC_OWNER_FILE).unlink()
+            assert m.lastminute_owner_file(main) == main / m.LASTMINUTE_MUSIC_OWNER_FILE
+
         # It refuses music it cannot read, and a game without the alias to copy.
         raises(ValueError, lambda: m.collect_sound_assets(root, index, originals, renderer, maps,
                                                           prematch_music=rejected['layer II']))
@@ -315,7 +358,8 @@ with tempfile.TemporaryDirectory(prefix='cod2-prematch-music-') as directory:
         ("    if sum(length for _, length, _ in spans) * 10 < audio * 9:", "    if False:"),
         ("    audio = len(data) - tag - (128 if data[-128:-125] == b'TAG' else 0)\n    if sum(",
          "    audio = len(data) - tag\n    if sum("),
-        ("    if seconds < 1:\n        raise invalid('shorter than 1 s')", "    if not seconds:\n        raise invalid('empty')"),
+        ("    if seconds < 1:\n        raise invalid(f'shorter than {skip + 1} s')",
+         "    if not seconds:\n        raise invalid('empty')"),
         ("    if walked is None or not walked[3]:\n        raise invalid('not an MP3 file')",
          "    if walked is None:\n        raise invalid('not an MP3 file')"),
         ("name=alias, file=file, loadspec='all_mp', startdelay=''",
@@ -327,8 +371,10 @@ with tempfile.TemporaryDirectory(prefix='cod2-prematch-music-') as directory:
          "        files['sound/' + PREMATCH_MUSIC_FILE] = prematch_music"),
         ("        assert table is None and music is None, f'{what} packaged without the owner file'",
          "        assert True"),
-        ("    assert music == package_prematch_music(owner, limit, owner_file), f'Packaged {what} differs from the owner file'",
+        ("    assert music == package_prematch_music(owner, limit, owner_file, skip), f'Packaged {what} differs from the owner file'",
          "    assert music is not None"),
+        ("    assert music == package_prematch_music(owner, limit, owner_file, skip), f'Packaged {what} differs from the owner file'",
+         "    assert music == package_prematch_music(owner, limit, owner_file), f'Packaged {what} differs from the owner file'"),
         ("    assert len(rows) == 1 and any(source_header == header", "    assert any(source_header == header"),
         ("            assert all(dict(zip(other_header, row)).get('name', '').lower() != alias",
          "            assert all(row is not None"),
@@ -338,6 +384,20 @@ with tempfile.TemporaryDirectory(prefix='cod2-prematch-music-') as directory:
         ("package_prematch_music(endgame_music, ENDGAME_MUSIC_SECONDS,\n"
          "                                                                      ENDGAME_MUSIC_OWNER_FILE)",
          "package_prematch_music(endgame_music)"),
+        ("LASTMINUTE_MUSIC_START = 30", "LASTMINUTE_MUSIC_START = 29"),
+        ("LASTMINUTE_MUSIC_SECONDS = 65", "LASTMINUTE_MUSIC_SECONDS = 60"),
+        ("        if skipped < skip:\n            skipped += duration\n            continue\n", ""),
+        ("        if skipped < skip:\n", "        if skipped + duration < skip:\n"),
+        ("        writer.writerow(prematch_music_row(header, fields, LASTMINUTE_MUSIC_ALIAS, LASTMINUTE_MUSIC_FILE))",
+         "        writer.writerow(prematch_music_row(header, fields, ENDGAME_MUSIC_ALIAS, LASTMINUTE_MUSIC_FILE))"),
+        ("            lastminute_music, LASTMINUTE_MUSIC_SECONDS, LASTMINUTE_MUSIC_OWNER_FILE, LASTMINUTE_MUSIC_START)",
+         "            lastminute_music, LASTMINUTE_MUSIC_SECONDS, LASTMINUTE_MUSIC_OWNER_FILE)"),
+        ("                       'last minute music', LASTMINUTE_MUSIC_START)", "                       'last minute music')"),
+        ("    for name in (LASTMINUTE_MUSIC_OWNER_FILE, PREMATCH_MUSIC_OWNER_FILE):",
+         "    for name in (PREMATCH_MUSIC_OWNER_FILE, LASTMINUTE_MUSIC_OWNER_FILE):"),
+        ("    for name in (LASTMINUTE_MUSIC_OWNER_FILE, PREMATCH_MUSIC_OWNER_FILE):",
+         "    for name in (LASTMINUTE_MUSIC_OWNER_FILE,):"),
+        ("        if (main / name).is_file():", "        if (main / name).exists():"),
     ]
     for old, new in mutants:
         assert module_source.count(old) == 1, old
@@ -350,5 +410,6 @@ with tempfile.TemporaryDirectory(prefix='cod2-prematch-music-') as directory:
 print(f'PASS: without the owner file the archive has no countdown music; with it browser_prematch_music streams the '
       f'first 65 s of its frames, tags and encoder frame left out, as El Daba\'s opening music in every map and at '
       f'once, the rest of the archive unchanged; {len(cases)} kept and {len(rejected)} refused MP3s, the kept ones '
-      f'read as the engine reads them under ASan/UBSan; the checker rejects 13 altered packages; '
+      f'read as the engine reads them under ASan/UBSan; the checker rejects 13 altered packages; the last minute\'s '
+      f'music streams 65 s of the owner\'s track from 30 s in, the countdown\'s unless they keep one for it; '
       f'all {len(mutants)} mutants fail')

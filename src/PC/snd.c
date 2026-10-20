@@ -175,6 +175,7 @@ static __attribute_regparm__(2) void SND_RestoreChanInfo(snd_channel_info_t *cha
 static __attribute_regparm__(3) void SND_StartBackground(int track, const snd_alias_t *pAlias, int fadetime, snd_alias_system_t system);
 void SND_PlayAmbientAlias(const snd_alias_t *pAlias, int fadetime, snd_alias_system_t system);
 void SND_PlayMusicAlias(const snd_alias_t *pAlias, snd_alias_system_t system);
+int SND_FadeInMusicAlias(const snd_alias_t *pAlias, int fadetime, snd_alias_system_t system);
 void SND_StopMusic(int fadetime);
 void SND_StopSounds(snd_stopsounds_arg_t which);
 void SND_ShutdownChannels(void);
@@ -1573,6 +1574,16 @@ void SND_PlayMusicAlias(const snd_alias_t *pAlias, snd_alias_system_t system)
         return;
 
     SND_StartBackground(0, pAlias, 0, system);
+}
+
+/* As SND_PlayMusicAlias, the music rising from silence over fadetime ms.
+ * Returns whether it started: the music channel was free. */
+int SND_FadeInMusicAlias(const snd_alias_t *pAlias, int fadetime, snd_alias_system_t system)
+{
+    if (!g_snd.Initialized2d || !pAlias || !SND_IsStreamChannelFree(32))
+        return 0;
+    SND_StartBackground(0, pAlias, fadetime, system);
+    return 1;
 }
 
 void SND_StopMusic(int fadetime)

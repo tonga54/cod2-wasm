@@ -2,6 +2,8 @@
 #include "imports.h"
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_endgame.h"
+#include "headers/PC/cgame_mp/cg_prematch.h"
+#include "headers/PC/cgame_mp/cg_scorepanel.h"
 #include "headers/PC/cgame_mp/cg_scoretable.h"
 #include "headers/PC/gfx_d3d/r_font_wwii.h"
 #include "headers/PC/gfx_d3d/r_hud2d.h"
@@ -23,7 +25,9 @@ extern int Com_sprintf(char *dest, int size, const char *fmt, ...);
 extern snd_alias_list_t *Com_FindSoundAlias(const char *name);
 extern snd_alias_t *Com_PickSoundAliasFromList(snd_alias_list_t *aliasList);
 extern void SND_PlayMusicAlias(const snd_alias_t *pAlias, snd_alias_system_t system);
+extern int SND_FadeInMusicAlias(const snd_alias_t *pAlias, int fadetime, snd_alias_system_t system);
 extern void SND_StopMusic(int fadetime);
+extern int I_stricmp(const char *s0, const char *s1);
 
 /* Virtual units of the 4:3 area, measured on the WWII capture (1.2 pixels a
  * unit): the result over a rule and the mode at the map, the two sides
@@ -108,6 +112,18 @@ extern void SND_StopMusic(int fadetime);
  * over the last 3 s before the next map. */
 #define ENDGAME_MUSIC_ALIAS "browser_endgame_music"
 #define ENDGAME_MUSIC_FADE_MSEC 3000
+/* The owner's music for the last minute of a match, which the audio archive
+ * streams from 30 s into the track: it fades in over 4 s once the stock clock
+ * shows a minute or less, and gives way to the end's music as the match ends,
+ * or fades out over 2 s without it. Not in S&D, whose clock is a round's, nor
+ * through the countdown, which holds the clock. A clock that moves by more
+ * than a second is another match's: the music fades out and waits for its
+ * last minute. */
+#define ENDGAME_LAST_MINUTE_ALIAS "browser_lastminute_music"
+#define ENDGAME_LAST_MINUTE_MSEC 60000
+#define ENDGAME_LAST_MINUTE_FADE_IN_MSEC 4000
+#define ENDGAME_LAST_MINUTE_FADE_OUT_MSEC 2000
+#define ENDGAME_CLOCK_SLACK_MSEC 1000
 #define ENDGAME_MAX_CLIENTS 64
 #define ENDGAME_PODIUM 3
 /* Marks a string the server sent without localizing it. */
@@ -146,6 +162,10 @@ typedef struct {
     int intermission;
     int start;
     int musicPlaying;
+    /* The clock's end the last minute's music played for, and whether it
+     * still plays. */
+    int lastMinuteEnd;
+    int lastMinutePlaying;
     int reason;
     int medalSize;
     int medalKinds[2];
@@ -275,11 +295,46 @@ void CG_EndgameMessage(const char *message)
     }
 }
 
+static void CG_EndgameLastMinute(int intermission)
+{
+    int end, left;
+    snd_alias_list_t *music;
+
+    if (intermission || CG_PrematchActive() || !I_stricmp(cgs->gametype, "sd"))
+        return;
+    end = CG_ScorePanelClockEnd();
+    if (!end)
+        return;
+    if (s_endgame.lastMinutePlaying && abs(end - s_endgame.lastMinuteEnd) > ENDGAME_CLOCK_SLACK_MSEC) {
+        s_endgame.lastMinutePlaying = 0;
+        SND_StopMusic(ENDGAME_LAST_MINUTE_FADE_OUT_MSEC);
+    }
+    left = end - cg->time;
+    if (s_endgame.lastMinutePlaying || abs(end - s_endgame.lastMinuteEnd) <= ENDGAME_CLOCK_SLACK_MSEC || left <= 0 ||
+        left > ENDGAME_LAST_MINUTE_MSEC)
+        return;
+    music = Com_FindSoundAlias(ENDGAME_LAST_MINUTE_ALIAS);
+    if (!music) {
+        s_endgame.lastMinuteEnd = end;
+        return;
+    }
+    /* Tried again the next frame while the music channel still fades the
+     * countdown's music out. */
+    if (SND_FadeInMusicAlias(Com_PickSoundAliasFromList(music), ENDGAME_LAST_MINUTE_FADE_IN_MSEC, SASYS_CGAME)) {
+        s_endgame.lastMinuteEnd = end;
+        s_endgame.lastMinutePlaying = 1;
+    }
+}
+
 static void CG_EndgameMusic(int intermission)
 {
     if (intermission && !s_endgame.intermission) {
         snd_alias_list_t *music = Com_FindSoundAlias(ENDGAME_MUSIC_ALIAS);
 
+        if (s_endgame.lastMinutePlaying) {
+            s_endgame.lastMinutePlaying = 0;
+            SND_StopMusic(music ? 0 : ENDGAME_LAST_MINUTE_FADE_OUT_MSEC);
+        }
         s_endgame.musicPlaying = music != NULL;
         if (music)
             SND_PlayMusicAlias(Com_PickSoundAliasFromList(music), SASYS_CGAME);
@@ -301,6 +356,7 @@ void CG_EndgameFrame(int intermission)
 {
     if (intermission && !s_endgame.intermission)
         s_endgame.start = cg->time;
+    CG_EndgameLastMinute(intermission);
     CG_EndgameMusic(intermission);
     s_endgame.intermission = intermission;
     /* The UI paints after the scene, so its request waits for this frame. */

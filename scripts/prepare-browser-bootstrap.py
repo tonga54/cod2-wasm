@@ -9,7 +9,7 @@ import struct
 import zipfile
 from browser_sound_assets import (ENDGAME_MUSIC_OWNER_FILE, HIT_SOUND_OWNER_FILE, MENU_MUSIC_OWNER_FILE,
                                   OWNER_SOUNDS_DIR, PREMATCH_MUSIC_OWNER_FILE, collect_sound_assets,
-                                  load_owner_sounds)
+                                  lastminute_owner_file, load_owner_sounds)
 from browser_bot_menu import apply_bot_menu
 from browser_class_menus import add_class_menu, class_menus
 from browser_class_pictures import OWNER_PICTURES_DIR, load_owner_pictures
@@ -354,13 +354,17 @@ try:
     menu_music = root / "data/main" / MENU_MUSIC_OWNER_FILE
     prematch_music = root / "data/main" / PREMATCH_MUSIC_OWNER_FILE
     endgame_music = root / "data/main" / ENDGAME_MUSIC_OWNER_FILE
+    lastminute_music = lastminute_owner_file(root / "data/main")
+    if lastminute_music:
+        print(f"Last minute music: from the owner's {lastminute_music.name}")
     archives["cod2_browser_audio.iwd"] = collect_sound_assets(
         root, asset_index, originals, renderer, maps,
         hit_sound.read_bytes() if hit_sound.is_file() else None,
         menu_music.read_bytes() if menu_music.is_file() else None,
         load_owner_sounds(root / "data/main" / OWNER_SOUNDS_DIR),
         prematch_music.read_bytes() if prematch_music.is_file() else None,
-        endgame_music.read_bytes() if endgame_music.is_file() else None)
+        endgame_music.read_bytes() if endgame_music.is_file() else None,
+        lastminute_music.read_bytes() if lastminute_music else None)
     for mapname, longname in maps.items():
         archives["cod2_browser_bootstrap.iwd"][f"mp/{mapname[3:]}.arena"] = (
             f'{{ map "{mapname}" longname "{longname}" gametype "{" ".join(gametypes)}" }}\n'.encode()

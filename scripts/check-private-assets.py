@@ -22,11 +22,13 @@ from browser_spawn_safety import apply_spawn_safety
 from browser_endgame import SCRIPTS as ENDGAME_SCRIPTS, apply_endgame_timing
 from browser_sound_assets import (ENDGAME_MUSIC_FILE, ENDGAME_MUSIC_OWNER_FILE, ENDGAME_MUSIC_TABLE,
                                   HIT_SOUND_ALIAS, HIT_SOUND_FILE, HIT_SOUND_OWNER_FILE, HIT_SOUND_TABLE,
+                                  LASTMINUTE_MUSIC_FILE, LASTMINUTE_MUSIC_TABLE, lastminute_owner_file,
                                   MENU_MUSIC_ALIASES, MENU_MUSIC_FILE, MENU_MUSIC_OWNER_FILE, MENU_MUSIC_TABLE,
                                   OWNER_SOUNDS_DIR, OWNER_SOUNDS_FOLDER, OWNER_SOUNDS_TABLE, PREMATCH_MUSIC_FILE,
                                   PREMATCH_MUSIC_OWNER_FILE, PREMATCH_MUSIC_SOURCE, PREMATCH_MUSIC_TABLE, alias_table,
                                   explosive_alias_table, load_owner_sounds, verify_endgame_music, verify_hit_sound,
-                                  verify_menu_music, verify_owner_sounds, verify_prematch_music)
+                                  verify_lastminute_music, verify_menu_music, verify_owner_sounds,
+                                  verify_prematch_music)
 
 root = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
@@ -63,7 +65,7 @@ try:
                 entries[name] = data
                 if name in (HIT_SOUND_TABLE, "sound/" + HIT_SOUND_FILE, MENU_MUSIC_TABLE, "sound/" + MENU_MUSIC_FILE,
                             PREMATCH_MUSIC_TABLE, "sound/" + PREMATCH_MUSIC_FILE, ENDGAME_MUSIC_TABLE,
-                            "sound/" + ENDGAME_MUSIC_FILE):
+                            "sound/" + ENDGAME_MUSIC_FILE, LASTMINUTE_MUSIC_TABLE, "sound/" + LASTMINUTE_MUSIC_FILE):
                     continue
                 if name.startswith(("sound/" + OWNER_SOUNDS_FOLDER, OWNER_SOUNDS_TABLE[:-4], PICTURE_FOLDER)):
                     continue
@@ -204,6 +206,9 @@ try:
     owner_endgame_music = root / "data/main" / ENDGAME_MUSIC_OWNER_FILE
     verify_endgame_music(entries, original_prematch_rows,
                          owner_endgame_music.read_bytes() if owner_endgame_music.is_file() else None)
+    owner_lastminute_music = lastminute_owner_file(root / "data/main")
+    verify_lastminute_music(entries, original_prematch_rows,
+                            owner_lastminute_music.read_bytes() if owner_lastminute_music else None)
     owner_sounds = load_owner_sounds(root / "data/main" / OWNER_SOUNDS_DIR)
     verify_owner_sounds(entries, original_rows, owner_sounds)
     # From the explosives' own table, or the owner's where the pack replaces them.
