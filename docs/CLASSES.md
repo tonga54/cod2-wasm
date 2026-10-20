@@ -394,7 +394,12 @@ archives are prepared (`scripts/browser_explosives.py`,
   it back by holding Use (F, or X on a controller) for half a second within
   52 units of it, with it in sight: "Press and hold F to pickup S-Mine 44"
   shows under the crosshair. It returns to the kit when there is room for it,
-  so a full kit stays at two.
+  so a full kit stays at two. Once it lies on the ground, armed or not, an
+  enemy's bullet that passes within 5 units of its can sets it off on the
+  server's next frame; the blast and its kills belong to the shooter, or to
+  the owner if the shooter has left. The owner's and teammates' bullets pass
+  it by, as they do a mine that has already clicked. In free-for-all anyone
+  but the owner can shoot it.
 - **C4**, CoD4's charge with CoD2's sticky bomb. G takes out the detonator,
   fire throws a charge that sticks where it lands, and aim sets off every
   charge the player placed, wherever they are.

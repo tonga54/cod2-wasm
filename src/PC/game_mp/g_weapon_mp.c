@@ -53,6 +53,7 @@ extern void *fire_grenade(gentity_t *ent, vec_t *start, vec_t *vel, int grenType
 extern float Vec3Normalize(vec3_t v);
 extern void G_LocationalTrace(trace_t *results, const vec_t *start, const vec_t *end, int passEntityNum, int contentmask, unsigned char *priorityMap);
 extern void G_CheckHitTriggerDamage(gentity_t *attacker, vec_t *start, vec_t *end, int damage, int mod);
+extern void G_BulletHitsMines(gentity_t *attacker, const vec_t *start, const vec_t *end);
 extern qboolean OnSameTeam(gentity_t *ent1, gentity_t *ent2);
 
 extern struct level_locals_t level;
@@ -477,6 +478,7 @@ static void Bullet_Fire_Extended(const gentity_t *source, gentity_s (*attacker)[
     endpos[2] = start[2] + (end[2] - start[2]) * tr.fraction;
 
     G_CheckHitTriggerDamage(attackerEnt, start, endpos, weapDef->damage, iMOD);
+    G_BulletHitsMines(attackerEnt, start, endpos);
 
     traceEnt = &((gentity_t *)imp_g_entities)[tr.entityNum];
 

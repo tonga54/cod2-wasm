@@ -140,6 +140,7 @@ static float Vec3Normalize(float *v) {float n=sqrtf(v[0]*v[0]+v[1]*v[1]+v[2]*v[2
 static float Vec3NormalizeTo(const float *v,float *out) {memcpy(out,v,sizeof(vec3_t));return Vec3Normalize(out);}
 static void G_LocationalTrace(trace_t *tr,const vec_t *a,const vec_t *b,int n,int mask,unsigned char *p) {*tr=(trace_t){.fraction=.5f,.entityNum=1,.normal={-1,0,0},.partGroup=hitLocation};}
 static void G_CheckHitTriggerDamage(gentity_t *a,vec_t *s,vec_t *e,int d,int mod) {}
+static void G_BulletHitsMines(gentity_t *a,const vec_t *s,const vec_t *e) {}
 static gentity_t *G_TempEntity(const vec_t *v,int event) {assert(0);return 0;}
 static byte DirToByte(const vec_t *v) {assert(0);return 0;}
 static int Dvar_GetInt(const char *name) {return 0;}

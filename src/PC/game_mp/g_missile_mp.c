@@ -113,6 +113,10 @@ extern float sinf(float x);
 #define GMISSILE_PICKUP_HEIGHT 40.0f
 #define GMISSILE_PICKUP_MSEC 500
 #define GMISSILE_BUTTONS_USE 0x28
+/* An enemy's bullet sets a resting S-Mine off within this far of a point this
+ * far over its origin: around the model's can and igniter (browser_smine.py). */
+#define GMISSILE_MINE_HIT_RADIUS 5.0f
+#define GMISSILE_MINE_HIT_RISE 2.0f
 
 static inline void VectorCopy(const vec_t *src, vec_t *dst)
 {
@@ -373,6 +377,8 @@ void G_EndGrenadeInput(gentity_t *player)
 static int s_placedSequence;
 /* The spawn of its owner each placed explosive belongs to, by entity number. */
 static int s_placedSpawnTime[1024];
+/* The client whose bullet hit each mine, plus one, until the mine's frame. */
+static unsigned char s_mineShotBy[1024];
 
 static int G_PlacedTeam(const gentity_t *owner)
 {
@@ -457,6 +463,7 @@ static void G_PlaceExplosive(gentity_t *owner, gentity_t *ent, const WeaponDef *
     ent->s.otherEntityNum = owner->s.number;
     ent->team = (byte)G_PlacedTeam(owner);
     s_placedSpawnTime[ent->s.number & 1023] = owner->client ? owner->client->lastSpawnTime : 0;
+    s_mineShotBy[ent->s.number & 1023] = 0;
     ent->count = 0;
     ent->spawnflags = 0;
     ent->maxHealth = ++s_placedSequence;
@@ -532,6 +539,17 @@ static qboolean G_RunPlacedExplosive(gentity_t *ent, const WeaponDef *weapDef)
 
     if (!owner) {
         G_FreeEntity(ent);
+        return 1;
+    }
+    if (s_mineShotBy[ent->s.number & 1023]) {
+        gentity_t *shooter = &g_entities[s_mineShotBy[ent->s.number & 1023] - 1];
+
+        s_mineShotBy[ent->s.number & 1023] = 0;
+        /* The blast is the shooter's, unless they have left. */
+        if (shooter->r.inuse && shooter->client && shooter->client->sess.connected == 2)
+            ent->parent = COD2_GEntityHandle(shooter);
+        ent->nextthink = 0;
+        G_ExplodeMissile(ent);
         return 1;
     }
     if (ent->spawnflags & GMISSILE_PLACED_STUCK) {
@@ -692,6 +710,52 @@ void G_UpdateMinePickup(gentity_t *player)
         ps->cursorHintString = mine->s.weapon;
         ps->cursorHintEntIndex = 1023;
     }
+}
+
+/* As WWII's S-Mine, a resting mine goes off when an enemy shoots it: the
+ * first a bullet from start to end passes close enough to, for the first
+ * shooter. It goes off on its own frame, once the shot's rewound players are
+ * back where they are. */
+void G_BulletHitsMines(gentity_t *attacker, const vec_t *start, const vec_t *end)
+{
+    gentity_t *hit = NULL;
+    float length, nearest = 0.0f;
+    vec3_t dir;
+    int i;
+
+    if (!attacker || (unsigned)attacker->s.number >= 64 || !attacker->client)
+        return;
+    VectorSubtract(end, start, dir);
+    length = Vec3Normalize(dir);
+    if (length <= 0.0f)
+        return;
+    G_ListMines();
+    for (i = 0; i < s_mineCount; i++) {
+        gentity_t *mine = &g_entities[s_mineList[i]];
+        gentity_t *owner;
+        vec3_t center, offset;
+        float along;
+
+        if (!mine->r.inuse || mine->s.eType != 4 || mine->handler != 7 || mine->s.pos.trType != 0 ||
+            (mine->spawnflags & GMISSILE_PLACED_TRIGGERED))
+            continue;
+        owner = G_PlacedOwner(mine);
+        if (!owner || owner == attacker || OnSameTeam(owner, attacker))
+            continue;
+        VectorCopy(mine->r.currentOrigin, center);
+        center[2] += GMISSILE_MINE_HIT_RISE;
+        VectorSubtract(center, start, offset);
+        along = DotProduct(offset, dir);
+        along = along < 0.0f ? 0.0f : along > length ? length : along;
+        VectorMA(offset, -along, dir, offset);
+        if (DotProduct(offset, offset) > GMISSILE_MINE_HIT_RADIUS * GMISSILE_MINE_HIT_RADIUS ||
+            (hit && along >= nearest))
+            continue;
+        hit = mine;
+        nearest = along;
+    }
+    if (hit && !s_mineShotBy[hit->s.number & 1023])
+        s_mineShotBy[hit->s.number & 1023] = (unsigned char)(attacker->s.number + 1);
 }
 
 /* Asked by the snapshot before sight: a placed explosive at rest goes to its

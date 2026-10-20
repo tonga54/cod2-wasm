@@ -117,6 +117,7 @@ static gentity_t *fire_grenade(gentity_t *,vec_t *,vec_t *,int,int);
 typedef int SoundAlias;static SoundAlias G_SoundAliasIndex(const char *n){return 1;}
 static int OnSameTeam(gentity_t *a,gentity_t *b){return a->client&&b->client&&a->client->sess.cs.team&&a->client->sess.cs.team==b->client->sess.cs.team;}
 static int s_placedSequence,s_placedSpawnTime[1024];
+static unsigned char s_mineShotBy[1024];
 '''
 
 defines = '\n'.join(s for s in weapons.splitlines() if s.startswith('#define WEAPON_') or s.startswith('#define PM_WEAPON_'))

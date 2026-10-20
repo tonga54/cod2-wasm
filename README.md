@@ -160,7 +160,8 @@ retail CoD2:
   the left hand draws its pin, and CoD4's C4, thrown to stick and set off with
   aim from anywhere. Your squad's emblem, a star or an iron cross, pulses over
   them for you and your teammates. Hold Use over your own S-Mine to take it
-  back. See [placed explosives](docs/CLASSES.md#placed-explosives).
+  back; enemies can shoot it to set it off, and its blast is theirs. See
+  [placed explosives](docs/CLASSES.md#placed-explosives).
 - **WWII countdown before a match:** players who spawn before a match begins
   wait through one 15-second countdown, free to look around and aim but not to
   move, fire, throw, reload or use. It starts when the first person spawns or

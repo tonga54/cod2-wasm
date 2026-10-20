@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Run the S-Mine's and C4's production code: setting the mine down at its
-owner's feet, arming and the enemy's step, the owner taking it back, sticking,
-the detonator, owners and limits, who is sent one through walls, weapon file
-keys, the HUD's pulsing squad emblems and G toggle."""
+owner's feet, arming and the enemy's step, an enemy shooting it, the owner
+taking it back, sticking, the detonator, owners and limits, who is sent one
+through walls, weapon file keys, the HUD's pulsing squad emblems and G
+toggle."""
 from pathlib import Path
 import re
 import subprocess
@@ -150,6 +151,7 @@ void G_ExplodeMissile(gentity_t *e);
 static int G_RunThink(gentity_t *e){if(e->nextthink>0&&e->nextthink<=level.time){e->nextthink=0;G_ExplodeMissile(e);}return 0;}
 static SoundAlias G_SoundAliasIndex(const char *n){assert(n&&*n);return 1;}
 static int s_placedSequence,s_placedSpawnTime[1024];
+static unsigned char s_mineShotBy[1024];
 static int s_mineListTime=-1,s_mineCount,s_minePickupStart[64],s_minePickupEntity[64];
 static unsigned short s_mineList[128];
 gentity_t *fire_grenade(gentity_t *,vec_t *,vec_t *,int,int);
@@ -161,7 +163,8 @@ server_body = function(team, 'OnSameTeam').replace('qboolean OnSameTeam', 'stati
         'VectorMA', 'SnapFloat', 'SnapVector', 'LerpPosition', 'G_GetHeldGrenade', 'G_CanPickUpGrenade',
         'G_FindNearbyGrenade', 'G_PlacedTeam', 'G_PlacedSound', 'G_PlacedOwner', 'G_SetDownMine',
         'G_PlaceExplosive', 'G_StickMissile', 'G_RunPlacedExplosive', 'G_DetonateExplosives', 'G_CanTakeMine',
-        'G_ListMines', 'G_FindOwnMine', 'G_UpdateMinePickup', 'G_PlacedExplosiveSentTo', 'G_ExplodeMissile',
+        'G_ListMines', 'G_FindOwnMine', 'G_UpdateMinePickup', 'G_BulletHitsMines', 'G_PlacedExplosiveSentTo',
+        'G_ExplodeMissile',
         'fire_grenade', 'G_BounceMissile', 'G_RunMissile'))
 server_checks = r'''
 enum {MINE=1,CHARGE=2,FRAG=3,WORLD=1022};
@@ -172,7 +175,7 @@ static void at(gentity_t *p,float x,float y,float z){p->r.currentOrigin[0]=x;p->
 static void reset(void){
  memset(g_entities,0,sizeof(g_entities));memset(clients,0,sizeof(clients));memset(defs,0,sizeof(defs));
  level.time=1000;level.previousTime=950;level.num_entities=72;s_placedSequence=0;s_mineListTime=-1;
- memset(s_placedSpawnTime,0,sizeof(s_placedSpawnTime));
+ memset(s_placedSpawnTime,0,sizeof(s_placedSpawnTime));memset(s_mineShotBy,0,sizeof(s_mineShotBy));
  memset(s_minePickupStart,0,sizeof(s_minePickupStart));world=blockSight=0;floorZ=0;wallX=1e9f;
  floorNormal[0]=floorNormal[1]=0;floorNormal[2]=1;
  explosions=radiusCalls=bounces=sounds=tempCount=0;lastAttacker=NULL;hit=(trace_t){.fraction=1,.entityNum=1023};
@@ -373,7 +376,66 @@ int main(void){
  /* Free-for-all: only to its owner. */
  reset();owner=player(0,0);enemy=player(1,0);m=place(owner,MINE);rest(m,0,0);
  assert(G_PlacedExplosiveSentTo(&m->s,within,0)&&!G_PlacedExplosiveSentTo(&m->s,within,1));cases++;
- printf("PASS: %d server cases: a mine arms 1.2 s after it lies still, clicks under an enemy's feet within 40 units and 24 below to 48 above and goes off 150 ms later for its owner, never for teammates, its owner, the dead, spectators or the disconnected; anyone in free-for-all; C4 sticks flat to walls, floors, ceilings and slopes, bounces off players, and goes off only by its owner's detonator, anywhere, in flight too; two of each kind per owner; both go with an owner who leaves or changes sides; neither is thrown back; the S-Mine is set down upright a step ahead of its owner's feet, short of walls, down steps, falling over drops and steep slopes; only its owner takes it back, holding Use half a second within reach, in sight, where no other hint is offered, the nearer first, with a full kit or none too, refunded only into room in a kit that carries it; a resting one is sent to its owner and teammates within 1600 units wherever it lies, never to enemies, spectators or others in free-for-all\n",cases);
+ {
+  /* An enemy's bullet through the can sets a resting mine off, armed or
+   * still arming: on the mine's next frame, not during the shot, and the
+   * shooter's blast. */
+  vec3_t from={-300,0,2},to={300,0,2};
+  for(int armed=0;armed<2;armed++){
+   reset();owner=player(0,2);enemy=player(1,1);
+   if(armed)m=armedMine(owner);else{m=place(owner,MINE);rest(m,0,0);frame(m,50);}
+   at(owner,500,0,0);at(enemy,-500,0,0);
+   G_BulletHitsMines(enemy,from,to);assert(!explosions&&m->s.eType==4);
+   frame(m,50);assert(explosions==1&&radiusCalls==1&&lastAttacker==enemy&&m->s.eType==0);cases++;
+  }
+  /* Within 5 units of a point 2 over its origin, along the bullet's own
+   * path only: not where it stopped short, nor before it started. */
+  struct {vec3_t a,b;int fires;} paths[]={
+   {{-300,4.9f,2},{300,4.9f,2},1},{{-300,5.1f,2},{300,5.1f,2},0},{{0,0,300},{0,0,6.9f},1},{{0,0,300},{0,0,7.1f},0},
+   {{-300,0,2},{-4.9f,0,2},1},{{-300,0,2},{-5.1f,0,2},0},{{5.1f,0,2},{300,0,2},0},{{4.9f,0,2},{300,0,2},1}};
+  for(unsigned i=0;i<sizeof(paths)/sizeof(paths[0]);i++){
+   reset();owner=player(0,2);enemy=player(1,1);m=place(owner,MINE);rest(m,0,0);at(owner,500,0,0);at(enemy,-500,0,0);
+   frame(m,50);G_BulletHitsMines(enemy,paths[i].a,paths[i].b);frame(m,50);assert(explosions==paths[i].fires);cases++;
+  }
+  /* Only an enemy's bullet: not a teammate's or its owner's; anyone's but
+   * the owner's in free-for-all. */
+  struct {int side,who,fires;} shooters[]={{2,2,0},{2,0,0},{2,1,1},{0,1,1},{0,0,0}};
+  for(unsigned i=0;i<sizeof(shooters)/sizeof(shooters[0]);i++){
+   reset();owner=player(0,shooters[i].side);enemy=player(1,shooters[i].side?1:0);mate=player(2,shooters[i].side);
+   m=place(owner,MINE);rest(m,0,0);at(owner,500,0,0);at(enemy,-500,0,0);at(mate,0,500,0);frame(m,50);
+   G_BulletHitsMines(&g_entities[shooters[i].who],from,to);frame(m,50);assert(explosions==shooters[i].fires);cases++;
+  }
+  /* Not C4, nor a mine still falling, nor one that has clicked: that one
+   * goes off when it would, its owner's. */
+  reset();owner=player(0,2);enemy=player(1,1);at(owner,500,0,0);at(enemy,-500,0,0);
+  c=place(owner,CHARGE);rest(c,0,0);frame(c,50);G_BulletHitsMines(enemy,from,to);frame(c,50);
+  assert(!explosions&&c->r.inuse&&c->s.eType==4);
+  m=place(owner,MINE);rest(m,0,0);m->s.pos.trType=5;G_BulletHitsMines(enemy,from,to);assert(!s_mineShotBy[m->s.number]);
+  reset();owner=player(0,2);enemy=player(1,1);gentity_t *gunner=player(3,1);m=armedMine(owner);
+  at(enemy,10,0,0);frame(m,50);assert(m->spawnflags&2);at(enemy,-500,0,0);at(gunner,-500,0,0);
+  G_BulletHitsMines(gunner,from,to);assert(!s_mineShotBy[m->s.number]);frame(m,100);assert(!explosions);
+  frame(m,50);assert(explosions==1&&lastAttacker==owner);cases+=3;
+  /* Of two on the bullet's path, the nearer goes off; the other stays. */
+  reset();owner=player(0,2);enemy=player(1,1);at(owner,500,500,0);at(enemy,-500,0,0);
+  gentity_t *nearMine=place(owner,MINE),*farMine=place(owner,MINE);rest(nearMine,-100,0);rest(farMine,100,0);
+  frame(nearMine,50);frame(farMine,0);G_BulletHitsMines(enemy,from,to);frame(nearMine,50);frame(farMine,0);
+  assert(explosions==1&&nearMine->s.eType==0&&farMine->s.eType==4&&farMine->r.inuse);cases++;
+  /* The first shooter's; the owner's once that shooter has left; gone
+   * without a blast with an owner who has left. */
+  for(int leave=0;leave<3;leave++){
+   reset();owner=player(0,2);enemy=player(1,1);gunner=player(3,1);m=place(owner,MINE);rest(m,0,0);
+   at(owner,500,0,0);at(enemy,-500,0,0);at(gunner,-500,50,0);frame(m,50);
+   G_BulletHitsMines(enemy,from,to);G_BulletHitsMines(gunner,from,to);
+   if(leave==1)enemy->client->sess.connected=0;
+   if(leave==2)owner->client->sess.connected=0;
+   frame(m,50);
+   if(leave<2)assert(explosions==1&&lastAttacker==(leave?owner:enemy));else assert(!explosions&&!m->r.inuse);cases++;
+  }
+  /* A new mine where a shot one lay starts unshot. */
+  reset();owner=player(0,2);at(owner,500,0,0);s_mineShotBy[level.num_entities]=2;m=place(owner,MINE);rest(m,0,0);
+  frame(m,50);frame(m,50);assert(!explosions&&m->s.eType==4&&m->r.inuse);cases++;
+ }
+ printf("PASS: %d server cases: a mine arms 1.2 s after it lies still, clicks under an enemy's feet within 40 units and 24 below to 48 above and goes off 150 ms later for its owner, never for teammates, its owner, the dead, spectators or the disconnected; anyone in free-for-all; C4 sticks flat to walls, floors, ceilings and slopes, bounces off players, and goes off only by its owner's detonator, anywhere, in flight too; two of each kind per owner; both go with an owner who leaves or changes sides; neither is thrown back; the S-Mine is set down upright a step ahead of its owner's feet, short of walls, down steps, falling over drops and steep slopes; only its owner takes it back, holding Use half a second within reach, in sight, where no other hint is offered, the nearer first, with a full kit or none too, refunded only into room in a kit that carries it; a resting one is sent to its owner and teammates within 1600 units wherever it lies, never to enemies, spectators or others in free-for-all; an enemy's bullet within 5 units of a resting mine's can, along its own path, sets the nearer of two off on the mine's next frame, armed or arming, never a teammate's or its owner's, nor C4, a falling or clicked mine, the first shooter's blast unless they left\n",cases);
  return 0;
 }
 '''
@@ -687,6 +749,23 @@ mutants = [
      '    if (shared->svFlags & 1) {\n        return 0;\n    }\n'
      '    if ((shared->clientMask[clientNum >> 5] >> (clientNum & 31)) & 1) {\n        return 0;\n    }\n'
      '    if (shared->svFlags & 0x18) {\n        return 1;\n    }\n'),
+    # Shooting a mine.
+    ('server', 'owner == attacker || OnSameTeam(owner, attacker)', 'owner == attacker'),
+    ('server', '!owner || owner == attacker ||', '!owner ||'),
+    ('server', '> GMISSILE_MINE_HIT_RADIUS * GMISSILE_MINE_HIT_RADIUS ||', '> 1e9f ||'),
+    ('server', '        along = along < 0.0f ? 0.0f : along > length ? length : along;\n', ''),
+    ('server', ' || mine->s.pos.trType != 0 ||\n            (mine->spawnflags & GMISSILE_PLACED_TRIGGERED))\n            continue;\n        owner',
+     ' ||\n            (mine->spawnflags & GMISSILE_PLACED_TRIGGERED))\n            continue;\n        owner'),
+    ('server', 'mine->s.pos.trType != 0 ||\n            (mine->spawnflags & GMISSILE_PLACED_TRIGGERED))\n            continue;\n        owner',
+     'mine->s.pos.trType != 0)\n            continue;\n        owner'),
+    ('server', '            (hit && along >= nearest))', '            0)'),
+    ('server', '    if (hit && !s_mineShotBy[hit->s.number & 1023])', '    if (hit)'),
+    ('server', '            ent->parent = COD2_GEntityHandle(shooter);\n', ''),
+    ('server', 'if (shooter->r.inuse && shooter->client && shooter->client->sess.connected == 2)', 'if (1)'),
+    ('server', '    s_mineShotBy[ent->s.number & 1023] = 0;\n    ent->count = 0;', '    ent->count = 0;'),
+    ('server', '        G_ExplodeMissile(ent);\n        return 1;\n    }\n    if (ent->spawnflags & GMISSILE_PLACED_STUCK) {',
+     '        return 1;\n    }\n    if (ent->spawnflags & GMISSILE_PLACED_STUCK) {'),
+    ('server', '    center[2] += GMISSILE_MINE_HIT_RISE;', ''),
 ]
 header_mutants = [
     ('pmove', 'return def->weapType == WEAPTYPE_GRENADE && !BG_IsPlacedExplosive(def) &&',

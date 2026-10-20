@@ -49,6 +49,10 @@ static cbrush_t brushes[8];
 static void Com_DPrintf(const char *s,...) {assert(0);}
 static float Vec3Normalize(float *v){float n=sqrtf(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);if(n)for(int i=0;i<3;i++)v[i]/=n;return n;}
 static void G_CheckHitTriggerDamage(gentity_t *a,vec_t *s,vec_t *e,int d,int mod) {}
+/* Each stretch the bullet flies, for the mines along it. */
+static int segments;static vec3_t segmentStart[8],segmentEnd[8];
+static void G_BulletHitsMines(gentity_t *a,const vec_t *s,const vec_t *e) {
+ assert(a==entities&&segments<8);memcpy(segmentStart[segments],s,sizeof(vec3_t));memcpy(segmentEnd[segments++],e,sizeof(vec3_t));}
 static byte DirToByte(const vec_t *v){return 0;}
 static gentity_t *G_TempEntity(const vec_t *p,int event){events++;return &effect;}
 static void G_Damage(gentity_t *t,gentity_t *i,gentity_t *a,const void *dir,const vec_t *p,int d,int flags,int mod,int loc,int offset){assert(t==entities+1);damageCalls++;receivedDamage=d;}
@@ -85,7 +89,7 @@ static void slab(float x,float thick,int material) {
 static int fire(WeaponDef *w,float y,float startX) {
  weaponParms wp={.weapDef=w,.muzzleTrace={startX,0,0}};
  vec3_t end={8192,y,0},start;memcpy(start,wp.muzzleTrace,sizeof(start));
- damageCalls=receivedDamage=traces=events=0;
+ damageCalls=receivedDamage=traces=events=segments=0;
  Bullet_Fire_Extended(entities,(gentity_s (*)[16])entities,start,end,1,0,&wp,entities,0);
  assert(!memcmp(start,wp.muzzleTrace,sizeof(start))); // Each pellet keeps its original muzzle.
  assert(damageCalls<=1 && events<=4);
@@ -146,6 +150,12 @@ int main(void) {
  }
  // Existing rifle flesh penetration still respects friendly fire.
  brushCount=0;team=0;assert(fire(&gun,0,0)==100 && traces==2);team=1;
+ // Mines are checked along each stretch the bullet flies, from the muzzle to
+ // the board, then from its far side to the player, for the shooter.
+ brushCount=0;slab(100,8,21);assert(fire(&gun,0,0)==wood&&segments==2);
+ assert(segmentStart[0][0]==0&&segmentEnd[0][0]>99.5f&&segmentEnd[0][0]<=100&&segmentStart[1][0]>=108&&
+  segmentStart[1][0]<108.5f&&fabsf(segmentEnd[1][0]-200)<.01f);
+ hitPlayer=0;brushCount=0;fire(&gun,0,0);assert(segments==1&&segmentEnd[0][0]==8192);hitPlayer=1;
  printf("PASS: %d material/thickness shots using actual brush collision; angles, layers, hard back faces, close targets, full range, glass, shotgun, trace budgets and flesh\n",cases);
  return 0;
 }

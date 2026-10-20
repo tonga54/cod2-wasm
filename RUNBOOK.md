@@ -4105,3 +4105,44 @@ Validation:
   by about a sixth of the screen with the PPSh (14 rounds) and the Thompson
   (13 rounds); a second after release the view was back where it started,
   with the hits running up the wall from the aim point.
+
+## Shooting an S-Mine — 2026-10-20
+
+The owner asked for enemies to be able to set off a mine by shooting it.
+Grenades carry no contents, so no trace met them; giving mines contents
+would also have made them solid to players and grenades. Instead,
+`Bullet_Fire_Extended` hands each stretch a bullet flies, from its start to
+where it stopped and again past each layer of cover it goes through, to
+`G_BulletHitsMines` beside the trigger-damage check. The nearest resting S-Mine
+of an enemy's whose point 2 units over its origin lies within 5 units of that
+stretch is marked for the first shooter: around the model's can and igniter
+(`browser_smine.py`). A teammate's or the owner's bullet passes it by, as it
+does C4, a falling mine or one that has clicked; in free-for-all anyone but
+the owner counts.
+
+The mine goes off on its own frame, after the shot has put the players it
+rewound for lag back where they are, so the blast meets them there. As
+CoD4's claymores do, the blast is the shooter's: its kills and the obituary
+are theirs, with the mine's icon, unless they have left, when it stays the
+owner's. A mine whose owner has gone is still removed without a blast, and a
+new mine in the same entity starts unshot.
+
+Validation:
+
+- `scripts/test-placed-explosives.py` runs `G_BulletHitsMines` with the
+  production mine code: armed or arming mines go off on their next frame and
+  not during the shot, for the shooter. It checks the 5 unit reach at 4.9 and
+  5.1, from the side and from above, along the stretch only (not where it
+  stopped short, nor before it started); teammates, the owner and free-for-all;
+  C4, falling and clicked mines; the nearer of two; the first shooter, the
+  owner's blast once that shooter has left and none once the owner has; and a
+  new mine where a shot one lay. 13 more mutants fail (58).
+- `scripts/test-bullet-penetration.py`: the real `Bullet_Fire_Extended`
+  passes each stretch to the mine check, muzzle to board and its far side to
+  the player, or once to full range; without the call it fails.
+- `scripts/test-grenade-lifecycle.py` and `scripts/test-weapon-balance.py`
+  pass.
+- Two browsers in a Carentan TDM room: one player set an S-Mine down at their
+  feet and stayed there; an enemy 60 units away, in god mode, fired a short
+  burst at it. It went off, the owner died, and the shooter's kill feed read
+  "Aim QB [S-Mine] Aim QA" with "You killed Aim QA" and Kill +100.
