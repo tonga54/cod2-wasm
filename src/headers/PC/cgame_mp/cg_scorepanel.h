@@ -11,8 +11,8 @@ void CG_ScorePanelSetDmScore(int clientNum, int score);
 int CG_ScorePanelHidesHudElem(const hudelem_t *elem);
 /* The stock clock's text and color, for the scoreboard; NULL without one. */
 const char *CG_ScorePanelClock(vec4_t color);
-/* The time the stock clock reaches zero at while it counts down; 0 without
- * one. */
+/* The time the stock clock reaches zero at while it counts down, the match's
+ * own through a killcam too; 0 without one. */
 int CG_ScorePanelClockEnd(void);
 /* The panel's numbers for the viewer: their side's score on top and the
  * other's (in deathmatch theirs and the best other player's), the score

@@ -273,7 +273,10 @@ the other stops the Pi's updates.
 The client follows the stock clock, the one the score panel shows. It plays
 the music once per clock, after the countdown, which holds the clock. A clock
 that moves by more than a second belongs to another match: the music fades
-out and waits for that match's last minute. Search and Destroy has none,
+out and waits for that match's last minute. A killcam's clock is not another
+match's: the server replays it moved later by the replay's age, which the
+client takes off again, so the music plays on through a death and its killcam.
+Search and Destroy has none,
 because its clock is a round's. If the countdown's music is still fading on
 the music channel, the last minute's music starts once that channel is free.
 

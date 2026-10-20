@@ -5143,3 +5143,36 @@ Validation:
   hits took less than 127 in its burst. All 21 one-shot deaths were bolt-action
   or scoped rifles. Lives that took 120, then another 128 or 160, regenerated
   between bursts.
+
+## Last minute music through a killcam — 2026-10-20
+
+The owner was killed with about 30 seconds left, and the last minute's music
+stopped.
+
+During a killcam the server sends the killer's archived player state.
+`SV_GetArchivedClientInfo` moves every archived HUD time later by the
+replay's age, so the replay's clock reads as it did then. The match clock's
+end moved about 7 seconds, and the music took it for another match's clock.
+It faded out, and then started again from the top of the track for the
+replay's clock. When the killcam ended, the clock moved back, and the music
+faded and restarted again. A death without a killcam, such as a suicide, left
+it playing.
+
+`CG_ScorePanelClockEnd` now subtracts the snapshot's `ps.deltaTime`, the
+same age the server adds, so it returns the match's own end live and through
+a killcam. The score panel still draws the replay's clock during the killcam.
+
+Validation:
+
+- `test-score-panel.py`: the end is the same with a clock moved 7.05 s and a
+  matching `deltaTime`; a clock counting up and no clock give none. The
+  mutant that stops subtracting fails.
+- QA: 90-second Toujane TDM matches with 6 bots and a QA-only script that has
+  an enemy bot kill the player 45 s before the end, through the mode's
+  damage callback, so the killcam plays:
+  - Without the fix, the music started at 62.3 s, stopped and restarted from
+    the top as the killcam began (82.2 s), and again as it ended (95.2 s).
+  - With it, the one stream played on from 64.5 s through the death and the
+    killcam to the end of the sample at 108 s, with no restart. Its level
+    never fell below 0.54 in the 25 s after the death, and a screenshot 8 s
+    after the death shows the killcam.

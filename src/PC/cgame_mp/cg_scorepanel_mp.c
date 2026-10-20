@@ -504,7 +504,9 @@ int CG_ScorePanelClockEnd(void)
     CG_ScorePanelFindRetail(&cg->snap->ps, &retail);
     if (!retail.clock || (retail.clock->type != HE_TYPE_TIMER_DOWN && retail.clock->type != HE_TYPE_TENTHS_TIMER_DOWN))
         return 0;
-    return retail.clock->time;
+    /* A killcam replays the archived clock, which the server moves later by
+     * the replay's age. */
+    return retail.clock->time - cg->snap->ps.deltaTime;
 }
 
 void CG_DrawScorePanel(void)

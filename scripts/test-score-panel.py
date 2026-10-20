@@ -65,7 +65,7 @@ typedef struct hudelem_s hudelem_t;
 typedef struct { struct { int enabled; } current; } dvar_t;
 enum { TEAM_FREE, TEAM_AXIS, TEAM_ALLIES, TEAM_SPECTATOR };
 typedef struct { int infoValid; int team; } clientInfo_t;
-typedef struct { int clientNum; struct { hudelem_t current[31]; hudelem_t archival[31]; } hud; } playerState_t;
+typedef struct { int clientNum, deltaTime; struct { hudelem_t current[31]; hudelem_t archival[31]; } hud; } playerState_t;
 typedef struct { playerState_t ps; } snapshot_t;
 typedef struct { float xy[2]; float st[2]; float rgba[4]; } HudVertex2D;
 static snapshot_t snapState;
@@ -487,6 +487,18 @@ int main(void) {
     cg->snap = NULL;
     assert(!CG_ScorePanelClock(color));
     cg->snap = &snapState;
+    /* The clock's end is the match's, through a killcam too: the server moves
+     * the archived clock later by the replay's age. */
+    assert(CG_ScorePanelClockEnd() == 10000 + 483000);
+    snapState.ps.hud.archival[0].time += 7050;
+    snapState.ps.deltaTime = 7050;
+    assert(CG_ScorePanelClockEnd() == 10000 + 483000);
+    snapState.ps.deltaTime = 0;
+    snapState.ps.hud.archival[0].type = HE_TYPE_TIMER_UP;
+    assert(!CG_ScorePanelClockEnd());
+    memset(&snapState.ps.hud.archival[0], 0, sizeof(snapState.ps.hud.archival[0]));
+    assert(!CG_ScorePanelClockEnd());
+    stockHud();
 
     /* An Allied player winning 21 to 11 toward 75, with 8:03 left. */
     CG_ScorePanelInit();
@@ -618,6 +630,7 @@ mutants = [
     ('x + 0.5f * unit, baseline + (rise + 0.5f) * unit', 'x, baseline + (rise + 0.5f) * unit'),
     ('x + 0.5f * unit, baseline + (rise + 0.5f) * unit', 'x + 0.5f * unit, baseline + 0.5f * unit'),
     ('    if (fill < SCORE_PANEL_BAR_WIDTH)\n', ''),
+    ('return retail.clock->time - cg->snap->ps.deltaTime;', 'return retail.clock->time;'),
 ]
 timer_mutants = [
     ('elem->type >= HE_TYPE_TENTHS_TIMER_DOWN', '0'),
@@ -648,5 +661,5 @@ print('PASS: the panel hides only the stock clock, icons, scores and limits, in 
       'before fading into the mode name, fills bars toward the serverinfo score limit, keeps the stock clock text '
       'and color, shrinks long mode names clear of it, letters everything by the capture\'s capital heights (7.5, '
       '10.6, 10.4 and 7.2 units) in the font the UI picks for them, and draws a faint emblem and an arrow only for '
-      'a side; '
+      'a side; the clock\'s end is the match\'s through a killcam; '
       f'{len(variants) - 1} failing regression mutants')
