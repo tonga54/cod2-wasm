@@ -62,7 +62,10 @@ static struct {struct {MaterialHandle whiteMaterial;} media;int viewWidth,viewHe
 static dvar_t enabled={.current={.enabled=1,.value=1}},disabled,paused,highMin={.current={.value=.8f}};
 static dvar_t *cg_crosshairAlpha=&enabled,*cg_crosshairAlphaMin=&disabled;
 static dvar_t *cg_drawGun=&enabled,*cg_drawCrosshair=&enabled,*cg_paused=&paused;
-static dvar_t *cg_crosshairDynamic=&disabled;
+static dvar_t *cg_crosshairDynamic=&disabled,*cg_crosshairEnemyColor=&enabled;
+/* The enemy the client confirms under the crosshair, or -1. */
+static int crosshairEnemy=-1,enemyChecks;
+static int CG_CrosshairEnemy(void) {enemyChecks++;return crosshairEnemy;}
 static WeaponDef weapon={.fAdsCrosshairInFrac=.5f,.fAdsCrosshairOutFrac=.5f,
     .iReticleSideSize=8,.iReticleMinOfs=10,.szReticleSide="gfx/reticle/side_skinny_xenon.tga"};
 static weaponInfo_t weapons[2]={{0},{.hReticleSide=1}};
@@ -277,14 +280,22 @@ int main(void) {
     ps->weaponstate=0;
     /* Standing still afterwards restores the normal size and full alpha. */
     ps->aimSpreadScale=0;assert(fabsf(frame(1300)-expected(1))<1e-3f);visible(1);tint(1,1,1);
-    /* An enemy under the crosshair (0x200000) leaves the marks and the center
-     * white; a teammate (0x100000) turns them the teammate labels' color, or
-     * the stock green while the stock labels are drawn. */
+    /* An enemy the client confirms under the crosshair turns the marks and
+     * the center red, the stock green's counterpart, client 0 included. The
+     * server's flag alone (smoke, a teammate in the way) or
+     * cg_crosshairEnemyColor off leaves them white. A teammate (0x100000)
+     * turns them the teammate labels' color, or the stock green while the
+     * stock labels are drawn, without looking for an enemy. */
     weapons[1].hReticleCenter=2;
-    ps->pm_flags=0x200000;frame(1300);visible(1);tint(1,1,1);center(1,1,1);
-    ps->pm_flags=0x100000;frame(1300);visible(1);
+    ps->pm_flags=0x200000;enemyChecks=0;frame(1300);visible(1);tint(1,1,1);center(1,1,1);assert(enemyChecks==1);
+    crosshairEnemy=0;frame(1300);visible(1);tint(1,.25f,.25f);center(1,.25f,.25f);
+    crosshairEnemy=5;frame(1300);visible(1);tint(1,.25f,.25f);center(1,.25f,.25f);
+    cg_crosshairEnemyColor=&disabled;frame(1300);visible(1);tint(1,1,1);center(1,1,1);
+    cg_crosshairEnemyColor=&enabled;
+    ps->pm_flags=0x100000;enemyChecks=0;frame(1300);visible(1);assert(!enemyChecks);
     tint(labelColor[0],labelColor[1],labelColor[2]);center(labelColor[0],labelColor[1],labelColor[2]);
     labelsDrawn=0;frame(1300);visible(1);tint(.25f,1,.25f);center(.25f,1,.25f);labelsDrawn=1;
+    crosshairEnemy=-1;
     ps->pm_flags=0;frame(1300);tint(1,1,1);center(1,1,1);
     weapons[1].hReticleCenter=0;
     /* Every resolution gets sharp marks of whole pixels at the measured
@@ -368,10 +379,17 @@ replacements = [
     (teammate_color, '        if (1) {\n'),
     (teammate_color, '        CG_GetTeammateNameColor(color);\n        {\n'),
     ('if (pmFlags & 0x100000) {', 'if (pmFlags & 0x300000) {'),
+    # Red from the server's flag alone, through smoke; never red; red with
+    # the dvar off, or for every client but 0; another red.
     (white, '    } else if (pmFlags & 0x200000) {\n'
             '        color[0] = 1.0f;\n'
             '        color[1] = 0.25f;\n'
             '        color[2] = 0.25f;\n' + white),
+    ('    } else if (cg_crosshairEnemyColor->current.enabled && CG_CrosshairEnemy() >= 0) {',
+     '    } else if (0) {'),
+    ('cg_crosshairEnemyColor->current.enabled && ', ''),
+    ('CG_CrosshairEnemy() >= 0', 'CG_CrosshairEnemy() > 0'),
+    ('        color[1] = 0.25f;\n', '        color[1] = 0.5f;\n'),
     ('if (pmFlags & 0x100000) {', 'if (0) {'),
     ('color[3] = reticleVisibility *', 'color[3] = posLerp *'),
     ('(alpha >= alphaMin ? alpha : alphaMin) * reticleVisibility', '(alpha >= alphaMin ? alpha : alphaMin)'),
@@ -428,7 +446,8 @@ with tempfile.TemporaryDirectory(prefix='cod2-crosshair-') as directory:
 print('PASS: four thin hip-fire lines rasterized at 18 spread levels with a 0.6 alpha floor, whole pixels wide '
       'and sharp at 576p to 1440p, on and off center and with both sub-pixel 2D offsets, their opacity making up '
       'the measured width, starting exactly at the spread; sprint opening/closing over 66 frame intervals '
-      '(linear and eased), firing out of sprint, white over enemies, the teammate labels\' color over teammates '
+      '(linear and eased), firing out of sprint, red over an enemy the client confirms and white for the '
+      'server\'s flag alone or with cg_crosshairEnemyColor off, the teammate labels\' color over teammates '
       '(green with the stock labels), ADS fade and shortening, six HUD gates including the countdown before a '
       'match, which keeps the scope overlay; the bar told by its file name in any '
       'case, other side images such as the launchers\' arcs drawn as before; '

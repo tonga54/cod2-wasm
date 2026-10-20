@@ -53,7 +53,11 @@ def function(text, name):
 assert draw.count('#include "headers/PC/cgame_mp/cg_playernames.h"\n') == 1
 position = function(draw, 'CG_GetPlayerNamePosition')
 friendly = function(draw, 'CG_DrawFriendlyNames')
+crosshair_enemy = function(draw, 'CG_CrosshairEnemy')
 enemy = function(draw, 'CG_DrawEnemyNames')
+# The name and the red crosshair find the enemy the same way.
+assert enemy.count('CG_CrosshairEnemy()') == 1
+assert function(draw, 'CG_DrawCrosshair').count('CG_CrosshairEnemy() >= 0') == 1
 assert friendly.count('CG_GetPlayerNamePosition(') == 1 and enemy.count('CG_GetPlayerNamePosition(') == 1
 assert friendly.count('CG_DrawTeammateName(') == 1
 assert friendly.index('CG_DrawTeammateName(') < friendly.index('UI_DrawText(')
@@ -431,7 +435,10 @@ int main(void) {
     traceHit = 5;
     draws = 0;
     assert(!EnemyDraws(50000) && !traces);
+    assert(CG_CrosshairEnemy() == -1 && !traces);
     cg->predictedPlayerState.pm_flags = 0x200000 | 0x100;
+    assert(CG_CrosshairEnemy() == 5 && traces == 1);
+    traces = 0;
     assert(EnemyDraws(50000) && traces == 1);
 
     /* The view ray, skipping the player, against bodies and solid world as
@@ -460,14 +467,21 @@ int main(void) {
     assert(EnemyDraws(50149) && fabsf(drawn[3].color[3] - 0.01f) < 1e-6f);
     assert(!EnemyDraws(50150));
 
-    /* A teammate in the way is not named, nor an enemy the server no longer
-     * flags, out of the weapon's range. */
+    /* A teammate in the way is not named, nor a slot without a player, the
+     * world, or an enemy the server no longer flags, out of the weapon's
+     * range. */
     traceHit = 63;
-    assert(!EnemyDraws(51000));
+    assert(!EnemyDraws(51000) && CG_CrosshairEnemy() == -1);
+    traceHit = 7;
+    assert(CG_CrosshairEnemy() == -1);
+    traceHit = 1022;
+    assert(CG_CrosshairEnemy() == -1);
+    traceHit = 64;
+    assert(CG_CrosshairEnemy() == -1);
     cg->predictedPlayerState.pm_flags = 0x100;
     traceHit = 5;
     traces = 0;
-    assert(!EnemyDraws(52000) && !traces);
+    assert(!EnemyDraws(52000) && !traces && CG_CrosshairEnemy() == -1);
 
     /* Nor one behind smoke, which the server's flag ignores: the smoke between
      * the eye and where the ray meets him leaves less than a fifth visible. */
@@ -479,8 +493,9 @@ int main(void) {
         assert(smokeStart[i] == traceStart[i]);
         assert(fabsf(smokeEnd[i] - (traceStart[i] + (traceEnd[i] - traceStart[i]) * traceFraction)) < 1e-3f);
     }
+    assert(CG_CrosshairEnemy() == -1);
     smokeVisibility = 0.2f;
-    assert(EnemyDraws(52500));
+    assert(EnemyDraws(52500) && CG_CrosshairEnemy() == 5);
     smokeVisibility = 0.19f;
     assert(EnemyDraws(52600) && fabsf(drawn[5].color[3] - 0.5f) < 1e-6f && !EnemyDraws(52650));
     smokeVisibility = 1.0f;
@@ -489,7 +504,7 @@ int main(void) {
     cg->predictedPlayerState.pm_flags = 0x200000;
     cg->bgs.clientinfo[0].team = 0;
     cg->bgs.clientinfo[5].team = 0;
-    assert(EnemyDraws(53000));
+    assert(EnemyDraws(53000) && CG_CrosshairEnemy() == 5);
     cg->bgs.clientinfo[0].team = 1;
     cg->bgs.clientinfo[5].team = 2;
 
@@ -597,11 +612,26 @@ friendly_mutants = [
     ('if (CG_DrawTeammateName(ci->name, x, y)) continue;', 'if (CG_DrawTeammateName(ci->name, x, 0)) continue;'),
     ('if (CG_DrawTeammateName(ci->name, x, y)) continue;', ''),
 ]
-enemy_mutants = [
-    ('    if (ps->pm_flags & 0x200000) {', '    if (1) {'),
-    ('    if (ps->pm_flags & 0x200000) {', '    if (ps->pm_flags & 0x100000) {'),
+crosshair_enemy_mutants = [
+    ('    if (!(ps->pm_flags & 0x200000))\n        return -1;\n', ''),
+    ('    if (!(ps->pm_flags & 0x200000))', '    if (!(ps->pm_flags & 0x100000))'),
+    ('    if (trace.entityNum >= 64)\n        return -1;\n', ''),
+    ('ci->infoValid && ', ''),
     ('(!team || ci->team != team)', '(ci->team != team)'),
     ('(!team || ci->team != team)', '(!team || ci->team == team)'),
+    (' && FX_GetServerVisibility(start, contact) >= 0.2f)\n', ')\n'),
+    ('FX_GetServerVisibility(start, contact) >= 0.2f', 'FX_GetServerVisibility(start, contact) > 0.2f'),
+    ('FX_GetServerVisibility(start, contact)', 'FX_GetServerVisibility(start, end)'),
+    ('(end[axis] - start[axis]) * trace.fraction;', '(end[axis] - start[axis]);'),
+    ('ps->clientNum, 0x2000001)', 'ps->clientNum, 0x2000000)'),
+    ('ps->clientNum, 0x2000001)', '1023, 0x2000001)'),
+    ('* 8192.0f;', '* 1024.0f;'),
+    ('start[axis] = cg->refdef.vieworg[axis];', 'start[axis] = 0.0f;'),
+    ('        return trace.entityNum;\n', '        return 0;\n'),
+]
+enemy_mutants = [
+    ('    enemy = CG_CrosshairEnemy();\n', '    enemy = -1;\n'),
+    ('        lastClient = enemy;\n', ''),
     ('CG_FadeColor(lastTime, 150, 100)', 'CG_FadeColor(lastTime, 1000, 100)'),
     ('CG_FadeColor(lastTime, 150, 100)', 'CG_FadeColor(lastTime, 150, 150)'),
     ('    if (lastTime > cg->time)\n        lastTime = 0;\n', ''),
@@ -611,32 +641,27 @@ enemy_mutants = [
     ('cent->nextState.clientNum != lastClient ||', ''),
     ('        !ci->infoValid || (team && ci->team == team)', '        (team && ci->team == team)'),
     ('(team && ci->team == team) || !ci->name[0])', '!ci->name[0])'),
-    (' && FX_GetServerVisibility(start, contact) >= 0.2f) {', ') {'),
-    ('FX_GetServerVisibility(start, contact) >= 0.2f', 'FX_GetServerVisibility(start, contact) > 0.2f'),
-    ('FX_GetServerVisibility(start, contact)', 'FX_GetServerVisibility(start, end)'),
-    ('(end[axis] - start[axis]) * trace.fraction;', '(end[axis] - start[axis]);'),
-    ('ps->clientNum, 0x2000001)', 'ps->clientNum, 0x2000000)'),
-    ('ps->clientNum, 0x2000001)', '1023, 0x2000001)'),
-    ('* 8192.0f;', '* 1024.0f;'),
-    ('start[axis] = cg->refdef.vieworg[axis];', 'start[axis] = 0.0f;'),
     ('CG_DrawEnemyName(ci->name, x, y, fade[3]);', 'CG_DrawEnemyName(ci->name, x, y, 1.0f);'),
     ('    if (CG_GetPlayerNamePosition(cent, &x, &y))\n        CG_DrawEnemyName',
      '    x = y = 0;\n    CG_GetPlayerNamePosition(cent, &x, &y);\n        CG_DrawEnemyName'),
 ]
 
-variants = [(names_module, position, friendly, enemy)]
+variants = [(names_module, position, friendly, crosshair_enemy, enemy)]
 for old, new in mutants:
     assert names_module.count(old) == 1, old
-    variants.append((names_module.replace(old, new), position, friendly, enemy))
+    variants.append((names_module.replace(old, new), position, friendly, crosshair_enemy, enemy))
 for old, new in position_mutants:
     assert position.count(old) == 1, old
-    variants.append((names_module, position.replace(old, new), friendly, enemy))
+    variants.append((names_module, position.replace(old, new), friendly, crosshair_enemy, enemy))
 for old, new in friendly_mutants:
     assert friendly.count(old) == 1, old
-    variants.append((names_module, position, friendly.replace(old, new), enemy))
+    variants.append((names_module, position, friendly.replace(old, new), crosshair_enemy, enemy))
+for old, new in crosshair_enemy_mutants:
+    assert crosshair_enemy.count(old) == 1, old
+    variants.append((names_module, position, friendly, crosshair_enemy.replace(old, new), enemy))
 for old, new in enemy_mutants:
     assert enemy.count(old) == 1, old
-    variants.append((names_module, position, friendly, enemy.replace(old, new)))
+    variants.append((names_module, position, friendly, crosshair_enemy, enemy.replace(old, new)))
 
 with tempfile.TemporaryDirectory(prefix='cod2-player-names-') as directory:
     path = Path(directory) / 'names.c'

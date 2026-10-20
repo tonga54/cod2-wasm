@@ -29,6 +29,7 @@ extern const dvar_t *cg_chatTime;
 extern const dvar_t *cg_crosshairAlpha;
 extern const dvar_t *cg_crosshairAlphaMin;
 extern const dvar_t *cg_crosshairDynamic;
+extern const dvar_t *cg_crosshairEnemyColor;
 extern const dvar_t *cg_draw2D;
 extern const dvar_t *cg_drawCrosshair;
 extern const dvar_t *cg_drawCrosshairNames;
@@ -1294,48 +1295,60 @@ static void CG_DrawFriendlyNames(void)
     }
 }
 
-/* The enemy under the crosshair is named above the head, once the server
- * flags an enemy there (0x200000) within the weapon's enemyCrosshairRange, as
- * the stock red crosshair was. The name lingers and fades like a crosshair
- * name. Free-for-all players have team 0. */
-static void CG_DrawEnemyNames(void)
+/* The enemy under the crosshair, or -1: the server flags one there
+ * (0x200000) within the weapon's enemyCrosshairRange, and the view ray finds
+ * him. Free-for-all players have team 0. */
+static int CG_CrosshairEnemy(void)
 {
-    static int lastClient, lastTime;
     const playerState_t *ps = &cg->predictedPlayerState;
     int team = cg->bgs.clientinfo[ps->clientNum].team;
     vec3_t start, end, contact;
     vec3_t traceMins = { 0.0f, 0.0f, 0.0f };
     vec3_t traceMaxs = { 0.0f, 0.0f, 0.0f };
     trace_t trace;
+    clientInfo_t *ci;
+    int axis;
+
+    if (!(ps->pm_flags & 0x200000))
+        return -1;
+    for (axis = 0; axis < 3; ++axis) {
+        start[axis] = cg->refdef.vieworg[axis];
+        end[axis] = start[axis] + cg->refdef.viewaxis[0][axis] * 8192.0f;
+    }
+    CG_TraceCapsule(&trace, start, traceMins, traceMaxs, end, ps->clientNum, 0x2000001);
+    if (trace.entityNum >= 64)
+        return -1;
+    ci = &cg->bgs.clientinfo[trace.entityNum];
+    for (axis = 0; axis < 3; ++axis)
+        contact[axis] = start[axis] + (end[axis] - start[axis]) * trace.fraction;
+    /* A dedicated server runs no effects, so the flag ignores smoke; the
+     * server's smoke test runs here on the client's particles. */
+    if (ci->infoValid && (!team || ci->team != team) && FX_GetServerVisibility(start, contact) >= 0.2f)
+        return trace.entityNum;
+    return -1;
+}
+
+/* The enemy under the crosshair is named above the head. The name lingers
+ * and fades like a crosshair name. */
+static void CG_DrawEnemyNames(void)
+{
+    static int lastClient, lastTime;
+    int team = cg->bgs.clientinfo[cg->predictedPlayerState.clientNum].team;
     const float *fade;
     centity_t *cent;
     clientInfo_t *ci;
     float x, y;
-    int axis;
+    int enemy;
 
     /* Another server's clock can start behind the last sighting. */
     if (lastTime > cg->time)
         lastTime = 0;
     if (cg->renderingThirdPerson)
         return;
-    if (ps->pm_flags & 0x200000) {
-        for (axis = 0; axis < 3; ++axis) {
-            start[axis] = cg->refdef.vieworg[axis];
-            end[axis] = start[axis] + cg->refdef.viewaxis[0][axis] * 8192.0f;
-        }
-        CG_TraceCapsule(&trace, start, traceMins, traceMaxs, end, ps->clientNum, 0x2000001);
-        if (trace.entityNum < 64) {
-            ci = &cg->bgs.clientinfo[trace.entityNum];
-            for (axis = 0; axis < 3; ++axis) {
-                contact[axis] = start[axis] + (end[axis] - start[axis]) * trace.fraction;
-            }
-            /* A dedicated server runs no effects, so the flag ignores smoke;
-             * the server's smoke test runs here on the client's particles. */
-            if (ci->infoValid && (!team || ci->team != team) && FX_GetServerVisibility(start, contact) >= 0.2f) {
-                lastClient = trace.entityNum;
-                lastTime = cg->time;
-            }
-        }
+    enemy = CG_CrosshairEnemy();
+    if (enemy >= 0) {
+        lastClient = enemy;
+        lastTime = cg->time;
     }
     fade = CG_FadeColor(lastTime, 150, 100);
     if (!fade)
@@ -1807,8 +1820,9 @@ unsigned int CG_DrawCrosshair(void)
     CG_DrawAttachmentSight(ps, weapIndex, centerX, centerY);
 
     /* Teammates turn the crosshair the color of their labels, the stock green
-     * with the stock labels. Enemies leave it white; the red hit marker
-     * confirms hits instead. */
+     * with the stock labels. CoD2 left it white over an enemy; here an enemy
+     * under it turns it red, the stock green's counterpart, unless
+     * cg_crosshairEnemyColor is off. */
     pmFlags = ps->pm_flags;
     if (pmFlags & 0x100000) {
         if (!CG_GetTeammateNameColor(color)) {
@@ -1816,6 +1830,10 @@ unsigned int CG_DrawCrosshair(void)
             color[1] = 1.0f;
             color[2] = 0.25f;
         }
+    } else if (cg_crosshairEnemyColor->current.enabled && CG_CrosshairEnemy() >= 0) {
+        color[0] = 1.0f;
+        color[1] = 0.25f;
+        color[2] = 0.25f;
     } else {
         color[0] = 1.0f;
         color[1] = 1.0f;

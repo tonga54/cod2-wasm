@@ -4337,3 +4337,42 @@ Validation:
   in green and Mobility 7 to 6 in red, "Aims in 253 ms, from 220" in red;
   FMJ, Damage 2 to 3 and Range 3 to 2 with its penetration line in green;
   Quickdraw, Mobility 7 to 9 and Accuracy 4 to 3.
+
+## A red crosshair over the enemy — 2026-10-20
+
+The owner asked for the hip-fire crosshair to turn red over an enemy's body,
+as it turns green over a teammate. On October 17 (d6bbe30) the crosshair had
+been left white over enemies to match a WWII capture, on the belief that
+CoD2 turned it red. `CoD2MP_s.exe` never did: its crosshair color function
+at 0x4c8d50 knows only the teammate's green (0.25, 1, 0.25) and white, and
+`cg_crosshairEnemyColor` is registered at 0x4be629 and read nowhere. The red
+came from the reconstruction; `docs/GRAPHICS_2026-10-16.md` now says so.
+
+The server still flags an enemy under a player's crosshair
+(`Player_UpdateLookAtEntity`, `pm_flags` 0x200000) within the weapon's
+`enemyCrosshairRange`: 750 units for the SMGs, 1500 for the semi-automatic
+rifles, the BAR, the Bren and the MP44, 950 for the bolt-actions, 550 for
+the scoped rifles and the pistols, 384 for the Trench Gun. A dedicated
+server runs no effects, so that flag ignores smoke. `CG_CrosshairEnemy` now
+holds what the red enemy name already did with it: the flag, the client's
+own view ray to a player of another team (any player in free-for-all), and
+the smoke test on the client's particles. `CG_DrawEnemyNames` names that
+player, and `CG_DrawCrosshair` turns the marks and the center (1, 0.25,
+0.25), the green's counterpart, while `cg_crosshairEnemyColor` is on: its
+default, saved in the profile. A teammate's green comes first and looks for
+no enemy.
+
+Validation:
+
+- `scripts/test-hip-crosshair.py`: red marks and center over an enemy the
+  client confirms, client 0 included; white for the server's flag alone and
+  with the dvar off; the teammate's color without looking for an enemy. Four
+  more mutants fail.
+- `scripts/test-player-names.py`: `CG_CrosshairEnemy` returns the enemy, and
+  -1 without the flag, for a teammate, an empty slot, entity 64, the world
+  and smoke; the name keeps its behavior through it. The view-ray mutants
+  now run against the shared function, with five more.
+- `test-prematch.py` passes; the web client builds.
+- Two browsers on opposite teams in a Carentan TDM room, 152 units apart and
+  facing: each crosshair red on the other's chest under his red name, and
+  white on the wall beside him.
