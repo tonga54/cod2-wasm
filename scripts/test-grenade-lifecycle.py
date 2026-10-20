@@ -130,7 +130,8 @@ body = ''.join(function(missiles, n) for n in (
     'G_FindNearbyGrenade', 'G_UpdateGrenadeHint', 'G_GrenadeCookOff', 'G_BeginGrenadeInput',
     'G_EndGrenadeInput', 'G_PlacedTeam', 'G_PlacedSound', 'G_PlacedOwner', 'G_SetDownMine', 'G_PlaceExplosive',
     'G_StickMissile',
-    'G_RunPlacedExplosive', 'G_DetonateExplosives', 'G_ExplodeMissile', 'fire_grenade', 'G_BounceMissile', 'G_RunMissile'))
+    'G_LaunchMine', 'G_RunPlacedExplosive', 'G_DetonateExplosives', 'G_ExplodeMissile', 'fire_grenade', 'G_BounceMissile',
+    'G_RunMissile'))
 # Production functions are external; give the extracted grenade factory the same linkage.
 support = support.replace('static gentity_t *fire_grenade(', 'gentity_t *fire_grenade(')
 body += ''.join(function(weapons, n) for n in (

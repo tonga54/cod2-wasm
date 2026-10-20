@@ -402,7 +402,10 @@ archives are prepared (`scripts/browser_explosives.py`,
   look. It takes about two seconds with a rifle. The hand animations are the
   Mk 2 grenade's pull-pin, with the left arm reaching for the S-Mine's pin and
   a held pose and setting down added. The mine arms after 1.2 s; an enemy's
-  feet within 40 units click it and it goes off 0.15 s later. Its owner takes
+  feet within 40 units click it, and 0.3 s later it springs straight up,
+  turning, to a standing player's chest, 44 units, where it goes off about
+  0.65 s after the click: long enough to see it rise, too soon to run clear of
+  the blast. It passes through anyone standing over it. Its owner takes
   it back by holding Use (F, or X on a controller) for half a second within
   52 units of it, with it in sight: "Press and hold F to pickup S-Mine 44"
   shows under the crosshair. It returns to the kit when there is room for it,

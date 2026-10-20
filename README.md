@@ -157,7 +157,8 @@ retail CoD2:
   drawn reticles and the 4x Optic a sniper scope. See
   [attachments](docs/CLASSES.md#attachments).
 - **Placed explosives:** CoD WWII's S-Mine 44, set down at your feet after
-  the left hand draws its pin, and CoD4's C4, thrown to stick and set off with
+  the left hand draws its pin, which clicks under an enemy's feet and springs
+  up to explode at chest height, and CoD4's C4, thrown to stick and set off with
   aim from anywhere. Your squad's emblem, a star or an iron cross, pulses over
   them for you and your teammates. Hold Use over your own S-Mine to take it
   back; enemies can shoot it to set it off, and its blast is theirs. See

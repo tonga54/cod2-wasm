@@ -117,6 +117,14 @@ extern float sinf(float x);
  * far over its origin: around the model's can and igniter (browser_smine.py). */
 #define GMISSILE_MINE_HIT_RADIUS 5.0f
 #define GMISSILE_MINE_HIT_RISE 2.0f
+/* Its proximity delay after the click, the S-Mine springs this far up, to a
+ * standing player's chest, and goes off as it stops rising; the trajectory's
+ * gravity, units a second squared. It turns as it rises, and passes through
+ * the players above it. */
+#define GMISSILE_MINE_JUMP 44.0f
+#define GMISSILE_GRAVITY 800.0f
+#define GMISSILE_MINE_SPIN 360.0f
+#define GMISSILE_CONTENTS_BODY 0x2000000
 
 static inline void VectorCopy(const vec_t *src, vec_t *dst)
 {
@@ -529,8 +537,32 @@ static void G_StickMissile(gentity_t *ent, const trace_t *trace, const vec_t *en
     SV_LinkEntity(ent);
 }
 
+/* Straight up from where it lies, slowing under gravity, to go off at the
+ * top; the missile code flies it from here. */
+static void G_LaunchMine(gentity_t *ent)
+{
+    const float speed = sqrtf(2.0f * GMISSILE_GRAVITY * GMISSILE_MINE_JUMP);
+
+    VectorCopy(ent->r.currentOrigin, ent->s.pos.trBase);
+    VectorClear(ent->s.pos.trDelta);
+    ent->s.pos.trDelta[2] = speed;
+    ent->s.pos.trType = 5;
+    ent->s.pos.trTime = LEVEL_TIME;
+    ent->s.pos.trDuration = 0;
+    VectorCopy(ent->r.currentAngles, ent->s.apos.trBase);
+    VectorClear(ent->s.apos.trDelta);
+    ent->s.apos.trDelta[1] = GMISSILE_MINE_SPIN;
+    ent->s.apos.trType = 2;
+    ent->s.apos.trTime = LEVEL_TIME;
+    ent->s.groundEntityNum = 1023;
+    ent->clipmask &= ~GMISSILE_CONTENTS_BODY;
+    ent->nextthink = LEVEL_TIME + (int)(1000.0f * speed / GMISSILE_GRAVITY + 0.5f);
+    SV_LinkEntity(ent);
+}
+
 /* A placed explosive's frame before the missile code: 1 when it has nothing
- * left to do. A mine arms once it lies still, then senses enemies' feet. */
+ * left to do. A mine arms once it lies still, then senses enemies' feet, and
+ * after its click springs up. */
 static qboolean G_RunPlacedExplosive(gentity_t *ent, const WeaponDef *weapDef)
 {
     gentity_t *owner = G_PlacedOwner(ent);
@@ -564,7 +596,13 @@ static qboolean G_RunPlacedExplosive(gentity_t *ent, const WeaponDef *weapDef)
         G_SetAngle(ent, ent->r.currentAngles);
         G_PlacedSound(ent, weapDef->szArmSound);
     }
-    if ((ent->spawnflags & GMISSILE_PLACED_TRIGGERED) || LEVEL_TIME < ent->count)
+    if (ent->spawnflags & GMISSILE_PLACED_TRIGGERED) {
+        /* Once only: in the air its explosion is due. */
+        if (!ent->nextthink && LEVEL_TIME >= ent->count)
+            G_LaunchMine(ent);
+        return 0;
+    }
+    if (LEVEL_TIME < ent->count)
         return 0;
     for (i = 0; i < 64; i++) {
         gentity_t *other = &g_entities[i];
@@ -579,7 +617,7 @@ static qboolean G_RunPlacedExplosive(gentity_t *ent, const WeaponDef *weapDef)
             delta[2] < -GMISSILE_PROXIMITY_BELOW || delta[2] > GMISSILE_PROXIMITY_ABOVE)
             continue;
         ent->spawnflags |= GMISSILE_PLACED_TRIGGERED;
-        ent->nextthink = LEVEL_TIME + weapDef->iProximityDelay;
+        ent->count = LEVEL_TIME + weapDef->iProximityDelay;
         G_PlacedSound(ent, weapDef->szTriggerSound);
         break;
     }

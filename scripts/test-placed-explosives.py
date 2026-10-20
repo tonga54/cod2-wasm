@@ -79,7 +79,7 @@ static struct {int grenade;}scr_const;
 static struct {int methodOfDeath,splashMethodOfDeath;}entityHandlers[20];
 static vec3_t zero;static byte *vec3_origin_ptr=(byte*)zero,*pPriorityMap;
 static WeaponDef defs[4];
-static int explosions,radiusCalls,bounces,sounds;static gentity_t *lastAttacker;
+static int explosions,radiusCalls,bounces,sounds;static gentity_t *lastAttacker;static vec3_t blast;
 static trace_t hit={.fraction=1,.entityNum=1023};
 static gentity_t temps[64];static int tempCount;
 #define _ENT(e) ((gentity_t *)(e))
@@ -130,7 +130,7 @@ static int DirToByte(vec_t *v){return 0;}
 static void G_AddEvent(gentity_t *e,int a,int b){if(a==0xbc){assert(e->s.eType==0);explosions++;}if(a==0xbb)bounces++;}
 static int G_RadiusDamage(vec_t *o,gentity_t *e,gentity_t *a,float inner,float outer,float radius,gentity_t *i,int m){
  assert(inner==defs[e->s.weapon].iExplosionInnerDamage&&radius==defs[e->s.weapon].iExplosionRadius);
- lastAttacker=a;radiusCalls++;return 0;}
+ lastAttacker=a;radiusCalls++;memcpy(blast,o,sizeof(blast));return 0;}
 typedef void EffectTemplate;
 static void Server_SwitchToValidFxScheduler(void){}
 static EffectTemplate *FX_RegisterEffect(const char *name){return NULL;}
@@ -162,7 +162,8 @@ server_body = function(team, 'OnSameTeam').replace('qboolean OnSameTeam', 'stati
         'VectorCopy', 'VectorSubtract', 'VectorAdd', 'VectorScale', 'VectorClear', 'VectorLength', 'DotProduct',
         'VectorMA', 'SnapFloat', 'SnapVector', 'LerpPosition', 'G_GetHeldGrenade', 'G_CanPickUpGrenade',
         'G_FindNearbyGrenade', 'G_PlacedTeam', 'G_PlacedSound', 'G_PlacedOwner', 'G_SetDownMine',
-        'G_PlaceExplosive', 'G_StickMissile', 'G_RunPlacedExplosive', 'G_DetonateExplosives', 'G_CanTakeMine',
+        'G_PlaceExplosive', 'G_StickMissile', 'G_LaunchMine', 'G_RunPlacedExplosive', 'G_DetonateExplosives',
+        'G_CanTakeMine',
         'G_ListMines', 'G_FindOwnMine', 'G_UpdateMinePickup', 'G_BulletHitsMines', 'G_PlacedExplosiveSentTo',
         'G_ExplodeMissile',
         'fire_grenade', 'G_BounceMissile', 'G_RunMissile'))
@@ -181,7 +182,7 @@ static void reset(void){
  explosions=radiusCalls=bounces=sounds=tempCount=0;lastAttacker=NULL;hit=(trace_t){.fraction=1,.entityNum=1023};
  for(int i=1;i<4;i++){defs[i].weapType=WEAPTYPE_GRENADE;defs[i].offhandClass=1;defs[i].iMaxAmmo=2;
   for(int s=0;s<32;s++)defs[i].parallelBounce[s]=defs[i].perpendicularBounce[s]=.5f;}
- defs[MINE].proximityRadius=40;defs[MINE].iProximityArmTime=1200;defs[MINE].iProximityDelay=150;
+ defs[MINE].proximityRadius=40;defs[MINE].iProximityArmTime=1200;defs[MINE].iProximityDelay=300;
  defs[MINE].iExplosionRadius=192;defs[MINE].iExplosionInnerDamage=300;defs[MINE].iExplosionOuterDamage=60;
  defs[MINE].szArmSound="arm";defs[MINE].szTriggerSound="click";defs[MINE].szBounceSound="land";
  defs[MINE].szPickupSound="pickup";defs[MINE].iClipIndex=5;defs[MINE].iClipSize=2;
@@ -210,12 +211,37 @@ int main(void){
  gentity_t *m=place(owner,MINE);
  assert(m->nextthink==0&&m->s.otherEntityNum==0&&m->team==2&&m->s.apos.trType==0&&m->r.currentAngles[0]==0);
  /* Arms 1.2 s after it comes to rest, with its plant sound; then an enemy's
-  * step clicks it and it goes off 150 ms later, credited to its owner. */
+  * step clicks it, 300 ms later it springs straight up, turning and through
+  * anyone over it, and it goes off as it stops rising, 44 units up, a
+  * standing player's chest: its owner's blast. */
  rest(m,0,0);at(enemy,10,0,0);frame(m,50);assert(m->count==level.time+1200&&sounds==1&&!(m->spawnflags&2));
  for(int t=0;t<1100;t+=50){frame(m,50);assert(!(m->spawnflags&2));}
- frame(m,100);assert((m->spawnflags&2)&&m->nextthink==level.time+150&&sounds==2);
- frame(m,100);assert(!explosions);frame(m,50);assert(explosions==1&&radiusCalls==1&&lastAttacker==owner);
+ frame(m,100);assert((m->spawnflags&2)&&m->count==level.time+300&&!m->nextthink&&sounds==2);
+ int launch=m->count;
+ frame(m,250);assert(m->s.pos.trType==0&&m->r.currentOrigin[2]==0&&!explosions);
+ frame(m,50);
+ assert(m->s.pos.trType==5&&m->s.pos.trTime==launch&&!m->s.pos.trDelta[0]&&!m->s.pos.trDelta[1]&&
+  fabsf(m->s.pos.trDelta[2]-sqrtf(2*800*44.0f))<1e-3f&&m->s.groundEntityNum==1023);
+ assert(m->nextthink==launch+332&&!(m->clipmask&0x2000000)&&m->s.apos.trType==2&&m->s.apos.trDelta[1]==360);
+ {
+  float lastZ=m->r.currentOrigin[2];
+  while(!explosions&&level.time<launch+1000){
+   frame(m,50);
+   if(!explosions){assert(m->r.currentOrigin[2]>lastZ&&!m->r.currentOrigin[0]&&!m->r.currentOrigin[1]);
+    lastZ=m->r.currentOrigin[2];}
+  }
+ }
+ assert(explosions==1&&radiusCalls==1&&lastAttacker==owner&&level.time>=launch+332&&level.time<launch+382);
+ assert(fabsf(blast[2]-44)<1.5f&&!blast[0]&&!blast[1]);
  cases+=4;
+ /* Brought back to rest before it goes off, it springs up only once. */
+ reset();owner=player(0,2);enemy=player(1,1);m=armedMine(owner);at(enemy,10,0,0);frame(m,50);
+ for(int k=0;k<6;k++)frame(m,50);
+ assert(m->s.pos.trType==5);
+ launch=m->s.pos.trTime;int due=m->nextthink;m->s.pos.trType=0;m->s.groundEntityNum=WORLD;
+ frame(m,50);assert(m->nextthink==due&&m->s.pos.trTime==launch&&m->s.pos.trType==0);
+ while(!explosions&&level.time<due+100)frame(m,50);
+ assert(explosions==1&&level.time>=due&&level.time<due+50);cases++;
  /* Only a living, playing, connected enemy's feet within 40 units across and
   * 24 below to 48 above. */
  struct {int who,dead,state,connected;float x,z;int fires;} steps[]={
@@ -414,7 +440,8 @@ int main(void){
   reset();owner=player(0,2);enemy=player(1,1);gentity_t *gunner=player(3,1);m=armedMine(owner);
   at(enemy,10,0,0);frame(m,50);assert(m->spawnflags&2);at(enemy,-500,0,0);at(gunner,-500,0,0);
   G_BulletHitsMines(gunner,from,to);assert(!s_mineShotBy[m->s.number]);frame(m,100);assert(!explosions);
-  frame(m,50);assert(explosions==1&&lastAttacker==owner);cases+=3;
+  for(int k=0;k<20&&!explosions;k++)frame(m,50);
+  assert(explosions==1&&lastAttacker==owner&&fabsf(blast[2]-44)<1.5f);cases+=3;
   /* Of two on the bullet's path, the nearer goes off; the other stays. */
   reset();owner=player(0,2);enemy=player(1,1);at(owner,500,500,0);at(enemy,-500,0,0);
   gentity_t *nearMine=place(owner,MINE),*farMine=place(owner,MINE);rest(nearMine,-100,0);rest(farMine,100,0);
@@ -435,7 +462,7 @@ int main(void){
   reset();owner=player(0,2);at(owner,500,0,0);s_mineShotBy[level.num_entities]=2;m=place(owner,MINE);rest(m,0,0);
   frame(m,50);frame(m,50);assert(!explosions&&m->s.eType==4&&m->r.inuse);cases++;
  }
- printf("PASS: %d server cases: a mine arms 1.2 s after it lies still, clicks under an enemy's feet within 40 units and 24 below to 48 above and goes off 150 ms later for its owner, never for teammates, its owner, the dead, spectators or the disconnected; anyone in free-for-all; C4 sticks flat to walls, floors, ceilings and slopes, bounces off players, and goes off only by its owner's detonator, anywhere, in flight too; two of each kind per owner; both go with an owner who leaves or changes sides; neither is thrown back; the S-Mine is set down upright a step ahead of its owner's feet, short of walls, down steps, falling over drops and steep slopes; only its owner takes it back, holding Use half a second within reach, in sight, where no other hint is offered, the nearer first, with a full kit or none too, refunded only into room in a kit that carries it; a resting one is sent to its owner and teammates within 1600 units wherever it lies, never to enemies, spectators or others in free-for-all; an enemy's bullet within 5 units of a resting mine's can, along its own path, sets the nearer of two off on the mine's next frame, armed or arming, never a teammate's or its owner's, nor C4, a falling or clicked mine, the first shooter's blast unless they left\n",cases);
+ printf("PASS: %d server cases: a mine arms 1.2 s after it lies still, clicks under an enemy's feet within 40 units and 24 below to 48 above, springs up 300 ms later, turning and through players, and goes off at its top 44 units up for its owner, once, never for teammates, its owner, the dead, spectators or the disconnected; anyone in free-for-all; C4 sticks flat to walls, floors, ceilings and slopes, bounces off players, and goes off only by its owner's detonator, anywhere, in flight too; two of each kind per owner; both go with an owner who leaves or changes sides; neither is thrown back; the S-Mine is set down upright a step ahead of its owner's feet, short of walls, down steps, falling over drops and steep slopes; only its owner takes it back, holding Use half a second within reach, in sight, where no other hint is offered, the nearer first, with a full kit or none too, refunded only into room in a kit that carries it; a resting one is sent to its owner and teammates within 1600 units wherever it lies, never to enemies, spectators or others in free-for-all; an enemy's bullet within 5 units of a resting mine's can, along its own path, sets the nearer of two off on the mine's next frame, armed or arming, never a teammate's or its owner's, nor C4, a falling or clicked mine, the first shooter's blast unless they left\n",cases);
  return 0;
 }
 '''
@@ -749,6 +776,16 @@ mutants = [
      '    if (shared->svFlags & 1) {\n        return 0;\n    }\n'
      '    if ((shared->clientMask[clientNum >> 5] >> (clientNum & 31)) & 1) {\n        return 0;\n    }\n'
      '    if (shared->svFlags & 0x18) {\n        return 1;\n    }\n'),
+    # Springing up after the click.
+    ('server', '            G_LaunchMine(ent);', '            ent->nextthink = LEVEL_TIME;'),
+    ('server', '        if (!ent->nextthink && LEVEL_TIME >= ent->count)', '        if (LEVEL_TIME >= ent->count)'),
+    ('server', '        ent->count = LEVEL_TIME + weapDef->iProximityDelay;', '        ent->count = LEVEL_TIME;'),
+    ('server', '    ent->s.pos.trDelta[2] = speed;', '    ent->s.pos.trDelta[2] = speed * 1.5f;'),
+    ('server', '    ent->nextthink = LEVEL_TIME + (int)(1000.0f * speed / GMISSILE_GRAVITY + 0.5f);',
+     '    ent->nextthink = LEVEL_TIME + 500;'),
+    ('server', '    ent->clipmask &= ~GMISSILE_CONTENTS_BODY;\n', ''),
+    ('server', '    ent->s.apos.trDelta[1] = GMISSILE_MINE_SPIN;\n', ''),
+    ('server', '    ent->s.groundEntityNum = 1023;\n    ent->clipmask', '    ent->clipmask'),
     # Shooting a mine.
     ('server', 'owner == attacker || OnSameTeam(owner, attacker)', 'owner == attacker'),
     ('server', '!owner || owner == attacker ||', '!owner ||'),

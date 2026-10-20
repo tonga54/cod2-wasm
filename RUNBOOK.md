@@ -4241,3 +4241,35 @@ Validation:
   rifle and x3 on a semi-automatic one, from the weapon files' `damage`,
   `semiAuto` and `boltAction`.
 - `test-class-select.py` and `test-class-camo.py` pass.
+
+## The S-Mine springs up — 2026-10-20
+
+The owner asked for a mine stepped on to give a moment to notice it, rise
+into the air and explode at the player's chest, without time to escape.
+It clicked and went off on the ground 0.15 s later.
+
+`G_RunPlacedExplosive` now keeps the click as it was, but schedules the jump
+in the mine's `count` instead of its explosion: the weapon file's
+`proximityDelay`, now 0.3 s (`browser_explosives.py`). `G_LaunchMine` then
+throws it straight up at √(2·800·44) ≈ 265 units a second under the
+trajectory's gravity, turning 360° a second, with bodies taken out of its
+clip mask so that a player standing on it does not stop it. Its explosion is
+due as it stops rising, 332 ms later, 44 units over its origin, a standing
+player's chest. The missile code flies it from there, and a mine brought
+back to rest before then does not spring again, as its explosion is already
+due. From the click it goes off in about 0.65 s. The blast kills within about
+160 units, so even a player who sprints off at once is still in it. A mine
+an enemy shoots still goes off where it lies.
+
+Validation:
+
+- `scripts/test-placed-explosives.py`: the click with the jump 300 ms away
+  and nothing due; at it, straight up at the speed for 44 units, turning, off
+  the ground and through bodies; rising every frame, then the blast 332–382 ms
+  later about 44 units up, the owner's; one jump only for a mine brought back
+  to rest; a clicked mine's blast at chest height. 8 more mutants fail (66).
+  `test-grenade-lifecycle.py` passes with the launch in its build.
+- Two browsers in a Carentan TDM room, recorded from the owner's view
+  130 units away: the squad emblem went as the mine sprang 0.3 s after the
+  enemy stepped by it, the canister rose in front of him to his chest, and it
+  went off there about 0.3 s later.

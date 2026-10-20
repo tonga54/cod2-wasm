@@ -88,8 +88,9 @@ def _bounces(parallel, perpendicular):
 
 
 # The S-Mine 44 is set down upright at its owner's feet; it arms after
-# 1.2 s, then a foot within 40 units (a metre) clicks it and it goes off
-# 0.15 s later, with the retail minefields' blast over a grenade's. The hand
+# 1.2 s, then a foot within 40 units (a metre) clicks it, 0.3 s later it
+# springs up and it goes off at a standing player's chest (g_missile_mp.c),
+# with the retail minefields' blast over a grenade's. The hand
 # takes 0.85 s to bring it up and draw its pin, and sets it down 0.3 s after.
 # CoD4's C4 sticks where it first hits and waits for its detonator.
 MINE = {
@@ -105,7 +106,7 @@ MINE = {
     **_bounces('0.1', '0.05'),
 }
 MINE_KEYS = {
-    'proximityRadius': '40', 'proximityArmTime': '1.2', 'proximityDelay': '0.15',
+    'proximityRadius': '40', 'proximityArmTime': '1.2', 'proximityDelay': '0.3',
     'bounceSound': 'weap_mine_land', 'armSound': 'weap_mine_arm', 'triggerSound': 'minefield_click',
 }
 C4 = {
