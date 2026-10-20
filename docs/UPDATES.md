@@ -84,7 +84,9 @@ configuration; unfinished transactions are recovered on the next timer run.
 The last good package/images remain available. A rejected code commit is not
 retried automatically; a new main commit or explicit `--retry` is required.
 Network failures and unfinished CI builds are retried without replacing the
-running game. These checks catch build/startup regressions; they cannot prove
+running game. The workflow skips pushes that change only Markdown or `docs/`,
+so when `main` ends in such commits the updater installs the release of the
+newest commit beneath them that has one. It never goes back past a code change. These checks catch build/startup regressions; they cannot prove
 that every future change is bug-free.
 
 Install on a prepared Pi with Docker Compose 2.24.4+ and user lingering enabled:

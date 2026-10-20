@@ -27,6 +27,10 @@ class Deferred(RuntimeError):
     pass
 
 
+class Unreleased(Deferred):
+    pass
+
+
 def atomic_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + '.tmp')
@@ -104,6 +108,22 @@ class Updater:
 
     def git(self, *args):
         return self.run('git', '-C', str(self.root), *args, timeout=60)
+
+    def documentation_only(self, base, revision):
+        # The release workflow skips pushes that change only these files.
+        changed = self.git('diff', '--name-only', base + '..' + revision).splitlines()
+        return bool(changed) and all(p.endswith('.md') or p.startswith('docs/') for p in changed)
+
+    def release_candidates(self, revision):
+        """revision, then each earlier commit that only documentation separates
+        from it, back to the last code change: such pushes get no release."""
+        candidates, newer = [revision], revision
+        for commit in self.git('rev-list', '--first-parent', '--max-count=20', revision).splitlines()[1:]:
+            if not self.documentation_only(commit, newer):
+                break
+            candidates.append(commit)
+            newer = commit
+        return candidates
 
     def status(self, status, **fields):
         self.record.update(status=status, checkedAt=int(time.time()), **fields)
@@ -183,7 +203,7 @@ class Updater:
             self.download(base + 'manifest.json', release / 'manifest.json')
         except urllib.error.HTTPError as error:
             if error.code == 404:
-                raise Deferred('The main build is still pending CI validation') from error
+                raise Unreleased('The main build is still pending CI validation') from error
             if error.code in (403, 429, 500, 502, 503, 504):
                 raise Deferred('Release delivery is temporarily unavailable; retrying later') from error
             raise
@@ -294,7 +314,8 @@ class Updater:
                 self.git('fetch', '--no-tags', 'origin', 'refs/heads/main:refs/remotes/origin/main')
             except RuntimeError as error:
                 raise Deferred('Unable to recheck main before activation; retrying later') from error
-            if self.git('rev-parse', 'origin/main') != manifest['revision']:
+            main = self.git('rev-parse', 'origin/main')
+            if main != manifest['revision'] and not self.documentation_only(manifest['revision'], main):
                 raise Deferred('A newer main commit arrived; waiting for its validated package')
             transaction = {'revision': manifest['revision'], 'previousRevision': previous,
                            'previousImages': self.current_images(), 'release': str(release)}
@@ -359,19 +380,25 @@ class Updater:
                 return
             self.git('merge-base', '--is-ancestor', current, revision)
             installed = self.installed_revision()
-            changed = self.git('diff', '--name-only', installed + '..' + revision).splitlines()
-            if changed and all(p.endswith('.md') or p.startswith('docs/') for p in changed):
+            if self.documentation_only(installed, revision):
                 self.status('code-current', revision=installed, targetRevision=revision)
                 return
             if self.record.get('failedRevision') == revision and not retry:
                 self.status('rejected', targetRevision=revision, reason='This commit failed validation; awaiting a new main commit')
                 return
             self.ensure_idle()
-            release, manifest = self.prepare(revision)
-            self.status('validating', targetRevision=revision)
+            for target in self.release_candidates(revision):
+                try:
+                    release, manifest = self.prepare(target)
+                    break
+                except Unreleased:
+                    continue
+            else:
+                raise Deferred('The main build is still pending CI validation')
+            self.status('validating', targetRevision=target)
             self.validate_candidate(release, manifest)
             self.activate(release, manifest)
-            self.cleanup(revision)
+            self.cleanup(target)
             # The running Python process retains its code. The next timer run
             # can use an updated, successfully deployed updater implementation.
             installed = Path.home() / '.local/lib/cod2/update-pi.py'

@@ -12,7 +12,7 @@ from unittest.mock import patch
 spec = importlib.util.spec_from_file_location('pi_updater', Path(__file__).with_name('update-pi.py'))
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
-OLD, NEW = 'a' * 40, 'b' * 40
+OLD, NEW, DOCS = 'a' * 40, 'b' * 40, 'd' * 40
 
 
 def manifest():
@@ -41,6 +41,7 @@ class FakeUpdater(module.Updater):
         (self.release/'assets/main/value').write_text('new private assets')
         (self.release/'source').mkdir()
         self.head = OLD
+        self.main, self.history, self.changes = NEW, [], {}
         self.dirty = False
         self.clients = 0
         self.calls = []
@@ -56,11 +57,13 @@ class FakeUpdater(module.Updater):
     def git(self,*args):
         self.calls.append(('git',args))
         if args==('rev-parse','origin/main'):
-            return NEW
+            return self.main
+        if args[:1]==('rev-list',):
+            return '\n'.join(self.history)
         if args[:1]==('diff',):
-            return 'src/PC/bgame/bg_weapons.c'
+            return self.changes.get(args[-1],'src/PC/bgame/bg_weapons.c')
         if args[:1]==('merge',):
-            self.head=NEW
+            self.head=args[-1]
         if args[:1]==('reset',):
             self.head=OLD
         return ''
@@ -196,6 +199,49 @@ class Tests(unittest.TestCase):
             self.assertEqual(updater.record['status'],'waiting')
             self.assertNotEqual(updater.record.get('failedRevision'),NEW)
             self.assertEqual((updater.assets/'main/value').read_text(),'old private assets')
+
+    def prepare_released(self,updater,released):
+        prepared=[]
+        def prepare(revision):
+            prepared.append(revision)
+            if revision not in released:raise module.Unreleased('No release for '+revision[:7])
+            return updater.release,manifest()
+        return prepared,prepare
+
+    def test_documentation_after_a_released_commit_installs_that_release(self):
+        with tempfile.TemporaryDirectory() as directory:
+            updater=FakeUpdater(directory);updater.main=DOCS;updater.history=[DOCS,NEW,OLD]
+            updater.changes={f'{NEW}..{DOCS}':'RUNBOOK.md\ndocs/RASPBERRY_PI.md'}
+            prepared,prepare=self.prepare_released(updater,{NEW})
+            with patch.object(updater,'prepare',side_effect=prepare),patch.object(updater,'validate_candidate'):
+                updater.check()
+            self.assertEqual(prepared,[DOCS,NEW])
+            self.assertEqual((updater.record['status'],updater.record['revision']),('updated',NEW))
+            self.assertEqual(updater.head,NEW)
+            self.assertEqual((updater.assets/'main/value').read_text(),'new private assets')
+            self.assertTrue(updater.release.exists(),'cleanup keeps the installed release')
+            with patch.object(updater,'prepare') as again:updater.check()
+            again.assert_not_called()
+            self.assertEqual(updater.record['status'],'code-current')
+
+    def test_documentation_over_an_unreleased_code_commit_waits_for_its_release(self):
+        with tempfile.TemporaryDirectory() as directory:
+            updater=FakeUpdater(directory);updater.main=DOCS;updater.history=[DOCS,NEW,OLD]
+            updater.changes={f'{NEW}..{DOCS}':'README.md'}
+            prepared,prepare=self.prepare_released(updater,{OLD})
+            with patch.object(updater,'prepare',side_effect=prepare):updater.check()
+            self.assertEqual(prepared,[DOCS,NEW],'an older code release is never a candidate')
+            self.assertEqual(updater.record['status'],'waiting')
+            self.assertEqual(updater.head,OLD)
+
+    def test_activation_accepts_newer_documentation_but_not_newer_code(self):
+        with tempfile.TemporaryDirectory() as directory:
+            updater=FakeUpdater(directory);updater.main='e'*40
+            with self.assertRaisesRegex(module.Deferred,'newer main commit'):updater.activate(updater.release,manifest())
+            self.assertEqual((updater.assets/'main/value').read_text(),'old private assets')
+            updater.changes={f'{NEW}..{"e"*40}':'docs/UPDATES.md'}
+            updater.activate(updater.release,manifest())
+            self.assertEqual(updater.head,NEW)
 
     def test_hard_killed_activation_recovers_on_next_check(self):
         with tempfile.TemporaryDirectory() as directory:

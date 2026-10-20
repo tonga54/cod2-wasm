@@ -4938,3 +4938,38 @@ Validation:
   hold a body cut short. The first run found that a Worker's main module may
   only export handlers, so the logic moved to `handler.mjs`.
 - The gateway image builds. Without `/cdn` it proxies archives as before.
+- On the Pi, the first publish took about four and a half minutes. Wrangler
+  sent 640 MiB, about a third over the 470 MB of parts, over Wi-Fi at about
+  3 MiB/s. Every archive redirects through the public address with its login,
+  and gets 401 without it.
+  - The Mac downloaded the 400 MB renderer from Cloudflare in 8.1 s, against
+    over two minutes at the Pi's upload speed.
+  - A fresh headless Chrome, pointed at the Worker through the QA stack,
+    reached the main menu in 16.5 s, every archive having come from
+    Cloudflare.
+  - Chrome reports those downloads as `net::ERR_ABORTED` (canceled) once the
+    page has read every byte. That happens only with a reader over Cloudflare's
+    HTTP/2 or HTTP/3, not with `arrayBuffer()` or with the Pi's HTTP/1.1, and
+    the framework's SHA-256 check passes.
+
+## Updates past documentation-only commits — 2026-10-20
+
+The release workflow skips pushes that change only Markdown or `docs/`. When
+a documentation commit was pushed on top of a code commit the Pi had not
+installed yet, `main` ended in a commit without a release. The updater waited
+for its release until the next code commit. This happened with the Cloudflare
+commits.
+
+`update-pi.py` now also tries the commits beneath `main`, but only while
+nothing except documentation separates them from `main`. It stops at the last
+code change, so an older build is never a candidate. During activation it
+accepts a `main` that has moved on by documentation only. Once the release is
+installed, the next checks report `code-current`.
+
+Validation: `test-pi-updater.py`, 14 tests, 3 of them new. With documentation
+over a released commit, the updater installs that commit's release and keeps
+it for rollback. With documentation over an unreleased commit, it waits and
+never tries an older code release. During activation, newer code still defers
+it and newer documentation does not. Four of five mutants are caught. The
+fifth makes a commit without files count as documentation, and the
+`code-current` check needs the original behaviour.
