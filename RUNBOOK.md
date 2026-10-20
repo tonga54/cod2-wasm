@@ -5261,3 +5261,134 @@ Validation:
 - In Chrome on a throttled network against the QA stack, the screen was shot
   starting, downloading, verifying and preparing. Barlow 400 and 500 loaded
   from `/fonts/` (200, `font/ttf`), and the status is set in Barlow 500.
+
+## Real recoil and damage by cartridge — 2026-10-20
+
+The owner felt that some weapons kicked far too much and others hardly at all,
+and asked for recoil and damage coherent with real weapons, taking Call of
+Duty: WWII as a reference where needed.
+
+Measured with the production camera and gun springs, aiming, the original
+values had little to do with the guns:
+- the submachine guns, firing pistol rounds, climbed two to three times as far
+  in half a second as the MP44 and the Bren (PPSh 7.3°, Sten 5.3°, MP44 2.1°,
+  Bren 1.7°);
+- the semi-automatic rifles barely kicked: an aimed Garand or SVT-40 shot moved
+  the sights 0.8°, less than an MP40's 1.5°;
+- the Colt kicked 4.2° and climbed 4.6° over seven shots at four a second,
+  while the Luger, TT-30 and Webley settled between shots.
+
+Damage ignored the cartridge as well: the MP40's 9 mm dealt the BAR's .30-06
+40, the PPSh and PPS-42, which fire the same round, 30 and 35, and the M1
+Carbine the Garand's 45 doubled to the chest.
+
+`lan-balanced-v5` takes recoil from each gun's free recoil. For every class
+weapon `downstream/weapon-balance.json` records its cartridge, bullet and
+charge mass, muzzle and gas velocity, loaded weight and muzzle device.
+Impulse is bullet mass × muzzle velocity + charge mass × gas velocity, energy
+is impulse² / (2 × loaded mass), times 0.8 for the PPSh-41's compensator and
+the PPS-43's and SVT-40's muzzle brakes. That gives the usual figures: 1.2 J
+for an MP40, 5.3 J for the StG 44, 17 J for a Garand, 23 J for a Kar98k.
+- One aimed shot moves the sights, camera and gun together, 0.93° per square
+  root of a joule.
+- Half a second of automatic fire climbs 0.26° per square root of a joule per
+  round a second. The original camera kick replaces the kick's speed at each
+  shot and returns at 6% of it, so a burst's climb does not follow from one
+  shot's kick; the automatics are fitted to the climb itself. The constant
+  keeps the nine automatics' average where it was, about 4° in half a second.
+- Each gun keeps the shape of its retail kick: its sideways and hip kicks and
+  its gun kick scale with it. Every automatic weapon recentres at 1,700, every
+  semi-automatic rifle at 1,480 and every pistol at 1,400. The G43 takes the
+  Garand's and SVT-40's aimed gun spring. The M1 Carbine kicks to either side;
+  it kicked only to the right, which carried four quick shots 2° right.
+
+| Weapon | Round | Free recoil | Aimed kick a shot | Climb in 0.5 s |
+| --- | --- | --- | --- | --- |
+| MP40 | 9×19 mm | 1.2 J | 1.5° → 1.2° | 3.7° → 2.4° |
+| Sten | 9×19 mm | 1.3 J | 1.5° → 1.0° | 5.3° → 2.9° |
+| PPSh | 7.62×25 mm | 0.9 J | 1.8° → 1.1° | 7.3° → 2.9° |
+| PPS-42 | 7.62×25 mm | 1.4 J | 1.2° → 0.9° | 4.7° → 2.9° |
+| Grease Gun | .45 ACP | 2.3 J | 1.5° → 1.4° | 3.7° → 3.3° |
+| Thompson | .45 ACP | 1.9 J | 1.2° → 1.1° | 4.7° → 4.2° |
+| MP44 | 7.92×33 mm Kurz | 5.3 J | 1.2° → 1.9° | 2.1° → 5.1° |
+| Bren | .303 British | 5.9 J | 1.0° → 1.9° | 1.7° → 5.3° |
+| BAR | .30-06 | 7.7 J | 1.0° → 2.0° | 3.0° → 6.6° |
+| M1 Carbine | .30 Carbine | 5.2 J | 1.1° → 2.1° | — |
+| SVT-40 | 7.62×54 mmR | 17.6 J | 0.8° → 3.2° | — |
+| M1 Garand | .30-06 | 17.4 J | 0.8° → 3.9° | — |
+| G43 | 7.92×57 mm | 19.1 J | 1.3° → 4.1° | — |
+| Lee-Enfield | .303 British | 15.5 J | 2.2° → 3.7° | — |
+| Mosin-Nagant | 7.62×54 mmR | 18.6 J | 2.2° → 4.0° | — |
+| Kar98k | 7.92×57 mm | 22.6 J | 2.2° → 4.4° | — |
+| Scoped rifles | as above | 13.0–20.0 J | 2.4° → 3.4–4.1° | — |
+| Trench Gun | 12 gauge 00 buck | 28.4 J | 3.9° → 5.0° | — |
+| TT-30 | 7.62×25 mm | 3.9 J | 2.5° → 1.8° | — |
+| Luger | 9×19 mm | 4.7 J | 2.5° → 2.0° | — |
+| Webley | .455 Webley | 4.8 J | 2.5° → 2.0° | — |
+| Colt .45 | .45 ACP | 5.9 J | 4.2° → 2.3° | — |
+
+Damage now follows the cartridge, up close at 125 health:
+
+| Round | Weapons | Damage | Body shots | Headshots |
+| --- | --- | --- | --- | --- |
+| 7.62×25 mm | PPSh, PPS-42 (from 35), TT-30 (from 40) | 30 | 5 | 2 |
+| 9×19 mm | MP40 (from 40), Sten, Luger (from 40) | 35 | 4 | 2 |
+| .45 ACP, .455 Webley | Thompson (from 35), Grease Gun, Colt, Webley | 40 | 4 | 2; the pistols 1 |
+| 7.92×33 mm Kurz | MP44 (from 40) | 42 | 3 | 2 |
+| .30 Carbine | M1 Carbine (45 ×2 to the chest before) | 42 | 3 | 1 |
+| Full-power, automatic | BAR, Bren (from 40) | 45 | 3 | 2 |
+| Full-power, semi-automatic | Garand, G43, SVT-40 | 45, ×2 to the chest | 2 | 1 |
+| Full-power, bolt-action | Kar98k, Lee-Enfield, Mosin-Nagant, Springfield | 90, ×1.5 | 1 | 1 |
+
+- A pistol deals what a submachine gun firing its round deals and loses it
+  sooner. The Luger and TT-30 keep the ×3.125 head of the 125 health change:
+  more would let a far headshot take a larger share of a life than retail's,
+  so they kill with two headshots where the Colt and Webley kill with one.
+- In submachine guns pistol rounds keep the range rule by rate of fire; the
+  Sten's aimed spread rises from 0.2° to the others' 0.5°, since the crudest
+  of them was the most accurate.
+- The MP44 falls from 42 to 32 between 1,200 and 2,500 units, the BAR and Bren
+  from 45 to their retail 40 between 1,500 and 2,500, so Advanced Rifling
+  still lengthens the BAR's three-shot range. The M1 Carbine keeps 42 at every
+  range, as the semi-automatic rifles do; Advanced Rifling is not on its list.
+- High Caliber's cap now applies again: the BAR's headshot would reach 135, the
+  MP44's 126, and both stop at 124.
+
+A simulation of aimed engagements against a standing target, with the
+production springs, aimed spread, damage curve and hit locations, a player
+correcting 60% of the climb and automatics free to fire short bursts, gave:
+- before: the semi-automatic rifles killed with two shots in 0.14 s at every
+  range to 45 m, and one burst of the MP44 or Bren killed in 80–99% of
+  engagements to 30 m;
+- now: the semi-automatic rifles still kill in 0.14 s up close but pace their
+  second shot from 20 m (0.2–0.4 s); the 9 mm submachine guns are the
+  steadiest to 20 m; the MP44, BAR and Bren kill fastest up close, lose about
+  40% of their bursts to the climb at 20 m, and lead from 30 m.
+
+The rule that recoil overrides only add kick goes, since the submachine guns
+now kick less. `weapon_balance.py` takes the hip and gun kick fields, the
+aimed gun spring, `gunMaxPitch` and the M1 Carbine's neck and upper arms.
+
+Validation:
+
+- `test-weapon-balance.py` (owner data): 130,910 server damage cases at 125
+  health with the shots in the table above, damage by cartridge, the automatic
+  weapons' range rules, and every class weapon's aimed recoil within 4% of its
+  real recoil through the production springs (the largest gap after rounding
+  is 2.2%). Retail CoD2's kicks miss it for all 25 guns.
+- `test-attachments.py` (61 mutants): the BAR fixture deals 45 and High
+  Caliber's cap engages on it.
+- `test-class-data.py` (47 mutants) had failed since the 125 health change:
+  it expected a 35-damage automatic's High Caliber line at 100 health (×2.84).
+  It now checks the MP44's 42 stopping at 124 (×2.96).
+- `check-private-assets.py`, `test-weapon-fire-modes.py`,
+  `test-ads-transitions.py`, `test-melee-damage.py`,
+  `test-grenade-indicators.py` and `test-client-clock-recoil.py` pass.
+- `prepare-browser-bootstrap.py` reproduced the published archives byte for
+  byte before the change; after it only the renderer archive differs
+  (400,424,651 bytes) and the manifest is regenerated.
+- `test-browser-classes-runtime.py` on the native server with the new
+  archives passed 20 of 22. The two checks that spawn the test player on the
+  Axis fail the same way with the previous archives and with the 11:52 server
+  binary, so they are not this change's.
+- Not yet played in a browser match.

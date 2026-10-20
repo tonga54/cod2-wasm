@@ -1,28 +1,34 @@
 #!/usr/bin/env python3
-"""Audit retail/derived stats and exercise actual server bullet/player damage."""
+"""Audit retail/derived stats and exercise actual server bullet/player damage and aimed recoil."""
+from math import sqrt
 from pathlib import Path
 import json
 import re
 import subprocess
 import tempfile
 import zipfile
-from weapon_balance import apply_weapon_balance, load_profile, weapon_fields
+from weapon_balance import apply_weapon_balance, free_recoil, load_profile, weapon_fields
 from browser_explosives import WEAPONS as EXPLOSIVES
 from browser_player_health import PLAYER_HEALTH
 
 root = Path(__file__).resolve().parent.parent
 profile = load_profile()
-# Up close, at the players' health: the shots that kill to the upper torso and to the head. Every automatic
-# weapon and pistol takes one more to the body than at retail's 100; the bolt-action rifles still kill with one
-# to the body, the semi-automatic rifles and pistols with one to the head, the automatic weapons with two.
+# Up close, at the players' health: the shots that kill to the upper torso and to the head. A 7.62x25mm round
+# takes five to the body, 9x19mm, .45 ACP and .455 Webley four, the intermediate and full-power automatic rounds
+# three; the bolt-action rifles kill with one to the body, the semi-automatic rifles, Colt and Webley with one to
+# the head, the automatic weapons, Luger and TT-30 with two.
 KILL_SHOTS = {
-    'thompson_mp': (4, 2), 'pps42_mp': (4, 2), 'sten_mp': (4, 2), 'ppsh_mp': (5, 2), 'mp40_mp': (4, 2),
-    'greasegun_mp': (4, 2), 'bar_mp': (4, 2), 'bren_mp': (4, 2), 'mp44_mp': (4, 2),
-    'colt_mp': (4, 1), 'webley_mp': (4, 1), 'tt30_mp': (4, 1), 'luger_mp': (4, 1),
-    'm1garand_mp': (2, 1), 'm1carbine_mp': (2, 1), 'svt40_mp': (2, 1), 'g43_mp': (2, 1),
+    'thompson_mp': (4, 2), 'greasegun_mp': (4, 2), 'mp40_mp': (4, 2), 'sten_mp': (4, 2),
+    'ppsh_mp': (5, 2), 'pps42_mp': (5, 2), 'mp44_mp': (3, 2), 'bar_mp': (3, 2), 'bren_mp': (3, 2),
+    'colt_mp': (4, 1), 'webley_mp': (4, 1), 'luger_mp': (4, 2), 'tt30_mp': (5, 2),
+    'm1garand_mp': (2, 1), 'svt40_mp': (2, 1), 'g43_mp': (2, 1), 'm1carbine_mp': (3, 1),
     'kar98k_mp': (1, 1), 'enfield_mp': (1, 1), 'mosin_nagant_mp': (1, 1), 'springfield_mp': (1, 1),
     'kar98k_sniper_mp': (1, 1), 'enfield_scope_mp': (1, 1), 'mosin_nagant_sniper_mp': (1, 1),
 }
+# Up close, the damage of each cartridge; full-power rifle rounds by the action that fires them.
+CARTRIDGE_DAMAGE = {'7.62x25mm': '30', '9x19mm': '35', '.45 ACP': '40', '.455 Webley': '40',
+                    '7.92x33mm Kurz': '42', '.30 Carbine': '42'}
+FULL_POWER_DAMAGE = {'automatic': '45', 'semi': '45', 'bolt': '90'}
 # The Trench Gun's damage is a pellet's; the default weapon no class gives.
 UNRATED = {'shotgun_mp', 'defaultweapon_mp'}
 with zipfile.ZipFile(root / 'data/browser/main/cod2_browser_renderer.iwd') as archive:
@@ -46,6 +52,7 @@ changed = []
 report = []
 metrics = []
 balanced = {}
+retail_defs = {}
 hit_fields = ('locNone', 'locHelmet', 'locHead', 'locNeck', 'locTorsoUpper',
               'locTorsoLower', 'locRightArmUpper', 'locLeftArmUpper',
               'locRightArmLower', 'locLeftArmLower', 'locRightHand', 'locLeftHand',
@@ -61,17 +68,16 @@ for name, data in sorted(current.items()):
     assert differences == profile['weapons'].get(name.removeprefix('weapons/mp/'), {}), name
     if differences:
         changed.append(name.removeprefix('weapons/mp/'))
-    # Recoil overrides only ever add kick: higher, wider, slower to centre.
-    for key, sign in (('adsViewKickPitchMin', 1), ('adsViewKickPitchMax', 1), ('adsViewKickYawMin', -1),
-                      ('adsViewKickYawMax', 1), ('adsViewKickCenterSpeed', -1)):
-        if key in differences:
-            assert sign * (float(after[key]) - float(before[key])) > 0, (name, key)
     keys = ('weaponClass', 'weaponType', 'damage', 'minDamage', 'maxDamageRange',
             'minDamageRange', 'fireTime', 'clipSize', 'shotCount', 'reloadTime',
             'reloadEmptyTime', 'adsSpread', 'hipSpreadStandMin', 'hipSpreadMax',
             'locHead', 'locTorsoUpper', 'boltAction', 'rechamberTime', 'adsViewKickPitchMin',
-            'adsViewKickPitchMax', 'adsViewKickYawMin', 'adsViewKickYawMax', 'adsViewKickCenterSpeed')
+            'adsViewKickPitchMax', 'adsViewKickYawMin', 'adsViewKickYawMax', 'adsViewKickCenterSpeed',
+            'adsGunKickPitchMin', 'adsGunKickPitchMax')
+    reference = profile['recoil']['weapons'].get(name.removeprefix('weapons/mp/'))
     report.append({'weapon': name.removeprefix('weapons/mp/'), 'retailSource': sources[name],
+                   'cartridge': reference and reference['cartridge'],
+                   'freeRecoilJoules': reference and round(free_recoil(reference)[1], 2),
                    'changes': differences, 'retail': {k: before[k] for k in keys if k in before},
                    'balanced': {k: after[k] for k in keys if k in after}})
     # Turrets use the activator's held weapon for hit-location selection in
@@ -87,8 +93,10 @@ for name, data in sorted(current.items()):
     automatic = before.get('semiAuto') != '1' and before.get('boltAction') != '1'
     reviewed = sum(1 << i for i, key in enumerate(hit_fields) if key in differences)
     balanced[name.removeprefix('weapons/mp/')] = after
+    retail_defs[name.removeprefix('weapons/mp/')] = before
+    far = int(after['minDamage']) if automatic and after['weaponClass'] == 'rifle' else 0
     metrics.append('{' + initializer(before) + ',' + initializer(after) + ',' +
-                   str(int(bool(differences))) + ',' + str(int(name.endswith(('bren_mp', 'mp44_mp', 'bar_mp')))) + ',' +
+                   str(int(bool(differences))) + ',' + str(far) + ',' +
                    str(int('damage' in differences)) + ',' + str(int(automatic)) + ',' + str(reviewed) + ',' +
                    ','.join(map(str, KILL_SHOTS.get(name.removeprefix('weapons/mp/'), (0, 0)))) + '}')
 assert sorted(changed) == sorted(profile['weapons'])
@@ -104,22 +112,31 @@ for name, fields in balanced.items():
 for key, names in twins.items():
     assert len({tuple(balanced[name][k] for k in model_fields) for name in names}) == 1, names
 assert any(len(names) > 1 for names in twins.values())
-# The automatic weapons' rules: the helmet as the head; SMGs falling to 10,
-# from 600 to 1,500 units at 700 rounds a minute or more and from 700 to
-# 2,000 below; automatic rifles from 40 to 28 between 1,200 and 2,500, with
-# 0.2 degrees of aimed spread.
+# Damage follows the cartridge: a round deals the same up close whatever fires it, a pistol what a
+# submachine gun firing its round deals; full-power rifle rounds by the action that fires them.
+reference = profile['recoil']['weapons']
+assert set(reference) == set(KILL_SHOTS) | {'shotgun_mp'}, sorted(set(reference) ^ (set(KILL_SHOTS) | {'shotgun_mp'}))
+for name in KILL_SHOTS:
+    fields = balanced[name]
+    action = 'bolt' if fields['boltAction'] == '1' else 'semi' if fields['semiAuto'] == '1' else 'automatic'
+    expected = CARTRIDGE_DAMAGE.get(reference[name]['cartridge'], FULL_POWER_DAMAGE[action])
+    assert fields['damage'] == expected, (name, fields['damage'], expected)
+# The automatic weapons' rules: the helmet as the head. Pistol rounds fall to 10, in SMGs firing 700
+# rounds a minute or more from 600 to 1,500 units and in slower ones from 700 to 2,000, with 0.5 degrees
+# of aimed spread; the intermediate round falls to 32 from 1,200 and full-power rounds to 40 from 1,500,
+# both by 2,500, with 0.2.
 automatics = [name for name, fields in balanced.items() if fields['semiAuto'] != '1' and fields['boltAction'] != '1']
 assert len(automatics) == 9, automatics
 for name in automatics:
     fields = balanced[name]
     assert fields['locHead'] == fields['locHelmet'], name
     if fields['weaponClass'] == 'smg':
-        expected = ('10', '600', '1500') if 60 / float(fields['fireTime']) >= 700 else ('10', '700', '2000')
-        assert (fields['minDamage'], fields['maxDamageRange'], fields['minDamageRange']) == expected, name
+        expected = ('10', '600', '1500', '0.5') if 60 / float(fields['fireTime']) >= 700 else ('10', '700', '2000', '0.5')
     else:
         assert fields['weaponClass'] == 'rifle', name
-        assert (fields['minDamage'], fields['maxDamageRange'], fields['minDamageRange'], fields['adsSpread']) == \
-            ('28', '1200', '2500', '0.2'), name
+        intermediate = reference[name]['cartridge'] == '7.92x33mm Kurz'
+        expected = ('32', '1200', '2500', '0.2') if intermediate else ('40', '1500', '2500', '0.2')
+    assert (fields['minDamage'], fields['maxDamageRange'], fields['minDamageRange'], fields['adsSpread']) == expected, name
 # Refuse a different retail patch instead of silently changing the wrong field.
 name = 'weapons/mp/sten_mp'
 malformed = original[name].replace(b'\\locHead\\3', b'\\locHead\\4')
@@ -193,7 +210,7 @@ static int Dvar_GetInt(const char *name) {return 0;}
 static int OnSameTeam(gentity_t *a,gentity_t *b) {return 1;}
 '''
 checks = r'''
-typedef struct {WeaponDef retail,balanced;int changed,rangedAutomatic,closeBodyReduced,automatic,reviewed,bodyShots,headShots;} Metric;
+typedef struct {WeaponDef retail,balanced;int changed,farDamage,damageChanged,automatic,reviewed,bodyShots,headShots;} Metric;
 static int shot(WeaponDef *weapon,float distance,int loc) {
  activeWeapon=weapon;hitLocation=loc;receivedDamage=damageCalls=0;
  vec3_t start={0,0,0},end={distance*2,0,0};weaponParms wp={weapon};
@@ -215,8 +232,8 @@ int main(void) {
    if(m->changed && distance<100) {
     /* A reviewed hit location deals what it did not. */
     if(m->reviewed>>loc&1) assert(now!=old);
-    /* Where the damage is reviewed, every hit deals less. */
-    else if(m->closeBodyReduced) assert(loc==18 ? now==old : now<old);
+    /* Where the damage is reviewed, every hit deals its cartridge's. */
+    else if(m->damageChanged) assert(loc==18 ? now==old : now!=old);
     else assert(now==old);
    }
    /* No automatic weapon kills with one headshot. */
@@ -230,7 +247,7 @@ int main(void) {
   /* The shots that kill up close, to the upper torso and to the head. */
   if(m->bodyShots) assert(shotsToKill(shot(&m->balanced,10,4))==m->bodyShots &&
                           shotsToKill(shot(&m->balanced,10,2))==m->headShots);
-  if(m->rangedAutomatic) {assert(shot(&m->balanced,3000,4)==28);assert(shot(&m->balanced,3000,2)==56);}
+  if(m->farDamage) {assert(shot(&m->balanced,3000,4)==m->farDamage);assert(shot(&m->balanced,3000,2)==2*m->farDamage);}
  }
  printf("PASS: %d original/balanced server bullet/player-damage cases, 19 hit locations, range boundaries, no hit more of the players' %d health than of retail's 100, the shots that kill up close, no automatic one-headshot kill\n",cases,HEALTH);
  return 0;
@@ -245,12 +262,91 @@ with tempfile.TemporaryDirectory(prefix='cod2-weapon-balance-') as directory:
                     str(path / 'test.c'), '-lm', '-o', str(path / 'test')], check=True)
     subprocess.run([str(path / 'test')], check=True)
 
+# Aimed recoil follows real recoil. One aimed shot moves the sights, camera and gun together, by singleShot
+# degrees per square root of the gun's free recoil energy; half a second of automatic fire climbs by
+# automaticClimb degrees per square root of a joule per round a second. The production camera and gun
+# springs run each gun's mean kick in 5 ms steps; a scope's sights follow the camera alone.
+view_source = (root / 'src/PC/cgame_mp/cg_view_mp.c').read_text()
+gun_source = (root / 'src/PC/bgame/bg_weapons.c').read_text()
+recoil_scale = profile['recoil']
+
+
+def recoil_table(definitions):
+    rows = []
+    for name, data in sorted(reference.items()):
+        fields = definitions[name]
+        value = lambda key: float(fields[key])
+        automatic = fields['semiAuto'] != '1' and fields['boltAction'] != '1'
+        interval = round(value('fireTime') * 1000)
+        index = sqrt(free_recoil(data)[1]) * data['muzzleDevice']
+        target = recoil_scale['automaticClimb'] * index * 1000 / interval if automatic else \
+            recoil_scale['singleShot'] * index
+        rows.append('{"%s",%d,%d,%d,%g,%g,%g,%g,%g,%g,%g,%g,%.6f}' % (
+            name, automatic, not fields['adsOverlayShader'], interval,
+            (value('adsViewKickPitchMin') + value('adsViewKickPitchMax')) / 2, value('adsViewKickCenterSpeed'),
+            (value('adsGunKickPitchMin') + value('adsGunKickPitchMax')) / 2, value('adsGunKickAccel'),
+            value('adsGunKickSpeedMax'), value('adsGunKickSpeedDecay'), value('adsGunKickStaticDecay'),
+            value('gunMaxPitch'), target))
+    return 'static const Recoil recoil[]={' + ',\n'.join(rows) + '};\n'
+
+
+recoil_checks = r'''
+#include <math.h>
+#include <stdio.h>
+typedef int qboolean;
+typedef float vec_t;
+''' + ''.join(line + '\n' for line in view_source.splitlines() if line.startswith('#define CG_KICK_')) + \
+    function(view_source, 'CG_IntegrateViewKick') + \
+    function(gun_source, 'BG_CalculateWeaponPosition_GunRecoil_SingleAngle') + r'''
+typedef struct {const char *name;int automatic,iron,interval;float pitch,center,gunPitch,accel,speedMax,speedDecay,staticDecay,gunMax;double target;} Recoil;
+TABLE
+/* Degrees up: one aimed shot's peak, or where the shot fired after half a second of automatic fire goes. */
+static double aimed(const Recoil *r) {
+ float angles[3]={0},velocity[3]={0},offset=0,speed=0;
+ double result=0;
+ int shots=r->automatic ? 500/r->interval+1 : 1,fired=0;
+ for(int t=0;t<3000;t+=5) {
+  if(fired<shots && t>=fired*r->interval) {
+   if(r->automatic) result=-(angles[0]+(r->iron ? offset : 0));
+   velocity[0]=-r->pitch;speed+=r->gunPitch;fired++;
+  }
+  CG_IntegrateViewKick(angles,velocity,r->center,5);
+  BG_CalculateWeaponPosition_GunRecoil_SingleAngle(&offset,&speed,0.005f,r->gunMax,r->accel,r->speedMax,r->speedDecay,r->staticDecay);
+  if(!r->automatic && -(angles[0]+(r->iron ? offset : 0))>result) result=-(angles[0]+(r->iron ? offset : 0));
+ }
+ return result;
+}
+int main(void) {
+ int off=0,count=sizeof(recoil)/sizeof(recoil[0]);
+ for(int i=0;i<count;i++) {
+  double got=aimed(recoil+i);
+  if(fabs(got/recoil[i].target-1)>0.04) {printf("  %s: %.2f degrees, real recoil %.2f\n",recoil[i].name,got,recoil[i].target);off++;}
+ }
+ printf("%d of %d guns off their real recoil by more than 4%%\n",off,count);
+ return off;
+}
+'''
+with tempfile.TemporaryDirectory(prefix='cod2-weapon-recoil-') as directory:
+    path = Path(directory)
+    runs = []
+    for definitions in (balanced, retail_defs):
+        (path / 'recoil.c').write_text(recoil_checks.replace('TABLE', recoil_table(definitions)))
+        subprocess.run(['cc', '-std=c99', '-O1', '-g', '-fsanitize=address,undefined',
+                        str(path / 'recoil.c'), '-lm', '-o', str(path / 'recoil')], check=True)
+        runs.append(subprocess.run([str(path / 'recoil')], capture_output=True, text=True))
+        assert not runs[-1].stderr, runs[-1].stderr
+    # Every gun follows its real recoil; retail CoD2's own kicks miss it for every one.
+    assert runs[0].returncode == 0, runs[0].stdout
+    assert runs[1].returncode == len(reference), runs[1].stdout
+    print(runs[0].stdout, end='')
+
 output = root / 'out/weapon-balance-audit.json'
 output.parent.mkdir(exist_ok=True)
 output.write_text(json.dumps({'profile': profile['id'], 'healthReference': PLAYER_HEALTH,
     'note': 'Body/head damage uses the server range curve and hit multipliers. Shotgun damage is per pellet; turret file stats do not assert a player TTK.',
     'weapons': report}, indent=2) + '\n')
-print(f'PASS: {len(report)} packaged weapon definitions audited; only {len(changed)} reviewed definitions changed, '
-      f'recoil only ever added; alike weapons share one damage model; every automatic weapon follows its class rules; '
-      f'retail mismatch rejected')
+print(f'PASS: {len(report)} packaged weapon definitions audited; only {len(changed)} reviewed definitions changed; '
+      f'damage follows the cartridge; alike weapons share one damage model; every automatic weapon follows its class '
+      f'rules; aimed recoil of all {len(reference)} class weapons within 4% of their real free recoil, which retail '
+      f'misses for every one; retail mismatch rejected')
 print(output)

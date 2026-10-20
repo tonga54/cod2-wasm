@@ -173,7 +173,7 @@ int main(void)
     Define(KAR98K, "kar98k_mp", 5, 60, 330, 1000, 300, 50.0f, 0.0f, 1.5f, 2000.0f, "");
     Define(KAR98K_SNIPER, "kar98k_sniper_mp", 5, 60, 330, 1000, 250, 15.0f, 0.0f, 3.0f, 2000.0f, "scope_overlay_german");
     Define(BAR, "bar_mp", 20, 120, 110, 100, 300, 50.0f, 0.0f, 1.0f, 1500.0f, "");
-    Define(BREN, "bren_mp", 30, 180, 120, 100, 300, 50.0f, 0.2f, 1.5f, 1200.0f, "");
+    Define(BREN, "bren_mp", 30, 180, 120, 100, 300, 50.0f, 0.2f, 1.5f, 1500.0f, "");
     Define(SHOTGUN, "shotgun_mp", 6, 60, 283, 733, 300, 65.0f, 5.5f, 6.0f, 384.0f, "");
     Define(COLT, "colt_mp", 7, 21, 125, 100, 267, 80.0f, 1.0f, 3.0f, 384.0f, "");
     Define(WEBLEY, "webley_mp", 6, 18, 135, 100, 275, 80.0f, 1.0f, 3.0f, 384.0f, "");
@@ -181,11 +181,11 @@ int main(void)
     bg_iNumWeapons = PPS42;
     defs[THOMPSON].damage = defs[PPS42].damage = 35;
     defs[GREASEGUN].damage = defs[GARAND].damage = defs[COLT].damage = defs[WEBLEY].damage = 45;
-    defs[BAR].damage = defs[BREN].damage = 40;
+    defs[BAR].damage = defs[BREN].damage = 45;
     defs[GARAND].bSemiAuto = defs[COLT].bSemiAuto = defs[WEBLEY].bSemiAuto = 1;
     defs[THOMPSON].minDamage = defs[PPS42].minDamage = defs[GREASEGUN].minDamage = 10;
     defs[COLT].minDamage = defs[WEBLEY].minDamage = 10;
-    defs[BAR].minDamage = defs[BREN].minDamage = 28;
+    defs[BAR].minDamage = defs[BREN].minDamage = 40;
     /* The semi-automatic and bolt-action rifles keep their damage at every range. */
     defs[GARAND].minDamage = 45;
     defs[KAR98K].damage = defs[KAR98K].minDamage = defs[KAR98K_SNIPER].damage = defs[KAR98K_SNIPER].minDamage = 90;
@@ -306,18 +306,15 @@ int main(void)
     d = Attached(GARAND, ATT_BIT(ATT_HIGHCAL));
     assert(NEAR(d.locationDamageMultipliers[HITLOC_HEAD], 3.0f) && NEAR(d.locationDamageMultipliers[HITLOC_HELMET], 3.0f));
     assert(NEAR(d.locationDamageMultipliers[4], 1.0f) && NEAR(d.fAdsViewKickPitchMax, 80.5f));
-    /* The BAR's headshot rises by half, to 120 of the players' 125. An
-     * automatic weapon's stops a point short of killing alone, after the
+    /* Raised by half, the BAR's headshot would deal 135 of the players' 125.
+     * An automatic weapon's stops a point short of killing alone, after the
      * server truncates it, and never falls below the gun's own. */
     d = Attached(BAR, ATT_BIT(ATT_HIGHCAL));
-    assert(NEAR(d.locationDamageMultipliers[HITLOC_HEAD], 3.0f) && NEAR(d.locationDamageMultipliers[HITLOC_HELMET], 3.0f));
+    assert(NEAR(d.locationDamageMultipliers[HITLOC_HEAD], (BG_PLAYER_HEALTH - 0.5f) / 45.0f));
+    assert(NEAR(d.locationDamageMultipliers[HITLOC_HELMET], (BG_PLAYER_HEALTH - 0.5f) / 45.0f));
+    assert((int)(45.0f * d.locationDamageMultipliers[HITLOC_HEAD]) == BG_PLAYER_HEALTH - 1);
     {
         WeaponDef high = defs[BAR];
-        high.locationDamageMultipliers[HITLOC_HEAD] = 2.5f;
-        BG_ApplyAttachments(&high, ATT_BIT(ATT_HIGHCAL));
-        assert(NEAR(high.locationDamageMultipliers[HITLOC_HEAD], (BG_PLAYER_HEALTH - 0.5f) / 40.0f));
-        assert((int)(40.0f * high.locationDamageMultipliers[HITLOC_HEAD]) == BG_PLAYER_HEALTH - 1);
-        high = defs[BAR];
         high.locationDamageMultipliers[HITLOC_HEAD] = 3.5f;
         BG_ApplyAttachments(&high, ATT_BIT(ATT_HIGHCAL));
         assert(NEAR(high.locationDamageMultipliers[HITLOC_HEAD], 3.5f));
@@ -335,7 +332,7 @@ int main(void)
     d = Attached(GARAND, ATT_BIT(ATT_RIFLING));
     assert(!memcmp(&d, &defs[GARAND], sizeof(d)));
     assert(NEAR(Attached(BAR, ATT_BIT(ATT_RIFLING)).fMaxDamageRange, 1875.0f));
-    /* The MP44 shares the BAR's damage model, and so its rifling. */
+    /* The MP44 takes the BAR's rifling. */
     {
         AttachmentStats bar, mp44;
         memset(&bar, 0, sizeof(bar));
@@ -350,7 +347,7 @@ int main(void)
         assert(NEAR(mp44.maxDamageRange, 1500.0f) && NEAR(mp44.minDamageRange, 3125.0f) && !memcmp(&bar, &mp44, sizeof(bar)));
     }
     /* WWII's light machine guns take neither Advanced Rifling nor High Caliber, nor its carbine a Lens Sight. */
-    assert(NEAR(Attached(BREN, ATT_BIT(ATT_RIFLING)).fMaxDamageRange, 1200.0f));
+    assert(NEAR(Attached(BREN, ATT_BIT(ATT_RIFLING)).fMaxDamageRange, 1500.0f));
     assert(NEAR(Attached(BREN, ATT_BIT(ATT_HIGHCAL)).locationDamageMultipliers[HITLOC_HEAD],
                 defs[BREN].locationDamageMultipliers[HITLOC_HEAD]));
     assert(!(BG_AttachmentsAllowed("bren_mp") & (ATT_BIT(ATT_RIFLING) | ATT_BIT(ATT_HIGHCAL))));

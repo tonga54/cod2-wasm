@@ -4,11 +4,18 @@ from pathlib import Path
 import re
 
 PROFILE_PATH = Path(__file__).resolve().parent.parent / "downstream/weapon-balance.json"
-ALLOWED_FIELDS = {
-    "locHelmet", "locHead", "locTorsoLower", "locRightLegUpper", "locLeftLegUpper", "damage", "minDamage",
-    "maxDamageRange", "minDamageRange", "adsSpread", "hipSpreadStandMin", "hipSpreadMax", "adsViewKickPitchMin",
-    "adsViewKickPitchMax", "adsViewKickYawMin", "adsViewKickYawMax", "adsViewKickCenterSpeed",
+KICK_FIELDS = {
+    prefix + kind + part
+    for prefix in ("ads", "hip") for kind in ("ViewKick", "GunKick")
+    for part in ("PitchMin", "PitchMax", "YawMin", "YawMax")
 }
+ALLOWED_FIELDS = KICK_FIELDS | {
+    "locHelmet", "locHead", "locNeck", "locTorsoUpper", "locTorsoLower", "locRightArmUpper", "locLeftArmUpper",
+    "locRightLegUpper", "locLeftLegUpper", "damage", "minDamage", "maxDamageRange", "minDamageRange", "adsSpread",
+    "hipSpreadStandMin", "hipSpreadMax", "adsViewKickCenterSpeed", "adsGunKickAccel", "adsGunKickSpeedMax",
+    "adsGunKickSpeedDecay", "adsGunKickStaticDecay", "gunMaxPitch",
+}
+RECOIL_FIELDS = ("bulletGrams", "muzzleVelocity", "chargeGrams", "gasVelocity", "loadedKg", "muzzleDevice")
 
 
 def load_profile():
@@ -21,7 +28,22 @@ def load_profile():
                 raise ValueError("Invalid balance field: " + name + "/" + key)
             if not all(isinstance(v, str) and re.fullmatch(r"-?\d+(?:\.\d+)?", v) for v in values):
                 raise ValueError("Invalid balance value: " + name + "/" + key)
+    recoil = profile["recoil"]
+    if not all(isinstance(recoil[k], (int, float)) and recoil[k] > 0 for k in ("singleShot", "automaticClimb")):
+        raise ValueError("Invalid recoil scale")
+    for name, data in recoil["weapons"].items():
+        if not re.fullmatch(r"[a-z0-9_]+_mp", name) or not isinstance(data.get("cartridge"), str):
+            raise ValueError("Invalid recoil weapon: " + name)
+        if set(data) != {"cartridge", *RECOIL_FIELDS} or not all(
+                isinstance(data[k], (int, float)) and data[k] > 0 for k in RECOIL_FIELDS):
+            raise ValueError("Invalid recoil data: " + name)
     return profile
+
+
+def free_recoil(data):
+    """Free recoil impulse (N s) and energy (J) of one round from a gun's loaded weight."""
+    impulse = (data["bulletGrams"] * data["muzzleVelocity"] + data["chargeGrams"] * data["gasVelocity"]) / 1000
+    return impulse, impulse * impulse / (2 * data["loadedKg"])
 
 
 def weapon_fields(data):

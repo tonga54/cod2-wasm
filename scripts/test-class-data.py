@@ -460,11 +460,18 @@ int main(void)
             assert(count == 1 && !strcmp(lines[0], "Aimed recoil -15%") && tones[0] == 1);
             assert(attached.value[CLASS_STAT_ACCURACY] > rifle.value[CLASS_STAT_ACCURACY]);
         }
-        assert(stats.raw.damage == 35 && !stats.raw.semiAuto && !stats.raw.boltAction);
-        ClassData_AttachedStats(&stats, "mp44_mp", ATT_BIT(ATT_HIGHCAL), &attached);
-        count = ClassData_AttachmentEffects(&stats.raw, &attached.raw, lines, tones, 8);
-        assert(count == 2 && !strcmp(lines[0], "Head damage x2.84, from x2") && tones[0] == 1);
-        assert(!strcmp(lines[1], "Aimed recoil +15%") && tones[1] == -1);
+        /* The MP44's 42 three times over would kill alone: its headshot stops at 124. */
+        {
+            ClassStats automatic;
+            ClassData_ReadStats("WEAPONFILE\\damage\\42\\minDamage\\32\\maxDamageRange\\1200\\minDamageRange\\2500"
+                                "\\fireTime\\0.12\\adsViewKickPitchMax\\81\\locHead\\2\\locHelmet\\2", &automatic);
+            assert(!automatic.raw.semiAuto && !automatic.raw.boltAction);
+            ClassData_AttachedStats(&automatic, "mp44_mp", ATT_BIT(ATT_HIGHCAL), &attached);
+            count = ClassData_AttachmentEffects(&automatic.raw, &attached.raw, lines, tones, 8);
+            assert(count == 2 && !strcmp(lines[0], "Head damage x2.96, from x2") && tones[0] == 1);
+            assert(!strcmp(lines[1], "Aimed recoil +15%") && tones[1] == -1);
+            assert((int)(42.0f * attached.raw.headMultiplier[0]) == 124);
+        }
         /* A 4x Optic scopes the rifle: its fifth for a scope, 4x zoom, and a
          * quarter on the aim. */
         ClassData_AttachedStats(&stats, "m1garand_mp", ATT_BIT(ATT_OPTIC4X), &attached);

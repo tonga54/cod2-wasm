@@ -126,9 +126,14 @@ remain areas of active development. [Behavior, navigation and validation →](do
 - **S-Mine 44:** place a bouncing mine, reclaim your own with Use, or shoot an
   enemy mine to detonate it. Friendly placed explosives carry team indicators.
 - **C4:** throw a sticky charge and detonate it remotely with the aim input.
-- **125 health:** regenerated health and a custom damage profile give automatic
-  weapons and pistols longer body-shot engagements than retail CoD2. Bolt-action
+- **125 health:** regenerated health and a custom damage profile give submachine
+  guns and pistols longer body-shot engagements than retail CoD2. Bolt-action
   rifles retain lethal body shots; two melee strikes kill a full-health player.
+- **Real recoil and cartridge damage:** each gun's aimed kick follows its real
+  free recoil, the cartridge's impulse against the gun's loaded weight: a BAR
+  climbs harder than an MP40, a Garand kicks harder than a carbine. Damage
+  follows the cartridge, from five body shots for a 7.62×25mm round to three
+  for intermediate and full-power automatic rounds.
 - **Mounted MG42:** sustained fire builds heat, forces cooling and increases recoil.
 - **Respawns:** occupied and nearby exposed enemy positions are avoided when safer
   alternatives exist. TDM adds a three-second respawn countdown.
