@@ -5457,3 +5457,37 @@ on `main` before this change. A local stack with this compose file (hardening
 and sysctl applied) downloaded, verified and mounted the archives in a browser,
 joined an 8-bot Carentan room and loaded the map through both on-demand paths.
 Not tested on the Pi itself, nor in Firefox, Safari or Windows.
+
+## A step beside the S-Mine clicks it — 2026-10-20
+
+The owner found that enemies had to step right on the S-Mine to set it off,
+and asked for a slightly wider trigger. The weapon file's `proximityRadius`
+(`browser_explosives.py`) goes from 40 to 56 units across, from the enemy's
+origin to the mine's, still 24 below to 48 above. A player is 30 units wide,
+so an enemy whose side passes within about 41 units of the can now clicks it,
+against 25 before. The 0.3 s before it springs, the rise and the blast are
+unchanged.
+
+It clicks earlier on an enemy's way, so one who walks or sprints over it is
+nearer when it goes off. Through 50 ms server frames, with the blast 650 ms
+after the click and 125 health: walking into it, or past it up to 50 units
+off, takes 141 to 197 and kills; sprinting straight over it takes 119 to 135,
+lethal about two times in three, where at 40 it never killed; sprinting past
+50 units off takes 74 to 89.
+
+Validation:
+
+- `scripts/test-placed-explosives.py` runs the server's trigger at the weapon
+  file's radius instead of a fixed 40: 55.9 units clicks it, 56.1 does not. An
+  enemy walking or sprinting by 50 units off clicks it as he passes, and 64
+  units off goes by: 92 server cases, 4 new. 67 mutants fail; the new one
+  puts the radius back at 40, which neither walker clicks.
+- From the owner's files as published (the sound pack without its newer
+  `weap_mine_click` row), `prepare-browser-bootstrap.py` reproduced the
+  published manifest. With the change only `weapons/mp/mine_mp` in the
+  renderer archive differs, by its `proximityRadius`, and the manifest is
+  regenerated. `check-private-assets.py` passes.
+- `test-browser-smine.py`, `test-class-data.py`, `test-owner-sound-pack.py`,
+  `test-weapon-fire-modes.py`, `test-grenade-lifecycle.py` and
+  `test-grenade-indicators.py` pass.
+- Not yet played in a browser match.

@@ -163,11 +163,11 @@ retail CoD2:
   iron sights inside it and the reticle glowing on the glass. See
   [attachments](CLASSES.md#attachments).
 - **Placed explosives:** CoD WWII's S-Mine 44, set down at your feet after
-  the left hand draws its pin, which clicks under an enemy's feet and springs
-  up to explode at chest height, and CoD4's C4, thrown to stick and set off with
-  aim from anywhere. Your squad's emblem, a star or an iron cross, pulses over
-  them for you and your teammates. Hold Use over your own S-Mine to take it
-  back; enemies can shoot it to set it off, and its blast is theirs. See
+  the left hand draws its pin, which clicks when an enemy steps on or beside it
+  and springs up to explode at chest height, and CoD4's C4, thrown to stick and
+  set off with aim from anywhere. Your squad's emblem, a star or an iron cross,
+  pulses over them for you and your teammates. Hold Use over your own S-Mine to
+  take it back; enemies can shoot it to set it off, and its blast is theirs. See
   [placed explosives](CLASSES.md#placed-explosives).
 - **WWII countdown before a match:** players who spawn before a match begins
   wait through one 15-second countdown, free to look around and aim but not to
