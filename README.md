@@ -155,6 +155,11 @@ retail CoD2:
   on a client; the room's `scr_prematch_time` (0 to 60 s, default 15) sets or
   disables it. See the
   [graphics notes](docs/GRAPHICS_2026-10-16.md#wwii-countdown-before-a-match-october-18-2026).
+- **End of a match:** the result shows for 5 seconds, both sides' scores or
+  deathmatch's best three, then the final scoreboard until the next map loads,
+  16 seconds in. With the owner's
+  [end of match music](docs/UPDATES.md#owner-end-of-match-music), it plays
+  throughout and fades out over the last 3 seconds.
 - **WWII pause menu:** Escape in a match blurs and darkens the live view and
   opens tabs laid out from Call of Duty: WWII's: **Class** (your five classes
   under Custom, the five defaults under Standard Issue, with the focused

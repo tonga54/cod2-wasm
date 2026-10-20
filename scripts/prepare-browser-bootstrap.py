@@ -7,8 +7,9 @@ import json
 import re
 import struct
 import zipfile
-from browser_sound_assets import (HIT_SOUND_OWNER_FILE, MENU_MUSIC_OWNER_FILE, OWNER_SOUNDS_DIR,
-                                  PREMATCH_MUSIC_OWNER_FILE, collect_sound_assets, load_owner_sounds)
+from browser_sound_assets import (ENDGAME_MUSIC_OWNER_FILE, HIT_SOUND_OWNER_FILE, MENU_MUSIC_OWNER_FILE,
+                                  OWNER_SOUNDS_DIR, PREMATCH_MUSIC_OWNER_FILE, collect_sound_assets,
+                                  load_owner_sounds)
 from browser_bot_menu import apply_bot_menu
 from browser_class_menus import add_class_menu, class_menus
 from browser_class_pictures import OWNER_PICTURES_DIR, load_owner_pictures
@@ -17,6 +18,7 @@ from browser_attachment_models import attachment_model_assets
 from browser_settings_menu import apply_settings_menu
 from browser_objective_assets import objective_asset_roots
 from browser_spawn_safety import apply_spawn_safety
+from browser_endgame import apply_endgame_timing
 from weapon_balance import apply_weapon_balance, load_profile
 
 root = Path(__file__).resolve().parent.parent
@@ -177,6 +179,7 @@ try:
         data = apply_weapon_balance(name, data, balance_profile)
         data = apply_settings_menu(name, data)
         data = apply_spawn_safety(name, data)
+        data = apply_endgame_timing(name, data)
         if name == "default_mp.cfg":
             data = default_cfg
         if name == "ui/options_shoot.menu":
@@ -350,12 +353,14 @@ try:
     hit_sound = root / "data/main" / HIT_SOUND_OWNER_FILE
     menu_music = root / "data/main" / MENU_MUSIC_OWNER_FILE
     prematch_music = root / "data/main" / PREMATCH_MUSIC_OWNER_FILE
+    endgame_music = root / "data/main" / ENDGAME_MUSIC_OWNER_FILE
     archives["cod2_browser_audio.iwd"] = collect_sound_assets(
         root, asset_index, originals, renderer, maps,
         hit_sound.read_bytes() if hit_sound.is_file() else None,
         menu_music.read_bytes() if menu_music.is_file() else None,
         load_owner_sounds(root / "data/main" / OWNER_SOUNDS_DIR),
-        prematch_music.read_bytes() if prematch_music.is_file() else None)
+        prematch_music.read_bytes() if prematch_music.is_file() else None,
+        endgame_music.read_bytes() if endgame_music.is_file() else None)
     for mapname, longname in maps.items():
         archives["cod2_browser_bootstrap.iwd"][f"mp/{mapname[3:]}.arena"] = (
             f'{{ map "{mapname}" longname "{longname}" gametype "{" ".join(gametypes)}" }}\n'.encode()

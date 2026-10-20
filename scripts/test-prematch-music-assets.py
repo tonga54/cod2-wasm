@@ -37,6 +37,8 @@ GRENADE_ROWS = [row(name=source, file=f'weapons/{source}.wav', channel='auto', l
 GRENADE_SOUND = b'RIFF' + struct.pack('<I', 36) + b'WAVEfmt ' + bytes(28)
 PACKAGED_ROW = row(name='browser_prematch_music', **dict(INTRO, file='browser/prematchmusic.mp3', loadspec='all_mp',
                                                           startdelay=''))
+ENDGAME_ROW = row(name='browser_endgame_music', **dict(INTRO, file='browser/endgamemusic.mp3', loadspec='all_mp',
+                                                       startdelay=''))
 
 
 def csv_text(rows):
@@ -239,6 +241,24 @@ def checks(m, archive_path, no_source_path):
             raises(AssertionError, lambda: m.verify_prematch_music(package, source_rows, owner))
         raises(ValueError, lambda: m.verify_prematch_music(owned, source_rows, rejected['under 1 s']))
 
+        # The end of a match's music beside it: its first 20 s as an alias of
+        # its own, the rest unchanged; the checker takes exactly that.
+        both = m.collect_sound_assets(root, index, originals, renderer, maps, prematch_music=OWNER,
+                                      endgame_music=OWNER)
+        kept = both['sound/' + m.ENDGAME_MUSIC_FILE]
+        assert 20 <= m.mp3_frames(kept)[4] < 20 + OWNER_STEP and OWNER_KEPT.startswith(kept)
+        table_header, rows = m.alias_table(both[m.ENDGAME_MUSIC_TABLE].decode())
+        assert table_header == HEADER and rows == [ENDGAME_ROW]
+        assert {name: data for name, data in both.items()
+                if name not in (m.ENDGAME_MUSIC_TABLE, 'sound/' + m.ENDGAME_MUSIC_FILE)} == owned
+        m.verify_endgame_music(both, source_rows, OWNER)
+        m.verify_prematch_music(both, source_rows, OWNER)
+        m.verify_endgame_music(owned, source_rows, None)
+        longer = dict(both)
+        longer['sound/' + m.ENDGAME_MUSIC_FILE] = OWNER_KEPT
+        for package, owner in ((owned, OWNER), (both, None), (longer, OWNER)):
+            raises(AssertionError, lambda: m.verify_endgame_music(package, source_rows, owner))
+
         # It refuses music it cannot read, and a game without the alias to copy.
         raises(ValueError, lambda: m.collect_sound_assets(root, index, originals, renderer, maps,
                                                           prematch_music=rejected['layer II']))
@@ -284,7 +304,7 @@ with tempfile.TemporaryDirectory(prefix='cod2-prematch-music-') as directory:
 
     mutants = [
         ("PREMATCH_MUSIC_SECONDS = 65", "PREMATCH_MUSIC_SECONDS = 60"),
-        ("        if seconds >= PREMATCH_MUSIC_SECONDS:\n            break\n", ""),
+        ("        if seconds >= limit:\n            break\n", ""),
         ("    if vbr_header(data, spans[0][0]):\n        spans = spans[1:]\n", ""),
         ("in (b'Xing', b'Info') or", "== b'Xing' or"),
         (" or data[start + 36:start + 40] == b'VBRI'", ""),
@@ -298,20 +318,26 @@ with tempfile.TemporaryDirectory(prefix='cod2-prematch-music-') as directory:
         ("    if seconds < 1:\n        raise invalid('shorter than 1 s')", "    if not seconds:\n        raise invalid('empty')"),
         ("    if walked is None or not walked[3]:\n        raise invalid('not an MP3 file')",
          "    if walked is None:\n        raise invalid('not an MP3 file')"),
-        ("name=PREMATCH_MUSIC_ALIAS, file=PREMATCH_MUSIC_FILE, loadspec='all_mp', startdelay=''",
-         "name=PREMATCH_MUSIC_ALIAS, file=PREMATCH_MUSIC_FILE, startdelay=''"),
-        ("name=PREMATCH_MUSIC_ALIAS, file=PREMATCH_MUSIC_FILE, loadspec='all_mp', startdelay=''",
-         "name=PREMATCH_MUSIC_ALIAS, file=PREMATCH_MUSIC_FILE, loadspec='all_mp'"),
+        ("name=alias, file=file, loadspec='all_mp', startdelay=''",
+         "name=alias, file=file, startdelay=''"),
+        ("name=alias, file=file, loadspec='all_mp', startdelay=''",
+         "name=alias, file=file, loadspec='all_mp'"),
         ("PREMATCH_MUSIC_SOURCE = 'eldaba_intro_music'", "PREMATCH_MUSIC_SOURCE = 'ambient_africa'"),
         ("        files['sound/' + PREMATCH_MUSIC_FILE] = package_prematch_music(prematch_music)",
          "        files['sound/' + PREMATCH_MUSIC_FILE] = prematch_music"),
-        ("        assert table is None and music is None, 'Countdown music packaged without the owner file'",
+        ("        assert table is None and music is None, f'{what} packaged without the owner file'",
          "        assert True"),
-        ("    assert music == package_prematch_music(owner), 'Packaged countdown music differs from the owner file'",
+        ("    assert music == package_prematch_music(owner, limit, owner_file), f'Packaged {what} differs from the owner file'",
          "    assert music is not None"),
         ("    assert len(rows) == 1 and any(source_header == header", "    assert any(source_header == header"),
-        ("            assert all(dict(zip(other_header, row)).get('name', '').lower() != PREMATCH_MUSIC_ALIAS",
+        ("            assert all(dict(zip(other_header, row)).get('name', '').lower() != alias",
          "            assert all(row is not None"),
+        ("ENDGAME_MUSIC_SECONDS = 20", "ENDGAME_MUSIC_SECONDS = 65"),
+        ("        writer.writerow(prematch_music_row(header, fields, ENDGAME_MUSIC_ALIAS, ENDGAME_MUSIC_FILE))",
+         "        writer.writerow(prematch_music_row(header, fields))"),
+        ("package_prematch_music(endgame_music, ENDGAME_MUSIC_SECONDS,\n"
+         "                                                                      ENDGAME_MUSIC_OWNER_FILE)",
+         "package_prematch_music(endgame_music)"),
     ]
     for old, new in mutants:
         assert module_source.count(old) == 1, old

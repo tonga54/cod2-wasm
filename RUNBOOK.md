@@ -4022,3 +4022,36 @@ single call. In the browser, small 12.5-pixel scrolls moved the class list a
 row per 100 pixels the way they went, three 40-pixel notches three rows, and
 in the weapon picker four 100-pixel notches went from 12/21 to 16/21 and two
 40-pixel notches up to 14/21.
+
+## A longer end of a match, with the owner's music — 2026-10-19
+
+The owner asked for their track to play over the end of a match, and for the
+result and then the scoreboard to stay up a little longer. The five modes'
+scripts waited 10 s before `exitLevel`, which the corrected script clock runs
+in 10 s: 3 s of result, half a second's handover and 6.5 s of scoreboard.
+`browser_endgame.py` now has the private derived scripts wait 16 s
+(`check-private-assets.py` holds them to that), and `cg_endgame_mp.c` shows the
+result for 5 s, so the scoreboard stays 10.5 s.
+
+The owner's `endgamemusic.mp3` (docs/UPDATES.md, "Owner end of match music")
+streams as `browser_endgame_music`, the first 20 s of it, through the same
+generator functions as the countdown's, now given their limit, file and
+alias. The cgame starts it as the intermission begins, fades it out over the
+last 3 of its 16 s and stops it at once if the intermission ends early;
+without the alias the end is silent.
+
+Validation:
+
+- `scripts/test-endgame.py` follows the longer timeline and the music: once
+  per intermission, a fade with what is left of the last 3 s (2 s for a first
+  frame 14 s in, none past the end), stopped when the intermission ends and
+  silent without the alias; the client's 16 s match the scripts' wait and leave
+  at least 10 s of scoreboard; the patch takes only the five modes' retail
+  wait. 9 more mutants fail.
+- `scripts/test-prematch-music-assets.py`: the end of match music beside the
+  countdown's keeps 20 s as its own alias and changes nothing else; the
+  checker refuses it missing, unowned or 65 s long; 3 more mutants fail.
+- In a Carentan TDM room with a 30 s time limit: at the end the music decoded
+  and played at once, held its volume until 13.03 s and fell to 0 at 15.99 s;
+  the result was still up at 2.7 s, the scoreboard at 7.1 and 12.1 s, and the
+  next map loaded at 16 s.

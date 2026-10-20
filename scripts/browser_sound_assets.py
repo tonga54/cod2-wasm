@@ -30,6 +30,15 @@ PREMATCH_MUSIC_TABLE = 'soundaliases/browser_prematchmusic.csv'
 # The longest countdown the server holds, 60 s, and the 5 s the music outlasts
 # it: the archive keeps that much of the music, about 25 MB decoded.
 PREMATCH_MUSIC_SECONDS = 65
+# Music of the owner's for the end of a match, likewise never in Git, streams
+# the same way as an alias of its own.
+ENDGAME_MUSIC_OWNER_FILE = 'endgamemusic.mp3'
+ENDGAME_MUSIC_ALIAS = 'browser_endgame_music'
+ENDGAME_MUSIC_FILE = 'browser/endgamemusic.mp3'
+ENDGAME_MUSIC_TABLE = 'soundaliases/browser_endgamemusic.csv'
+# The 16 s intermission the server holds (browser_endgame.py) and a margin,
+# about 8 MB decoded.
+ENDGAME_MUSIC_SECONDS = 20
 # A sound pack of the owner's may sit there too, likewise never in Git: a
 # folder of 16-bit PCM WAVs and a list of the original aliases whose rows they
 # replace, a row a file, with values for any other alias column.
@@ -149,12 +158,12 @@ def vbr_header(data, start):
     return data[xing:xing + 4] in (b'Xing', b'Info') or data[start + 36:start + 40] == b'VBRI'
 
 
-def package_prematch_music(data):
-    """The owner's countdown music as the archive holds it: its MPEG audio layer III frames for the first
-    PREMATCH_MUSIC_SECONDS, without its tags or an encoder's header frame, which would count frames no longer
-    there."""
+def package_prematch_music(data, limit=PREMATCH_MUSIC_SECONDS, owner=PREMATCH_MUSIC_OWNER_FILE):
+    """The owner's countdown music, or other owner music given its limit and file name, as the archive holds it:
+    its MPEG audio layer III frames for the first limit seconds, without its tags or an encoder's header frame,
+    which would count frames no longer there."""
     def invalid(reason):
-        return ValueError(f'{PREMATCH_MUSIC_OWNER_FILE}: {reason}')
+        return ValueError(f'{owner}: {reason}')
 
     walked = mp3_spans(data)
     if walked is None or not walked[3]:
@@ -167,7 +176,7 @@ def package_prematch_music(data):
         spans = spans[1:]
     kept, seconds = [], 0.0
     for start, length, duration in spans:
-        if seconds >= PREMATCH_MUSIC_SECONDS:
+        if seconds >= limit:
             break
         kept.append(data[start:start + length])
         seconds += duration
@@ -268,10 +277,10 @@ def menu_music_row(header, fields):
     return [values.get(name, '') for name in header]
 
 
-def prematch_music_row(header, fields):
-    """The retail mission opening music's row, streaming the owner's countdown music at once in every
-    multiplayer map."""
-    values = dict(fields, name=PREMATCH_MUSIC_ALIAS, file=PREMATCH_MUSIC_FILE, loadspec='all_mp', startdelay='')
+def prematch_music_row(header, fields, alias=PREMATCH_MUSIC_ALIAS, file=PREMATCH_MUSIC_FILE):
+    """The retail mission opening music's row, streaming the owner's countdown music, or other owner music as its
+    alias, at once in every multiplayer map."""
+    values = dict(fields, name=alias, file=file, loadspec='all_mp', startdelay='')
     return [values.get(name, '') for name in header]
 
 
@@ -329,27 +338,38 @@ def verify_menu_music(entries, original_rows, owner):
                        for row in other_rows), 'Original menu music kept beside the owner\'s: ' + name
 
 
-def verify_prematch_music(entries, source_rows, owner):
-    """Check that a package streams the owner's countdown music, and only it, as its alias.
+def verify_owner_music(entries, source_rows, owner, table_name, file_name, alias, limit, owner_file, what):
+    """Check that a package streams the owner's music, and only it, as its alias.
 
     source_rows holds (header, fields) for every original row of the mission
     opening music; owner is the owner's file content, or None without one."""
-    table = entries.get(PREMATCH_MUSIC_TABLE)
-    music = entries.get('sound/' + PREMATCH_MUSIC_FILE)
+    table = entries.get(table_name)
+    music = entries.get('sound/' + file_name)
     if owner is None:
-        assert table is None and music is None, 'Countdown music packaged without the owner file'
+        assert table is None and music is None, f'{what} packaged without the owner file'
         return
-    assert music == package_prematch_music(owner), 'Packaged countdown music differs from the owner file'
-    assert table is not None, 'Missing the countdown music alias'
+    assert music == package_prematch_music(owner, limit, owner_file), f'Packaged {what} differs from the owner file'
+    assert table is not None, f'Missing the {what} alias'
     header, rows = alias_table(table.decode('utf-8'))
-    assert len(rows) == 1 and any(source_header == header and rows[0] == prematch_music_row(header, fields)
+    assert len(rows) == 1 and any(source_header == header and rows[0] == prematch_music_row(header, fields, alias,
+                                                                                            file_name)
                                   for source_header, fields in source_rows), \
-        'The countdown music alias differs from the original mission opening music'
+        f'The {what} alias differs from the original mission opening music'
     for name, data in entries.items():
-        if name.startswith('soundaliases/') and name.endswith('.csv') and name != PREMATCH_MUSIC_TABLE:
+        if name.startswith('soundaliases/') and name.endswith('.csv') and name != table_name:
             other_header, other_rows = alias_table(data.decode('utf-8'))
-            assert all(dict(zip(other_header, row)).get('name', '').lower() != PREMATCH_MUSIC_ALIAS
-                       for row in other_rows), 'The countdown music alias is in another table: ' + name
+            assert all(dict(zip(other_header, row)).get('name', '').lower() != alias
+                       for row in other_rows), f'The {what} alias is in another table: ' + name
+
+
+def verify_prematch_music(entries, source_rows, owner):
+    verify_owner_music(entries, source_rows, owner, PREMATCH_MUSIC_TABLE, PREMATCH_MUSIC_FILE, PREMATCH_MUSIC_ALIAS,
+                       PREMATCH_MUSIC_SECONDS, PREMATCH_MUSIC_OWNER_FILE, 'countdown music')
+
+
+def verify_endgame_music(entries, source_rows, owner):
+    verify_owner_music(entries, source_rows, owner, ENDGAME_MUSIC_TABLE, ENDGAME_MUSIC_FILE, ENDGAME_MUSIC_ALIAS,
+                       ENDGAME_MUSIC_SECONDS, ENDGAME_MUSIC_OWNER_FILE, 'end of match music')
 
 
 def verify_owner_sounds(entries, original_rows, owner):
@@ -409,7 +429,7 @@ def add_explosive_aliases(tables, aliases):
 
 
 def collect_sound_assets(root, asset_index, originals, renderer, maps, hit_sound=None, menu_music=None,
-                         owner_sounds=None, prematch_music=None):
+                         owner_sounds=None, prematch_music=None, endgame_music=None):
     def read(name):
         path, original_name = asset_index[name]
         return originals[path].read(original_name)
@@ -518,6 +538,19 @@ def collect_sound_assets(root, asset_index, originals, renderer, maps, hit_sound
         files[PREMATCH_MUSIC_TABLE] = output.getvalue().encode('utf-8')
         files['sound/' + PREMATCH_MUSIC_FILE] = package_prematch_music(prematch_music)
         print(f'Countdown music: the owner\'s {PREMATCH_MUSIC_OWNER_FILE} streams as {PREMATCH_MUSIC_ALIAS}')
+    if endgame_music is not None:
+        if PREMATCH_MUSIC_SOURCE not in aliases:
+            raise ValueError(f'No original {PREMATCH_MUSIC_SOURCE} alias for the owner end of match music to copy')
+        table, _, fields = aliases[PREMATCH_MUSIC_SOURCE][0]
+        header = tables[table][0]
+        output = io.StringIO(newline='')
+        writer = csv.writer(output, lineterminator='\r\n')
+        writer.writerow(header)
+        writer.writerow(prematch_music_row(header, fields, ENDGAME_MUSIC_ALIAS, ENDGAME_MUSIC_FILE))
+        files[ENDGAME_MUSIC_TABLE] = output.getvalue().encode('utf-8')
+        files['sound/' + ENDGAME_MUSIC_FILE] = package_prematch_music(endgame_music, ENDGAME_MUSIC_SECONDS,
+                                                                      ENDGAME_MUSIC_OWNER_FILE)
+        print(f'End of match music: the owner\'s {ENDGAME_MUSIC_OWNER_FILE} streams as {ENDGAME_MUSIC_ALIAS}')
     if owner_sounds is not None:
         unused = sorted(set(pack) - set(owned))
         if unused:

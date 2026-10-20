@@ -20,6 +20,10 @@ extern const char *UI_GetGameTypeDisplayName(const char *gameType);
 extern const char *SEH_LocalizeTextMessage(const char *msg, const char *context, int errType);
 extern void I_strncpyz(char *dest, const char *src, int destsize);
 extern int Com_sprintf(char *dest, int size, const char *fmt, ...);
+extern snd_alias_list_t *Com_FindSoundAlias(const char *name);
+extern snd_alias_t *Com_PickSoundAliasFromList(snd_alias_list_t *aliasList);
+extern void SND_PlayMusicAlias(const snd_alias_t *pAlias, snd_alias_system_t system);
+extern void SND_StopMusic(int fadetime);
 
 /* Virtual units of the 4:3 area, measured on the WWII capture (1.2 pixels a
  * unit): the result over a rule and the mode at the map, the two sides
@@ -92,13 +96,18 @@ extern int Com_sprintf(char *dest, int size, const char *fmt, ...);
 #define ENDGAME_DIM 0.7f
 #define ENDGAME_TEXT_STYLE 3
 /* Milliseconds into the intermission: the announcement fades in while its
- * rule grows from the middle, stays, then hands over to the scoreboard. The
- * stock scripts change the map after "wait 10", which our servers' sv_fps 30
- * runs in 6.7 s; the scoreboard keeps half of it. */
+ * rule grows from the middle, stays, then hands over to the scoreboard, which
+ * stays until the next map: browser_endgame.py has the five modes' scripts
+ * wait 16 s for it. */
 #define ENDGAME_FADE_MSEC 400
 #define ENDGAME_RULE_MSEC 600
-#define ENDGAME_ANNOUNCE_MSEC 3000
+#define ENDGAME_ANNOUNCE_MSEC 5000
 #define ENDGAME_HANDOVER_MSEC 500
+#define ENDGAME_INTERMISSION_MSEC 16000
+/* The owner's music for the end of a match plays from its start and fades out
+ * over the last 3 s before the next map. */
+#define ENDGAME_MUSIC_ALIAS "browser_endgame_music"
+#define ENDGAME_MUSIC_FADE_MSEC 3000
 #define ENDGAME_MAX_CLIENTS 64
 #define ENDGAME_PODIUM 3
 /* Marks a string the server sent without localizing it. */
@@ -136,6 +145,7 @@ typedef struct {
 typedef struct {
     int intermission;
     int start;
+    int musicPlaying;
     int reason;
     int medalSize;
     int medalKinds[2];
@@ -265,11 +275,33 @@ void CG_EndgameMessage(const char *message)
     }
 }
 
+static void CG_EndgameMusic(int intermission)
+{
+    if (intermission && !s_endgame.intermission) {
+        snd_alias_list_t *music = Com_FindSoundAlias(ENDGAME_MUSIC_ALIAS);
+
+        s_endgame.musicPlaying = music != NULL;
+        if (music)
+            SND_PlayMusicAlias(Com_PickSoundAliasFromList(music), SASYS_CGAME);
+    } else if (s_endgame.musicPlaying && !intermission) {
+        s_endgame.musicPlaying = 0;
+        SND_StopMusic(0);
+    } else if (s_endgame.musicPlaying) {
+        int left = s_endgame.start + ENDGAME_INTERMISSION_MSEC - cg->time;
+
+        if (left <= ENDGAME_MUSIC_FADE_MSEC) {
+            s_endgame.musicPlaying = 0;
+            SND_StopMusic(left > 0 ? left : 0);
+        }
+    }
+}
+
 /* The medals are built with the first frames of a map, not when it ends. */
 void CG_EndgameFrame(int intermission)
 {
     if (intermission && !s_endgame.intermission)
         s_endgame.start = cg->time;
+    CG_EndgameMusic(intermission);
     s_endgame.intermission = intermission;
     /* The UI paints after the scene, so its request waits for this frame. */
     g_webBackdropFrac = g_webMenuBackdrop;

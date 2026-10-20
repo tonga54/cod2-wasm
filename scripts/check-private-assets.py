@@ -19,12 +19,14 @@ from browser_explosives import (ALIAS_TABLE as EXPLOSIVE_ALIAS_TABLE, ALIASES as
 from browser_settings_menu import apply_settings_menu
 from browser_objective_assets import objective_asset_roots
 from browser_spawn_safety import apply_spawn_safety
-from browser_sound_assets import (HIT_SOUND_ALIAS, HIT_SOUND_FILE, HIT_SOUND_OWNER_FILE, HIT_SOUND_TABLE,
+from browser_endgame import SCRIPTS as ENDGAME_SCRIPTS, apply_endgame_timing
+from browser_sound_assets import (ENDGAME_MUSIC_FILE, ENDGAME_MUSIC_OWNER_FILE, ENDGAME_MUSIC_TABLE,
+                                  HIT_SOUND_ALIAS, HIT_SOUND_FILE, HIT_SOUND_OWNER_FILE, HIT_SOUND_TABLE,
                                   MENU_MUSIC_ALIASES, MENU_MUSIC_FILE, MENU_MUSIC_OWNER_FILE, MENU_MUSIC_TABLE,
                                   OWNER_SOUNDS_DIR, OWNER_SOUNDS_FOLDER, OWNER_SOUNDS_TABLE, PREMATCH_MUSIC_FILE,
                                   PREMATCH_MUSIC_OWNER_FILE, PREMATCH_MUSIC_SOURCE, PREMATCH_MUSIC_TABLE, alias_table,
-                                  explosive_alias_table, load_owner_sounds, verify_hit_sound, verify_menu_music,
-                                  verify_owner_sounds, verify_prematch_music)
+                                  explosive_alias_table, load_owner_sounds, verify_endgame_music, verify_hit_sound,
+                                  verify_menu_music, verify_owner_sounds, verify_prematch_music)
 
 root = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
@@ -60,7 +62,8 @@ try:
                 data = archive.read(name)
                 entries[name] = data
                 if name in (HIT_SOUND_TABLE, "sound/" + HIT_SOUND_FILE, MENU_MUSIC_TABLE, "sound/" + MENU_MUSIC_FILE,
-                            PREMATCH_MUSIC_TABLE, "sound/" + PREMATCH_MUSIC_FILE):
+                            PREMATCH_MUSIC_TABLE, "sound/" + PREMATCH_MUSIC_FILE, ENDGAME_MUSIC_TABLE,
+                            "sound/" + ENDGAME_MUSIC_FILE):
                     continue
                 if name.startswith(("sound/" + OWNER_SOUNDS_FOLDER, OWNER_SOUNDS_TABLE[:-4], PICTURE_FOLDER)):
                     continue
@@ -107,7 +110,9 @@ try:
                     assert original.count(b'self.sessionstate = "playing";') == 1
                     expected = original.replace(b"delay = 2;", b'delay = 3;\n\tself setClientCvar("cg_respawnDeadline", getTime() + 3000);')
                     expected = expected.replace(b'self.sessionstate = "playing";', b'self.sessionstate = "playing";\n\tself setClientCvar("cg_respawnDeadline", 0);')
-                    assert data == expected, name
+                    assert data == apply_endgame_timing(name, expected), name
+                elif name in ENDGAME_SCRIPTS:
+                    assert data == apply_endgame_timing(name, original), name
                 elif name == "ui_mp/createserver.menu":
                     assert data == apply_bot_menu(original), name
                 elif name == "ui_mp/joinserver.menu":
@@ -196,6 +201,9 @@ try:
     owner_prematch_music = root / "data/main" / PREMATCH_MUSIC_OWNER_FILE
     verify_prematch_music(entries, original_prematch_rows,
                           owner_prematch_music.read_bytes() if owner_prematch_music.is_file() else None)
+    owner_endgame_music = root / "data/main" / ENDGAME_MUSIC_OWNER_FILE
+    verify_endgame_music(entries, original_prematch_rows,
+                         owner_endgame_music.read_bytes() if owner_endgame_music.is_file() else None)
     owner_sounds = load_owner_sounds(root / "data/main" / OWNER_SOUNDS_DIR)
     verify_owner_sounds(entries, original_rows, owner_sounds)
     # From the explosives' own table, or the owner's where the pack replaces them.
@@ -244,6 +252,8 @@ try:
     hit_sound = "the owner's" if owner_hit_sound.is_file() else "the retail"
     menu_music = "the owner's" if owner_menu_music.is_file() else "the retail"
     prematch_music = "the owner's countdown music" if owner_prematch_music.is_file() else "no countdown music"
+    if owner_endgame_music.is_file():
+        prematch_music += ", the owner's end of match music"
     pack = f"the owner's sounds for {len(owner_sounds['aliases'])} aliases" if owner_sounds else "no owner sound pack"
     pictures = f"the owner's {len(owner_pictures)} class pictures" if owner_pictures else "no owner class pictures"
     print(f"PASS: {len(entries)} private entries, {total} bytes, retail bytes/reviewed overrides, Toujane/Carentan/Dawnville, five retail modes, all three BSPs and factions, {hit_sound} hit sound, {menu_music} menu music, {prematch_music}, {pack}, {pictures}")
