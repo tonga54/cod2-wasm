@@ -34,8 +34,10 @@ other modes use their original scripts and settings.
 
 The host starts with **no rooms**. Users create their own servers, each named
 after its creator's gametag (its letters, digits, spaces and `_|.-`, up to 32),
-with up to three concurrent rooms and 64 configured player slots per room. An empty
-room closes after five minutes. **Join Game → Delete my server** lets its owner
+with up to three concurrent rooms and 64 configured player slots per room.
+**Join Game** lists them by server name, map and players in the same style as
+the other menus, refreshed every five seconds; Enter or a click joins. An empty
+room closes after five minutes. **Join Game → DEL (Delete my server)** lets its owner
 remove it immediately. Ownership is stored in that browser and checked with a
 private token; changing browsers or clearing site storage loses that record.
 The slot limit is configuration, not a claim that 64-player matches have been

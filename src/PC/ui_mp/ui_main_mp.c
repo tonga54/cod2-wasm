@@ -4,6 +4,7 @@
 #include "cod2_feature_config.h"
 #include "headers/PC/ui_mp/ui_class_menu.h"
 #include "headers/PC/ui_mp/ui_match_menu.h"
+#include "headers/PC/ui_mp/ui_join_menu.h"
 #include "headers/PC/ui_mp/ui_pause_menu.h"
 #include "headers/PC/ui_mp/ui_wwii_menu.h"
 #include "headers/PC/ui_mp/ui_wwii_settings.h"
@@ -739,7 +740,7 @@ qboolean UI_CheckExecKey(int key)
         return 0;
     if (!menu)
         return 0;
-    if (UI_ClassMenu_WantsKeys(menu) || UI_PauseMenu_WantsKeys(menu))
+    if (UI_ClassMenu_WantsKeys(menu) || UI_PauseMenu_WantsKeys(menu) || UI_JoinMenu_WantsKeys(menu))
         return 1;
 
     if ((key >= 0xc8 && key <= 0xce) ||
@@ -1405,6 +1406,8 @@ static inline __attribute__((always_inline)) void UI_KeyEvent_impl(int key, qboo
             /* So does the pause menu over a match. */
         } else if (UI_MatchMenu_KeyEvent((displayContextDef_t *)uiInfo, menu, key, down)) {
             /* So does the match screen, over Start New Server's menus. */
+        } else if (UI_JoinMenu_KeyEvent((displayContextDef_t *)uiInfo, menu, key, down)) {
+            /* And Join Game, over joinserver. */
         } else if (UI_WWIISettings_KeyEvent((displayContextDef_t *)uiInfo, menu, key, down)) {
             /* And Options' laid-out list and pages. */
         } else if (key == 0x1b && down && !Menus_AnyFullScreenVisible(uiInfo) && menu->onESC == 0) {

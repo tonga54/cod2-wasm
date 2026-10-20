@@ -3,6 +3,7 @@
 #include "bytematch.h"
 #include "headers/PC/ui_mp/ui_class_menu.h"
 #include "headers/PC/ui_mp/ui_match_menu.h"
+#include "headers/PC/ui_mp/ui_join_menu.h"
 #include "headers/PC/ui_mp/ui_pause_menu.h"
 #include "headers/PC/ui_mp/ui_wwii_menu.h"
 #include "headers/PC/ui_mp/ui_wwii_settings.h"
@@ -2351,6 +2352,7 @@ void Menus_Open(displayContextDef_t *dc, menuDef_t *menu)
     if ((*(void **)&((menuDef_t *)m)->soundName))
         UI_PlayLocalSoundAliasByName(((menuDef_t *)m)->soundName);
     UI_MatchMenu_Opened(dc, menu);
+    UI_JoinMenu_Opened(dc, menu);
     openCount = (((displayContextDef_s*)(d))->openMenuCount);
     for (i = openCount - 1; i >= 0; i--) {
         byte *om = *(byte **)((char *)&((displayContextDef_s *)d)->menuStack[i]);
@@ -2433,6 +2435,9 @@ qboolean Display_MouseMove(displayContextDef_t *dc, void *p, int x, int y)
     }
     /* The match screen's own pointer, not its hidden retail items. */
     if (UI_MatchMenu_Covers(dc, Menu_GetFocused(dc)))
+        return 1;
+    /* Join Game's too. */
+    if (UI_JoinMenu_Covers(dc, Menu_GetFocused(dc)))
         return 1;
     int openCount = (((displayContextDef_s*)(d))->openMenuCount);
     int i = openCount - 1;
@@ -5509,6 +5514,10 @@ paint_content:
 
     if (UI_MatchMenu_Covers(dc, menu)) {
         UI_MatchMenu_Paint(dc, menu);
+        return;
+    }
+    if (UI_JoinMenu_Covers(dc, menu)) {
+        UI_JoinMenu_Paint(dc, menu);
         return;
     }
 

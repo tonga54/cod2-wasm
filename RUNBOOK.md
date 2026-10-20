@@ -4456,3 +4456,26 @@ audio hooked: a class row, Enter into Modify, a move to the Lethal slot,
 Enter into its picker, the next grenade and two Escapes played once each;
 F2 on a grenade and pointer motion within a row played nothing; pointer
 motion across three rows played three.
+
+## Join Game in the menus' style — 2026-10-20
+
+The owner asked for Join Game with only the server name, map and players,
+without the retail browser's Source, Connection (ISDN), Game Type, refresh
+date, Quick Refresh, Filter Servers, New Favorite, Delete Favorite, Password
+and Server Info, and styled like the other menus.
+
+`ui_join_menu.c` paints a WWII screen over the retail `joinserver` menu, as
+`ui_match_menu.c` does over `createserver`, through the same hooks; the menu
+file is unchanged, so the private packages and the manifest are too (its
+hidden "Delete my server" button stays in the package, unused). The rows
+show the hostname, the arenas' map name and clients/sv_maxclients; ENTER
+joins, DEL deletes a room this browser created, ESC goes back. The screen
+refreshes on its own every 5 s in place of Quick Refresh, painting the last
+servers while a refresh empties the list and keeping the focus on its
+server by address. Details and evidence are in
+`docs/GRAPHICS_2026-10-16.md`, "WWII Join Game".
+
+Validation: `test-join-menu.py` (new, 20 mutants), `test-match-menu.py`,
+`test-pause-menu.py`; the web client and the native server build; in the QA
+stack with two rooms, the list, the focus, an automatic refresh without a
+gap, Escape back to the main menu and Enter into a match.

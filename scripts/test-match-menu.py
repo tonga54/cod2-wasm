@@ -1223,7 +1223,7 @@ mutants = [
 ]
 
 # The backdrop: bg's other items give way under createserver as under
-# Create a Class, and only those two.
+# Create a Class and Join Game, and only those three.
 page_open = function(wwii, 'UI_WWIIMenu_PageOpen')
 backdrop = r'''
 #include <assert.h>
@@ -1241,7 +1241,11 @@ int main(void) {
     assert(UI_WWIIMenu_PageOpen(&dc));
     page.window.name = "create_a_class";
     assert(UI_WWIIMenu_PageOpen(&dc));
+    page.window.name = "joinserver";
+    assert(UI_WWIIMenu_PageOpen(&dc));
     page.window.name = "createserver_maps";
+    assert(!UI_WWIIMenu_PageOpen(&dc));
+    page.window.name = "joinserver_popmenu";
     assert(!UI_WWIIMenu_PageOpen(&dc));
     page.window.name = "createserver";
     dc.openMenuCount = 2;

@@ -672,8 +672,8 @@ static int UI_WWIIMenu_MainOpen(const displayContextDef_t *dc)
     return 0;
 }
 
-/* Create a Class and Start New Server paint their own pages over the
- * backdrop alone. */
+/* Create a Class, Start New Server and Join Game paint their own pages over
+ * the backdrop alone. */
 static int UI_WWIIMenu_PageOpen(const displayContextDef_t *dc)
 {
     int i;
@@ -682,7 +682,8 @@ static int UI_WWIIMenu_PageOpen(const displayContextDef_t *dc)
         const menuDef_t *menu = dc->menuStack[i];
 
         if (menu && menu->window.name &&
-            (!I_stricmp(menu->window.name, "create_a_class") || !I_stricmp(menu->window.name, "createserver")))
+            (!I_stricmp(menu->window.name, "create_a_class") || !I_stricmp(menu->window.name, "createserver") ||
+             !I_stricmp(menu->window.name, "joinserver")))
             return 1;
     }
     return 0;

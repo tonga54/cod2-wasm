@@ -41,7 +41,8 @@ assert 'scriptmenus/ingame.menu' not in (root / 'scripts/browser_settings_menu.p
 # The UI opens it from the script, keeps every key from the binds while it has
 # the focus, feeds it keys before the stock Escape and paints it with the menu.
 assert function(main, 'UI_CheckExecKey').count(
-    '    if (UI_ClassMenu_WantsKeys(menu) || UI_PauseMenu_WantsKeys(menu))\n        return 1;\n') == 1
+    '    if (UI_ClassMenu_WantsKeys(menu) || UI_PauseMenu_WantsKeys(menu) || UI_JoinMenu_WantsKeys(menu))\n'
+    '        return 1;\n') == 1
 key_event = function(main, 'UI_KeyEvent_impl')
 assert key_event.index('UI_PauseMenu_KeyEvent((displayContextDef_t *)uiInfo, menu, key, down)') < \
     key_event.index('key == 0x1b && down && !Menus_AnyFullScreenVisible(uiInfo)')
