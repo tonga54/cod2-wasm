@@ -236,7 +236,8 @@ retail CoD2:
   more texture memory per map; uncapped frame rates dropped by about 1%.
   See [graphics validation and limits](docs/GRAPHICS_2026-10-16.md).
 - **WWII sniper scopes:** the scoped Kar98k, Springfield, Lee-Enfield and
-  Mosin-Nagant stay on screen while raised, as in Call of Duty: WWII. The
+  Mosin-Nagant, and the 4x Optic on the other rifles, the BAR and the Bren,
+  stay on screen while raised, as in Call of Duty: WWII. The
   eyepiece's glass becomes a window onto the magnified world with the reticle
   on it, the world around the eyepiece blurs, and holding the breath (Shift)
   blacks out everything but the scope. The glass shows a dim reflection while

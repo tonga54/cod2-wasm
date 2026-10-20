@@ -7,7 +7,8 @@
  * stays on screen while it is raised to the eye, the eyepiece's glass becomes
  * a window onto the magnified world, the world around the eyepiece is blurred
  * and blacked out while the breath is held, and the reticle turns with the
- * scope as the bolt is worked. cg_wwiiScope 0, a rifle whose eyepiece is not
+ * scope as the bolt is worked. A 4x Optic on a gun without a scope of its
+ * own is drawn the same way. cg_wwiiScope 0, a rifle whose eyepiece is not
  * known or a browser without the scene compositor keep the stock overlay. */
 
 /* A scope's glass, in the space of the gun's j_gun bone: the centre of its
@@ -53,6 +54,11 @@ void CG_WwiiScopeInit(void);
 /* Closes the window for a frame that draws no view weapon. */
 void CG_WwiiScopeClear(void);
 const CgWwiiScopeGlass *CG_WwiiScopeFindGlass(const char *gunModel);
+/* A 4x Optic's glass as browser_attachment_models.py writes it beside the
+ * optic's model, in glass/<gun model>__optic4x: the rim's centre, its radius,
+ * the eye's three numbers and the roll, in that order. Returns 0, leaving
+ * glass as it was, for anything else. */
+int CG_WwiiScopeParseGlass(const char *text, CgWwiiScopeGlass *glass);
 /* The scoped rifle's glass when the WWII scope draws this weapon, else NULL. */
 const CgWwiiScopeGlass *CG_WwiiScopeGlassForWeapon(int weapon);
 /* The part of the raise over which a weapon zooms in: frac, the weapon's own
@@ -65,6 +71,11 @@ float CG_WwiiScopeZoomInFrac(int weapon, float frac);
  * behind it or has no area. */
 int CG_WwiiScopeProjectGlass(const CgWwiiScopeGlass *glass, const vec3_t *boneAxis, const vec_t *boneOrigin,
                              const vec_t *eye, const vec3_t *viewAxis, const float *projection, CgWwiiScopeLens *lens);
+/* The view weapon's anim in place of anim: a rifle the WWII scope draws works
+ * its bolt at the eye in its idle pose, the scope rolling out, as the scoped
+ * rifles do; an iron-sighted rifle's scoped rechamber anim would sweep the
+ * hand across the magnified view. */
+int CG_WwiiScopeViewAnim(const playerState_t *ps, int weapon, int anim);
 /* Turns the rifle as it is raised: levels its reticle and rolls it out while
  * the bolt is worked. */
 void CG_WwiiScopeAdjustViewWeapon(const playerState_t *ps, int weapon, vec_t *angles);

@@ -2548,6 +2548,7 @@ void CG_WeaponRunXModelAnims(playerState_t *ps, weaponInfo_t *weapInfo)
     } else {
         activeAnim = 1;
     }
+    activeAnim = CG_WwiiScopeViewAnim(ps, weaponIndex, activeAnim);
 
     CG_SetWeaponXAnimWeights(pAnimTree, &(*(weaponInfo_t **)imp_cg_weapons)[weaponIndex], activeAnim);
 

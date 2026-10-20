@@ -2,11 +2,13 @@
 """The attachment model generator (browser_attachment_models.py) on made-up guns, without the owner's files:
 which models each class weapon gets, the bone each rides, the sights centred on the line of sight of the
 aiming animation's last frame with their glass only in the pictures, the 4x Optics from the scoped rifles'
-own scopes, the WWII can along the muzzle with its sleeve and below the line of sight, the two clamped
+own scopes and their glass for the WWII scope, the WWII can along the muzzle with its sleeve and below the line
+of sight, the two clamped
 magazines, the longer one and a rifle's box magazine, the gun without its own, the retail winding, unit normals,
 floats that round the same on every machine, and the finishes' textures and materials."""
 import math
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -35,6 +37,11 @@ def write_parts(free, parented):
 def about_y(degrees):
     half = math.radians(degrees) / 2
     return (0.0, math.sin(half), 0.0, math.cos(half))
+
+
+def about_x(degrees):
+    half = math.radians(degrees) / 2
+    return (math.sin(half), 0.0, 0.0, math.cos(half))
 
 
 def boxes(along, low, high, step=1.0, mesh=None):
@@ -105,12 +112,15 @@ files['xanim/viewmodel_test_idle'] = S.write_xanim({'fps': 30, 'frames': 1, 'bon
     ('j_clip', None, [(2.5, 0.0, -0.4)]),
     ('tag_flash', None, [(16.0, 0.0, 1.4)])]})
 # The raise ends on its last frame, a step past the one before, as the engine now holds it. The pistol's
-# brings the eye low over the bore, the G43's turns the line of sight from the sniper rifle's.
+# brings the eye low over the bore, the G43's turns the line of sight from the sniper rifle's, the Bren's leans
+# the gun's top 5 degrees left, as the stock Bren's does.
 RAISES = {
     'viewmodel_test_ads_up': [(about_y(0.0), (0.0, 0.0, 0.0)), (about_y(1.0), (2.0, 0.6, -0.3)),
                               (about_y(-1.5), (3.6, 0.3, -0.5)), (about_y(-0.5), (4.0, 0.0, -0.7))],
     'viewmodel_test_ads_up_low': [(about_y(0.0), (0.0, 0.0, 0.0)), (about_y(0.0), (4.0, 0.0, 0.1))],
     'viewmodel_test_ads_up_turned': [(about_y(0.0), (0.0, 0.0, 0.0)), (about_y(-6.0), (4.0, 0.0, -0.9))],
+    'viewmodel_test_ads_up_canted': [(about_y(0.0), (0.0, 0.0, 0.0)),
+                                     (S._qmul(about_y(-0.5), about_x(-5.0)), (4.0, 0.0, -0.7))],
 }
 for anim, frames in RAISES.items():
     files['xanim/' + anim] = S.write_xanim({'fps': 30, 'frames': len(frames), 'bones': [
@@ -124,7 +134,7 @@ WEAPONS = {
     'springfield_mp': ('viewmodel_test_springfield', 'viewmodel_test_ads_up'),
     'm1garand_mp': ('viewmodel_test_garand', 'viewmodel_test_ads_up'),
     'enfield_scope_mp': ('viewmodel_test_enfield_scope', 'viewmodel_test_ads_up'),
-    'bren_mp': ('viewmodel_test_bren', 'viewmodel_test_ads_up'),
+    'bren_mp': ('viewmodel_test_bren', 'viewmodel_test_ads_up_canted'),
     'shotgun_mp': ('viewmodel_test_shotgun', 'viewmodel_test_ads_up'),
 }
 for weapon, (model, raise_anim) in WEAPONS.items():
@@ -159,6 +169,10 @@ CLASSES = {'primary': ['thompson_mp', 'kar98k_sniper_mp', 'kar98k_mp', 'g43_mp',
                'kar98k_sniper_mp': ['optic4x', 'suppressor'], 'kar98k_mp': ['optic4x', 'extmag'],
                'g43_mp': ['optic4x', 'extmag'], 'm1garand_mp': ['optic4x'], 'bren_mp': ['optic4x'],
                'shotgun_mp': ['extmag'], 'colt_mp': ['suppressor', 'extmag', 'fmj']}}
+# The made-up scoped rifles' glass, as the WWII scope's table would hold it: the back of their scope.
+TEST_GLASS = ((-3.0, 0.0, 2.65), 0.3)
+A.SCOPE_GLASSES.update({model: TEST_GLASS for model in ('viewmodel_test_sniper', 'viewmodel_test_springfield',
+                                                         'viewmodel_test_enfield_scope')})
 entries = A.attachment_model_assets(read, CLASSES)
 cases = 0
 
@@ -178,7 +192,7 @@ for attachment in ('suppressor', 'reflex', 'lens', 'extmag', 'nomag'):
 # A scoped rifle keeps its own scope; the rifles take the scoped rifles'; a pistol a can and a longer magazine.
 expected |= model_entries('viewmodel_test_sniper', 'suppressor')
 for model in ('viewmodel_test_kar98k', 'viewmodel_test_g43', 'viewmodel_test_garand', 'viewmodel_test_bren'):
-    expected |= model_entries(model, 'optic4x')
+    expected |= model_entries(model, 'optic4x') | {A.GLASS + model + A.SUFFIX + 'optic4x'}
 for attachment in ('suppressor', 'extmag', 'nomag'):
     expected |= model_entries('viewmodel_test_pistol', attachment)
 # A rifle with a magazine of its own has it longer; one loaded through the top keeps its stripper clip and has a
@@ -353,6 +367,59 @@ assert abs(min(p[0] for p in bracket) - (at[0] - 0.7)) < 1e-4 and abs(max(p[0] f
 cases += 1
 
 
+# ---------------------------------------------------------------- the 4x Optics' glass for the WWII scope
+def glass_of(model):
+    """A 4x Optic's glass file: eight numbers of four decimals on a line."""
+    text = entries[A.GLASS + model + A.SUFFIX + 'optic4x'].decode()
+    assert re.fullmatch(r'(-?\d+\.\d{4} ){7}-?\d+\.\d{4}\n', text), text
+    numbers = [float(v) for v in text.split()]
+    return tuple(numbers[0:3]), numbers[3], tuple(numbers[4:7]), numbers[7]
+
+
+def at_full_aim(rim, raise_anim):
+    """Where the raise's last frame leaves a point of j_gun's space from the eye at tag_view, x forward, y left
+    and z up, and how many degrees it cants the gun's top right."""
+    tq, tt = RAISES[raise_anim][-1]
+    wq, wt = IDLE_WEAPON
+    q = multiply(tq, wq)
+    t = tuple(a + b for a, b in zip(tt, rotate(tq, wt)))
+    up = rotate(q, (0.0, 0.0, 1.0))
+    return tuple(a + b for a, b in zip(rotate(q, rim), t)), math.degrees(math.atan2(-up[1], up[2]))
+
+
+# The generator takes the scoped rifles' glasses from the WWII scope's own table.
+assert A.SCOPE_GLASSES['viewmodel_springfield'] == ((-5.968, 0.255, 3.675), 0.578)
+assert {'viewmodel_kar98_scope', 'viewmodel_enfield_scope', 'viewmodel_mosinnagant_cloth'} <= set(A.SCOPE_GLASSES)
+# The Kar98k's scope sits as on the sniper rifle, and so does its glass.
+rim, radius, eye, roll = glass_of('viewmodel_test_kar98k')
+assert rim == TEST_GLASS[0] and radius == TEST_GLASS[1], (rim, radius)
+expected_eye, expected_roll = at_full_aim(rim, 'viewmodel_test_ads_up')
+assert math.dist(eye, expected_eye) < 1e-3 and abs(roll - expected_roll) < 1e-3 and abs(roll) < 1e-3, (eye, roll)
+# The G43's glass moves with its scope: as far from each of the scope's points as on the sniper rifle, the back of
+# a scope whose middle is OPTIC_AHEAD and 3 ahead of the eye.
+rim, radius, eye, roll = glass_of('viewmodel_test_g43')
+assert radius == TEST_GLASS[1]
+for i in range(0, len(original), 5):
+    assert abs(math.dist(rim, moved[i]) - math.dist(TEST_GLASS[0], original[i])) < 2e-3, i
+expected_eye, expected_roll = at_full_aim(rim, 'viewmodel_test_ads_up_turned')
+assert math.dist(eye, expected_eye) < 2e-3 and abs(roll - expected_roll) < 1e-3, (eye, expected_eye, roll)
+assert abs(eye[0] - (A.OPTIC_AHEAD['g43_mp'] + 3.0 - 3.5)) < 0.05, eye
+# The Garand's is the Springfield's glass; the Bren's raise cants it 5 degrees anticlockwise.
+for model, raise_anim in (('viewmodel_test_garand', 'viewmodel_test_ads_up'),
+                          ('viewmodel_test_bren', 'viewmodel_test_ads_up_canted')):
+    rim, radius, eye, roll = glass_of(model)
+    expected_eye, expected_roll = at_full_aim(rim, raise_anim)
+    assert radius == TEST_GLASS[1] and math.dist(eye, expected_eye) < 2e-3, (model, eye, expected_eye)
+    assert abs(roll - expected_roll) < 1e-3, (model, roll, expected_roll)
+assert abs(roll + 5.0) < 0.05, roll
+# A scoped rifle whose glass the table lacks gives its scope but no glass.
+missing = A.SCOPE_GLASSES.pop('viewmodel_test_springfield')
+garand_entries, shown = A.gun_attachments(read, 'm1garand_mp', {'optic4x'})
+A.SCOPE_GLASSES['viewmodel_test_springfield'] = missing
+assert shown == ['optic4x'] and set(garand_entries) == model_entries('viewmodel_test_garand', 'optic4x')
+cases += 1
+
+
 # ---------------------------------------------------------------- the can on the muzzle
 def flash_space(gun_, point):
     return A._flash_space(gun_, point)
@@ -486,26 +553,42 @@ MUTANTS = [
     ("    top = min(max(tops), at[2] - 0.2)", "    top = max(tops)"),
     ("    points = gun.points(without='j_clip')", "    points = gun.points()"),
     ("    place = S._compose((frame, origin), source)", "    place = S._compose((_sight_frame(rifle), origin), source)"),
-    ("    if gun.weapon in OPTIC_IN_PLACE:\n        return parts\n", ""),
+    ("    if gun.weapon in OPTIC_IN_PLACE:\n        return rifle, parts, None, None\n", ""),
     ("min(a[2], b[2], c[2]) > 2.2 and", "min(a[2], b[2], c[2]) > -99.0 and"),
+    ("        rim = S._add(S._qrot(place[0], rim), place[1])\n", ""),
+    ("        self.aimed = S._compose(hands['tag_weapon'], gun['j_gun'])", "        self.aimed = gun['j_gun']"),
+    ("    roll = math.degrees(math.atan2(-up[1], up[2]))", "    roll = math.degrees(math.atan2(up[1], up[2]))"),
+    ("            if glass:\n                entries[GLASS + base + attachment] = glass.encode()\n", ""),
+    ("    if not glass:\n        return None\n", ""),
 ]
 if not os.environ.get('COD2_ATTACHMENT_MODELS_MUTANT'):
-    source_text = (Path(__file__).resolve().parent / 'browser_attachment_models.py').read_text()
+    here = Path(__file__).resolve().parent
+    source_text = (here / 'browser_attachment_models.py').read_text()
     with tempfile.TemporaryDirectory(prefix='cod2-attachment-models-') as directory:
-        directory = Path(directory)
+        # The repository's layout: the generator reads the WWII scope's glass table from the engine's source.
+        scripts = Path(directory) / 'scripts'
+        scripts.mkdir()
+        table = Path(directory) / 'src/PC/cgame_mp/cg_wwiiscope_mp.c'
+        table.parent.mkdir(parents=True)
+        shutil.copy(here.parent / 'src/PC/cgame_mp/cg_wwiiscope_mp.c', table)
         for name in ('browser_explosives.py', 'browser_smine.py'):
-            shutil.copy(Path(__file__).resolve().parent / name, directory / name)
-        shutil.copy(__file__, directory / 'test.py')
+            shutil.copy(here / name, scripts / name)
+        shutil.copy(__file__, scripts / 'test.py')
+        (scripts / 'browser_attachment_models.py').write_text(source_text)
+        unchanged = subprocess.run([sys.executable, str(scripts / 'test.py')], capture_output=True, text=True,
+                                   env=dict(os.environ, COD2_ATTACHMENT_MODELS_MUTANT='1'))
+        assert unchanged.returncode == 0, unchanged.stdout + unchanged.stderr
         for old, new in MUTANTS:
             assert source_text.count(old) == 1, old
-            (directory / 'browser_attachment_models.py').write_text(source_text.replace(old, new))
-            result = subprocess.run([sys.executable, str(directory / 'test.py')], capture_output=True, text=True,
+            (scripts / 'browser_attachment_models.py').write_text(source_text.replace(old, new))
+            result = subprocess.run([sys.executable, str(scripts / 'test.py')], capture_output=True, text=True,
                                     env=dict(os.environ, COD2_ATTACHMENT_MODELS_MUTANT='1'))
             assert result.returncode != 0, f'mutant survived: {new!r}'
 
 print(f'PASS: {cases} cases: the models each class weapon gets, each on the bone it rides; sights on the line of '
       f'sight of the raise\'s last frame, their glass only in the pictures; the 4x Optics from the scoped rifles\' '
-      f'scopes, in place, turned onto another line, cut from the Springfield, on the Bren\'s bracket; the can past '
+      f'scopes, in place, turned onto another line, cut from the Springfield, on the Bren\'s bracket, and their '
+      f'glass moved with them, where full aim leaves it and how it cants it; the can past '
       f'the muzzle, its sleeve, below the line of sight; two clamped magazines, a longer one and a rifle\'s box '
       f'magazine, the gun without its own; retail winding, unit normals, canonical floats, the same bytes twice; '
       f'the finishes\' textures and '

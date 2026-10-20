@@ -2,8 +2,10 @@
 #include "imports.h"
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_wwiiscope.h"
+#include "headers/PC/bgame/bg_attachments.h"
 #include "headers/PC/gfx_d3d/r_hud2d.h"
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 /* Each scope's glass in the space of the gun's j_gun bone, read from the
@@ -33,6 +35,33 @@ const CgWwiiScopeGlass *CG_WwiiScopeFindGlass(const char *gunModel)
     return NULL;
 }
 
+/* No glass reaches this many units from j_gun or the eye, and no stock ADS
+ * pose cants a scope this many degrees. */
+#define CG_WWIISCOPE_GLASS_REACH 45.0f
+
+int CG_WwiiScopeParseGlass(const char *text, CgWwiiScopeGlass *glass)
+{
+    float v[8];
+    int i, used = -1;
+
+    if (!text || sscanf(text, "%f %f %f %f %f %f %f %f %n", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7],
+                        &used) != 8 || used < 0 || text[used])
+        return 0;
+    for (i = 0; i < 8; i++) {
+        if (!(fabsf(v[i]) < CG_WWIISCOPE_GLASS_REACH))
+            return 0;
+    }
+    if (!(v[3] > 0.0f) || !(v[4] > 0.0f))
+        return 0;
+    for (i = 0; i < 3; i++) {
+        glass->rim[i] = v[i];
+        glass->eye[i] = v[4 + i];
+    }
+    glass->radius = v[3];
+    glass->roll = v[7];
+    return 1;
+}
+
 #ifdef __EMSCRIPTEN__
 
 extern const dvar_t *Dvar_RegisterBool_mac(const char *name, int value, int flags);
@@ -46,6 +75,9 @@ extern void ConvertQuatToMat(const DObjAnimMat *mat, float axis[3][3]);
 extern void MatrixMultiply(const float (*in1)[3], const float (*in2)[3], float (*out)[3]);
 extern float XAnimGetWeight(const struct XAnimTree_s *tree, unsigned int animIndex);
 extern int WebSceneFx_ScopeAvailable(void);
+extern int FS_ReadFile(const char *qpath, void **buffer);
+extern void FS_FreeFile(void *buffer);
+extern MaterialHandle CL_RegisterMaterialNoMip(const char *name, int imageTrack);
 extern const dvar_t *cg_fov;
 extern const dvar_t *cg_fovScale;
 extern const dvar_t *cg_fovMin;
@@ -75,8 +107,9 @@ extern const dvar_t *cg_fovMin;
 #define CG_WWIISCOPE_BOLT_ROLL 8.0f
 #define CG_WWIISCOPE_BOLT_LEFT 0.4f
 #define CG_WWIISCOPE_BOLT_DOWN 0.12f
-/* The view weapon's rechamber anims, from the hip and scoped, as
- * CG_RegisterWeapon numbers them. */
+/* The view weapon's idle anim and its rechamber anims, from the hip and
+ * scoped, as CG_RegisterWeapon numbers them. */
+#define CG_WWIISCOPE_IDLE_ANIM 1
 #define CG_WWIISCOPE_RECHAMBER_ANIM 6
 #define CG_WWIISCOPE_ADS_RECHAMBER_ANIM 20
 #define CG_WWIISCOPE_RECHAMBERING 4
@@ -105,8 +138,13 @@ float g_webScopeLens[13];
 
 static const dvar_t *cg_wwiiScope;
 static signed char s_glassIndex[CG_WWIISCOPE_MAX_WEAPONS];
+/* Each gun's 4x Optic glass, read once: 1 when known, else NONE. */
+static CgWwiiScopeGlass s_opticGlasses[CG_WWIISCOPE_MAX_WEAPONS];
+static signed char s_opticKnown[CG_WWIISCOPE_MAX_WEAPONS];
 /* The scoped rechamber anim is the idle pose. */
 static unsigned char s_idleBolt[CG_WWIISCOPE_MAX_WEAPONS];
+/* The scoped rechamber anim gave way to the idle pose. */
+static unsigned char s_heldBolt[CG_WWIISCOPE_MAX_WEAPONS];
 static CgWwiiScopeImage s_images[R_HUD_IMAGE_SCOPE_LENS_COUNT];
 static CgWwiiScopeLens s_lens;
 /* The view weapon this frame is a WWII scope's rifle: its stock overlay
@@ -140,10 +178,49 @@ static const CgWwiiScopeGlass *CG_WwiiScopeWeaponGlass(int weapon)
         if (weapDef && weapDef->overlayReticle && weapDef->weapClass != 9 && weapDef->szOverlayMaterial[0])
             glass = CG_WwiiScopeFindGlass(weapDef->szGunXModel);
         s_glassIndex[weapon] = glass ? (signed char)(glass - cg_wwiiScopeGlasses) : CG_WWIISCOPE_NONE;
-        s_idleBolt[weapon] = glass && (!weapDef->szXAnims[20] || !weapDef->szXAnims[20][0] ||
-                                       (weapDef->szXAnims[1] && !I_stricmp(weapDef->szXAnims[20], weapDef->szXAnims[1])));
+        s_idleBolt[weapon] = weapDef && (!weapDef->szXAnims[20] || !weapDef->szXAnims[20][0] ||
+                                         (weapDef->szXAnims[1] && !I_stricmp(weapDef->szXAnims[20], weapDef->szXAnims[1])));
     }
     return s_glassIndex[weapon] >= 0 ? &cg_wwiiScopeGlasses[s_glassIndex[weapon]] : NULL;
+}
+
+/* The glass of the gun's 4x Optic, where the archives place one on it. */
+static const CgWwiiScopeGlass *CG_WwiiScopeOpticGlass(int weapon)
+{
+    if (s_opticKnown[weapon] == CG_WWIISCOPE_UNKNOWN) {
+        const WeaponDef *weapDef = BG_GetWeaponDef(weapon);
+        void *file = NULL;
+        char name[96];
+
+        s_opticKnown[weapon] = CG_WWIISCOPE_NONE;
+        if (weapDef && weapDef->szGunXModel && weapDef->szGunXModel[0]) {
+            snprintf(name, sizeof(name), "glass/%s__%s", weapDef->szGunXModel, g_attachments[ATT_OPTIC4X].name);
+            if (FS_ReadFile(name, &file) > 0 && file &&
+                CG_WwiiScopeParseGlass((const char *)file, &s_opticGlasses[weapon])) {
+                s_opticGlasses[weapon].gunModel = weapDef->szGunXModel;
+                s_opticKnown[weapon] = 1;
+            }
+            if (file)
+                FS_FreeFile(file);
+        }
+    }
+    return s_opticKnown[weapon] > 0 ? &s_opticGlasses[weapon] : NULL;
+}
+
+/* A scoped rifle's own glass, else the glass of the 4x Optic the player
+ * has on the gun, once it takes the optic's overlay. */
+static const CgWwiiScopeGlass *CG_WwiiScopePlayerGlass(const playerState_t *ps, int weapon)
+{
+    const CgWwiiScopeGlass *glass = CG_WwiiScopeWeaponGlass(weapon);
+    const WeaponDef *weapDef;
+
+    if (glass || weapon <= 0 || weapon >= CG_WWIISCOPE_MAX_WEAPONS || weapon > BG_GetNumWeapons() ||
+        !(BG_GetWeaponAttachments(ps, weapon) & ATT_BIT(ATT_OPTIC4X)))
+        return glass;
+    weapDef = BG_GetPlayerWeaponDef(ps, weapon);
+    if (!weapDef || !weapDef->overlayReticle || !weapDef->szOverlayMaterial[0])
+        return NULL;
+    return CG_WwiiScopeOpticGlass(weapon);
 }
 
 static int CG_WwiiScopeFullView(void)
@@ -155,11 +232,27 @@ static int CG_WwiiScopeFullView(void)
 }
 
 /* The compositor only composes a view that fills the screen. */
-const CgWwiiScopeGlass *CG_WwiiScopeGlassForWeapon(int weapon)
+static const CgWwiiScopeGlass *CG_WwiiScopeGlassFor(const playerState_t *ps, int weapon)
 {
     if (!cg_wwiiScope || !cg_wwiiScope->current.enabled || !WebSceneFx_ScopeAvailable() || !CG_WwiiScopeFullView())
         return NULL;
-    return CG_WwiiScopeWeaponGlass(weapon);
+    return CG_WwiiScopePlayerGlass(ps, weapon);
+}
+
+const CgWwiiScopeGlass *CG_WwiiScopeGlassForWeapon(int weapon)
+{
+    return CG_WwiiScopeGlassFor(&cg->predictedPlayerState, weapon);
+}
+
+/* The overlay the reticle is cut from: the weapon's own, or the sniper
+ * scope's a 4x Optic borrows. */
+static MaterialHandle CG_WwiiScopeOverlay(const playerState_t *ps, int weapon)
+{
+    const WeaponDef *weapDef = BG_GetPlayerWeaponDef(ps, weapon);
+
+    if (weapDef->szOverlayMaterial != BG_GetWeaponDef(weapon)->szOverlayMaterial)
+        return CL_RegisterMaterialNoMip(weapDef->szOverlayMaterial, 7);
+    return (*(weaponInfo_t **)imp_cg_weapons)[weapon].hADSOverlay;
 }
 
 /* The lens image of a scope overlay, built once per renderer into one of the
@@ -198,7 +291,9 @@ void CG_WwiiScopeInit(void)
 
     cg_wwiiScope = Dvar_RegisterBool_mac("cg_wwiiScope", 1, 0x1001);
     memset(s_glassIndex, CG_WWIISCOPE_UNKNOWN, sizeof(s_glassIndex));
+    memset(s_opticKnown, CG_WWIISCOPE_UNKNOWN, sizeof(s_opticKnown));
     memset(s_idleBolt, 0, sizeof(s_idleBolt));
+    memset(s_heldBolt, 0, sizeof(s_heldBolt));
     memset(s_images, 0, sizeof(s_images));
     memset(&s_lens, 0, sizeof(s_lens));
     memset(g_webScopeLens, 0, sizeof(g_webScopeLens));
@@ -244,7 +339,7 @@ static float CG_WwiiScopeZoomFraction(float posFrac, float frac)
 
 static float CG_WwiiScopeZoom(const playerState_t *ps, int weapon)
 {
-    const WeaponDef *weapDef = BG_GetWeaponDef(weapon);
+    const WeaponDef *weapDef = BG_GetPlayerWeaponDef(ps, weapon);
 
     return CG_WwiiScopeZoomFraction(ps->fWeaponPosFrac, cg->playerEntity.bPositionToADS ?
                                     CG_WwiiScopeZoomInFrac(weapon, weapDef->fAdsZoomInFrac) : weapDef->fAdsZoomOutFrac);
@@ -253,12 +348,19 @@ static float CG_WwiiScopeZoom(const playerState_t *ps, int weapon)
 /* The move, in units forward, left and up, that puts the glass of the resting
  * pose on the view axis, aim of the way: hand is where the rifle's origin
  * already sits from the eye, with the sway the stock code froze at the
- * start of the raise. */
-static void CG_WwiiScopeCentreOffset(const CgWwiiScopeGlass *glass, const float *hand, float aim, float *offset)
+ * start of the raise. Turning the rifle back by roll degrees, as
+ * CG_WwiiScopeAdjustViewWeapon does, carries the glass round that origin: a
+ * 4x Optic's sits well above it. */
+static void CG_WwiiScopeCentreOffset(const CgWwiiScopeGlass *glass, const float *hand, float aim, float roll,
+                                     float *offset)
 {
+    float turn = roll * 0.0174532925f;
+    float left = glass->eye[1] * cosf(turn) + glass->eye[2] * sinf(turn);
+    float up = glass->eye[2] * cosf(turn) - glass->eye[1] * sinf(turn);
+
     offset[0] = 0.0f;
-    offset[1] = glass->eye[0] > 0.0f ? -(hand[1] + glass->eye[1]) * aim : 0.0f;
-    offset[2] = glass->eye[0] > 0.0f ? -(hand[2] + glass->eye[2]) * aim : 0.0f;
+    offset[1] = glass->eye[0] > 0.0f ? -(hand[1] + left) * aim : 0.0f;
+    offset[2] = glass->eye[0] > 0.0f ? -(hand[2] + up) * aim : 0.0f;
 }
 
 /* How far through its roll a scoped bolt is at fraction t of the rechamber:
@@ -311,32 +413,42 @@ static float CG_WwiiScopeBoltProgress(const playerState_t *ps, const WeaponDef *
 
 /* The anim weights, not the weapon state: the client plays a fire or
  * rechamber anim to its end, past its state's time. A rifle whose scoped
- * rechamber is its idle pose works its bolt procedurally, while
- * PM_StartRechamber's scoped anim plays. */
+ * rechamber is its idle pose, or gave way to it, works its bolt
+ * procedurally, while PM_StartRechamber's scoped anim plays. */
 static void CG_WwiiScopeBoltState(const playerState_t *ps, int weapon, CgWwiiScopeBolt *bolt)
 {
     static const unsigned char fireAnims[4] = { 3, 5, 18, 19 };
     const struct XAnimTree_s *tree = (*(weaponInfo_t **)imp_cg_weapons)[weapon].tree;
     float scoped, progress;
-    int i;
+    int i, idle;
 
     memset(bolt, 0, sizeof(*bolt));
     if (!tree)
         return;
     for (i = 0; i < 4; i++)
         bolt->fire = fmaxf(bolt->fire, XAnimGetWeight(tree, fireAnims[i]));
-    scoped = XAnimGetWeight(tree, CG_WWIISCOPE_ADS_RECHAMBER_ANIM);
-    bolt->rechamber = fmaxf(XAnimGetWeight(tree, CG_WWIISCOPE_RECHAMBER_ANIM), s_idleBolt[weapon] ? 0.0f : scoped);
-    if (s_idleBolt[weapon]) {
-        progress = CG_WwiiScopeBoltProgress(ps, BG_GetWeaponDef(weapon));
+    scoped = s_heldBolt[weapon] ? 1.0f : XAnimGetWeight(tree, CG_WWIISCOPE_ADS_RECHAMBER_ANIM);
+    idle = s_idleBolt[weapon] || s_heldBolt[weapon];
+    bolt->rechamber = fmaxf(XAnimGetWeight(tree, CG_WWIISCOPE_RECHAMBER_ANIM), idle ? 0.0f : scoped);
+    if (idle) {
+        progress = CG_WwiiScopeBoltProgress(ps, BG_GetPlayerWeaponDef(ps, weapon));
         if (progress >= 0.0f)
             bolt->procedural = CG_WwiiScopeBoltEnvelope(progress) * scoped;
     }
 }
 
+int CG_WwiiScopeViewAnim(const playerState_t *ps, int weapon, int anim)
+{
+    if (weapon <= 0 || weapon >= CG_WWIISCOPE_MAX_WEAPONS)
+        return anim;
+    s_heldBolt[weapon] =
+        anim == CG_WWIISCOPE_ADS_RECHAMBER_ANIM && CG_WwiiScopeGlassFor(ps, weapon) && !s_idleBolt[weapon];
+    return s_heldBolt[weapon] ? CG_WWIISCOPE_IDLE_ANIM : anim;
+}
+
 void CG_WwiiScopeAdjustViewWeapon(const playerState_t *ps, int weapon, vec_t *angles)
 {
-    const CgWwiiScopeGlass *glass = CG_WwiiScopeGlassForWeapon(weapon);
+    const CgWwiiScopeGlass *glass = CG_WwiiScopeGlassFor(ps, weapon);
     CgWwiiScopeBolt bolt;
     float aim;
 
@@ -451,7 +563,7 @@ static int CG_WwiiScopeGunBone(struct DObj_s *obj, vec3_t *axis, vec_t *origin)
 
 void CG_WwiiScopePlaceViewWeapon(const playerState_t *ps, int weapon, vec_t *origin)
 {
-    const CgWwiiScopeGlass *glass = CG_WwiiScopeGlassForWeapon(weapon);
+    const CgWwiiScopeGlass *glass = CG_WwiiScopeGlassFor(ps, weapon);
     CgWwiiScopeBolt bolt;
     float hand[3], offset[3], aim, steady;
     int i, k;
@@ -464,8 +576,8 @@ void CG_WwiiScopePlaceViewWeapon(const playerState_t *ps, int weapon, vec_t *ori
         for (i = 0; i < 3; i++)
             hand[k] += (origin[i] - cg->refdef.vieworg[i]) * cg->refdef.viewaxis[k][i];
     }
-    CG_WwiiScopeCentreOffset(glass, hand, aim, offset);
     CG_WwiiScopeBoltState(ps, weapon, &bolt);
+    CG_WwiiScopeCentreOffset(glass, hand, aim, (glass->roll + CG_WWIISCOPE_BOLT_ROLL * bolt.procedural) * aim, offset);
     CG_WwiiScopeBoltShift(glass->radius, bolt.procedural * aim, offset);
     /* Only about the resting pose at full aim, never against the raise. */
     steady = CG_WwiiScopeSmoothstep(0.9f, 1.0f, ps->fWeaponPosFrac);
@@ -528,7 +640,7 @@ static float CG_WwiiScopeDarkStep(float dark, float target, float seconds)
 
 qboolean CG_WwiiScopeUpdate(const playerState_t *ps, int weapon, qboolean drawGun)
 {
-    const CgWwiiScopeGlass *glass = drawGun ? CG_WwiiScopeGlassForWeapon(weapon) : NULL;
+    const CgWwiiScopeGlass *glass = drawGun ? CG_WwiiScopeGlassFor(ps, weapon) : NULL;
     CgWwiiScopeLens *lens = &s_lens;
     const weaponInfo_t *weapInfo;
     vec3_t boneAxis[3];
@@ -604,7 +716,7 @@ float CG_DrawWwiiScopeReticle(void)
 {
     static const unsigned short indices[6] = { 0, 1, 2, 0, 2, 3 };
     const vidConfig_t *vid = &((clientStatic_t *)imp_cls)->vidConfig;
-    const weaponInfo_t *weapInfo;
+    const playerState_t *ps = &cg->predictedPlayerState;
     const CgWwiiScopeLens *lens = &s_lens;
     HudVertex2D verts[4];
     MaterialHandle material;
@@ -614,8 +726,7 @@ float CG_DrawWwiiScopeReticle(void)
         return -1.0f;
     if (!(lens->presence > 0.0f) || !(lens->open > 0.01f))
         return 1.0f - lens->open;
-    weapInfo = &(*(weaponInfo_t **)imp_cg_weapons)[BG_GetViewmodelWeaponIndex(&cg->predictedPlayerState)];
-    material = CG_WwiiScopeLensImage(weapInfo->hADSOverlay, &edge);
+    material = CG_WwiiScopeLensImage(CG_WwiiScopeOverlay(ps, BG_GetViewmodelWeaponIndex(ps)), &edge);
     if (!material || !(edge > 0.0f))
         return 1.0f - lens->open;
     CG_WwiiScopeReticleQuad(lens, edge, (float)vid->width, (float)vid->height, lens->open, verts);
@@ -643,6 +754,13 @@ float CG_WwiiScopeZoomInFrac(int weapon, float frac)
 {
     (void)weapon;
     return frac;
+}
+
+int CG_WwiiScopeViewAnim(const playerState_t *ps, int weapon, int anim)
+{
+    (void)ps;
+    (void)weapon;
+    return anim;
 }
 
 void CG_WwiiScopeAdjustViewWeapon(const playerState_t *ps, int weapon, vec_t *angles)

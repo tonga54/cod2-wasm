@@ -229,8 +229,12 @@ repository holds none of their data.
   rifle's line of sight to the gun's, its middle 3 ahead of the sights' place,
   its lowest point on the highest of the gun beneath its middle, magazines
   aside and no higher than the iron sights' line; a bracket fills what room is
-  left, as under the Bren's, beside its magazine. It shows at the hip and while
-  raising; at full zoom the scope's overlay takes over, as the rule above says.
+  left, as under the Bren's, beside its magazine. Raised, the WWII scope draws
+  it as it does the scoped rifles, its glass a window with the borrowed
+  reticle, from `glass/<gun>__optic4x`, which the generator writes beside it:
+  the source rifle's glass moved with the scope, where the gun's ADS up anim
+  leaves it at full aim and how far it cants it. Through it a bolt-action works
+  its bolt in its idle pose, the scope rolling aside, as the scoped rifles do.
 - The can never rises into the line of sight: where that runs low over the
   bore, as on the Thompson, Colt and TT-30, the can hangs below the bore, which
   then nears its top.
@@ -580,7 +584,7 @@ on canvases the generator accepts, for the day a class weapon matches one.
 - Only the player's own first-person gun shows its attachments. Other players'
   guns, and every gun in third person, look the same with any of them: the
   attachments travel in the player state, which only its player receives.
-  The 4x Optic at full zoom borrows a sniper rifle's scope image.
+  The 4x Optic's reticle is its nation's sniper scope's.
 - The cans, sights, clamps and box magazines are this port's, made from simple
   shapes; the 4x Optics are CoD2's scopes, not WWII's shorter one, and the
   Mosin-Nagant's own sniper scope, cut into its cloth, cannot be lifted. A

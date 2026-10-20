@@ -4,14 +4,18 @@ their data.
 
 For a gun model viewmodel_x and each attachment its weapon takes that WWII shows on the gun:
 - xmodel/viewmodel_x__suppressor rides tag_flash: a can along the muzzle's +x;
-- xmodel/viewmodel_x__reflex, __lens and __optic4x ride j_gun, centred on the line of sight the
-  aiming animation puts the eye on, so the reticle drawn at the screen's centre sits in the glass;
+- xmodel/viewmodel_x__reflex and __lens ride j_gun, centred on the line of sight the aiming
+  animation puts the eye on, so the reticle drawn at the screen's centre sits in the glass;
+- xmodel/viewmodel_x__optic4x rides j_gun, a scoped rifle's scope over the receiver; beside it
+  glass/viewmodel_x__optic4x is its glass for the WWII scope (cg_wwiiscope_mp.c), which centres
+  that glass at the eye while aiming;
 - xmodel/viewmodel_x__extmag rides j_clip: the gun's own magazine, its lower part longer, in the
   gun's material; with it the game draws xmodel/viewmodel_x__nomag, the gun without its magazine.
 Units are inches, x forward, y left, z up, as the guns are modelled.
 """
 import json
 import math
+import re
 import struct
 from pathlib import Path
 
@@ -203,6 +207,8 @@ class Gun:
         if fields.get('adsUpAnim'):
             anims.append(read_anim_locals(read, fields['adsUpAnim'], None))
         hands = _posed(hand_names, hand_parents, hand_local, anims)
+        # j_gun's pose at full aim from the view weapon's origin: x forward, y left, z up.
+        self.aimed = S._compose(hands['tag_weapon'], gun['j_gun'])
         aimed = S._invert(hands['tag_weapon'])
         self.eye = S._add(S._qrot(aimed[0], (0.0, 0.0, 0.0)), aimed[1])
         ahead = S._sub(S._add(S._qrot(aimed[0], (1.0, 0.0, 0.0)), aimed[1]), self.eye)
@@ -554,6 +560,12 @@ OPTIC_SOURCES = {
 OPTIC_IN_PLACE = ('kar98k_mp', 'enfield_mp')
 # Above this much room between a 4x Optic's mount and the gun under it, a bracket fills it.
 MOUNT_GAP = 0.25
+# The scoped rifles' glasses by gun model, as the WWII scope's table holds them: the rim's centre in j_gun's
+# space and its radius.
+SCOPE_GLASSES = {model.lower(): ((float(x), float(y), float(z)), float(radius)) for model, x, y, z, radius in re.findall(
+    r'\{ "(\w+)", \{ ([-\d.]+)f, ([-\d.]+)f, ([-\d.]+)f \}, ([-\d.]+)f,',
+    (ROOT / 'src/PC/cgame_mp/cg_wwiiscope_mp.c').read_text())}
+GLASS = 'glass/'
 
 
 def scope_parts(read, source):
@@ -571,15 +583,16 @@ def scope_parts(read, source):
     return rifle, parts
 
 
-def optic4x(gun, read):
-    """The gun's 4x Optic in j_gun's space: its scope from OPTIC_SOURCES, along the gun's line of sight over its
-    receiver, OPTIC_AHEAD and 3 more ahead of the eye, its mount on the highest of the gun beneath the middle
-    of the scope but no higher than the iron sights' line: what stands taller, as the Bren's magazine and its
-    cover, the scope clears beside it. Aiming through it turns to the scope's overlay, so the scope need not
-    meet the eye."""
+def optic4x_fit(gun, read):
+    """Where the gun's 4x Optic sits: the rifle of OPTIC_SOURCES its scope comes from, the scope's parts in that
+    rifle's j_gun space, the move onto the gun's and the bracket under it, both None for a scope that sits on
+    the gun as on its rifle. The scope lies along the gun's line of sight over its receiver, OPTIC_AHEAD and 3
+    more ahead of the eye, its mount on the highest of the gun beneath the middle of the scope but no higher
+    than the iron sights' line: what stands taller, as the Bren's magazine and its cover, the scope clears
+    beside it."""
     rifle, parts = scope_parts(read, OPTIC_SOURCES[gun.weapon])
     if gun.weapon in OPTIC_IN_PLACE:
-        return parts
+        return rifle, parts, None, None
     source = S._invert((_sight_frame(rifle), rifle.eye))
     local = [S._add(S._qrot(source[0], v[5]), source[1]) for part in parts for v in part.vertices]
     back, front = min(p[0] for p in local), max(p[0] for p in local)
@@ -594,11 +607,38 @@ def optic4x(gun, read):
     up = S._qrot(frame, (0.0, 0.0, 1.0))
     origin = S._add(S._add(at, S._qrot(frame, (-middle, 0.0, 0.0))), S._scale(up, (top - lowest) / up[2]))
     place = S._compose((frame, origin), source)
-    out = [part.moved(*place) for part in parts]
+    mount = None
     if top - tops[2] > MOUNT_GAP:
-        out.append(box(Mesh('parkerized'), (at[0] - 0.7, at[1] - 0.22, tops[2] - 0.1),
-                       (at[0] + 0.7, at[1] + 0.22, top + 0.05)))
-    return out
+        mount = box(Mesh('parkerized'), (at[0] - 0.7, at[1] - 0.22, tops[2] - 0.1),
+                    (at[0] + 0.7, at[1] + 0.22, top + 0.05))
+    return rifle, parts, place, mount
+
+
+def optic4x(gun, read):
+    """The gun's 4x Optic in j_gun's space, as optic4x_fit places it."""
+    _, parts, place, mount = optic4x_fit(gun, read)
+    if place is None:
+        return parts
+    return [part.moved(*place) for part in parts] + ([mount] if mount else [])
+
+
+def optic4x_glass(gun, read):
+    """The 4x Optic's glass as the WWII scope reads it, a line of the numbers its table gives a scoped rifle: the
+    rim's centre in j_gun's space and its radius, where the gun's full aim leaves that centre from the view
+    weapon's origin, forward, left and up, and the degrees it cants the scope clockwise; None when the scope's
+    rifle has no glass in the table."""
+    rifle, _, place, _ = optic4x_fit(gun, read)
+    glass = SCOPE_GLASSES.get(rifle.model.lower())
+    if not glass:
+        return None
+    rim, radius = glass
+    if place is not None:
+        rim = S._add(S._qrot(place[0], rim), place[1])
+    q, t = gun.aimed
+    eye = S._add(S._qrot(q, rim), t)
+    up = S._qrot(q, (0.0, 0.0, 1.0))
+    roll = math.degrees(math.atan2(-up[1], up[2]))
+    return ' '.join(f'{value:.4f}' for value in canonical((*rim, radius, *eye, roll))) + '\n'
 
 
 def _magazine(gun):
@@ -915,6 +955,9 @@ def gun_attachments(read, weapon, takes):
             if gun.weapon not in OPTIC_SOURCES:
                 continue
             entries.update(mesh_model(base + attachment, optic4x(gun, read), RIDES[attachment]))
+            glass = optic4x_glass(gun, read)
+            if glass:
+                entries[GLASS + base + attachment] = glass.encode()
         else:
             meshes = {'reflex': reflex, 'lens': lens}[attachment](gun)
             entries.update(mesh_model(base + attachment, meshes, RIDES[attachment]))

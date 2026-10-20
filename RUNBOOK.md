@@ -4479,3 +4479,33 @@ Validation: `test-join-menu.py` (new, 20 mutants), `test-match-menu.py`,
 `test-pause-menu.py`; the web client and the native server build; in the QA
 stack with two rooms, the list, the focus, an automatic refresh without a
 gap, Escape back to the main menu and Enter into a match.
+
+## The 4x Optic through the WWII scope — 2026-10-20
+
+The owner reported that a 4x Optic on an iron-sighted rifle showed the stock
+overlay, black around the glass, and asked for it to look like the other
+scopes: the edge blurred, and black only while Shift is held.
+
+The WWII scope knew only the four sniper viewmodels' glass. When the private
+archives are prepared, `browser_attachment_models.py` now writes beside each
+4x Optic model its glass, `glass/<gun model>__optic4x`. That is the sniper
+rifle's glass from the scope's table, moved as the scope is, with where the
+gun's ADS up anim leaves it at full aim and how far it cants it.
+`cg_wwiiscope_mp.c` reads it when the player has the optic on that gun. It
+centres the glass allowing for the roll that levels the reticle, which
+matters on the Bren, canted 4.9°. Through the scope a bolt-action works its
+bolt in its idle pose, the scope rolling aside as on the sniper rifles; its
+scoped rechamber anim would sweep the magnified hand across the view.
+
+Only `cod2_browser_renderer.iwd` changes (1,861 bytes), so
+`site/wasm-game-data.json` is regenerated with this commit. Details, the ten
+guns' numbers and evidence are in `docs/GRAPHICS_2026-10-16.md`, "WWII scope
+on the 4x Optic".
+
+Validation: `test-browser-attachment-models.py` (25 mutants, 5 new) and
+`test-wwii-scope.py` (56 mutants), both with the owner's IWDs; the web client
+build and the private archives regenerated. In the QA stack, these guns
+showed the WWII view at full aim and black only with Shift: the Garand,
+Kar98k, Bren, Lee-Enfield and MP44 with the optic, and the four sniper
+rifles. The Kar98k worked its bolt through the optic without the hand
+crossing the view, and through its iron sights without the optic as before.

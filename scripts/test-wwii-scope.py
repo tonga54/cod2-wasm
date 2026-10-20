@@ -3,8 +3,9 @@
 
 Checks the hooks that wire the scope into the view weapon, the reticle, the
 zoom and the cgame's start-up; runs its glass projection, rifle projection,
-zoom, centring, bolt, blackout and reticle math, and the lens image decoder,
-under ASan and UBSan, each with mutants that must fail; and, when the retail
+zoom, centring, bolt, blackout and reticle math, the glass a player's weapon
+is drawn with, a 4x Optic's read from its glass file, and the lens image
+decoder, under ASan and UBSan, each with mutants that must fail; and, when the retail
 IWDs are in data/main, checks the glass table and the rifle's near clip
 against the sniper viewmodels and the lens edges against the scope overlays.
 """
@@ -68,6 +69,16 @@ assert reticle.index('wwiiVisibility = CG_DrawWwiiScopeReticle();\n    if (wwiiV
                      '        return wwiiVisibility;\n') < reticle.index('weapDef->szOverlayMaterial[0]')
 main = (root / 'src/PC/cgame_mp/cg_main_mp.c').read_text()
 assert main.index('CG_HitMarkerInit();') < main.index('CG_WwiiScopeInit();')
+# The view weapon's anim goes through the scope once chosen; the rifle is centred with the roll it is turned
+# back by, its bolt's included.
+run_anims = function(weapons, 'CG_WeaponRunXModelAnims')
+assert run_anims.index('    activeAnim = CG_WwiiScopeViewAnim(ps, weaponIndex, activeAnim);\n') < \
+    run_anims.index('CG_SetWeaponXAnimWeights(pAnimTree')
+place = function(scope, 'CG_WwiiScopePlaceViewWeapon')
+assert place.index('CG_WwiiScopeBoltState(ps, weapon, &bolt);') < place.index(
+    'CG_WwiiScopeCentreOffset(glass, hand, aim, (glass->roll + CG_WWIISCOPE_BOLT_ROLL * bolt.procedural) * aim, offset);')
+adjust = function(scope, 'CG_WwiiScopeAdjustViewWeapon')
+assert 'angles[2] -= glass->roll * aim;' in adjust and 'angles[2] -= CG_WWIISCOPE_BOLT_ROLL * bolt.procedural * aim;' in adjust
 # The window's near clip comes and goes with the window.
 assert 'lens->nearClip = CG_WWIISCOPE_NEAR_CLIP * lens->presence;' in scope
 
@@ -81,7 +92,7 @@ table = re.search(r'^const CgWwiiScopeGlass cg_wwiiScopeGlasses\[CG_WWIISCOPE_GL
 keeps = re.search(r'^static const float s_fireKeep\[3\] = [^\n]+\n^static const float s_rechamberKeep\[3\] = [^\n]+\n',
                   scope, re.M)[0]
 math_body = ''.join(function(scope, name) for name in (
-    'CG_WwiiScopeFindGlass', 'CG_WwiiScopeClamp01', 'CG_WwiiScopeSmoothstep', 'CG_WwiiScopeZoomFraction',
+    'CG_WwiiScopeFindGlass', 'CG_WwiiScopeParseGlass', 'CG_WwiiScopeClamp01', 'CG_WwiiScopeSmoothstep', 'CG_WwiiScopeZoomFraction',
     'CG_WwiiScopeCentreOffset', 'CG_WwiiScopeBoltEnvelope', 'CG_WwiiScopeBoltShift', 'CG_WwiiScopeSteady',
     'CG_WwiiScopeBoltProgress', 'CG_WwiiScopeBoltState', 'CG_WwiiScopeProjectPoint', 'CG_WwiiScopeProjectGlass',
     'CG_WwiiScopeProjectionScales', 'CG_WwiiScopeDarkStep', 'CG_WwiiScopeReticleQuad'))
@@ -102,13 +113,13 @@ typedef struct { struct XAnimTree_s *tree; } weaponInfo_t;
 ''' + types + defines + r'''
 static int I_stricmp(const char *a, const char *b) { return strcasecmp(a, b); }
 static WeaponDef weaponDef = { 1000 };
-static WeaponDef *BG_GetWeaponDef(int weapon) { (void)weapon; return &weaponDef; }
+static WeaponDef *BG_GetPlayerWeaponDef(const playerState_t *ps, int weapon) { (void)ps; (void)weapon; return &weaponDef; }
 static struct XAnimTree_s tree;
 static weaponInfo_t weaponInfos[4];
 static weaponInfo_t *weaponInfoTable = weaponInfos;
 static void *imp_cg_weapons = &weaponInfoTable;
 static float XAnimGetWeight(const struct XAnimTree_s *t, unsigned int anim) { return t->weights[anim]; }
-static unsigned char s_idleBolt[4];
+static unsigned char s_idleBolt[4], s_heldBolt[4];
 ''' + table + keeps
 math_checks = r'''
 static int near(float a, float b, float tolerance) { return fabsf(a - b) <= tolerance; }
@@ -133,6 +144,37 @@ int main(void) {
     }
     assert(!CG_WwiiScopeFindGlass(NULL) && !CG_WwiiScopeFindGlass("viewmodel_kar98") &&
            !CG_WwiiScopeFindGlass("viewmodel_kar98_scope_x") && !CG_WwiiScopeFindGlass("viewmodel_binoculars"));
+    cases++;
+
+    /* A 4x Optic's glass file, the generator's line, is read back; anything
+     * else leaves the glass as it was. */
+    {
+        static const char *const bad[] = {
+            "-5.2107 0.1407 3.2472 0.5780 6.3633 0.1443 1.0267\n",
+            "-5.2107 0.1407 3.2472 0.5780 6.3633 0.1443 1.0267 0.1268 9\n",
+            "-5.2107 0.1407 3.2472 0.5780 6.3633 0.1443 1.0267 0.1268 x\n",
+            "-5.2107 0.1407 3.2472 0.0000 6.3633 0.1443 1.0267 0.1268\n",
+            "-5.2107 0.1407 3.2472 0.5780 0.0000 0.1443 1.0267 0.1268\n",
+            "-5.2107 0.1407 3.2472 0.5780 -6.3633 0.1443 1.0267 0.1268\n",
+            "-5.2107 0.1407 nan 0.5780 6.3633 0.1443 1.0267 0.1268\n",
+            "-5.2107 0.1407 3.2472 0.5780 6.3633 inf 1.0267 0.1268\n",
+            "-5.2107 0.1407 3.2472 0.5780 6.3633 0.1443 1.0267 45.0000\n",
+            "-50.0000 0.1407 3.2472 0.5780 6.3633 0.1443 1.0267 0.1268\n",
+            "glass\n",
+            "",
+        };
+        CgWwiiScopeGlass glass, before;
+
+        memset(&glass, 0, sizeof(glass));
+        assert(CG_WwiiScopeParseGlass("-5.2107 0.1407 3.2472 0.5780 6.3633 0.1443 1.0267 -4.8838\n", &glass));
+        assert(glass.rim[0] == -5.2107f && glass.rim[1] == 0.1407f && glass.rim[2] == 3.2472f && glass.radius == 0.578f);
+        assert(glass.eye[0] == 6.3633f && glass.eye[1] == 0.1443f && glass.eye[2] == 1.0267f && glass.roll == -4.8838f);
+        for (unsigned k = 0; k < sizeof(bad) / sizeof(bad[0]); k++) {
+            before = glass;
+            assert(!CG_WwiiScopeParseGlass(bad[k], &glass) && !memcmp(&glass, &before, sizeof(glass)));
+        }
+        assert(!CG_WwiiScopeParseGlass(NULL, &glass));
+    }
     cases++;
 
     /* The window opens with the world's zoom: CG_GetViewFov's smoothed share
@@ -255,23 +297,46 @@ int main(void) {
     }
     cases++;
 
-    /* Centring: at full aim the resting glass is on the view axis wherever
-     * the hand is, half way at half aim; an unmeasured eye stays put. */
-    for (int i = 0; i < CG_WWIISCOPE_GLASS_COUNT; i++) {
-        for (int k = 0; k < 20; k++) {
-            float hand[3] = { 0.3f * k - 3, 0.07f * k - 0.7f, 0.5f - 0.05f * k }, offset[3], half[3];
-            CG_WwiiScopeCentreOffset(GLASS(i), hand, 1, offset);
-            assert(offset[0] == 0 && near(hand[1] + offset[1] + GLASS(i)->eye[1], 0, EPS) &&
-                   near(hand[2] + offset[2] + GLASS(i)->eye[2], 0, EPS));
-            CG_WwiiScopeCentreOffset(GLASS(i), hand, 0.5f, half);
-            assert(near(half[1], 0.5f * offset[1], EPS) && near(half[2], 0.5f * offset[2], EPS));
+    /* Centring: the resting glass, carried round the rifle's origin by the
+     * roll the rifle is turned back by (angles[2] less it, AnglesToAxis
+     * turning a model's left to (0, cos r, sin r) and its up to (0, -sin r,
+     * cos r)), the cant's and a procedural bolt's, is on the view axis at full
+     * aim wherever the hand is, half way there at half aim. A Bren's 4x Optic
+     * glass sits high over the origin of a canted rifle. An unmeasured eye
+     * stays put. */
+    {
+        CgWwiiScopeGlass glasses[CG_WWIISCOPE_GLASS_COUNT + 1];
+        const CgWwiiScopeGlass bren = { "viewmodel_bren", { -6.7356f, 0.8039f, 3.7633f }, 0.635f,
+                                        { 7.4642f, 0.1022f, 1.3118f }, -4.8838f };
+
+        memcpy(glasses, cg_wwiiScopeGlasses, sizeof(cg_wwiiScopeGlasses));
+        glasses[CG_WWIISCOPE_GLASS_COUNT] = bren;
+        for (int i = 0; i <= CG_WWIISCOPE_GLASS_COUNT; i++) {
+            const CgWwiiScopeGlass *glass = &glasses[i];
+            for (int k = 0; k < 20; k++) {
+                for (int a = 0; a < 4; a++) {
+                    float aim = a & 1 ? 0.5f : 1.0f;
+                    float roll = (glass->roll + (a & 2 ? 0.5f * CG_WWIISCOPE_BOLT_ROLL : 0.0f)) * aim;
+                    float r = -roll * 3.14159265f / 180.0f;
+                    float left = glass->eye[1] * cosf(r) - glass->eye[2] * sinf(r);
+                    float up = glass->eye[1] * sinf(r) + glass->eye[2] * cosf(r);
+                    float hand[3] = { 0.3f * k - 3, 0.07f * k - 0.7f, 0.5f - 0.05f * k }, offset[3];
+                    CG_WwiiScopeCentreOffset(glass, hand, aim, roll, offset);
+                    assert(offset[0] == 0 && near(hand[1] + left + offset[1], (1 - aim) * (hand[1] + left), EPS) &&
+                           near(hand[2] + up + offset[2], (1 - aim) * (hand[2] + up), EPS));
+                }
+            }
         }
+        /* Levelled, the Bren's glass comes round to just right of the origin. */
+        float hand[3] = { 0, 0, 0 }, offset[3];
+        CG_WwiiScopeCentreOffset(&bren, hand, 1, bren.roll, offset);
+        assert(near(offset[1], 0.0098f, 2e-4f) && near(offset[2], -1.3157f, 2e-4f));
     }
     {
         CgWwiiScopeGlass unmeasured = *GLASS(0);
         float hand[3] = { 1, 2, 3 }, offset[3];
         unmeasured.eye[0] = 0;
-        CG_WwiiScopeCentreOffset(&unmeasured, hand, 1, offset);
+        CG_WwiiScopeCentreOffset(&unmeasured, hand, 1, unmeasured.roll, offset);
         assert(offset[0] == 0 && offset[1] == 0 && offset[2] == 0);
     }
     cases++;
@@ -394,6 +459,21 @@ int main(void) {
         CG_WwiiScopeBoltState(&ps, 2, &bolt);
         assert(bolt.procedural == 0);
         weaponDef.iRechamberTime = 1000;
+        /* A rifle whose scoped rechamber anim gave way to the idle pose works
+         * its bolt procedurally over the whole rechamber, no scoped anim
+         * playing. */
+        memset(&tree, 0, sizeof(tree));
+        tree.weights[1] = 1;
+        s_heldBolt[1] = 1;
+        for (int left = 1000; left >= 0; left -= 50) {
+            ps.weaponTime = left;
+            CG_WwiiScopeBoltState(&ps, 1, &bolt);
+            assert(bolt.rechamber == 0 && near(bolt.procedural, CG_WwiiScopeBoltEnvelope(1 - left / 1000.0f), EPS));
+        }
+        s_heldBolt[1] = 0;
+        ps.weaponTime = 500;
+        CG_WwiiScopeBoltState(&ps, 1, &bolt);
+        assert(bolt.rechamber == 0 && bolt.procedural == 0);
         /* No anim tree, no bolt. */
         CG_WwiiScopeBoltState(&ps, 3, &bolt);
         assert(bolt.fire == 0 && bolt.rechamber == 0 && bolt.procedural == 0);
@@ -450,17 +530,26 @@ math_mutants = [
     ('target > dark ? CG_WWIISCOPE_DARK_IN : CG_WWIISCOPE_DARK_OUT', 'target > dark ? CG_WWIISCOPE_DARK_OUT : CG_WWIISCOPE_DARK_IN'),
     ('    return target > dark ? fminf(target, dark + rate) : fmaxf(target, dark - rate);',
      '    return target > dark ? dark + rate : dark - rate;'),
-    ('-(hand[1] + glass->eye[1]) * aim', '-(hand[1] + glass->eye[1])'),
+    ('-(hand[1] + left) * aim', '-(hand[1] + left)'),
+    ('    float turn = roll * 0.0174532925f;', '    float turn = 0.0f;'),
+    ('    float turn = roll * 0.0174532925f;', '    float turn = glass->roll * aim * 0.0174532925f;'),
+    ('glass->eye[1] * cosf(turn) + glass->eye[2] * sinf(turn)', 'glass->eye[1] * cosf(turn) - glass->eye[2] * sinf(turn)'),
+    (' || used < 0 || text[used])', ')'),
+    ('    if (!(v[3] > 0.0f) || !(v[4] > 0.0f))\n        return 0;\n', ''),
+    ('        if (!(fabsf(v[i]) < CG_WWIISCOPE_GLASS_REACH))\n            return 0;\n', ''),
+    ('        glass->eye[i] = v[4 + i];', '        glass->eye[i] = v[3 + i];'),
     ('    return CG_WwiiScopeSmoothstep(0.04f, 0.3f, t) * (1.0f - CG_WwiiScopeSmoothstep(0.6f, 0.95f, t));',
      '    return CG_WwiiScopeSmoothstep(0.04f, 0.3f, t);'),
     ('    float units = radius / CG_WWIISCOPE_LENS_RADIUS * envelope;', '    float units = envelope;'),
     ('(1.0f - keep[i] * (i ? scale : 1.0f))', '(1.0f - keep[i])'),
     ('static const float s_rechamberKeep[3] = { 0.0f, 0.8f, 0.3f };', 'static const float s_rechamberKeep[3] = { 0.25f, 0.8f, 0.3f };'),
-    ('s_idleBolt[weapon] ? 0.0f : scoped', 'scoped'),
+    ('idle ? 0.0f : scoped', 'scoped'),
+    ('    scoped = s_heldBolt[weapon] ? 1.0f : XAnimGetWeight', '    scoped = XAnimGetWeight'),
+    ('    idle = s_idleBolt[weapon] || s_heldBolt[weapon];', '    idle = s_idleBolt[weapon];'),
     ('            bolt->procedural = CG_WwiiScopeBoltEnvelope(progress) * scoped;',
      '            bolt->procedural = CG_WwiiScopeBoltEnvelope(progress);'),
-    ('    bolt->rechamber = fmaxf(XAnimGetWeight(tree, CG_WWIISCOPE_RECHAMBER_ANIM), s_idleBolt[weapon] ? 0.0f : scoped);',
-     '    bolt->rechamber = ps->weaponstate == CG_WWIISCOPE_RECHAMBERING && !s_idleBolt[weapon];'),
+    ('    bolt->rechamber = fmaxf(XAnimGetWeight(tree, CG_WWIISCOPE_RECHAMBER_ANIM), idle ? 0.0f : scoped);',
+     '    bolt->rechamber = ps->weaponstate == CG_WWIISCOPE_RECHAMBERING && !idle;'),
     ('    static const unsigned char fireAnims[4] = { 3, 5, 18, 19 };', '    static const unsigned char fireAnims[4] = { 3, 5, 18, 18 };'),
     ('    if (!tree)\n        return;\n', ''),
     ('        verts[i].st[1] = corners[i][1] > 0.0f ? 0.0f : 1.0f;', '        verts[i].st[1] = corners[i][1] > 0.0f ? 1.0f : 0.0f;'),
@@ -771,11 +860,224 @@ int main(void) {
 zoom_mutants = [('frac < CG_WWIISCOPE_ZOOM_IN_FRAC', 'frac > CG_WWIISCOPE_ZOOM_IN_FRAC'),
                 ('    return frac;\n', '    return CG_WWIISCOPE_ZOOM_IN_FRAC;\n')]
 
+# The glass a player's weapon is drawn with: a scoped rifle's own; a 4x Optic's, read once from beside the optic's
+# model, while the player has one on a gun without a scope of its own and the optic brought its overlay; the
+# reticle cut from that overlay. Every match starts with the 4x Optics' glass unread.
+assert 'memset(s_opticKnown, CG_WWIISCOPE_UNKNOWN, sizeof(s_opticKnown));' in function(scope, 'CG_WwiiScopeInit')
+select_body = ''.join(function(scope, name) for name in (
+    'CG_WwiiScopeFindGlass', 'CG_WwiiScopeParseGlass', 'CG_WwiiScopeWeaponGlass', 'CG_WwiiScopeOpticGlass',
+    'CG_WwiiScopePlayerGlass', 'CG_WwiiScopeOverlay', 'CG_WwiiScopeViewAnim'))
+select_support = r'''
+#include <assert.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
+typedef float vec_t;
+typedef struct Material *MaterialHandle;
+struct Material { const char *name; };
+typedef struct { unsigned attachments; } playerState_t;
+typedef struct {
+    char *szGunXModel;
+    char *szXAnims[23];
+    int weapClass;
+    char *szOverlayMaterial;
+    int overlayReticle;
+} WeaponDef;
+typedef struct { MaterialHandle hADSOverlay; } weaponInfo_t;
+enum { ATT_REFLEX, ATT_LENS, ATT_OPTIC4X };
+#define ATT_BIT(a) (1u << (a))
+static const struct { const char *name; } g_attachments[] = { { "reflex" }, { "lens" }, { "optic4x" } };
+''' + types + defines + r'''
+static int I_stricmp(const char *a, const char *b) { return strcasecmp(a, b); }
+''' + table + re.search(r'^static signed char s_glassIndex\[.*?^static unsigned char s_heldBolt\[[^\n]*\n', scope,
+                        re.M | re.S)[0] + r'''
+/* The scope draws the view weapon unless cg_wwiiScope or the compositor turn it off. */
+static int scopeOn = 1;
+static const CgWwiiScopeGlass *CG_WwiiScopePlayerGlass(const playerState_t *ps, int weapon);
+static const CgWwiiScopeGlass *CG_WwiiScopeGlassFor(const playerState_t *ps, int weapon) {
+    return scopeOn ? CG_WwiiScopePlayerGlass(ps, weapon) : NULL;
+}
+#define WEAPONS 8
+static WeaponDef defs[WEAPONS + 1], attached[WEAPONS + 1];
+/* The overlay each gun's 4x Optic borrows, as BG_ApplyAttachments gives it to a gun without one. */
+static char *nations[WEAPONS + 1];
+static weaponInfo_t weaponInfos[WEAPONS + 1];
+static weaponInfo_t *weaponInfoTable = weaponInfos;
+static void *imp_cg_weapons = &weaponInfoTable;
+static int BG_GetNumWeapons(void) { return WEAPONS; }
+static WeaponDef *BG_GetWeaponDef(int weapon) { return &defs[weapon]; }
+/* The player's attachments ride on every weapon here. */
+static unsigned BG_GetWeaponAttachments(const playerState_t *ps, int weapon) { (void)weapon; return ps->attachments; }
+static WeaponDef *BG_GetPlayerWeaponDef(const playerState_t *ps, int weapon) {
+    if (!ps->attachments)
+        return &defs[weapon];
+    attached[weapon] = defs[weapon];
+    if ((ps->attachments & ATT_BIT(ATT_OPTIC4X)) && !defs[weapon].szOverlayMaterial[0] && nations[weapon]) {
+        attached[weapon].szOverlayMaterial = nations[weapon];
+        attached[weapon].overlayReticle = 2;
+    }
+    return &attached[weapon];
+}
+static const struct { const char *name, *text; } files[] = {
+    { "glass/viewmodel_m1garand__optic4x", "-5.2107 0.1407 3.2472 0.5780 6.3633 0.1443 1.0267 0.1268\n" },
+    { "glass/viewmodel_kar98k__optic4x", "-6.1160 -0.0570 2.9960\n" },
+    { "glass/viewmodel_bren__optic4x", "-6.7356 0.8039 3.7633 0.6350 7.4642 0.1022 1.3118 -4.8838\n" },
+    { "glass/viewmodel_scoped__optic4x", "-6.1160 -0.0570 2.9960 0.6120 5.3382 0.0118 1.0586 -0.2231\n" },
+    { "glass/viewmodel_mosinnagant__optic4x", "-3.8107 0.1590 2.9502 0.5780 4.8633 0.1466 1.1944 0.0000\n" },
+};
+static int reads, frees;
+static int FS_ReadFile(const char *qpath, void **buffer) {
+    reads++;
+    for (unsigned i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
+        if (!strcmp(files[i].name, qpath)) {
+            size_t length = strlen(files[i].text);
+            *buffer = memcpy(malloc(length + 1), files[i].text, length + 1);
+            return (int)length;
+        }
+    }
+    *buffer = NULL;
+    return -1;
+}
+static void FS_FreeFile(void *buffer) { frees++; free(buffer); }
+static struct Material materials[8];
+static int registered;
+static MaterialHandle CL_RegisterMaterialNoMip(const char *name, int imageTrack) {
+    assert(imageTrack == 7);
+    for (int i = 0; i < registered; i++)
+        if (!strcmp(materials[i].name, name))
+            return &materials[i];
+    materials[registered].name = name;
+    return &materials[registered++];
+}
+'''
+select_checks = r'''
+int main(void) {
+    static char empty[] = "", springfield[] = "viewmodel_springfield", garand[] = "viewmodel_m1garand",
+                thompson[] = "viewmodel_thompson", binoculars[] = "viewmodel_binoculars", kar98k[] = "viewmodel_kar98k",
+                bren[] = "viewmodel_bren", american[] = "scope_overlay_american", german[] = "scope_overlay_german",
+                idle[] = "viewmodel_m1garand_idle", kar98kIdle[] = "viewmodel_kar98_idle",
+                kar98kRechamber[] = "viewmodel_kar98_ads_rechamber", scoped[] = "viewmodel_scoped",
+                mosin[] = "viewmodel_mosinnagant", mosinIdle[] = "viewmodel_mosin_idle",
+                mosinRechamber[] = "viewmodel_mosin_ads_rechamber", russian[] = "scope_overlay_russian";
+    static struct Material own = { "own" };
+    const playerState_t none = { 0 }, optic = { ATT_BIT(ATT_OPTIC4X) }, reflex = { ATT_BIT(ATT_REFLEX) }, all = { ~0u };
+    const CgWwiiScopeGlass *glass;
+    int cases = 0;
+
+    memset(s_glassIndex, CG_WWIISCOPE_UNKNOWN, sizeof(s_glassIndex));
+    memset(s_opticKnown, CG_WWIISCOPE_UNKNOWN, sizeof(s_opticKnown));
+    for (int w = 0; w <= WEAPONS; w++)
+        defs[w].szGunXModel = defs[w].szOverlayMaterial = empty;
+    /* 1 the scoped Springfield; 2 the Garand, its rechamber its idle pose; 3 the Thompson, with no 4x Optic
+     * model; 4 binoculars; 5 the Kar98k, its glass file broken; 6 the Bren, its optic bringing no overlay; 7 a
+     * scope of its own the table lacks; 8 the Mosin-Nagant, its bolt worked in a scoped rechamber anim. */
+    defs[1].szGunXModel = springfield;
+    defs[1].szOverlayMaterial = american;
+    defs[1].overlayReticle = 3;
+    weaponInfos[1].hADSOverlay = &own;
+    defs[2].szGunXModel = garand;
+    defs[2].szXAnims[1] = idle;
+    nations[2] = american;
+    defs[3].szGunXModel = thompson;
+    nations[3] = american;
+    defs[4].szGunXModel = binoculars;
+    defs[4].weapClass = 9;
+    defs[4].szOverlayMaterial = american;
+    defs[4].overlayReticle = 1;
+    defs[5].szGunXModel = kar98k;
+    defs[5].szXAnims[1] = kar98kIdle;
+    defs[5].szXAnims[20] = kar98kRechamber;
+    nations[5] = german;
+    defs[6].szGunXModel = bren;
+    defs[7].szGunXModel = scoped;
+    defs[7].szOverlayMaterial = german;
+    defs[7].overlayReticle = 2;
+    defs[8].szGunXModel = mosin;
+    defs[8].szXAnims[1] = mosinIdle;
+    defs[8].szXAnims[20] = mosinRechamber;
+    nations[8] = russian;
+
+    /* A scoped rifle has its own glass, with or without the optic, and reads no file. */
+    assert(CG_WwiiScopePlayerGlass(&none, 1) == &cg_wwiiScopeGlasses[1]);
+    assert(CG_WwiiScopePlayerGlass(&optic, 1) == &cg_wwiiScopeGlasses[1] && reads == 0);
+    /* Binoculars keep their own overlay. */
+    assert(!CG_WwiiScopeWeaponGlass(4));
+    cases++;
+    /* The Garand has none without the optic or with another sight, and reads none. */
+    assert(!CG_WwiiScopePlayerGlass(&none, 2) && !CG_WwiiScopePlayerGlass(&reflex, 2) && reads == 0);
+    /* With it, the glass beside the optic's model, read once and freed. */
+    glass = CG_WwiiScopePlayerGlass(&optic, 2);
+    assert(glass && reads == 1 && frees == 1 && !strcmp(glass->gunModel, "viewmodel_m1garand"));
+    assert(glass->rim[0] == -5.2107f && glass->rim[2] == 3.2472f && glass->radius == 0.578f);
+    assert(glass->eye[0] == 6.3633f && glass->eye[2] == 1.0267f && glass->roll == 0.1268f);
+    assert(CG_WwiiScopePlayerGlass(&optic, 2) == glass && reads == 1);
+    /* The glass is the gun's, the choice each player's. */
+    assert(!CG_WwiiScopePlayerGlass(&none, 2));
+    /* A rechamber that is the idle pose is worked procedurally; the Kar98k's has an anim of its own. */
+    assert(s_idleBolt[2] == 1);
+    cases++;
+    /* No 4x Optic model, no glass, looked for once; a broken one, none, freed and not read again. */
+    assert(!CG_WwiiScopePlayerGlass(&optic, 3) && !CG_WwiiScopePlayerGlass(&optic, 3) && reads == 2 && frees == 1);
+    assert(!CG_WwiiScopePlayerGlass(&optic, 5) && !CG_WwiiScopePlayerGlass(&optic, 5) && reads == 3 && frees == 2);
+    assert(s_idleBolt[5] == 0);
+    /* An optic that brought no overlay leaves the gun to the stock code, its glass unread; so does another
+     * attachment on a scope the table lacks: only a 4x Optic's glass is read. */
+    assert(!CG_WwiiScopePlayerGlass(&optic, 6) && !CG_WwiiScopePlayerGlass(&reflex, 7) && reads == 3);
+    /* Nothing outside the weapons. */
+    assert(!CG_WwiiScopePlayerGlass(&all, 0) && !CG_WwiiScopePlayerGlass(&all, -1));
+    assert(!CG_WwiiScopePlayerGlass(&all, WEAPONS + 1) && !CG_WwiiScopePlayerGlass(&all, CG_WWIISCOPE_MAX_WEAPONS));
+    cases++;
+    /* The reticle is cut from the weapon's own overlay, or from the one its 4x Optic borrows. */
+    assert(CG_WwiiScopeOverlay(&none, 1) == &own && CG_WwiiScopeOverlay(&optic, 1) == &own && registered == 0);
+    MaterialHandle borrowed = CG_WwiiScopeOverlay(&optic, 2);
+    assert(borrowed && !strcmp(borrowed->name, "scope_overlay_american") && registered == 1);
+    cases++;
+    /* Through its 4x Optic the Mosin-Nagant works its bolt in its idle pose, the scoped rechamber anim held
+     * back until another anim plays; from the hip, without the optic or without the WWII scope its anims play
+     * as they are. A scoped rifle's rechamber is its idle pose already. */
+    assert(CG_WwiiScopeViewAnim(&optic, 8, 20) == 1 && s_heldBolt[8] == 1);
+    assert(CG_WwiiScopeViewAnim(&optic, 8, 7) == 7 && s_heldBolt[8] == 0);
+    assert(CG_WwiiScopeViewAnim(&optic, 8, 6) == 6 && s_heldBolt[8] == 0);
+    assert(CG_WwiiScopeViewAnim(&none, 8, 20) == 20 && s_heldBolt[8] == 0);
+    scopeOn = 0;
+    assert(CG_WwiiScopeViewAnim(&optic, 8, 20) == 20 && s_heldBolt[8] == 0);
+    scopeOn = 1;
+    assert(CG_WwiiScopeViewAnim(&optic, 1, 20) == 20 && s_heldBolt[1] == 0);
+    assert(CG_WwiiScopeViewAnim(&all, 0, 20) == 20 && CG_WwiiScopeViewAnim(&all, -1, 20) == 20);
+    assert(CG_WwiiScopeViewAnim(&all, CG_WWIISCOPE_MAX_WEAPONS, 20) == 20);
+    cases++;
+    printf("%d\n", cases);
+    return 0;
+}
+'''
+select_mutants = [
+    ('!(BG_GetWeaponAttachments(ps, weapon) & ATT_BIT(ATT_OPTIC4X))', '!BG_GetWeaponAttachments(ps, weapon)'),
+    ('    if (!weapDef || !weapDef->overlayReticle || !weapDef->szOverlayMaterial[0])\n        return NULL;\n', ''),
+    ('        s_opticKnown[weapon] = CG_WWIISCOPE_NONE;\n', ''),
+    ('            if (file)\n                FS_FreeFile(file);\n', ''),
+    ('glass || weapon <= 0 || weapon >= CG_WWIISCOPE_MAX_WEAPONS || weapon > BG_GetNumWeapons() ||', 'glass ||'),
+    ('s_idleBolt[weapon] = weapDef && (', 's_idleBolt[weapon] = glass && ('),
+    ('    if (weapDef->szOverlayMaterial != BG_GetWeaponDef(weapon)->szOverlayMaterial)\n'
+     '        return CL_RegisterMaterialNoMip(weapDef->szOverlayMaterial, 7);\n', ''),
+    ('                s_opticGlasses[weapon].gunModel = weapDef->szGunXModel;\n', ''),
+    ('"glass/%s__%s"', '"glass/%s_%s"'),
+    ('        anim == CG_WWIISCOPE_ADS_RECHAMBER_ANIM && CG_WwiiScopeGlassFor', '        CG_WwiiScopeGlassFor'),
+    (' && !s_idleBolt[weapon];', ';'),
+    ('    return s_heldBolt[weapon] ? CG_WWIISCOPE_IDLE_ANIM : anim;', '    return anim;'),
+    ('    if (weapon <= 0 || weapon >= CG_WWIISCOPE_MAX_WEAPONS)\n        return anim;\n', ''),
+]
+
 strict = ['-Wall', '-Werror', '-Wno-unused-function']
 with tempfile.TemporaryDirectory(prefix='cod2-wwii-scope-') as directory:
     run(directory, 'zoom', zoom_support + zoom_body + zoom_checks, strict, True)
     for index, (before, after) in enumerate(zoom_mutants):
         run(directory, f'zoom{index}', zoom_support + mutate(zoom_body, before, after) + zoom_checks, ['-w'], False)
+    select_cases = int(run(directory, 'select', select_support + select_body + select_checks, strict, True).stdout)
+    for index, (before, after) in enumerate(select_mutants):
+        run(directory, f'select{index}', select_support + mutate(select_body, before, after) + select_checks, ['-w'],
+            False)
     math_cases = int(run(directory, 'scope', math_support + math_body + math_checks, strict, True).stdout)
     for index, (before, after) in enumerate(math_mutants):
         if before.startswith('static const float s_rechamberKeep'):
@@ -797,4 +1099,6 @@ print(f'PASS: the WWII scope\'s hooks in the view weapon, reticle, zoom and star
       f'outline, rifle projection, zoom, blackout, centring, bolt and reticle math, the rifle\'s pose held by its '
       f'fire and rechamber anims\' weights past their states; {lens_cases} cases of lens images decoded, halved by '
       f'alpha and cleared outside their edge; the zoom\'s share of the raise as the attachments leave it; '
-      f'{len(math_mutants) + len(lens_mutants) + len(zoom_mutants)} mutants fail; {asset_note}')
+      f'{select_cases} cases of the glass a player\'s weapon is drawn with, a 4x Optic\'s read once beside its model, '
+      f'the overlay its reticle is cut from and the bolt worked in the idle pose through it; '
+      f'{len(math_mutants) + len(lens_mutants) + len(zoom_mutants) + len(select_mutants)} mutants fail; {asset_note}')
