@@ -243,6 +243,65 @@ class Tests(unittest.TestCase):
             updater.activate(updater.release,manifest())
             self.assertEqual(updater.head,NEW)
 
+    def test_players_joining_during_validation_stop_it_and_retry_later(self):
+        with tempfile.TemporaryDirectory() as directory:
+            updater=FakeUpdater(directory)
+            def compose(source,project,assets,images,*args,**kwargs):
+                updater.calls.append(('compose',str(source),project,args,dict(images)))
+                if args[:1]==('up',):updater.clients=1
+                return ''
+            def verify(*args,**kwargs):
+                module.time.sleep(2)
+                return 'passed'
+            with patch.object(module,'IDLE_POLL_SECONDS',0.05),patch.object(updater,'compose',side_effect=compose), \
+                 patch.object(updater,'verify',side_effect=verify), \
+                 patch.object(updater,'prepare',return_value=(updater.release,manifest())), \
+                 patch.object(updater,'activate') as activate:
+                started=module.time.monotonic()
+                updater.check()
+                self.assertLess(module.time.monotonic()-started,1.5,'validation stops without waiting for the candidate')
+            activate.assert_not_called()
+            self.assertEqual(updater.record['status'],'waiting')
+            self.assertIsNone(updater.record.get('failedRevision'),'a busy server does not reject the release')
+            self.assertEqual([c[3][0] for c in updater.calls if c[0]=='compose'][-1],'down','the candidate stack is removed')
+            self.assertEqual((updater.assets/'main/value').read_text(),'old private assets')
+
+    def test_validation_does_not_start_while_players_are_connected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            updater=FakeUpdater(directory);updater.clients=1
+            with self.assertRaises(module.Deferred):updater.validate_candidate(updater.release,manifest())
+            self.assertNotIn('up',[c[3][0] for c in updater.calls if c[0]=='compose'])
+
+    def test_preparation_rechecks_idle_before_loading_images(self):
+        with tempfile.TemporaryDirectory() as directory:
+            updater=FakeUpdater(directory)
+            (updater.originals/'iw_00.iwd').write_text('owner original')
+            def download(url,path,size=None,digest=None):
+                if path.name=='manifest.json':path.write_text(module.json.dumps(manifest()))
+                else:updater.clients=1
+            with patch.object(updater,'download',side_effect=download):
+                with self.assertRaises(module.Deferred):updater.prepare(NEW)
+            self.assertFalse(any(c[0]=='run' and c[1][:2]==('docker','load') for c in updater.calls))
+
+    def test_host_preparation_runs_at_lowest_priority(self):
+        with tempfile.TemporaryDirectory() as directory:
+            updater=FakeUpdater(directory)
+            for available in ('/usr/bin/ionice',None):
+                updater.calls.clear()
+                with patch.object(module.shutil,'which',return_value=available):
+                    updater.run_background('python3','prepare.py')
+                expected=('nice','-n','19')+(('ionice','-c','3') if available else ())+('python3','prepare.py')
+                self.assertEqual(updater.calls,[('run',expected)])
+
+    def test_candidate_containers_have_the_lowest_cpu_weight(self):
+        with tempfile.TemporaryDirectory() as directory:
+            updater=FakeUpdater(directory)
+            images={s:f'{module.RELEASE_REPOS[s]}:release-{NEW}' for s in module.SERVICES}
+            for qa in (True,False):
+                module.Updater.compose(updater,updater.release,'project',updater.assets,images,'config',qa=qa)
+                override=(updater.state/'project-images.yaml').read_text()
+                self.assertEqual(override.count('cpu_shares: 2'),3 if qa else 0)
+
     def test_hard_killed_activation_recovers_on_next_check(self):
         with tempfile.TemporaryDirectory() as directory:
             updater=FakeUpdater(directory)

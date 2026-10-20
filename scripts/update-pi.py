@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Validate a main release in isolation, apply it when idle, and roll back failures."""
 import argparse
+import concurrent.futures
 import fcntl
 import hashlib
 import json
@@ -21,6 +22,8 @@ ALIASES = dict(zip(SERVICES, ('local/cod2-wasm:pi', 'local/cod2-pi-server:dev', 
 RELEASE_REPOS = dict(zip(SERVICES, ('local/cod2-wasm', 'local/cod2-pi-server', 'local/cod2-gateway')))
 SHA = re.compile(r'^[a-f0-9]{40}$')
 HASH = re.compile(r'^[a-f0-9]{64}$')
+# How often a running validation checks that the server is still empty.
+IDLE_POLL_SECONDS = 5
 
 
 class Deferred(RuntimeError):
@@ -106,6 +109,12 @@ class Updater:
             raise RuntimeError(f'{command[0]} failed ({result.returncode}): {result.stdout[-3500:]}')
         return result.stdout.strip()
 
+    def run_background(self, *command):
+        """Runs host-side preparation at the lowest CPU and disk priority, so a
+        match that starts meanwhile keeps the Pi's cores and SD card."""
+        prefix = ('nice', '-n', '19') + (('ionice', '-c', '3') if shutil.which('ionice') else ())
+        return self.run(*prefix, *command)
+
     def git(self, *args):
         return self.run('git', '-C', str(self.root), *args, timeout=60)
 
@@ -142,6 +151,9 @@ class Updater:
         lines = ['services:']
         for service in SERVICES:
             lines.extend((f'  {service}:', f'    image: {images[service]}'))
+            if qa:
+                # The lowest CPU weight: production containers always win.
+                lines.append('    cpu_shares: 2')
             if qa and service == 'cod2-server':
                 lines.append('    cpus: 1.0')
             if qa and service == 'cod2-gateway':
@@ -221,6 +233,8 @@ class Updater:
                 self.download(base + 'pi-images.tar.gz', archive, manifest['archive']['size'], manifest['archive']['sha256'])
             except (urllib.error.URLError, TimeoutError) as error:
                 raise Deferred('Release download interrupted; retrying later') from error
+        # A download can take minutes; players may have joined since check().
+        self.ensure_idle()
         self.run('docker', 'load', '-i', str(archive))
         for service in SERVICES:
             image = json.loads(self.run('docker', 'image', 'inspect', manifest['images'][service]['tag']))[0]
@@ -244,12 +258,13 @@ class Updater:
         shutil.copytree(self.assets / 'web', assets / 'web', dirs_exist_ok=True,
                         ignore=shutil.ignore_patterns('host-maintenance.json'))
         generated = release / 'generated-assets.json'
-        self.run(sys.executable, str(source / 'scripts/prepare-browser-bootstrap.py'),
-                 '--main-dir', str(assets / 'main'), '--manifest', str(generated))
+        self.ensure_idle()
+        self.run_background(sys.executable, str(source / 'scripts/prepare-browser-bootstrap.py'),
+                            '--main-dir', str(assets / 'main'), '--manifest', str(generated))
         if json.loads(generated.read_text()) != json.loads((source / 'site/wasm-game-data.json').read_text()):
             raise ValueError('Prepared owner assets differ from the published build; refusing to mix versions')
-        self.run(sys.executable, str(source / 'scripts/check-private-assets.py'),
-                 '--main-dir', str(assets / 'main'), '--manifest', str(generated))
+        self.run_background(sys.executable, str(source / 'scripts/check-private-assets.py'),
+                            '--main-dir', str(assets / 'main'), '--manifest', str(generated))
         return release, manifest
 
     def verify(self, source, project, assets, images, build, qa=False):
@@ -267,8 +282,21 @@ class Updater:
         images = {s: manifest['images'][s]['tag'] for s in SERVICES}
         try:
             self.compose(source, project, assets, images, 'config', '--quiet', qa=True)
+            self.ensure_idle()
             self.compose(source, project, assets, images, 'up', '-d', '--no-build', '--wait', '--wait-timeout', '90', *SERVICES, qa=True)
-            print(self.verify(source, project, assets, images, manifest['build'], qa=True), flush=True)
+            # The candidate plays a real room with bots for minutes. Stop it as
+            # soon as someone joins production instead of sharing the Pi.
+            pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            try:
+                checked = pool.submit(self.verify, source, project, assets, images, manifest['build'], True)
+                while True:
+                    try:
+                        print(checked.result(timeout=IDLE_POLL_SECONDS), flush=True)
+                        break
+                    except concurrent.futures.TimeoutError:
+                        self.ensure_idle()
+            finally:
+                pool.shutdown(wait=False)
         finally:
             self.compose(source, project, assets, images, 'down', '--remove-orphans', qa=True)
 
@@ -423,7 +451,7 @@ def install(root, state, originals):
     units.mkdir(parents=True, exist_ok=True)
     arguments = ' '.join(json.dumps(str(p)).replace('%','%%') for p in (library/'update-pi.py',))
     arguments += ' --root ' + json.dumps(str(root)) + ' --state ' + json.dumps(str(state)) + ' --originals ' + json.dumps(str(originals))
-    (units / 'cod2-auto-update.service').write_text('[Unit]\nDescription=Validate and apply idle CoD2 main releases\nAfter=network-online.target\n\n[Service]\nType=oneshot\nExecStart=/usr/bin/python3 '+arguments+'\nTimeoutStartSec=25min\nTimeoutStopSec=120\nNice=10\n')
+    (units / 'cod2-auto-update.service').write_text('[Unit]\nDescription=Validate and apply idle CoD2 main releases\nAfter=network-online.target\n\n[Service]\nType=oneshot\nExecStart=/usr/bin/python3 '+arguments+'\nTimeoutStartSec=25min\nTimeoutStopSec=120\nNice=19\nCPUWeight=1\nIOSchedulingClass=idle\n')
     (units / 'cod2-auto-update.timer').write_text('[Unit]\nDescription=Check validated CoD2 main releases\n\n[Timer]\nOnBootSec=2min\nOnUnitInactiveSec=5min\nRandomizedDelaySec=30s\n\n[Install]\nWantedBy=timers.target\n')
     subprocess.run(['systemctl','--user','daemon-reload'],check=True)
     subprocess.run(['systemctl','--user','enable','--now','cod2-auto-update.timer'],check=True)
