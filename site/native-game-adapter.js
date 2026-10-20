@@ -108,15 +108,17 @@
         `${megabytes.format(received / 1000000)} / ${megabytes.format(total / 1000000)} MB`, percent);
     };
   }
-  function lanFilePolicy(file, context) {
+  function filePolicy(file, context) {
     const policy = { ...file, mountName: file.path };
-    if (globalThis.crypto?.subtle) return policy;
     const expected = String(file.sha256 || '').toLowerCase();
     if (!/^[a-f0-9]{64}$/.test(expected)) throw new Error(`Invalid SHA-256 for ${file.name}.`);
-    // The framework's custom validator runs for downloads AND cached files.
-    // Preserve the manifest hash in this closure; use the worker instead of
-    // its Web-Crypto-only built-in validator on an HTTP LAN origin.
+    // Web Crypto can only hash a whole archive held in one buffer (400 MB for
+    // the renderer IWD). Hash every download in bounded slices in a worker
+    // instead, on HTTP and HTTPS alike. A cached copy was hashed before it was
+    // stored and the cache drops it when the manifest version changes, so a
+    // start only checks its size and signature.
     delete policy.sha256;
+    policy.validateCached = false;
     policy.validate = blob => new Promise((resolve, reject) => {
       const worker = new Worker('/asset-sha256.js');
       const started = performance.now();
@@ -137,6 +139,268 @@
     });
     return policy;
   }
+  // Archives at least this large stay in browser storage and are read on
+  // demand; copying cod2_browser_renderer.iwd into the page held 400 MB for
+  // the whole session. Smaller archives (sounds the engine streams during a
+  // match) are still copied into memory.
+  const LAZY_ARCHIVE_BYTES = 128 * 1024 * 1024;
+  const ARCHIVE_CHUNK_BYTES = 256 * 1024;
+  const ARCHIVE_CACHE_BYTES = 32 * 1024 * 1024;
+  const DOWNLOAD_PART_BYTES = 8 * 1024 * 1024;
+  function createChunkCache(limit) {
+    const chunks = new Map();
+    let bytes = 0;
+    return {
+      get(key) {
+        const chunk = chunks.get(key);
+        if (chunk) { chunks.delete(key); chunks.set(key, chunk); }
+        return chunk;
+      },
+      set(key, chunk) {
+        chunks.set(key, chunk);
+        bytes += chunk.length;
+        for (const [oldest, old] of chunks) {
+          if (bytes <= limit || chunks.size === 1) break;
+          chunks.delete(oldest);
+          bytes -= old.length;
+        }
+      },
+      get bytes() { return bytes; }
+    };
+  }
+  let archiveChunks;
+  const BOM_GUARD = new Uint8Array(1);
+  function readRangeByXhr(blob, start, end) {
+    // Without a worker, a page's main thread can only read a Blob
+    // synchronously through a synchronous XHR of an object URL, as
+    // x-user-defined text. Decoding sniffs a byte order mark first, so a
+    // leading zero byte keeps a range starting with FF FE, FE FF or EF BB BF
+    // from being read as Unicode.
+    const url = URL.createObjectURL(new Blob([BOM_GUARD, blob.slice(start, end)]));
+    try {
+      const request = new XMLHttpRequest();
+      request.open('GET', url, false);
+      request.overrideMimeType('text/plain; charset=x-user-defined');
+      request.send(null);
+      const text = request.responseText;
+      if (text.length !== end - start + 1) throw new Error(`read ${text.length - 1} of ${end - start} bytes`);
+      const bytes = new Uint8Array(end - start);
+      for (let i = 0; i < bytes.length; ++i) bytes[i] = text.charCodeAt(i + 1);
+      return bytes;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+  // Runs in a worker: reads requested Blob ranges with FileReaderSync into
+  // shared memory. control: [state (1 request, 2 done, 3 failed), archive,
+  // start, end, bytes read].
+  function archiveWorker() {
+    onmessage = event => {
+      const { control, data, blobs } = event.data;
+      onmessage = null;
+      postMessage('ready');
+      const reader = new FileReaderSync();
+      let heapChurn;
+      for (;;) {
+        for (let state; (state = Atomics.load(control, 0)) !== 1;) Atomics.wait(control, 0, state);
+        try {
+          const bytes = new Uint8Array(reader.readAsArrayBuffer(blobs[control[1]].slice(control[2], control[3])));
+          data.set(bytes);
+          control[4] = bytes.length;
+          Atomics.store(control, 0, 2);
+        } catch {
+          Atomics.store(control, 0, 3);
+        }
+        // Each read's buffer is outside the JS heap, and this thread never
+        // idles, so nothing else starts a collection: without 128 KiB of heap
+        // allocation per read the worker kept every byte it ever read.
+        heapChurn = new Array(16384).fill(0);
+      }
+    };
+  }
+  // A cross-origin isolated page can hand reads to a worker and wait for its
+  // binary result instead of decoding XHR text.
+  async function startArchiveWorker(blobs) {
+    if (!globalThis.crossOriginIsolated || typeof SharedArrayBuffer !== 'function' || typeof Worker !== 'function')
+      throw new Error('the page is not cross-origin isolated');
+    const control = new Int32Array(new SharedArrayBuffer(20));
+    const data = new Uint8Array(new SharedArrayBuffer(ARCHIVE_CHUNK_BYTES));
+    const url = URL.createObjectURL(new Blob([`(${archiveWorker})();`], { type: 'text/javascript' }));
+    try {
+      await new Promise((resolve, reject) => {
+        const worker = new Worker(url);
+        const timer = setTimeout(() => reject(new Error('the archive worker did not start')), 5000);
+        worker.onmessage = () => { clearTimeout(timer); resolve(); };
+        worker.onerror = event => { clearTimeout(timer); reject(new Error(event.message || 'the archive worker failed')); };
+        worker.postMessage({ control, data, blobs });
+      });
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+    const archives = new Map(blobs.map((blob, index) => [blob, index]));
+    return (blob, start, end) => {
+      control[1] = archives.get(blob);
+      control[2] = start;
+      control[3] = end;
+      Atomics.store(control, 0, 1);
+      Atomics.notify(control, 0);
+      const deadline = performance.now() + 10000;
+      let state;
+      while ((state = Atomics.load(control, 0)) === 1)
+        if (performance.now() > deadline) throw new Error('the archive worker stopped responding');
+      Atomics.store(control, 0, 0);
+      if (state !== 2 || control[4] !== end - start) throw new Error(`read ${control[4]} of ${end - start} bytes`);
+      return data.slice(0, end - start);
+    };
+  }
+  let readRange = readRangeByXhr;
+  function createArchiveReader(blob, id) {
+    archiveChunks ||= createChunkCache(ARCHIVE_CACHE_BYTES);
+    let lastIndex = -1, last;
+    const chunk = index => {
+      if (index === lastIndex) return last;
+      const key = index * 16 + id;
+      let bytes = archiveChunks.get(key);
+      if (!bytes) {
+        const start = index * ARCHIVE_CHUNK_BYTES;
+        bytes = readRange(blob, start, Math.min(blob.size, start + ARCHIVE_CHUNK_BYTES));
+        archiveChunks.set(key, bytes);
+      }
+      lastIndex = index;
+      last = bytes;
+      return bytes;
+    };
+    return {
+      size: blob.size,
+      // Copies [position, position + length) into target at offset.
+      copy(position, length, target, offset) {
+        let copied = 0;
+        while (copied < length) {
+          const at = position + copied;
+          const index = Math.floor(at / ARCHIVE_CHUNK_BYTES);
+          const bytes = chunk(index);
+          const within = at - index * ARCHIVE_CHUNK_BYTES;
+          const count = Math.min(length - copied, bytes.length - within);
+          if (count <= 0) break;
+          target.set(bytes.subarray(within, within + count), offset + copied);
+          copied += count;
+        }
+        return copied;
+      }
+    };
+  }
+  function probeArchive(read, blob) {
+    // Each IWD is a ZIP: a local file header first, the end of central
+    // directory record (written without a comment) last.
+    const head = read(blob, 0, 4).join();
+    const tail = read(blob, blob.size - 22, blob.size - 18).join();
+    if (head !== '80,75,3,4' || tail !== '80,75,5,6') throw new Error('unexpected ZIP signatures');
+  }
+  function mountArchive(FS, path, reader, onError) {
+    const node = FS.create(path, 0o444);
+    const base = node.stream_ops;
+    node.usedBytes = reader.size;
+    node.contents = null;
+    node.stream_ops = {
+      ...base,
+      read(stream, buffer, offset, length, position) {
+        if (position >= reader.size) return 0;
+        const size = Math.min(reader.size - position, length);
+        try {
+          return reader.copy(position, size, new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength), offset);
+        } catch (error) {
+          onError(error);
+          throw new FS.ErrnoError(29);
+        }
+      },
+      write() { throw new FS.ErrnoError(63); },
+      mmap() { throw new FS.ErrnoError(43); }
+    };
+    return node;
+  }
+  async function downloadArchive(client, remote, policy, onProgress) {
+    if (!remote) throw new Error(`The container does not expose ${policy.key}.`);
+    if (!remote.valid) {
+      const error = new Error(`${remote.name || policy.name || policy.key} is not installed in this container.`);
+      error.code = 'OWNER_DATA_MISSING';
+      throw error;
+    }
+    const url = new URL(`${client.baseUrl || '/game-data'}/files/${encodeURIComponent(remote.key)}`, location.href);
+    if (client.variant) url.searchParams.set('variant', client.variant);
+    const response = await fetch(url.href, { cache: 'no-store', credentials: 'same-origin' });
+    if (!response.ok) throw new Error(`Downloading ${remote.name} failed with HTTP ${response.status}.`);
+    const total = Number(response.headers.get('content-length')) || 0;
+    const type = response.headers.get('content-type') || '';
+    let parts;
+    if (response.body?.getReader) {
+      // Fold the stream into bounded Blob parts as it arrives: the browser can
+      // keep those out of this page's memory, a list of every chunk it cannot.
+      const reader = response.body.getReader();
+      parts = [];
+      let chunks = [], pending = 0, received = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        pending += value.byteLength;
+        received += value.byteLength;
+        if (pending >= DOWNLOAD_PART_BYTES) { parts.push(new Blob(chunks)); chunks = []; pending = 0; }
+        onProgress({ phase: 'downloading', key: remote.key, received, total });
+      }
+      if (chunks.length) parts.push(new Blob(chunks));
+    } else parts = [await response.blob()];
+    return new File(parts, remote.name, { type });
+  }
+  async function loadAssets(context, onProgress) {
+    const client = context.dataClient;
+    const state = await client.status();
+    if (!state.ready) {
+      const error = new Error('The container still needs its required game data.');
+      error.code = 'CONTAINER_DATA_REQUIRED';
+      throw error;
+    }
+    const remote = new Map(state.files.map(file => [String(file.key).toLowerCase(), file]));
+    return dataSet.load(policy => downloadArchive(client, remote.get(String(policy.key).toLowerCase()), policy, onProgress),
+      { onProgress });
+  }
+  // The stored copies of the archives to read on demand, by entry.
+  // ?archives=memory copies every archive, ?archives=demand reads every one on
+  // demand, ?archives=xhr skips the worker.
+  async function onDemandArchives(entries, context) {
+    const mode = new URLSearchParams(location.search).get('archives');
+    const files = new Map();
+    for (const entry of entries) {
+      if (mode === 'memory' || (mode !== 'demand' && mode !== 'xhr' && entry.file.size < LAZY_ARCHIVE_BYTES)) continue;
+      // A fresh download is still the in-memory copy; read the stored one so
+      // the browser can release it.
+      let stored = null;
+      try { if (!entry.cached) stored = await dataSet.cache?.get?.(entry.key); } catch { /* Keep the downloaded copy. */ }
+      files.set(entry, stored?.file?.size === entry.file.size ? stored.file : entry.file);
+    }
+    if (!files.size) return files;
+    const readers = mode === 'xhr' ? [] : [['a worker', () => startArchiveWorker([...files.values()])]];
+    readers.push(['synchronous XHR', () => readRangeByXhr]);
+    const failures = [];
+    for (const [name, start] of readers) {
+      try {
+        const started = performance.now();
+        const read = await start();
+        for (const file of files.values()) probeArchive(read, file);
+        readRange = read;
+        for (const entry of files.keys())
+          context.log(`[assets] reading ${entry.mountName} from browser storage on demand through ${name} ` +
+            `(${Math.round(performance.now() - started)} ms to start)`);
+        return files;
+      } catch (error) {
+        failures.push(`${name}: ${error?.message || error}`);
+        context.log(`[assets] on-demand reads through ${failures.at(-1)}`);
+      }
+    }
+    for (const entry of files.keys())
+      context.log(`[assets] copying ${entry.mountName} into memory: on-demand reads are unavailable ` +
+        `(${failures.join('; ')})`, 'error');
+    return new Map();
+  }
   function closeTransport() {
     const transport = native?.cod2Transport;
     if (!transport) return;
@@ -144,6 +408,23 @@
     transport.packets.length = 0;
     transport.bytes = 0;
     transport.socket.close(1000);
+  }
+  function failureMessage(reason) {
+    return /memory|enlarge|allocat/i.test(String(reason)) ?
+      'The browser ran out of memory for the game. Close other tabs and reload the page.' :
+      'The game stopped unexpectedly. Reload the page to play again.';
+  }
+  // Stops the engine for good and tells the player instead of leaving a
+  // frozen frame on screen.
+  function fail(context, detail, message) {
+    if (failed) return;
+    failed = true;
+    closeTransport();
+    try { native?.pauseMainLoop?.(); } catch { /* The runtime may already be gone. */ }
+    context.log(detail, 'error');
+    context.setEngineState('crashed');
+    context.setStatus?.(message, true);
+    context.showLauncher?.();
   }
   function cacheWebGlState(gl, canvas) {
     // Fixed-function draws repeatedly submit the same sampler parameters and
@@ -651,7 +932,7 @@
       if (!policy) throw new Error('No asset policy is available for this client.');
       dataSet = context.framework.createOwnerDataSet({
         namespace: policy.namespace, version: policy.version,
-        files: policy.files.map(file => lanFilePolicy(file, context))
+        files: policy.files.map(file => filePolicy(file, context))
       });
       // WASM traps raised in an animation frame do not invoke onAbort.
       // Report native runtime failures to the framework as well as the console.
@@ -659,10 +940,7 @@
         if (!native || failed) return;
         const stack = String(event.error?.stack || '');
         if (!/\/cod2\.(wasm|js)([?:]|$)/.test(stack + '\n' + String(event.filename))) return;
-        failed = true;
-        closeTransport();
-        context.log(`[cod2-wasm] runtime: ${stack || event.message}`, 'error');
-        context.setEngineState('crashed');
+        fail(context, `[cod2-wasm] runtime: ${stack || event.message}`, failureMessage(stack || event.message));
       });
       context.log('[cod2-wasm] Local WebAssembly client: Toujane / Team Deathmatch.');
       if (context.config?.autoStart) {
@@ -683,9 +961,19 @@
       context.setEngineState('loading');
       try {
         context.setLoading('Preparing the game…', '', 0);
-        const factory = await loadFactory();
+        // Fetch the client script during the download but create its heap
+        // afterwards, so the two never hold their memory at the same time.
+        const factoryReady = loadFactory();
+        factoryReady.catch(() => {});
+        const onProgress = downloadProgress(context);
+        onProgress({ phase: 'checking-cache' });
+        const assets = await loadAssets(context, onProgress);
+        const factory = await factoryReady;
         const meter = performanceMeter(context);
         traceWebGl(context, meter);
+        context.elements.canvas.addEventListener('webglcontextlost', () => fail(context,
+          '[cod2-wasm] WebGL context lost',
+          'The browser reset the graphics card. Reload the page to play again.'));
         native = await factory({
           cod2Performance: meter,
           cod2SaveProfile: config => saveProfile(context, config),
@@ -705,23 +993,27 @@
           },
           printErr: line => context.log(String(line), 'error'),
           onAbort(reason) {
-            failed = true;
-            closeTransport();
-            context.log(`[cod2-wasm] abort: ${String(reason)}`, 'error');
-            context.setEngineState('crashed');
+            fail(context, `[cod2-wasm] abort: ${String(reason)}`, failureMessage(reason));
           }
         });
-        const onProgress = downloadProgress(context);
-        onProgress({ phase: 'checking-cache' });
-        const assets = await context.dataClient.load(dataSet, { onProgress });
+        const entries = Array.isArray(assets?.entries) ? assets.entries : Array.from(assets || []);
+        const onDemand = await onDemandArchives(entries, context);
         context.setLoading('Preparing the game… 0%', '', 0);
-        await context.framework.mountOwnerFiles(native, assets, {
+        await context.framework.mountOwnerFiles(native, entries.filter(entry => !onDemand.has(entry)), {
           root: '/game', preservePaths: true, mode: 'memfs', chunkBytes: 1024 * 1024,
           onProgress: event => {
             const percent = event.total ? Math.floor(event.copied / event.total * 100) : 100;
             context.setLoading(`Preparing the game… ${percent}%`, '', percent);
           }
         });
+        let archiveId = 0;
+        for (const [entry, file] of onDemand) {
+          const path = `/game/${entry.mountName}`;
+          native.FS.mkdirTree(path.slice(0, path.lastIndexOf('/')));
+          mountArchive(native.FS, path, createArchiveReader(file, archiveId++), error => fail(context,
+            `[assets] reading ${entry.mountName} failed: ${error?.message || error}`,
+            'The game files in this browser could not be read. Reload the page to play again.'));
+        }
         prepareProfile(context, native.FS);
         native.FS.chdir('/game');
         context.setLoading('Starting the game…', '', 100);

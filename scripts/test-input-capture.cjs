@@ -76,7 +76,7 @@ const sandbox = {
   addEventListener() {},
   crypto: {subtle: {}},
   fetch: async () => ({ok: true, json: async () => ({variants: {test: {files: [
-    {key:'saved',size:2000000}, {key:'large',size:18000000}
+    {key:'saved',size:2000000,sha256:'a'.repeat(64)}, {key:'large',size:18000000,sha256:'b'.repeat(64)}
   ]}}})}),
   createCod2Client: async options => {
     assert.equal(options.stdin(), null, 'browser stdin must not open a terminal prompt');
@@ -92,11 +92,7 @@ const context = {
     loadingTitle: {replaceChildren(logo) {assert.equal(logo.src, '/game-data/files/cod2-startup/original.png');}},
     loadingProgress: {setAttribute(name, value) {assert.equal(name, 'aria-label');assert.ok(value);}},
     loadingStatus: {}}, log() {},
-  framework: {createOwnerDataSet: x => ({policies:x.files}), mountOwnerFiles: async (native,assets,options) => {
-    options.onProgress({phase:'mounting',copied:10000000,total:20000000});
-    options.onProgress({phase:'mounted',copied:20000000,total:20000000});
-  }},
-  dataClient: {applyGate: async () => ({ready:true}), load: async (data,options) => {
+  framework: {createOwnerDataSet: x => ({policies:x.files, load: async (source,options) => {
     options.onProgress({phase:'restored',key:'saved',bytes:2000000,total:2});
     assert.equal(loadingMessages.at(-1)[2],10,'restored files count toward available bytes');
     options.onProgress({phase:'downloading',key:'large',received:9000000,total:18000000});
@@ -108,7 +104,11 @@ const context = {
     options.onProgress({phase:'cached',key:'large',bytes:18000000,total:2});
     assert.equal(loadingMessages.at(-1)[2],100,'validation/cache events do not double-count bytes');
     return [];
+  }}), mountOwnerFiles: async (native,assets,options) => {
+    options.onProgress({phase:'mounting',copied:10000000,total:20000000});
+    options.onProgress({phase:'mounted',copied:20000000,total:20000000});
   }},
+  dataClient: {applyGate: async () => ({ready:true}), status: async () => ({ready:true, files:[]})},
   preferences: {values: () => ({playerName: 'Test'})},
   shell: {engineState: () => shellState, requestInputCapture(event) {
     assert.equal(event.isTrusted,true); ++keyboardCaptureRequests;

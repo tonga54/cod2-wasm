@@ -34,17 +34,20 @@ async function policy(crypto) {
   return files[0];
 }
 (async () => {
-  const lan = await policy(undefined);
-  assert.equal(lan.sha256, undefined, 'LAN uses the mandatory custom SHA-256 validator');
-  assert.equal(lan.validateCached, undefined, 'framework must validate cached files too');
-  await lan.validate(new Blob([bytes]));
-  assert.equal(activeWorkers, 0);
-  const corrupted = Buffer.from(bytes);
-  corrupted[corrupted.length - 1] ^= 1;
-  await assert.rejects(lan.validate(new Blob([corrupted])), /SHA-256 mismatch/);
-  assert.equal(activeWorkers, 0, 'worker ends after rejection');
-  const secure = await policy({subtle:{}});
-  assert.equal(secure.sha256, hash, 'HTTPS keeps the framework Web Crypto validator');
-  assert.equal(secure.validate, undefined);
-  console.log('PASS: LAN validation accepts originals, rejects corruption, cleans workers, preserves HTTPS');
+  // HTTP LAN origins have no Web Crypto; HTTPS has it, but its digest needs a
+  // whole archive in one buffer. Both hash downloads in the bounded worker.
+  for (const crypto of [undefined, {subtle:{}}]) {
+    const checked = await policy(crypto);
+    assert.equal(checked.sha256, undefined, 'the framework never hashes a whole archive buffer');
+    assert.equal(checked.validateCached, false,
+      'a cached copy was hashed when stored; a start checks its size and signature only');
+    await checked.validate(new Blob([bytes]));
+    assert.equal(activeWorkers, 0);
+    const corrupted = Buffer.from(bytes);
+    corrupted[corrupted.length - 1] ^= 1;
+    await assert.rejects(checked.validate(new Blob([corrupted])), /SHA-256 mismatch/);
+    assert.equal(activeWorkers, 0, 'worker ends after rejection');
+  }
+  console.log('PASS: downloads on HTTP and HTTPS are hashed in the bounded worker, accept originals, reject ' +
+    'corruption and clean up workers; cached copies skip the whole-archive hash');
 })().catch(error => { console.error(error); process.exitCode=1; });

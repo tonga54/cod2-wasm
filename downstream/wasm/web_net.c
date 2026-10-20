@@ -108,7 +108,10 @@ EM_JS(void, WebNet_Send, (const void *data, int length), {
         return;
     }
     if (state.socket.readyState !== WebSocket.OPEN) return;
-    if (state.socket.bufferedAmount > 262144) { ++state.dropped; return; }
+    /* Commands are sent ~60 times a second and each repeats the last ones, so
+     * a stalled uplink drops them as UDP would rather than queue seconds of
+     * stale input behind the stall. */
+    if (state.socket.bufferedAmount > 8192) { ++state.dropped; return; }
     state.socket.send(HEAPU8.subarray(data, data + length));
 });
 

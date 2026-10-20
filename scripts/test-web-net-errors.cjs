@@ -90,5 +90,27 @@ async function reject(f) {
   await pending;
   assert.equal(changedRoom.Module.cod2Transport.room,1);
   assert.equal(changedRoom.Module.cod2Transport.packets.length,0);
-  console.log('PASS: full room, disappeared room, unreachable host, dropped connection, intentional disconnect and stale callbacks');
+
+  // A stalled uplink drops commands as UDP would instead of queueing them.
+  const sendStart = source.indexOf('EM_JS(void, WebNet_Send, (const void *data, int length), {');
+  const sendBody = source.slice(source.indexOf('{', sendStart) + 1, source.indexOf('\n});', sendStart));
+  const link = fixture([]);
+  link.open(0);
+  const heap = new Uint8Array(64).map((_, i) => i);
+  const sendContext = vm.createContext({Module:link.Module, WebSocket:{CONNECTING:0, OPEN:1}, HEAPU8:heap});
+  vm.runInContext('function send(data, length) {' + sendBody + '\n}', sendContext);
+  const socket = link.sockets[0];
+  socket.readyState = 1;
+  socket.bufferedAmount = 0;
+  sendContext.send(4, 8);
+  assert.deepEqual([...socket.sent[0]], [4,5,6,7,8,9,10,11]);
+  socket.bufferedAmount = 8192;
+  sendContext.send(0, 8);
+  assert.equal(socket.sent.length, 2, 'a small backlog is still sent');
+  socket.bufferedAmount = 8193;
+  sendContext.send(0, 8);
+  assert.equal(socket.sent.length, 2, 'more than 8 KiB waiting: the command is dropped');
+  assert.equal(link.Module.cod2Transport.dropped, 1);
+  console.log('PASS: full room, disappeared room, unreachable host, dropped connection, intentional disconnect, ' +
+    'stale callbacks and dropped commands behind a stalled uplink');
 })().catch(error => {console.error(error);process.exitCode=1;});
