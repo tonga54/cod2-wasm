@@ -19,8 +19,8 @@ const manager = http.createServer(async (req, res) => {
   if (req.method === 'POST') {
     let body=''; for await (const chunk of req) body += chunk;
     assert.deepEqual(JSON.parse(body), {name:'Second room',
-      map:creates === 0 ? 'mp_toujane' : creates === 2 ? 'mp_dawnville' : creates === 3 ? 'mp_burgundy' : 'mp_carentan',
-      gametype:requestedGametype ?? (creates < 4 ? 'tdm' : ['dm','tdm','ctf','hq','sd'][creates-4] || 'tdm'),
+      map:['mp_toujane', 'mp_carentan', 'mp_dawnville', 'mp_burgundy', 'mp_railyard'][creates] ?? 'mp_carentan',
+      gametype:requestedGametype ?? (creates < 5 ? 'tdm' : ['dm','tdm','ctf','hq','sd'][creates-5] || 'tdm'),
       botCount:requestedBots, botDifficulty:requestedDifficulty, ...requestedRules});
     ++creates; res.writeHead(201); res.end(JSON.stringify({id:1, port:udpPort+1}));
   } else if (req.method === 'DELETE') {
@@ -65,26 +65,28 @@ try {
   assert.equal(response.status,201); assert.equal(creates,3);
   response=await fetch(origin+'/servers',{method:'POST',headers:{Origin:origin},body:JSON.stringify({name:'Second room',map:'mp_burgundy'})});
   assert.equal(response.status,201); assert.equal(creates,4);
+  response=await fetch(origin+'/servers',{method:'POST',headers:{Origin:origin},body:JSON.stringify({name:'Second room',map:'mp_railyard'})});
+  assert.equal(response.status,201); assert.equal(creates,5);
   for (const map of ['mp_farmhouse', 'mp_carentan;quit', {}, 1]) {
     response=await fetch(origin+'/servers',{method:'POST',headers:{Origin:origin},body:JSON.stringify({name:'Second room',map})});
-    assert.equal(response.status,400); assert.equal(creates,4);
+    assert.equal(response.status,400); assert.equal(creates,5);
   }
   for (const gametype of ['dm','tdm','ctf','hq','sd']) {
     response=await fetch(origin+'/servers',{method:'POST',headers:{Origin:origin},body:JSON.stringify({name:'Second room',map:'mp_carentan',gametype})});
     assert.equal(response.status,201);
   }
-  assert.equal(creates,9);
+  assert.equal(creates,10);
   for (const gametype of ['sw','ctf;quit','',null,{},1]) {
     response=await fetch(origin+'/servers',{method:'POST',headers:{Origin:origin},body:JSON.stringify({name:'Second room',gametype})});
-    assert.equal(response.status,400); assert.equal(creates,9);
+    assert.equal(response.status,400); assert.equal(creates,10);
   }
   for (const botCount of [-1,33,1.5,true,null,'8',{}]) {
     response=await fetch(origin+'/servers',{method:'POST',headers:{Origin:origin},body:JSON.stringify({name:'Second room',botCount})});
-    assert.equal(response.status,400); assert.equal(creates,9);
+    assert.equal(response.status,400); assert.equal(creates,10);
   }
   for (const botDifficulty of ['expert','hard;quit','',null,{},1]) {
     response=await fetch(origin+'/servers',{method:'POST',headers:{Origin:origin},body:JSON.stringify({name:'Second room',botDifficulty})});
-    assert.equal(response.status,400); assert.equal(creates,9);
+    assert.equal(response.status,400); assert.equal(creates,10);
   }
   for (const botDifficulty of ['easy','normal','hard']) {
     requestedBots=8; requestedDifficulty=botDifficulty;

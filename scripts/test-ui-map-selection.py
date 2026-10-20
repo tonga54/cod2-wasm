@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise actual native UI creation/vote branches for all four map indices."""
+"""Exercise actual native UI creation/vote branches for all five map indices."""
 from pathlib import Path
 import subprocess
 import tempfile
@@ -59,10 +59,10 @@ harness += '\nstatic void create(void) {\n' + create + '\n}\n'
 harness += '\nstatic void vote(const char *name) {\n' + branch('voteMap') + '\n' + branch('voteTypeMap') + '\n}\n'
 harness += r'''
 int main(void) {
-    const char *maps[]={"mp_toujane","mp_carentan","mp_dawnville","mp_burgundy"};
-    sharedUiInfo.mapCount=4; sharedUiInfo.numGameTypes=1; sharedUiInfo.gameTypes[0].gameType="tdm";
-    for(int i=0;i<4;++i) sharedUiInfo.mapList[i].mapLoadName=maps[i];
-    for(int i=0;i<4;++i) {
+    const char *maps[]={"mp_toujane","mp_carentan","mp_dawnville","mp_burgundy","mp_railyard"};
+    sharedUiInfo.mapCount=5; sharedUiInfo.numGameTypes=1; sharedUiInfo.gameTypes[0].gameType="tdm";
+    for(int i=0;i<5;++i) sharedUiInfo.mapList[i].mapLoadName=maps[i];
+    for(int i=0;i<5;++i) {
         selectedMap.current.integer=i; create(); assert(!strcmp(output,maps[i]));
         char expected[256];
         vote("voteMap"); snprintf(expected,sizeof expected,"callvote map %s\n",maps[i]);
@@ -70,11 +70,11 @@ int main(void) {
         vote("voteTypeMap"); snprintf(expected,sizeof expected,"callvote typemap tdm %s\n",maps[i]);
         assert(!strcmp(output,expected));
     }
-    for(int i=-1;i<=128;++i) if(i<0 || i>=4) {
+    for(int i=-1;i<=128;++i) if(i<0 || i>=5) {
         selectedMap.current.integer=i; int before=calls;
         create(); vote("voteMap"); vote("voteTypeMap"); assert(calls==before);
     }
-    puts("PASS: actual UI creation/map/type-map votes select all four indices and reject invalid indices");
+    puts("PASS: actual UI creation/map/type-map votes select all five indices and reject invalid indices");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='cod2-ui-maps-') as directory:

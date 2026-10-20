@@ -929,11 +929,15 @@ int main(void) {
         assert(!(drawn[i].kind == PIC && near(drawn[i].x, 284.2f)));
     assert(wrapped("Hillside town in southern Tunisia, fought over by British and Afrika Korps troops across its flat "
                    "rooftops and narrow alleys.", 283.8f, 309.2f, 289.2f) == 2);
-    /* Burgundy's note fits the panel in two lines too. */
+    /* Burgundy's and Stalingrad's notes fit the panel in two lines too. */
     sharedUiInfo.mapList[2].mapLoadName = "mp_burgundy";
     paint();
     assert(wrapped("Farming village in eastern France, fought over by American and German troops among its "
                    "hedgerows, barns and wrecked tanks.", 283.8f, 309.2f, 289.2f) == 2);
+    sharedUiInfo.mapList[2].mapLoadName = "mp_railyard";
+    paint();
+    assert(wrapped("Snowbound railyard in the ruined city, fought over by Soviet and German troops among its train "
+                   "cars and burning buildings.", 283.8f, 309.2f, 289.2f) == 2);
     sharedUiInfo.mapList[2].mapLoadName = maps[2][0];
     sharedUiInfo.mapList[2].levelShot = &shots[2];
     assert(key(0x0d) && s_match.page == 0 && s_match.focus[0] == 1 && DVAR("ui_currentNetMap") == 2);

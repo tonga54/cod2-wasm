@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--map', choices=['mp_carentan', 'mp_toujane', 'mp_dawnville', 'mp_burgundy'], default='mp_carentan')
+    parser.add_argument('--map', choices=['mp_carentan', 'mp_toujane', 'mp_dawnville', 'mp_burgundy', 'mp_railyard'], default='mp_carentan')
     parser.add_argument('--mode', choices=['dm', 'tdm', 'ctf', 'hq', 'sd'], default='tdm')
     parser.add_argument('--bots', type=int, choices=range(1, 33), default=16)
     parser.add_argument('--seconds', type=int, default=90)

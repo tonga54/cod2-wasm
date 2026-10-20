@@ -36,7 +36,10 @@ parser.add_argument('--main-dir', type=Path, default=root / 'data/browser/main')
 parser.add_argument('--manifest', type=Path, default=root / 'site/wasm-game-data.json')
 args = parser.parse_args()
 maps = {"mp_toujane": "Toujane, Tunisia", "mp_carentan": "Carentan, France",
-        "mp_dawnville": "Dawnville, France", "mp_burgundy": "Burgundy, France"}
+        "mp_dawnville": "Dawnville, France", "mp_burgundy": "Burgundy, France",
+        "mp_railyard": "Stalingrad, Russia"}
+soldiertypes = ("british_africa", "german_africa", "american_normandy", "german_normandy", "russian_coat",
+                "german_winterlight")
 gametypes = ("dm", "tdm", "ctf", "hq", "sd")
 balance_profile = load_profile()
 policy = json.loads(args.manifest.read_text())["variants"]["cod2-mp"]
@@ -215,7 +218,7 @@ try:
     for name in EXPLOSIVE_ALIASES:
         assert name in aliases, "Missing explosive sound alias: " + name
     for name in ("weap_sten_fire_plr", "weap_mp40_fire", "step_run_plr_default",
-                 "bullet_small_flesh", "ambient_africa", "ambient_france", "music_mainmenu_mp",
+                 "bullet_small_flesh", "ambient_africa", "ambient_france", "ambient_russia", "music_mainmenu_mp",
                  "us_mp_cmd_followme"):
         assert name in aliases, "Missing gameplay sound alias: " + name
     assert not any(n.startswith(("sound/voiceovers/uk/88ridge/", "sound/voiceovers/us/duhoc")) for n in entries)
@@ -230,20 +233,24 @@ try:
                  "codescripts/delete.gsc", "codescripts/struct.gsc",
                  "ui_mp/scriptmenus/team_britishgerman.menu",
                  "ui_mp/scriptmenus/team_americangerman.menu",
+                 "ui_mp/scriptmenus/team_russiangerman.menu",
                  "ui_mp/scriptmenus/weapon_british.menu",
                  "ui_mp/scriptmenus/weapon_american.menu",
+                 "ui_mp/scriptmenus/weapon_russian.menu",
                  "ui_mp/scriptmenus/weapon_german.menu",
                  "ui_mp/scriptmenus/serverinfo_tdm.menu"):
         assert name in entries, "Missing client dependency: " + name
-    for soldiertype in ("british_africa", "german_africa", "american_normandy", "german_normandy"):
+    for soldiertype in soldiertypes:
         assert f"mptype/{soldiertype}.gsc" in entries, soldiertype
     for name, data in entries.items():
-        if name.startswith('character/mp_') and any(team in name for team in ('british_africa', 'german_africa', 'american_normandy', 'german_normandy')):
+        if name.startswith('character/mp_') and any(team in name for team in soldiertypes):
             for model in re.findall(rb'precacheModel\("([^\"]+)"\)', data):
                 modelname = model.decode().lower()
                 assert (modelname if modelname.startswith('xmodel/') else 'xmodel/' + modelname) in entries, model
     for weapon in ('frag_grenade_american_mp', 'smoke_grenade_american_mp', 'colt_mp',
-                   'm1carbine_mp', 'm1garand_mp', 'thompson_mp', 'bar_mp', 'springfield_mp', 'greasegun_mp'):
+                   'm1carbine_mp', 'm1garand_mp', 'thompson_mp', 'bar_mp', 'springfield_mp', 'greasegun_mp',
+                   'frag_grenade_russian_mp', 'smoke_grenade_russian_mp', 'tt30_mp', 'ppsh_mp',
+                   'mosin_nagant_mp', 'pps42_mp', 'mosin_nagant_sniper_mp'):
         assert 'weapons/mp/' + weapon in entries, weapon
     for mapname in maps:
         for dependency in (f'maps/mp/{mapname}.gsc', f'maps/mp/{mapname}_fx.gsc',
@@ -261,7 +268,7 @@ try:
         prematch_music += ", the owner's end of match music"
     pack = f"the owner's sounds for {len(owner_sounds['aliases'])} aliases" if owner_sounds else "no owner sound pack"
     pictures = f"the owner's {len(owner_pictures)} class pictures" if owner_pictures else "no owner class pictures"
-    print(f"PASS: {len(entries)} private entries, {total} bytes, retail bytes/reviewed overrides, Toujane/Carentan/Dawnville/Burgundy, five retail modes, all four BSPs and factions, {hit_sound} hit sound, {menu_music} menu music, {prematch_music}, {pack}, {pictures}")
+    print(f"PASS: {len(entries)} private entries, {total} bytes, retail bytes/reviewed overrides, Toujane/Carentan/Dawnville/Burgundy/Stalingrad, five retail modes, all five BSPs and factions, {hit_sound} hit sound, {menu_music} menu music, {prematch_music}, {pack}, {pictures}")
 finally:
     for archive in originals:
         archive.close()

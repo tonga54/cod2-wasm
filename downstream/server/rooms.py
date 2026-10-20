@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Small, internal-only supervisor for Toujane/Carentan/Dawnville/Burgundy multiplayer rooms."""
+"""Small, internal-only supervisor for Toujane/Carentan/Dawnville/Burgundy/Stalingrad multiplayer rooms."""
 import concurrent.futures
 import http.server
 import json
@@ -18,7 +18,7 @@ MAX_ROOMS = 3
 BASE_PORT = 28960
 IDLE_SECONDS = 300
 INFO_GRACE_SECONDS = 2
-SUPPORTED_MAPS = ('mp_toujane', 'mp_carentan', 'mp_dawnville', 'mp_burgundy')
+SUPPORTED_MAPS = ('mp_toujane', 'mp_carentan', 'mp_dawnville', 'mp_burgundy', 'mp_railyard')
 SUPPORTED_GAMETYPES = ('dm', 'tdm', 'ctf', 'hq', 'sd')
 MAX_BOTS = 32
 BOT_DIFFICULTIES = ('easy', 'normal', 'hard')
@@ -189,7 +189,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.reply(400, {'error': 'Invalid server name.'})
         mapname = body.get('map', 'mp_toujane')
         if not isinstance(mapname, str) or mapname not in SUPPORTED_MAPS:
-            return self.reply(400, {'error': 'Choose Toujane, Carentan, Dawnville or Burgundy.'})
+            return self.reply(400, {'error': 'Choose Toujane, Carentan, Dawnville, Burgundy or Stalingrad.'})
         gametype = body.get('gametype', 'tdm')
         if not isinstance(gametype, str) or gametype not in SUPPORTED_GAMETYPES:
             return self.reply(400, {'error': 'Choose a supported game mode.'})

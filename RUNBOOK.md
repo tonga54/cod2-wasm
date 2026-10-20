@@ -1,6 +1,6 @@
 # Call of Duty 2 browser runbook
 
-Status: **Toujane/Carentan/Dawnville/Burgundy browser port with five multiplayer modes under active development. Chrome and
+Status: **Toujane/Carentan/Dawnville/Burgundy/Stalingrad browser port with five multiplayer modes under active development. Chrome and
 the internal browser have verified movement, aiming, damage, death, respawn and
 synchronized scores, including the normal room. This is two-client coverage,
 not a 64-player load or long-duration stability result.**
@@ -4698,3 +4698,74 @@ Validation:
 
 Not covered: only TDM ran in the browser on Burgundy, and nobody played a
 match on it.
+
+## Stalingrad enabled, and effects that list cheapOrgCalc under spawnFlags — 2026-10-20
+
+The owner asked to enable Stalingrad, with its textures, shadows and lighting
+as on the maps added before. Stalingrad, Russia (`mp_railyard`) is in Start
+New Server's Map Select between Dawnville and Toujane, with the retail
+loading-screen picture and a note of its own. The gateway, room supervisor,
+discovery probe and the Pi's post-update check accept it, and rooms rotate
+through all five maps.
+
+It is the first map with the Soviet and German winter sides. Its script sets
+`russian` with `coats`, which `_teams.gsc` plays as `mptype/russian_coat`,
+and `german` with `winterlight`. The generator now keeps both uniforms'
+models, and the Soviet team and weapon script menus. The scoreboard already
+drew the Soviet star, the bots already armed Soviets, and classes carry any
+side's weapons.
+
+The private archives gain 665 files: the BSP and map scripts, 143 materials,
+273 textures (42 MB of them normal and specular maps, as on the other maps),
+64 models with their surfaces, the snow and fire effects, and the uniforms
+(118 files, 18 MB); the audio archive gains `ambient_russia` and a fire loop.
+The renderer archive grows from 307.1 to 385.4 MB and the audio archive from
+67.8 to 73.0 MB. `site/wasm-game-data.json` is regenerated with this commit.
+The Pi regenerates the same archives from its retail IWDs, where Stalingrad's
+BSP is in `iw_04.iwd` beside Toujane's.
+
+The renderer needs nothing of its own for the map: baked shadows, the light
+grid, fog and lighting come from its BSP, sun file and scripts. Its materials
+add only the particle cloud technique of its snow.
+
+`PrimitiveTemplate_ParseFlags` took a `spawnFlags` name only from
+`fxSpawnFlags`, which lacks `cheapOrgCalc`, a spawn-word flag that
+`fxAttributeFlags` lists. Retail effects list it under `spawnFlags` 38
+times. Five packaged effects did, and failed to load: Stalingrad's snow and
+burning buildings, two other fires, and the barrel explosion on every map,
+behind the `FX Error while parsing segment type 'Particle'` every map
+printed. A name now comes from the key's table, else from the other one, each
+entry setting its own word. Those effects load, effects that parsed before
+parse the same, and names neither table has still fail.
+
+The snow still does not fall in the browser. Its cloud particles go through
+`RB_TessParticleCloud`, which skips CoD2's DX7 renderer as the original did:
+a cloud is 1024 flakes that a vertex shader expands.
+
+Validation:
+
+- `test-fx-flags.py` (new, 47 cases, 7 mutants) runs the production parser
+  on the production tables: the names retail effects use under each key, the
+  five effects' spawn lines, each entry's own word, and unknown names.
+- `check-private-assets.py` passes with all five BSPs, both uniforms' models,
+  the Soviet menus, `ambient_russia` and the Soviet loadout. Regenerating the
+  four-map archives reproduces the previous manifest exactly.
+- `test-map-rotation.py --rounds 10`: a real dedicated server rotated twice
+  through the five maps without an error. Dedicated servers on Stalingrad
+  started in all five modes without an error, and reported TDM, CTF, HQ and
+  S&D as their mode. They start in 1.6 s and hold 220 MiB, as on the other
+  maps.
+- `test-room-maps.py`, `test-ui-map-selection.py`, `test-match-menu.py`,
+  `test-web-room-create.cjs` and the gateway's `rooms.test.mjs` pass.
+- The web client builds. A Stalingrad TDM room with six bots in the QA stack:
+  - the console showed no error of Stalingrad's own and, with the fix, no FX
+    error at all;
+  - screenshots showed the snow-covered yards, station and hangars, the
+    trains, the Panzers, dim interiors, the fog, the burning building's
+    flames and smoke, the Soviet coat in third person and the German winter
+    sleeves in first person;
+  - the scoreboard drew the Soviet star for the Allies and the iron cross for
+    the Axis.
+
+Not covered: the falling snow, as above. Only TDM ran in the browser on
+Stalingrad, and nobody played a match on it.

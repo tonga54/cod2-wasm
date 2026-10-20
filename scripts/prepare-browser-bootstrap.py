@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare private startup and Toujane/Carentan/Dawnville/Burgundy multiplayer assets."""
+"""Prepare private startup and Toujane/Carentan/Dawnville/Burgundy/Stalingrad multiplayer assets."""
 from pathlib import Path
 import argparse
 import hashlib
@@ -28,9 +28,11 @@ parser.add_argument('--manifest', type=Path, default=root / 'site/wasm-game-data
 args = parser.parse_args()
 balance_profile = load_profile()
 maps = {"mp_toujane": "Toujane, Tunisia", "mp_carentan": "Carentan, France",
-        "mp_dawnville": "Dawnville, France", "mp_burgundy": "Burgundy, France"}
+        "mp_dawnville": "Dawnville, France", "mp_burgundy": "Burgundy, France",
+        "mp_railyard": "Stalingrad, Russia"}
 gametypes = ("dm", "tdm", "ctf", "hq", "sd")
-soldiertypes = ("british_africa", "german_africa", "american_normandy", "german_normandy")
+soldiertypes = ("british_africa", "german_africa", "american_normandy", "german_normandy", "russian_coat",
+                "german_winterlight")
 main = args.main_dir
 main.mkdir(parents=True, exist_ok=True)
 archives = {}
@@ -116,8 +118,8 @@ try:
     pending.append("info/mp_lochit_dmgtable")
     # _menus.gsc builds these names from each map's factions and gametype.
     pending.extend("ui_mp/scriptmenus/" + menu + ".menu" for menu in (
-        "team_britishgerman", "team_americangerman", "weapon_british",
-        "weapon_american", "weapon_german"
+        "team_britishgerman", "team_americangerman", "team_russiangerman", "weapon_british",
+        "weapon_american", "weapon_russian", "weapon_german"
     ))
     for gametype in gametypes:
         pending.extend((f"maps/mp/gametypes/{gametype}.gsc",
@@ -398,6 +400,6 @@ policy = {
     }}
 }
 args.manifest.write_text(json.dumps(policy, indent=2) + "\n")
-print(f"Private Toujane/Carentan/Dawnville/Burgundy archives: {sum(item['size'] for item in files)} bytes; "
+print(f"Private Toujane/Carentan/Dawnville/Burgundy/Stalingrad archives: {sum(item['size'] for item in files)} bytes; "
       f"asset closure: {len(renderer)} files; gameplay still unverified")
 print(f"Weapon balance: {balance_profile['id']} ({len(balance_profile['weapons'])} weapons)")

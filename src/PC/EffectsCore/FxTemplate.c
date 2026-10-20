@@ -709,6 +709,28 @@ void PrimitiveTemplate_CreateBackCompatibleRotationDeltaCurve(const PrimitiveTem
     *(unsigned int *)(((char *)thisPtr + offsetof(PrimitiveTemplate, mFxChannels[0].curve)) + chanOff + 8) = *(unsigned int *)&graphScale;
 }
 
+/* A flag from the key's table, else from the other one: retail effects list
+ * the spawn word's cheapOrgCalc under spawnFlags, as Stalingrad's snow and the
+ * barrel explosion do, and each entry sets its own word either way. */
+static const FxFlagEntry *PrimitiveTemplate_FindFlag(const char *flag, const FxFlagEntry *flagEntries,
+                                                     int flagEntryCount)
+{
+    const FxFlagEntry *other = flagEntries == fxSpawnFlags ? fxAttributeFlags : fxSpawnFlags;
+    int otherCount = flagEntries == fxSpawnFlags ? (int)(sizeof(fxAttributeFlags) / sizeof(fxAttributeFlags[0]))
+                                                 : (int)(sizeof(fxSpawnFlags) / sizeof(fxSpawnFlags[0]));
+    int entryIndex;
+
+    for (entryIndex = 0; entryIndex < flagEntryCount; ++entryIndex) {
+        if (!stricmp(flagEntries[entryIndex].flag, flag))
+            return &flagEntries[entryIndex];
+    }
+    for (entryIndex = 0; entryIndex < otherCount; ++entryIndex) {
+        if (!stricmp(other[entryIndex].flag, flag))
+            return &other[entryIndex];
+    }
+    return NULL;
+}
+
 Bool PrimitiveTemplate_ParseFlags(const PrimitiveTemplate *_this, const char *line, const FxFlagEntry *flagEntries, int flagEntryCount)
 {
     byte *thisPtr = (byte *)_this;
@@ -716,7 +738,7 @@ Bool PrimitiveTemplate_ParseFlags(const PrimitiveTemplate *_this, const char *li
     char *flag;
     int parsedLength;
     int flagLength;
-    int entryIndex;
+    const FxFlagEntry *entry;
 
     lineLen = strlen(line);
     if (lineLen == 0)
@@ -732,17 +754,13 @@ Bool PrimitiveTemplate_ParseFlags(const PrimitiveTemplate *_this, const char *li
         while (parsedLength < lineLen && (unsigned char)line[parsedLength] > ' ')
             flag[flagLength++] = line[parsedLength++];
         flag[flagLength] = '\0';
-        for (entryIndex = 0; entryIndex < flagEntryCount; ++entryIndex) {
-            if (!stricmp(flagEntries[entryIndex].flag, flag)) {
-                ((PrimitiveTemplate *)thisPtr)->mAttributeFlags |= flagEntries[entryIndex].masks[0];
-                ((PrimitiveTemplate *)thisPtr)->mSpawnFlags |= flagEntries[entryIndex].masks[1];
-                break;
-            }
-        }
-        if (entryIndex == flagEntryCount) {
+        entry = PrimitiveTemplate_FindFlag(flag, flagEntries, flagEntryCount);
+        if (!entry) {
             Hunk_FreeTempMemory(flag);
             return 0;
         }
+        ((PrimitiveTemplate *)thisPtr)->mAttributeFlags |= entry->masks[0];
+        ((PrimitiveTemplate *)thisPtr)->mSpawnFlags |= entry->masks[1];
     }
 
     Hunk_FreeTempMemory(flag);
