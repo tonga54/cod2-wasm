@@ -344,6 +344,7 @@ Measured results have different scopes:
 | Pi 5, eight protocol clients + 16 Hard bots | 30.20 updates/s/client; 86.8% of one CPU core | Server/network sample; [report](docs/SERVER_PERFORMANCE_2026-10-13.md). |
 | Pi tick-rate comparison | 30 Hz retained as the default | 50 Hz saturated a core under the heavier tested load; [benchmark](docs/TICKRATE_BENCHMARK_2026-10-12.md). |
 | Development Mac rendering | About 120 FPS in documented gameplay checks | Specific desktop/display and short samples; [graphics report](docs/GRAPHICS_2026-10-16.md). |
+| Browser tab memory, Carentan with 8 bots | 815–836 MB in a match and 375 MB at the menu, from 1,149–1,204 MB and 734 MB | The large archive is read from browser storage on demand; Chromium on the development Mac; [report](docs/STABILITY_AND_SECURITY_2026-10-20.md). |
 
 These are measurements, not minimum FPS or maximum-player guarantees. Bot pathing,
 client hardware and crowded matches still need testing under the intended load.
@@ -392,6 +393,7 @@ choose when to reload. [Update operations and cache behavior →](docs/UPDATES.m
 | [Updates and private media](docs/UPDATES.md) | Releases, caching, music, sounds and class pictures |
 | [Technical reference](docs/TECHNICAL_REFERENCE.md) | Detailed gameplay rules, restored behavior, room API and operational checks |
 | [Client performance](docs/PERFORMANCE_2026-10-16.md) / [server performance](docs/SERVER_PERFORMANCE_2026-10-13.md) | Optimization measurements and their limits |
+| [Memory, server load and security](docs/STABILITY_AND_SECURITY_2026-10-20.md) | On-demand archives, bounded network queues, the bot governor, gateway limits and container hardening |
 | [Runbook](RUNBOOK.md) | Development history, runtime evidence and troubleshooting |
 | [Source audit](SOURCE_BASE_AUDIT.md) | Reconstructed source base and provenance |
 

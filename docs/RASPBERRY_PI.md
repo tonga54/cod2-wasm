@@ -260,7 +260,18 @@ The credentials live in the private `~/cod2-edge/access.json` file.
 Rate limits apply to HTTP requests and room creation/deletion, not messages inside
 an established game WebSocket. Authentication applies to downloads and WebSocket
 handshakes as well as the main page. This protects application access; it cannot
-prevent an attack from saturating the home's Internet connection.
+prevent an attack from saturating the home's Internet connection. Inside a game
+WebSocket the gateway itself limits each player's datagram size, rate and
+connectionless commands ([gateway security](STABILITY_AND_SECURITY_2026-10-20.md#gateway-security)).
+
+The proxy owns the player-facing TCP socket, so a stalled player's snapshots
+queue in its kernel buffer. Give the proxy service in the overlay the gateway's
+setting, so at most 16 KiB wait unsent and the gateway drops the rest:
+
+```yaml
+    sysctls:
+      net.ipv4.tcp_notsent_lowat: 16384
+```
 
 ### Downloads from Cloudflare
 
@@ -461,6 +472,13 @@ private profile only when bots are enabled and persists count/difficulty in
 that room's config across map rotation. No third-party bot package, waypoint
 download or separate Docker service is needed. Bots alone do not prevent the
 normal five-minute room cleanup.
+
+A room asking for more bots than the Pi can simulate at 30 Hz sheds them: after
+three seconds behind schedule or near a full core, one bot leaves and the room
+sees "Server busy: a bot left to keep the match smooth."; after a calm minute
+they return, up to the room's count. The server log shows each decision as
+`[bots] governor: late=…% cpu=…%`. See
+[the governor](STABILITY_AND_SECURITY_2026-10-20.md#bot-governor).
 
 See [Bots](../README.md#bots) for difficulty settings, behavior in all five game
 modes and navigation limitations. The same native server AI runs on the Pi;

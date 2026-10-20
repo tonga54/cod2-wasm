@@ -76,7 +76,14 @@ revision, regenerates private assets in staging, and checks their exact public
 manifest hashes. A separate Docker project then exercises six maps, two bots
 per map, browser metadata and WebSocket-to-native challenges.
 
-The updater waits while players or pending joins are present. During the brief
+The updater waits while players or pending joins are present, and checks again
+before loading images, before regenerating the private archives and before
+starting the candidate stack. The candidate plays a real room with bots for
+minutes; if a player joins production meanwhile it is stopped and the release
+waits for the next idle check instead of being rejected. Host preparation runs
+at `nice 19` with idle I/O priority and candidate containers at the lowest CPU
+weight. A unit installed before October 20, 2026 keeps `Nice=10`; rerun
+`--install` for `Nice=19`, `CPUWeight=1` and `IOSchedulingClass=idle`. During the brief
 idle switch, a host maintenance flag blocks new joins. It replaces the three
 game services, checks the new private manager/native UDP path, then advances the
 Pi checkout. Failed activation restores the previous assets, images and Compose

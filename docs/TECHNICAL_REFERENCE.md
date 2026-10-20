@@ -113,6 +113,12 @@ and tactical coordination can still need improvements.
 See [Bot behavior and validation](BOT_AI.md) for the implementation and
 the distinction between autonomous matches and controlled interaction tests.
 
+A host that cannot keep up sheds bots: after three seconds with simulation
+frames running late or nearly a whole core in use, one bot leaves ("Server busy:
+a bot left to keep the match smooth."); after a minute and twenty calm seconds
+they come back, never above the room's count, and later maps keep the count the
+host carried. See [the governor](STABILITY_AND_SECURITY_2026-10-20.md#bot-governor).
+
 Bots occupy ordinary player slots: eight bots leave 56 human slots, and 32 bots leave 32. They do not
 keep a room alive after its last human leaves; the usual five-minute idle
 cleanup still applies. A room's bots wait frozen where they spawned until the
@@ -508,7 +514,12 @@ startup.
 | `cod2-server` | Internal room supervisor and one authoritative engine process per room |
 
 The game network is internal to Docker; raw UDP and the room supervisor are not
-published to the LAN. Private files are mounted read-only. Set `COD2_WEB_PORT`
+published to the LAN. The gateway forwards only the connectionless commands a
+browser client sends (`getchallenge`, `connect`, `getinfo`, `getstatus`), caps
+each connection's datagram size, rate and snapshot backlog, and containers run
+without new privileges; see
+[gateway security](STABILITY_AND_SECURITY_2026-10-20.md#gateway-security).
+Private files are mounted read-only. Set `COD2_WEB_PORT`
 to change the public port or `COD2_WEB_DATA_DIR` to use another private-data
 location.
 
@@ -516,7 +527,10 @@ The current six-map package is approximately **473.4 MB** (451.5 MiB) in
 the checked-in manifest, including renderer and audio archives. Optional owner
 sounds and class pictures affect the prepared package size; use
 [`site/wasm-game-data.json`](../site/wasm-game-data.json) for exact sizes and hashes. Browsers download it once per site/cache version and keep it in
-IndexedDB. Size/SHA-256 checks verify each archive. Original owner IWDs stay
+IndexedDB. A worker verifies each download's SHA-256; later starts check the
+cached copy's size and signature. Archives of 128 MiB or more are read from
+IndexedDB on demand instead of being copied into the page
+(`?archives=memory` restores the copy). Original owner IWDs stay
 untouched in `data/main/`; the prepared copies stay in `data/browser/`. Original
 assets are excluded from Git and image layers. Generated WASM binaries are ignored by Git and shipped
 in the web runtime image.

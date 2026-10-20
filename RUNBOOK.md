@@ -5411,3 +5411,49 @@ Validation:
 - `scripts/test-gamepad.py` passes unchanged: the client applies what the
   cgame hands it to the sticks alone.
 - Not yet built into the browser client or played.
+
+## Browser memory, server load and gateway security — 2026-10-20
+
+A player reported heavy lag and a tab that sometimes closed. Details,
+measurements and limits are in
+[docs/STABILITY_AND_SECURITY_2026-10-20.md](docs/STABILITY_AND_SECURITY_2026-10-20.md).
+
+- The 400 MB renderer IWD is read from IndexedDB on demand (worker with
+  `FileReaderSync` into shared memory when cross-origin isolated, synchronous
+  XHR otherwise, the old copy as a last resort) instead of being copied into
+  the page. Cached archives are no longer hashed whole on every start;
+  downloads are hashed in the worker and folded into 8 MiB Blob parts. Same
+  build, fresh renderer, Carentan with 8 Hard bots: 734 → 375 MB at the menu,
+  1,149–1,204 → 815–836 MB in the match, `CL_InitCGame` 1.58 → 2.04 s.
+- The archive worker needs 128 KiB of JS heap allocation per read: without it
+  the never-idle thread collected nothing and kept every byte it read (+230 MB
+  per pass, released only by terminating it).
+- A lost WebGL context, an out-of-memory abort, a WASM trap or unreadable
+  stored files now stop the engine with a message instead of a frozen frame.
+- Client commands are dropped behind more than 8 KiB of WebSocket backlog,
+  snapshots behind more than 64 KiB at the gateway; the gateway container sets
+  `net.ipv4.tcp_notsent_lowat=16384` (the private Nginx service needs it too).
+- Bot governor: `sv_cpuLoad`/`sv_lateFrames` from `SV_Frame`; one bot leaves
+  after 3 s behind schedule or at ≥ 90% CPU, returns after a minute and 20
+  calm seconds; `scr_bot_capacity` carries the count through the rotation;
+  `botRemove()`/`botkick` only drops a slot still held by a test client. On the
+  Pi image under QEMU with the container limited to 0.3 CPU, 24 Hard bots went
+  to 12, one distinct bot each time, as hitches fell from 3 s to 0.8 s; with no
+  limit, 32 Hard bots used 37.1% of a Mac core and none was removed.
+- Gateway: only `getchallenge`, `connect`, `getinfo` and `getstatus` reach an
+  engine; 2 KiB datagrams, 200/s, 128 KiB/s and 10 connectionless/s per
+  connection; 15/30 s header/request timeouts; framing denied.
+- No per-packet `[cnx] SV_ConnectionlessPacket` log; `no-new-privileges`,
+  `cap_drop: ALL` (server keeps `NET_RAW`) and PID limits; the Pi updater
+  re-checks idleness between heavy steps, stops the candidate when a player
+  joins, and runs its preparation at the lowest priority.
+
+Validation: `test-web-archives.cjs`, `test-lan-validation.cjs`,
+`test-web-net-errors.cjs`, `test-input-capture.cjs`, `test-server-load.py`,
+`test-bot-governor.cjs`, `test-bot-frame-cadence.py`, `test-pi-updater.py` and
+the gateway suite (21 tests, `filter.test.mjs` new) pass; every other
+`test-static.sh` check passes except `test-sprint.py`, which fails the same way
+on `main` before this change. A local stack with this compose file (hardening
+and sysctl applied) downloaded, verified and mounted the archives in a browser,
+joined an 8-bot Carentan room and loaded the map through both on-demand paths.
+Not tested on the Pi itself, nor in Firefox, Safari or Windows.
