@@ -11,11 +11,16 @@ extern void CalcScreenPlacement(float *x, float *y, float *w, float *h, int horz
 
 #define SIGHT_SEGMENTS 24
 #define SIGHT_MAX_RINGS 6
-/* Virtual units: the reflex dot and its glow, the lens sight's ring and its
- * centre dot, each fading out over its feather, and the halo the light of
- * each spreads into around it. */
-#define SIGHT_REFLEX_RADIUS 0.8f
-#define SIGHT_REFLEX_GLOW 0.6f
+/* The reflex dot's core in virtual units, or this much of its window's
+ * opening on screen when the sight's ring frames one, so it reads at a glance
+ * whatever the gun; its glow reaches these many times the core, its halo
+ * these. */
+#define SIGHT_REFLEX_RADIUS 1.2f
+#define SIGHT_REFLEX_OPENING 0.045f
+#define SIGHT_REFLEX_GLOW 1.75f
+#define SIGHT_REFLEX_HALO 4.75f
+/* Virtual units: the lens sight's ring and its centre dot, each fading out
+ * over its feather, and the halo the light of each spreads into around it. */
 #define SIGHT_LENS_RING 6.5f
 #define SIGHT_LENS_RING_WIDTH 0.45f
 #define SIGHT_LENS_DOT 0.45f
@@ -58,6 +63,15 @@ static float CG_SightOpeningAlpha(float x, float y)
         return 0.0f;
     r = (1.0f - r) / (1.0f - SIGHT_OPENING_EDGE);
     return r * r * (3.0f - 2.0f * r);
+}
+
+/* The opening's radius in pixels, the geometric mean of its semi-axes; 0
+ * without one. */
+static float CG_SightOpeningRadius(void)
+{
+    float det = s_sightOpening.toUnit[0] * s_sightOpening.toUnit[3] - s_sightOpening.toUnit[1] * s_sightOpening.toUnit[2];
+
+    return s_sightOpening.on && det != 0.0f ? 1.0f / sqrtf(fabsf(det)) : 0.0f;
 }
 
 static void CG_SightVertex(HudVertex2D *vertex, float x, float y, const vec_t *color, float alpha)
@@ -127,8 +141,8 @@ void CG_DrawAttachmentSight(const playerState_t *ps, int weapon, float x, float 
     CalcScreenPlacement(&x, &y, &w, &scale, 2, 2);
     s_sightOpening.on = CG_WwiiScopeSightOpening(s_sightOpening.centre, s_sightOpening.toUnit);
     if (mask & ATT_BIT(ATT_REFLEX)) {
-        const float radii[4] = { 0.0f, SIGHT_REFLEX_RADIUS * scale, (SIGHT_REFLEX_RADIUS + SIGHT_REFLEX_GLOW) * scale,
-                                 (SIGHT_REFLEX_RADIUS + SIGHT_REFLEX_GLOW + SIGHT_HALO) * scale };
+        const float core = fmaxf(SIGHT_REFLEX_RADIUS * scale, SIGHT_REFLEX_OPENING * CG_SightOpeningRadius());
+        const float radii[4] = { 0.0f, core, core * SIGHT_REFLEX_GLOW, core * SIGHT_REFLEX_HALO };
         const float alphas[4] = { 1.0f, 1.0f, SIGHT_HALO_ALPHA, 0.0f };
 
         CG_DrawSightRings(x, y, radii, alphas, 4, s_sightReflex, alpha);

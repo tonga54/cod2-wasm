@@ -33,6 +33,18 @@ TEXTURE_SIZE = 128
 FINISHES = ('blued', 'parkerized', 'worn', 'brass', 'glass', 'black', 'rust')
 MATERIAL = 'mtl_browser_att_'
 IMAGE = 'browser_att_'
+# The Reflex and Lens Sights wear the gun's own material, renamed with MATERIAL so the WWII scope's compositor
+# draws them over a sight's window as it does the finishes: the gun's colour, detail, normal and specular maps,
+# their UVs on a plain patch of its metal at its own texel density.
+GUN_METAL = 'gun'
+# The search reads the colour and specular maps at the mip level whose larger side is at most PATCH_MIP; the patch
+# is PATCH_TEXELS square there.
+PATCH_MIP = 128
+PATCH_TEXELS = 8
+# Of the best patches there, the first whose texels at twice the size stand out of their neighbourhood by less
+# than this, nine in ten of them (a fraction of full scale), so no screw head, seam or engraving shows on a sight.
+PATCH_CANDIDATES = 40
+PATCH_DETAIL = 0.035
 # The guns whose j_clip is a magazine an Extended Mag lengthens; the others' is a stripper clip or
 # an en-bloc clip, a drum or a revolver's.
 MAGAZINES = ('thompson_mp', 'greasegun_mp', 'sten_mp', 'PPS42_mp', 'mp40_mp', 'm1carbine_mp', 'SVT40_mp',
@@ -53,12 +65,12 @@ EXTBOX = 'extbox'
 OPTIC_AHEAD = {
     'thompson_mp': 8.0, 'greasegun_mp': 9.5, 'sten_mp': 8.5, 'PPS42_mp': 9.0, 'ppsh_mp': 8.0,
     'mp40_mp': 8.5, 'm1garand_mp': 8.0, 'm1carbine_mp': 7.5, 'SVT40_mp': 8.0, 'g43_mp': 8.0,
-    'bar_mp': 9.0, 'bren_mp': 10.0, 'mp44_mp': 8.0, 'shotgun_mp': 7.0, 'enfield_mp': 7.5,
+    'bar_mp': 9.0, 'bren_mp': 10.0, 'mp44_mp': 8.0, 'shotgun_mp': 11.0, 'enfield_mp': 7.5,
     'mosin_nagant_mp': 6.5, 'kar98k_mp': 7.5,
 }
 # The Reflex Sight's frame and the Lens Sight's ring: their outer radius and the opening the eye looks through.
 # The WWII scope (cg_wwiiscope_mp.c) keeps the gun off the ring's whole disc, SIGHT_RINGS times the opening.
-REFLEX_OUTER, REFLEX_INNER = 0.8, 0.64
+REFLEX_OUTER, REFLEX_INNER = 0.74, 0.64
 LENS_OUTER, LENS_INNER = 0.6, 0.5
 SIGHT_OPENINGS = {'reflex': REFLEX_INNER, 'lens': LENS_INNER}
 SIGHT_RINGS = {'reflex': REFLEX_OUTER / REFLEX_INNER, 'lens': LENS_OUTER / LENS_INNER}
@@ -271,9 +283,13 @@ class Mesh:
         out.triangles = list(self.triangles)
         return out
 
-    def rigid_vertices(self):
+    def rigid_vertices(self, uv_of=None):
+        """The vertices as write_rigid_surfaces takes them, their UVs uv_of(position, normal) when given, of the
+        canonical position and normal, so a normal between two axes takes the same one on the Pi."""
         out = []
         for position, normal, uv in zip(self.positions, self.normals, self.uvs):
+            if uv_of:
+                uv = uv_of(canonical(position), canonical(normal))
             tangent = S._cross(normal, (0.0, 0.0, 1.0))
             if S._dot(tangent, tangent) < 1e-6:
                 tangent = S._cross(normal, (1.0, 0.0, 0.0))
@@ -536,45 +552,47 @@ def _glass(radius, at, finish='glass'):
 
 
 def reflex(gun):
-    """WWII's reflex sight: a round window in a thick frame, upright on a post and a clamped base over the
-    receiver, centred on the line of sight; its glass shows in the pictures, the reticle in a match."""
+    """WWII's reflex sight: a round window in a thin bevelled frame, upright on a post and a clamped base over the
+    receiver, centred on the line of sight, in the gun's metal; its glass shows in the pictures, the reticle in a
+    match."""
     ahead = OPTIC_AHEAD.get(gun.weapon, 7.5)
-    outer, inner, depth = REFLEX_OUTER, REFLEX_INNER, 0.26
-    frame = lathe(Mesh('blued'), [(-depth, inner), (-depth, outer), (depth, outer), (depth, inner), (-depth, inner)],
-                  segments=40)
-    lip = lathe(Mesh('worn'), [(depth, outer * 0.995), (depth + 0.04, outer * 0.96), (depth + 0.04, inner * 1.04),
-                               (depth, inner * 1.005)], segments=40)
-    meshes, centre = _on_sight_line(gun, [frame, lip] + _glass(inner, 0.0), ahead)
+    outer, inner, depth, bevel = REFLEX_OUTER, REFLEX_INNER, 0.12, 0.03
+    frame = lathe(Mesh(GUN_METAL), [(-depth, inner), (-depth, outer - bevel), (-depth + bevel, outer),
+                                    (depth - bevel, outer), (depth, outer - bevel), (depth, inner), (-depth, inner)],
+                  segments=48)
+    meshes, centre = _on_sight_line(gun, [frame] + _glass(inner, 0.0), ahead)
     top, ceiling = _under_opening(gun, centre, inner)
-    post = _mount_box(Mesh('blued'), (centre[0] - 0.2, centre[1] - 0.2, top + 0.25),
-                      (centre[0] + 0.2, centre[1] + 0.2, centre[2] - outer + 0.05), ceiling)
-    base = _mount_box(Mesh('parkerized'), (centre[0] - 0.8, centre[1] - 0.42, top - 0.05),
+    post = _mount_box(Mesh(GUN_METAL), (centre[0] - 0.16, centre[1] - 0.18, top + 0.25),
+                      (centre[0] + 0.16, centre[1] + 0.18, centre[2] - outer + 0.04), ceiling)
+    base = _mount_box(Mesh(GUN_METAL), (centre[0] - 0.8, centre[1] - 0.42, top - 0.05),
                       (centre[0] + 0.6, centre[1] + 0.42, top + 0.28), ceiling)
-    screw = _mount_box(Mesh('worn'), (centre[0] - 0.15, centre[1] - 0.52, top),
+    screw = _mount_box(Mesh(GUN_METAL), (centre[0] - 0.15, centre[1] - 0.52, top),
                        (centre[0] + 0.15, centre[1] - 0.42, top + 0.22), ceiling)
     return meshes + [part for part in (post, base, screw) if part]
 
 
 def lens(gun):
     """WWII's lens sight: the lens in a thin ring, upright on a short stalk and a block clamped to a base over
-    the receiver, centred on the line of sight; its lens shows in the pictures, the reticle in a match."""
+    the receiver, centred on the line of sight, in the gun's metal; its lens shows in the pictures, the reticle in
+    a match."""
     ahead = OPTIC_AHEAD.get(gun.weapon, 7.5)
     outer, inner, half, bevel = LENS_OUTER, LENS_INNER, 0.08, 0.025
-    ring = lathe(Mesh('blued'), [(-half, inner), (-half, outer - bevel), (-half + bevel, outer), (half - bevel, outer),
-                                 (half, outer - bevel), (half, inner), (-half, inner)], segments=48)
-    bezel = lathe(Mesh('worn'), [(half, inner * 1.005), (half + 0.025, inner * 1.02), (half + 0.025, inner * 1.1),
-                                 (half, inner * 1.14)], segments=48)
+    ring = lathe(Mesh(GUN_METAL), [(-half, inner), (-half, outer - bevel), (-half + bevel, outer),
+                                   (half - bevel, outer), (half, outer - bevel), (half, inner), (-half, inner)],
+                 segments=48)
+    bezel = lathe(Mesh(GUN_METAL), [(half, inner * 1.005), (half + 0.025, inner * 1.02), (half + 0.025, inner * 1.1),
+                                    (half, inner * 1.14)], segments=48)
     meshes, centre = _on_sight_line(gun, [ring, bezel] + _glass(inner, 0.0), ahead)
     top, ceiling = _under_opening(gun, centre, inner)
     bottom = centre[2] - outer + 0.03
     block_top = max(top + 0.22, min(top + 0.4, bottom - 0.05))
-    base = _mount_box(Mesh('parkerized'), (centre[0] - 0.75, centre[1] - 0.34, top - 0.05),
+    base = _mount_box(Mesh(GUN_METAL), (centre[0] - 0.75, centre[1] - 0.34, top - 0.05),
                       (centre[0] + 0.55, centre[1] + 0.34, top + 0.16), ceiling)
-    block = _mount_box(Mesh('blued'), (centre[0] - 0.3, centre[1] - 0.26, top + 0.15),
+    block = _mount_box(Mesh(GUN_METAL), (centre[0] - 0.3, centre[1] - 0.26, top + 0.15),
                        (centre[0] + 0.3, centre[1] + 0.26, block_top), ceiling)
-    stalk = _mount_box(Mesh('blued'), (centre[0] - 0.07, centre[1] - 0.1, block_top - 0.02),
+    stalk = _mount_box(Mesh(GUN_METAL), (centre[0] - 0.07, centre[1] - 0.1, block_top - 0.02),
                        (centre[0] + 0.07, centre[1] + 0.1, max(bottom, block_top)), ceiling)
-    screws = [_mount_box(Mesh('worn'), (centre[0] + x - 0.09, centre[1] - 0.42, top),
+    screws = [_mount_box(Mesh(GUN_METAL), (centre[0] + x - 0.09, centre[1] - 0.42, top),
                          (centre[0] + x + 0.09, centre[1] - 0.34, top + 0.13), ceiling) for x in (-0.5, 0.3)]
     return meshes + [part for part in [base, block, stalk] + screws if part]
 
@@ -919,6 +937,220 @@ def texture_pixels(finish, seed=7):
     return pixels
 
 
+# ---------------------------------------------------------------- the gun's own metal
+
+def material_textures(data):
+    """A material's images by the sampler they fill: colorMap, detailMap, normalMap, specularMap."""
+    count, _, table = struct.unpack_from('<III', data, 0x34)
+
+    def string(offset):
+        return data[offset:data.index(b'\0', offset)].decode('latin-1')
+    return {string(name): string(image) for name, _, image in
+            (struct.unpack_from('<III', data, table + 12 * k) for k in range(count & 0xffff))}
+
+
+def renamed_material(data, name):
+    """The material as it is under another name: the name appended and the header's name offset on it."""
+    out = bytearray(data) + name.encode('ascii') + b'\0'
+    struct.pack_into('<I', out, 0x00, len(data))
+    return bytes(out)
+
+
+def _rgb565(value):
+    return ((value >> 11) & 31) * 255 // 31, ((value >> 5) & 63) * 255 // 63, (value & 31) * 255 // 31
+
+
+def _dxt_colours(block, offset, four):
+    c0, c1, bits = struct.unpack_from('<HHI', block, offset)
+    a, b = _rgb565(c0), _rgb565(c1)
+    if four or c0 > c1:
+        palette = (a, b, tuple((2 * x + y) // 3 for x, y in zip(a, b)), tuple((x + 2 * y) // 3 for x, y in zip(a, b)))
+    else:
+        palette = (a, b, tuple((x + y) // 2 for x, y in zip(a, b)), (0, 0, 0))
+    return [palette[(bits >> (2 * i)) & 3] for i in range(16)]
+
+
+def read_iwi(data, side):
+    """An IWI's largest mip level whose larger side is at most side, but no smaller than the third, as rows of
+    (r, g, b): ARGB32, DXT1 or DXT5."""
+    if data[:3] != b'IWi' or data[3] != 5:
+        raise ValueError('Unexpected IWI')
+    fmt = data[4]
+    width, height = struct.unpack_from('<HH', data, 6)
+    ends = struct.unpack_from('<4i', data, 12)
+    level = 0
+    while max(width, height) > side and level < 2:
+        level, width, height = level + 1, max(1, width // 2), max(1, height // 2)
+    blob = data[ends[level + 1]:ends[level]]
+    rows = [[None] * width for _ in range(height)]
+    if fmt in (11, 13):
+        step, at = (8, 0) if fmt == 11 else (16, 8)
+        k = 0
+        for by in range(0, height, 4):
+            for bx in range(0, width, 4):
+                colours = _dxt_colours(blob, k + at, fmt == 13)
+                k += step
+                for i, colour in enumerate(colours):
+                    x, y = bx + i % 4, by + i // 4
+                    if x < width and y < height:
+                        rows[y][x] = colour
+    elif fmt == 1:
+        for y in range(height):
+            for x in range(width):
+                b, g, r = blob[4 * (y * width + x):4 * (y * width + x) + 3]
+                rows[y][x] = (r, g, b)
+    else:
+        raise ValueError('Unexpected IWI format %d' % fmt)
+    return rows
+
+
+def _luminance(rgb):
+    return 299 * rgb[0] + 587 * rgb[1] + 114 * rgb[2]
+
+
+def _triangles(gun, surfaces, keep=None):
+    """The corner vertices of the triangles of those surfaces that keep takes, of their positions in j_gun's space."""
+    for index in surfaces:
+        vertices, triangles = gun.surfaces[index]['vertices'], gun.surfaces[index]['triangles']
+        for i in range(0, len(triangles), 3):
+            corners = [vertices[v] for v in triangles[i:i + 3]]
+            if keep is None or keep([_in_gun(gun, v) for v in corners]):
+                yield corners
+
+
+def _coverage(gun, surfaces, width, height, keep=None):
+    """The texels painted at width by height by those surfaces' triangles that keep takes."""
+    painted = [[False] * width for _ in range(height)]
+    for corners in _triangles(gun, surfaces, keep):
+        (ax, ay), (bx, by), (cx, cy) = ((v['uv'][0] * width, v['uv'][1] * height) for v in corners)
+        area = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay)
+        if abs(area) < 1e-9:
+            continue
+        for y in range(max(0, int(math.floor(min(ay, by, cy)))), min(height, int(math.ceil(max(ay, by, cy))))):
+            for x in range(max(0, int(math.floor(min(ax, bx, cx)))), min(width, int(math.ceil(max(ax, bx, cx))))):
+                px, py = x + 0.5, y + 0.5
+                w0 = ((bx - px) * (cy - py) - (cx - px) * (by - py)) / area
+                w1 = ((cx - px) * (ay - py) - (ax - px) * (cy - py)) / area
+                if w0 >= 0.0 and w1 >= 0.0 and w0 + w1 <= 1.0:
+                    painted[y][x] = True
+    return painted
+
+
+def _detail(rows):
+    """How far each texel's luminance stands from the mean of its 3 by 3 neighbourhood; 0 on the border."""
+    light = [[_luminance(texel) for texel in row] for row in rows]
+    height, width = len(light), len(light[0])
+    out = [[0] * width for _ in range(height)]
+    for y in range(1, height - 1):
+        for x in range(1, width - 1):
+            out[y][x] = abs(light[y][x] - sum(light[y + j][x + i] for j in (-1, 0, 1) for i in (-1, 0, 1)) // 9)
+    return out
+
+
+def _in_gun(gun, vertex):
+    q, t = gun.bones.get(gun.names[vertex['bone']], (S.IDENTITY_QUAT, (0.0, 0.0, 0.0)))
+    return S._add(S._qrot(q, vertex['pos']), t)
+
+
+class Metal:
+    """Where a gun's sight parts take its metal: its material, renamed, and the patch of its colour map they
+    sample, metal that is plain, shiny and of the receiver's tone beneath the sight, with its texel density."""
+
+    def __init__(self, gun, read, mount):
+        cx, cy, top = mount
+        beneath = lambda points: all(abs(p[0] - cx) < 2.0 and abs(p[1] - cy) < 1.5 and p[2] > top - 1.5 for p in points)
+        counts = [sum(1 for _ in _triangles(gun, [i], beneath)) for i in range(len(gun.surfaces))]
+        if not any(counts):
+            counts = [len(surface['triangles']) for surface in gun.surfaces]
+        # The material of the surface most under the sight, and every surface drawn in it, one texture's atlas.
+        material = gun.materials[max(range(len(counts)), key=lambda i: counts[i])]
+        surfaces = [i for i, m in enumerate(gun.materials) if m == material]
+        self.source = 'materials/' + material
+        self.name = MATERIAL + gun.model
+        textures = material_textures(read(self.source))
+        colour_file = read('images/' + textures['colorMap'] + '.iwi')
+        self.size = struct.unpack_from('<HH', colour_file, 6)
+        colour = read_iwi(colour_file, PATCH_MIP)
+        height, width = len(colour), len(colour[0])
+        spec = read_iwi(read('images/' + textures['specularMap'] + '.iwi'), PATCH_MIP) if 'specularMap' in textures \
+            else None
+        light = [[_luminance(texel) for texel in row] for row in colour]
+        shine = [[_luminance(spec[y * len(spec) // height][x * len(spec[0]) // width]) if spec else 127500
+                  for x in range(width)] for y in range(height)]
+        painted = _coverage(gun, surfaces, width, height)
+        under = _coverage(gun, surfaces, width, height, beneath)
+        tones = sorted(light[y][x] for y in range(height) for x in range(width) if under[y][x]) or \
+            sorted(light[y][x] for y in range(height) for x in range(width) if painted[y][x])
+        target = tones[len(tones) // 2]
+        shines = sorted(shine[y][x] for y in range(height) for x in range(width) if painted[y][x])
+        n = PATCH_TEXELS
+        # Metal, not wood: shinier than four tenths of the gun's upper quartile.
+        metal = n * n * shines[3 * len(shines) // 4] * 2 // 5
+        candidates = []
+        for y in range(height - n + 1):
+            for x in range(width - n + 1):
+                cells = [(yy, xx) for yy in range(y, y + n) for xx in range(x, x + n)]
+                if not all(painted[yy][xx] for yy, xx in cells):
+                    continue
+                gleam = sum(shine[yy][xx] for yy, xx in cells)
+                if gleam < metal:
+                    continue
+                total = sum(light[yy][xx] for yy, xx in cells)
+                squares = sum(light[yy][xx] ** 2 for yy, xx in cells)
+                spread = math.isqrt(n * n * squares - total * total)
+                edges = sum(abs(light[yy][xx] - light[yy][xx + 1]) + abs(light[yy][xx] - light[yy + 1][xx])
+                            for yy in range(y, y + n - 1) for xx in range(x, x + n - 1)) * n * n // (2 * (n - 1) ** 2)
+                receiver = sum(under[yy][xx] for yy, xx in cells)
+                # A screw head or a seam: the texel furthest from the patch's mean.
+                peak = max(abs(n * n * light[yy][xx] - total) for yy, xx in cells)
+                # All in sums over the patch: the receiver's tone and an even surface first, a little for shine and
+                # for the receiver itself.
+                score = (gleam // 4 - 4 * abs(total - n * n * target) - 2 * spread - edges - peak +
+                         receiver * 12750)
+                candidates.append((-score, y, x))
+        if not candidates:
+            raise ValueError(gun.model + ' has no plain patch of metal')
+        candidates.sort()
+        fine = read_iwi(colour_file, 2 * PATCH_MIP)
+        scale = len(fine) // height
+        detail = _detail(fine)
+        limit = int(PATCH_DETAIL * 255000)
+        checked = []
+        for _, y, x in candidates[:PATCH_CANDIDATES]:
+            values = sorted(detail[yy][xx] for yy in range(y * scale, (y + n) * scale)
+                            for xx in range(x * scale, (x + n) * scale))
+            checked.append((values[9 * len(values) // 10], y, x))
+            if checked[-1][0] < limit:
+                break
+        _, y, x = checked[-1] if checked[-1][0] < limit else min(checked)
+        self.origin = (x / width, y / height)
+        self.extent = (n / width, n / height)
+        # Texels per inch on the gun at full size, the median over its triangles.
+        densities = []
+        for corners in _triangles(gun, surfaces):
+            a, b, c = (_in_gun(gun, v) for v in corners)
+            normal = S._cross(S._sub(b, a), S._sub(c, a))
+            area = math.sqrt(S._dot(normal, normal)) / 2
+            (u0, v0), (u1, v1), (u2, v2) = (v['uv'] for v in corners)
+            texels = abs((u1 - u0) * (v2 - v0) - (u2 - u0) * (v1 - v0)) / 2 * self.size[0] * self.size[1]
+            if area > 1e-4 and texels > 0:
+                densities.append(math.sqrt(texels / area))
+        self.density = round(_percentile(densities, 0.5), 2) if densities else 32.0
+
+    def uv(self, position, normal):
+        """A point's UV on the patch: its position, in inches across the face its normal most points out of, at
+        the gun's density, folded back and forth inside the patch."""
+        axis = max(range(3), key=lambda k: abs(normal[k]))
+        across = [position[k] for k in range(3) if k != axis]
+        out = []
+        for k in range(2):
+            inset = 0.5 / PATCH_TEXELS
+            t = across[k] * self.density / (self.extent[k] * self.size[k]) % 2.0
+            folded = t if t <= 1.0 else 2.0 - t
+            out.append(self.origin[k] + self.extent[k] * (inset + folded * (1.0 - 2 * inset)))
+        return tuple(out)
+
+
 # ---------------------------------------------------------------- writing models
 
 def write_single_bone_parts(name):
@@ -944,9 +1176,9 @@ def rigid_model(name, surfaces, materials, bone):
     }
 
 
-def mesh_model(name, parts, bone):
-    """An xmodel of one bone from meshes, a surface for each finish, and retail surfaces as they are; the
-    picture-only meshes stay out of it."""
+def mesh_model(name, parts, bone, metal=None):
+    """An xmodel of one bone from meshes, a surface for each finish, and retail surfaces as they are; meshes in
+    the gun's metal take its renamed material and UVs on its patch, and picture-only meshes stay out of it."""
     by_finish = {}
     surfaces, materials = [], []
     for part in parts:
@@ -956,18 +1188,25 @@ def mesh_model(name, parts, bone):
                 materials.append(part.material)
         elif not part.picture_only:
             by_finish.setdefault(part.finish, []).append(part)
-    for finish in FINISHES:
+    for finish in FINISHES + (GUN_METAL,):
         group = by_finish.get(finish)
         if not group:
             continue
         vertices, triangles = [], []
         for mesh in group:
             start = len(vertices)
-            vertices += mesh.rigid_vertices()
+            vertices += mesh.rigid_vertices(metal.uv if finish == GUN_METAL else None)
             triangles += [start + v for v in mesh.triangles]
         surfaces.append((vertices, triangles))
-        materials.append(MATERIAL + finish)
+        materials.append(metal.name if finish == GUN_METAL else MATERIAL + finish)
     return rigid_model(name, surfaces, materials, bone)
+
+
+def sight_mount(gun):
+    """Where the Reflex and Lens Sights stand: their centre's x and y, and the gun's top beneath it."""
+    centre = S._add(gun.eye, S._scale(gun.ahead, OPTIC_AHEAD.get(gun.weapon, 7.5)))
+    top, _ = _under_opening(gun, centre, REFLEX_INNER)
+    return centre[0], centre[1], top
 
 
 def gun_attachments(read, weapon, takes):
@@ -976,6 +1215,7 @@ def gun_attachments(read, weapon, takes):
     pistol = weapon in PISTOLS
     entries, shown = {}, []
     base = gun.model + SUFFIX
+    metal = None
     for attachment in VISIBLE:
         if attachment not in takes:
             continue
@@ -1003,8 +1243,11 @@ def gun_attachments(read, weapon, takes):
             if glass:
                 entries[GLASS + base + attachment] = glass.encode()
         else:
+            if metal is None:
+                metal = Metal(gun, read, sight_mount(gun))
+                entries['materials/' + metal.name] = renamed_material(read(metal.source), metal.name)
             meshes = {'reflex': reflex, 'lens': lens}[attachment](gun)
-            entries.update(mesh_model(base + attachment, meshes, RIDES[attachment]))
+            entries.update(mesh_model(base + attachment, meshes, RIDES[attachment], metal))
             entries[GLASS + base + attachment] = sight_glass(gun, attachment).encode()
         shown.append(attachment)
     return entries, shown

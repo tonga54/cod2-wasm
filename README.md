@@ -461,7 +461,8 @@ seconds by default. Clicking the canvas does not change fullscreen mode.
 
 ### Requirements
 
-- Git, Python 3.9+, Node.js, and Docker with Compose.
+- Git, Python 3.9+ (3.12+ to build for the
+  [Raspberry Pi](docs/RASPBERRY_PI.md)), Node.js, and Docker with Compose.
 - A local copy of the owner's original **CoD2 1.3 English IWD files**, including
   `localized_english_*.iwd`, placed in ignored `data/main/`.
 - The original MP executable/installation ZIP for extracting the favicon, or an

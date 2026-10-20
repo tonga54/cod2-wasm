@@ -195,16 +195,22 @@ def finish_textures(finish, cache={}):
     return cache[finish]
 
 
-def mesh_part(mesh):
-    vertices = mesh.rigid_vertices()
+def mesh_part(mesh, assets=None, metal=None):
+    """A generated mesh for the rasterizer: in the gun's metal, its material and UVs as in a match."""
+    if mesh.finish == B.GUN_METAL:
+        vertices = mesh.rigid_vertices(metal.uv)
+        textures = material_textures(assets, metal.source[len('materials/'):])[0]
+    else:
+        vertices = mesh.rigid_vertices()
+        textures = finish_textures(mesh.finish)
     return {'pos': np.array([v[5] for v in vertices], np.float64), 'nrm': np.array([v[0] for v in vertices]),
             'tan': np.array([v[3] for v in vertices]), 'bin': np.array([v[4] for v in vertices]),
             'uv': np.array([v[2] for v in vertices], np.float64),
-            'tris': np.array(mesh.triangles, np.int64).reshape(-1, 3), 'tex': finish_textures(mesh.finish),
+            'tris': np.array(mesh.triangles, np.int64).reshape(-1, 3), 'tex': textures,
             'alphatest': False}
 
 
-def model_parts(assets, parts, pose=None):
+def model_parts(assets, parts, pose=None, metal=None):
     """An attachment's meshes and retail surfaces for the rasterizer, in j_gun's space when pose places them;
     a picture-only glass keeps its opacity."""
     out = []
@@ -218,7 +224,7 @@ def model_parts(assets, parts, pose=None):
                         'tris': np.array(part.triangles, np.int64).reshape(-1, 3), 'tex': textures,
                         'alphatest': alphatest})
         else:
-            out.append(mesh_part(part))
+            out.append(mesh_part(part, assets, metal))
             if part.picture_only:
                 out[-1]['opacity'] = GLASS_OPACITY
     return [placed(part, pose) for part in out] if pose else out
@@ -234,7 +240,8 @@ def layer_parts(assets, gun, layer, pistol):
         return model_parts(assets, B.suppressor(gun, pistol), gun.bones['tag_flash'])
     if layer == 'optic4x':
         return model_parts(assets, B.optic4x(gun, assets.read))
-    return model_parts(assets, {'reflex': B.reflex, 'lens': B.lens}[layer](gun))
+    return model_parts(assets, {'reflex': B.reflex, 'lens': B.lens}[layer](gun),
+                       metal=B.Metal(gun, assets.read, B.sight_mount(gun)))
 
 
 def over(image, layer, opacity):

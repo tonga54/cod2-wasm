@@ -5012,3 +5012,47 @@ Validation:
   the fix they would have been 0.29 to 0.36. The bots' shots measured 0.09 to
   0.60, median 0.50.
 - `test-web-audio.cjs` and `test-hit-sound-assets.py` pass.
+
+## Reflex and Lens Sights in the gun's own metal — 2026-10-20
+
+The owner showed the Trench Gun's Reflex Sight as a big, flat black ring at the
+bottom right of the view, with no red dot at full aim. They asked for sights
+that look part of every gun: its texture, shading and shine.
+
+The sights wore this port's finishes: a dark colour map with no detail, normal
+or specular map. Beside the gun's lit material they looked like black plastic.
+The generator now copies the material of the gun's surface under the sight as
+`mtl_browser_att_<gun model>` and puts every sight part in it. The parts' UVs
+sample a plain patch of the gun's metal, found in its colour and specular maps,
+at the gun's texel density. The prefix keeps them drawn over the sight's
+window. Other changes:
+- the Reflex frame is thinner and bevelled;
+- the Trench Gun's sights stand 11 inches ahead of the eye instead of 7, on the
+  front of the receiver;
+- the red dot's core is 4.5% of the window's opening, and at least 1.2 virtual
+  units instead of 0.8.
+
+The Pi prepares the renderer archive itself and refuses a build whose archives
+differ from the manifest. The patch search runs in integers. The UVs are
+computed from the canonical positions and normals: at 45° a lathe's normal has
+components one to seven ulps apart, which macOS's and glibc's libm could order
+differently. The generator's 306 entries are byte-identical on macOS with
+Python 3.14 and in a Debian 13 arm64 container with Python 3.13, the Pi's
+system. Python 3.11 makes the Colt's and G43's Extended Mag models differ: with
+3.12's compensated `sum()` of floats swapped in, they match. So the build
+computer needs Python 3.12 or later, and `docs/RASPBERRY_PI.md` now says so.
+
+The renderer archive changes, so players download it again, from Cloudflare
+once the Pi has published it. The owner's class pictures are unchanged and still
+show the old finishes. `render-class-pictures.py` draws the new ones, which must
+be copied to the Pi before the build that uses them is deployed.
+
+Validation:
+
+- `test-browser-attachment-models.py` (43 mutants), `test-attachment-sight.py`
+  (18) and `test-wwii-scope.py` (64) pass.
+- `check-private-assets.py` passes on the prepared archives.
+- In the QA stack, all 25 gun and sight pairs were shot from the hip and at full
+  aim, and five again after the UV change.
+- `render-class-pictures.py --only shotgun_mp thompson_mp --out /tmp/...`
+  draws the sights in each gun's metal.

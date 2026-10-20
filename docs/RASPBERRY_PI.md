@@ -107,8 +107,11 @@ preparing the owner's private files. Compile the game on the build machine;
 the Pi does not need Emscripten, a compiler toolchain or the original full IWD
 collection.
 
-The build computer needs Git, Python 3.9+, Node.js, Docker with Compose, `ssh`,
+The build computer needs Git, Python 3.12+, Node.js, Docker with Compose, `ssh`,
 `rsync`, `curl`, and enough disk space for the original files and build toolchains.
+Python 3.11 and older add floats differently in `sum()`, so the Extended Mag
+models for the Colt and G43 come out different from the Pi's (Debian 13's
+Python 3.13), and the Pi refuses the build.
 Docker must support running **both `linux/amd64` and `linux/arm64` containers**.
 Docker Desktop on Apple Silicon provides this; for a Linux build host, configure
 the appropriate emulation using [Docker's multi-platform build instructions](https://docs.docker.com/build/building/multi-platform/).

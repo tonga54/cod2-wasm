@@ -5,7 +5,8 @@ aiming animation's last frame with their glass only in the pictures, the 4x Opti
 own scopes and their glass for the WWII scope, the WWII can along the muzzle with its sleeve and below the line
 of sight, the two clamped
 magazines, the longer one and a rifle's box magazine, the gun without its own, the retail winding, unit normals,
-floats that round the same on every machine, and the finishes' textures and materials."""
+floats that round the same on every machine, the finishes' textures and materials, and the sights in the gun's
+own material on an even patch of its metal."""
 import math
 import os
 import re
@@ -154,6 +155,40 @@ struct.pack_into('<III', template, 0x44, offsets['colorMap'], 0x200, offsets['mk
 struct.pack_into('<III', template, 0x50, offsets['normalMap'], 0x300, offsets['$identitynormalmap'])
 files[E.MK2_MATERIAL] = bytes(template) + strings
 
+
+def gun_material(name, textures):
+    """A material laid out as the retail guns' are: header, texture table, then the strings."""
+    table = 0x44
+    first = table + 12 * len(textures)
+    blob, at = b'', {}
+    for text in [name, 'phong_replace_spec'] + [text for pair in textures for text in pair]:
+        at[text] = first + len(blob)
+        blob += text.encode() + b'\0'
+    head = bytearray(first)
+    struct.pack_into('<II', head, 0x00, at[name], at[textures[0][1]])
+    struct.pack_into('<III', head, 0x34, len(textures), at['phong_replace_spec'], table)
+    for k, (sampler, image) in enumerate(textures):
+        struct.pack_into('<III', head, table + 12 * k, at[sampler], 0x200, at[image])
+    return bytes(head) + blob
+
+
+def gun_texel(x, y):
+    """The made-up gun's colour and specular maps at full size: wood on the right, a bright seam, a fine checker
+    on the left that averages to the metal at half size, and plain metal."""
+    if x >= 192:
+        return (120, 80, 45, 255), (30, 30, 30, 255)
+    if 200 <= y < 204:
+        return (200, 200, 200, 255), (180, 180, 180, 255)
+    if x < 32:
+        return ((40, 44, 50, 255) if (x + y) % 2 else (80, 84, 90, 255)), (180, 180, 180, 255)
+    return (60, 64, 70, 255), (180, 180, 180, 255)
+
+
+files['materials/mtl_test_gun'] = gun_material('mtl_test_gun', [('colorMap', 'test_gun_c'),
+                                                                ('specularMap', 'test_gun_s')])
+files['images/test_gun_c.iwi'] = E.write_iwi_argb([[gun_texel(x, y)[0] for x in range(256)] for y in range(256)])
+files['images/test_gun_s.iwi'] = E.write_iwi_argb([[gun_texel(x, y)[1] for x in range(256)] for y in range(256)])
+
 reads = []
 
 
@@ -191,6 +226,8 @@ for finish in A.FINISHES:
 for attachment in ('suppressor', 'reflex', 'lens', 'extmag', 'nomag'):
     expected |= model_entries('viewmodel_test_smg', attachment)
 expected |= {A.GLASS + 'viewmodel_test_smg' + A.SUFFIX + attachment for attachment in ('reflex', 'lens')}
+# Its sights wear its own material, renamed.
+expected.add('materials/' + A.MATERIAL + 'viewmodel_test_smg')
 # A scoped rifle keeps its own scope; the rifles take the scoped rifles'; a pistol a can and a longer magazine.
 expected |= model_entries('viewmodel_test_sniper', 'suppressor')
 for model in ('viewmodel_test_kar98k', 'viewmodel_test_g43', 'viewmodel_test_garand', 'viewmodel_test_bren'):
@@ -239,11 +276,15 @@ RETAIL = {'mtl_test_mag', 'mtl_test_kar98_scope', 'mtl_test_springfield', 'mtl_t
 for name in sorted(e[len('xmodel/'):] for e in entries if e.startswith('xmodel/') and A.NOMAG not in e):
     attachment = name.split(A.SUFFIX)[1]
     surfaces, materials = surfaces_of(name)
-    # One bone, named after the one it rides, its surfaces rigid on it in the finishes' or the retail materials.
+    # One bone, named after the one it rides, its surfaces rigid on it in the finishes', the retail or, for a
+    # sight, the gun's renamed material.
     names, parents, local = A.read_skeleton(entries['xmodelparts/' + name + '0'])
     assert names == ['att_' + dict(A.RIDES, **{A.EXTBOX: 'j_gun'})[attachment]] and parents == [-1], names
-    assert materials and all(m in RETAIL or m.startswith(A.MATERIAL) and m[len(A.MATERIAL):] in A.FINISHES
-                             for m in materials), materials
+    gun_metal = A.MATERIAL + name.split(A.SUFFIX)[0]
+    assert materials and all(m in RETAIL or m.startswith(A.MATERIAL) and m[len(A.MATERIAL):] in A.FINISHES or
+                             attachment in ('reflex', 'lens') and m == gun_metal for m in materials), materials
+    if attachment in ('reflex', 'lens'):
+        assert materials == [gun_metal], materials
     assert len(materials) == len(surfaces)
     for surface in surfaces:
         assert surface['marker'] == 0 and surface['triangles'] and max(surface['triangles']) < len(surface['vertices'])
@@ -302,7 +343,7 @@ assert math.dist(before, eye) > 0.3, 'the made-up raise must move the eye on its
 reach = A.OPTIC_AHEAD['thompson_mp']
 sights = {'reflex': A.reflex(gun), 'lens': A.lens(gun)}
 # The reflex's frame; the lens's thin ring, as WWII's, and the bezel at its front.
-for attachment, index, low, high, centre in (('reflex', 0, 0.64, 0.8, reach),
+for attachment, index, low, high, centre in (('reflex', 0, 0.64, 0.74, reach),
                                              ('lens', 0, 0.5, 0.6, reach),
                                              ('lens', 1, 0.5 * 1.005, 0.5 * 1.14, reach + 0.08 + 0.0125)):
     found = [distance_to_line(p, eye, ahead) for p in sights[attachment][index].positions]
@@ -312,7 +353,7 @@ for attachment, index, low, high, centre in (('reflex', 0, 0.64, 0.8, reach),
 # The lens's ring stands on a stalk from a block clamped to a base on the receiver.
 ring_bottom = min(p[2] for p in sights['lens'][0].positions)
 base, block, stalk = sights['lens'][4:7]
-assert (base.finish, block.finish, stalk.finish) == ('parkerized', 'blued', 'blued')
+assert all(m.finish == A.GUN_METAL for meshes in sights.values() for m in meshes if not m.picture_only)
 ring_x = [p[0] for p in sights['lens'][0].positions]
 top = A.receiver_top(gun, (min(ring_x) + max(ring_x)) / 2, reach=1.0)
 assert abs(min(p[2] for p in base.positions) - (top - 0.05)) < 1e-3
@@ -354,6 +395,67 @@ for attachment, opening, ring in (('reflex', 0.64, float(rings[2])), ('lens', 0.
     radial, along = distance_to_line(rim, eye, ahead)
     assert radial < 1e-3 and abs(along - reach) < 1e-3, (attachment, radial, along)
     assert abs(at_aim[0] - reach) < 2e-3 and abs(at_aim[1]) < 2e-3 and abs(at_aim[2]) < 2e-3 and cant == 0.0
+cases += 1
+
+
+# ---------------------------------------------------------------- the gun's own metal
+# The gun's material renamed: the same bytes and textures, the name appended and the header's name offset on it.
+source = files['materials/mtl_test_gun']
+renamed = entries['materials/' + A.MATERIAL + 'viewmodel_test_smg']
+assert renamed[4:len(source)] == source[4:] and renamed[len(source):] == (A.MATERIAL + 'viewmodel_test_smg\0').encode()
+assert struct.unpack_from('<I', renamed, 0)[0] == len(source)
+assert A.material_textures(renamed) == A.material_textures(source) == {'colorMap': 'test_gun_c',
+                                                                       'specularMap': 'test_gun_s'}
+# The patch: the first even one in raster order once the checker, plain at half size but busy at full size, is
+# passed; no wood, no seam. The receiver's material, of the surface under the sight.
+metal = A.Metal(gun, read, A.sight_mount(gun))
+assert metal.source == 'materials/mtl_test_gun' and metal.name == A.MATERIAL + 'viewmodel_test_smg'
+assert (metal.origin, metal.extent, metal.size) == ((16 / 128, 0.0), (8 / 128, 8 / 128), (256, 256)), metal.origin
+# Each of the receiver's faces takes the whole texture: the median triangle a side's, 256² / 2 texels on 0.85 in².
+assert metal.density == round(math.sqrt(256 * 256 / 2 / 0.85), 2), metal.density
+# Every UV of the sights on the patch, half a texel in from its edges.
+inset = 0.5 / A.PATCH_TEXELS
+for attachment in ('reflex', 'lens'):
+    for surface in surfaces_of('viewmodel_test_smg__' + attachment)[0]:
+        for vertex in surface['vertices']:
+            for k in (0, 1):
+                low = metal.origin[k] + metal.extent[k] * inset
+                assert low - 1e-6 <= vertex['uv'][k] <= low + metal.extent[k] * (1 - 2 * inset) + 1e-6, vertex['uv']
+# Across the face the normal most points out of, at the gun's density, there and back across the patch.
+side = metal.extent[0] * metal.size[0]
+up, point = (0.0, 0.0, 1.0), (0.3, 0.1, 0.2)
+assert all(abs(a - b) < 1e-9 for a, b in zip(metal.uv(point, up), metal.uv((0.3 + 2 * side / metal.density, 0.1, 0.2), up)))
+mirror = (2.0 - 0.3 * metal.density / side) * side / metal.density
+assert abs(metal.uv(point, up)[0] - metal.uv((mirror, 0.1, 0.2), up)[0]) < 1e-9
+step = metal.uv((0.3 + 0.1 / metal.density, 0.1, 0.2), up)[0] - metal.uv(point, up)[0]
+assert abs(abs(step) - 0.1 / side * metal.extent[0] * (1 - 2 * inset)) < 1e-9, step
+assert metal.uv((5.0, 0.1, 0.2), (1.0, 0.0, 0.0)) == metal.uv((-3.0, 0.1, 0.2), (1.0, 0.0, 0.0))
+# A normal between two axes, as the lathe's at 45° are, takes the same one whichever component the machine's libm
+# left a bit larger.
+lean = A.Mesh(A.GUN_METAL)
+lean.positions, lean.uvs = [(0.3, 0.1, 0.2)] * 2, [(0.0, 0.0)] * 2
+lean.normals = [(0.0, 0.7071067811865476, 0.7071067811865475), (0.0, 0.7071067811865475, 0.7071067811865476)]
+assert metal.uv(lean.positions[0], lean.normals[0]) != metal.uv(lean.positions[1], lean.normals[1])
+assert lean.rigid_vertices(metal.uv)[0][2] == lean.rigid_vertices(metal.uv)[1][2]
+cases += 1
+
+
+# The images the search reads: DXT1 in both of its modes, DXT5 whatever its endpoints, ARGB, and the mip level.
+def iwi(fmt, level0):
+    return (b'IWi' + bytes((5, fmt, 1)) + struct.pack('<HHH', 4, 4, 1) + struct.pack('<4i', 28 + len(level0), 28, 28, 28) +
+            level0)
+
+
+red, blue, first_row = 0xF800, 0x001F, 0b11100100
+assert A.read_iwi(iwi(11, struct.pack('<HHI', red, blue, first_row)), 4)[0] == [(255, 0, 0), (0, 0, 255), (170, 0, 85),
+                                                                               (85, 0, 170)]
+assert A.read_iwi(iwi(11, struct.pack('<HHI', blue, red, first_row)), 4)[0] == [(0, 0, 255), (255, 0, 0), (127, 0, 127),
+                                                                               (0, 0, 0)]
+assert A.read_iwi(iwi(13, bytes(8) + struct.pack('<HHI', blue, red, first_row)), 4)[0] == [
+    (0, 0, 255), (255, 0, 0), (85, 0, 170), (170, 0, 85)]
+small = E.write_iwi_argb([[(x * 16, y * 16, 0, 255) for x in range(16)] for y in range(16)])
+assert A.read_iwi(small, 16)[1][2] == (32, 16, 0)
+assert [len(A.read_iwi(small, side)) for side in (16, 8, 4, 2)] == [16, 8, 4, 4]
 cases += 1
 
 
@@ -614,6 +716,18 @@ MUTANTS = [
     ("    points = [p for p in gun.points(without='j_clip') if p[2] < ceiling]\n",
      "    points = gun.points(without='j_clip')\n"),
     ("    top = min(high[2], ceiling)\n", "    top = high[2]\n"),
+    ("            if checked[-1][0] < limit:\n                break\n", "            break\n"),
+    ("    struct.pack_into('<I', out, 0x00, len(data))", "    struct.pack_into('<I', out, 0x04, len(data))"),
+    ("            folded = t if t <= 1.0 else 2.0 - t", "            folded = t % 1.0"),
+    ("            inset = 0.5 / PATCH_TEXELS", "            inset = 0.0"),
+    ("                densities.append(math.sqrt(texels / area))", "                densities.append(texels / area)"),
+    ("        material = gun.materials[max(range(len(counts)), key=lambda i: counts[i])]",
+     "        material = gun.materials[-1]"),
+    ("    if four or c0 > c1:", "    if c0 > c1:"),
+    ("            checked.append((values[9 * len(values) // 10], y, x))", "            checked.append((values[0], y, x))"),
+    ("        axis = max(range(3), key=lambda k: abs(normal[k]))", "        axis = 2"),
+    ("                uv = uv_of(canonical(position), canonical(normal))", "                uv = uv_of(position, normal)"),
+    ("    while max(width, height) > side and level < 2:", "    while max(width, height) > side:"),
 ]
 if not os.environ.get('COD2_ATTACHMENT_MODELS_MUTANT'):
     here = Path(__file__).resolve().parent
@@ -645,5 +759,5 @@ print(f'PASS: {cases} cases: the models each class weapon gets, each on the bone
       f'glass moved with them, where full aim leaves it and how it cants it; the can past '
       f'the muzzle, its sleeve, below the line of sight; two clamped magazines, a longer one and a rifle\'s box '
       f'magazine, the gun without its own; retail winding, unit normals, canonical floats, the same bytes twice; '
-      f'the finishes\' textures and '
-      f'materials; {len(MUTANTS)} generator mutants fail')
+      f'the finishes\' textures and materials; the sights in the gun\'s renamed material, on an even patch of its '
+      f'metal at its texel density, and the images that search reads; {len(MUTANTS)} generator mutants fail')

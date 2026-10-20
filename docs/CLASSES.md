@@ -217,8 +217,8 @@ repository holds none of their data.
 | Attachment | Model | Rides | Guns |
 | --- | --- | --- | --- |
 | Suppressor | WWII's two-part can: on an SMG whose barrel runs bare, a rusted, perforated sleeve over it back to the receiver, then a blued can of radius 1 reaching 6.5 past the muzzle; on a pistol a can of radius 0.62 reaching 4.8. A band at each end and a dark bore | `tag_flash` | The six SMGs and four pistols |
-| Reflex Sight | A round window in a thick frame with a lip, upright on a post over a clamped base | `j_gun` | Every gun that takes it |
-| Lens Sight | WWII's: the lens in a thin ring, upright on a short stalk and a block clamped to a base | `j_gun` | Every gun that takes it |
+| Reflex Sight | A round window in a thin bevelled frame, upright on a post over a clamped base, in the gun's own metal | `j_gun` | Every gun that takes it |
+| Lens Sight | WWII's: the lens in a thin ring, upright on a short stalk and a block clamped to a base, in the gun's own metal | `j_gun` | Every gun that takes it |
 | 4x Optic | CoD2's own scopes: the Kar98k and Lee-Enfield take their sniper rifle's where it sits on it; the G43 and MP44 the Kar98k's, the Bren the Lee-Enfield's, the American and Soviet rifles the Springfield's, each along the gun's line of sight with its mount on the receiver | `j_gun` | The rifles, BAR, Bren and the iron-sighted bolt-actions; the scoped rifles keep their own |
 | Extended Mag | The SMGs' and MP44's: a second magazine clamped beside their own, on the left, lower and a little ahead, as WWII's M3 shows. The other rifles', LMGs' and pistols': their own magazine, its lower part stretched to 1.5 times the length. Both in the gun's material, so they take the camouflage | `j_clip` | The guns with a box magazine |
 | Extended Mag | A box magazine down out of the stock ahead of the trigger guard, with its floorplate, ribs and catch, as WWII's Kar98k shows; the Lee-Enfield's wraps its own | `j_gun` | The Kar98k, Springfield, Mosin-Nagant, Lee-Enfield, their scoped versions and the M1 Garand |
@@ -255,7 +255,17 @@ repository holds none of their data.
 - The parts take seven finishes, blued, parkerized, worn, brass, glass, black
   and rust: 128 × 128 textures made from noise, in materials laid out as the
   Mk 2 grenade's.
+- The Reflex and Lens Sights wear the gun's own material instead, copied as
+  `mtl_browser_att_<gun model>` so the compositor still draws them over their
+  window. They take its colour, detail, normal and specular maps, so they are
+  lit, shaded and shine as the gun does. Their UVs sample an 8-texel square of
+  the gun's colour map, at the gun's texel density. The generator finds the
+  square in the material of the surface under the sight: plain metal, as shiny
+  as the gun's metal and in the receiver's tone, with no screw head, seam or
+  engraving in it.
 - Floats are rounded to a millionth, so the Raspberry Pi writes the same bytes.
+  The sights' UVs are computed from the rounded positions and normals for the
+  same reason.
 - `cg_attachmodels_mp.c` puts each model on its bone after the hands and the
   gun, looking it up once a weapon registration: a missing model would load a
   fresh default each time it is registered. `cg_weapons.c` rebuilds the view
@@ -652,8 +662,9 @@ on canvases the generator accepts, for the day a class weapon matches one.
   Springfield's own material, on the Bren's bracket), the can past the muzzle
   with its sleeve and below the line of sight, the two clamped magazines, the
   longer one and the box magazine, the gun without its own, the retail
-  winding, unit normals, canonical floats, the same bytes twice, and the
-  finishes. It rejects 20 mutations.
+  winding, unit normals, canonical floats, the same bytes twice, the
+  finishes, and the sights in the gun's renamed material on a plain patch of
+  its metal, with the IWI decoding that search uses. It rejects 43 mutations.
 - `python3 scripts/test-view-attachments.py` compiles `cg_attachmodels_mp.c`
   with sanitizers: each model on its bone, the gun without its magazine under
   the longer one, a rifle's box magazine on `j_gun` with its gun kept, each

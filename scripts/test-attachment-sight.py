@@ -134,15 +134,15 @@ int main(void)
     d = &draws[0];
     assert(d->vertexCount == 73 && d->indexCount == 360);
     assert(NEAR(d->verts[0].xy[0], CX) && NEAR(d->verts[0].xy[1], CY) && NEAR(d->verts[0].rgba[3], 0.95f));
-    Ring(d, 1, 0.8f * 1.5f, red, 1.0f);
-    Ring(d, 25, 1.4f * 1.5f, red, 0.28f);
-    Ring(d, 49, 3.8f * 1.5f, red, 0.0f);
-    Mesh(d, 0.0f, 3.8f * 1.5f);
+    Ring(d, 1, 1.2f * 1.5f, red, 1.0f);
+    Ring(d, 25, 1.2f * 1.5f * 1.75f, red, 0.28f);
+    Ring(d, 49, 1.2f * 1.5f * 4.75f, red, 0.0f);
+    Mesh(d, 0.0f, 1.2f * 1.5f * 4.75f);
 
     /* It eases in: a quarter of the way through the fade shows 0.15625 of it. */
     assert(Sight(ATT_BIT(ATT_REFLEX), 0.7f) == 1);
     assert(NEAR(draws[0].verts[0].rgba[3], 0.95f * 0.15625f));
-    Ring(&draws[0], 1, 0.8f * 1.5f, red, 0.15625f);
+    Ring(&draws[0], 1, 1.2f * 1.5f, red, 0.15625f);
 
     /* The lens sight: a thin ring and a small dot, each in a halo. */
     assert(Sight(ATT_BIT(ATT_LENS), 1.0f) == 2);
@@ -170,7 +170,25 @@ int main(void)
     openingToUnit[1] = openingToUnit[2] = 0.0f;
     assert(Sight(ATT_BIT(ATT_REFLEX), 1.0f) == 1);
     assert(NEAR(draws[0].verts[0].rgba[3], 0.95f));
-    Ring(&draws[0], 1, 0.8f * 1.5f, red, 1.0f);
+    /* The dot grows with the opening on screen: 4.5% of a 50-pixel one,
+     * over the 1.8-pixel least, and of a 160-pixel one, glow and halo with it. */
+    Ring(&draws[0], 1, 0.045f * 50.0f, red, 1.0f);
+    openingToUnit[0] = openingToUnit[3] = 1.0f / 160.0f;
+    assert(Sight(ATT_BIT(ATT_REFLEX), 1.0f) == 1);
+    Ring(&draws[0], 1, 0.045f * 160.0f, red, 1.0f);
+    Ring(&draws[0], 25, 0.045f * 160.0f * 1.75f, red, 0.28f);
+    Ring(&draws[0], 49, 0.045f * 160.0f * 4.75f, red, 0.0f);
+    /* An oval opening counts the mean of its axes: 100 by 25 pixels, 50. */
+    openingToUnit[0] = 1.0f / 100.0f;
+    openingToUnit[3] = 1.0f / 25.0f;
+    assert(Sight(ATT_BIT(ATT_REFLEX), 1.0f) == 1);
+    Ring(&draws[0], 1, 0.045f * 50.0f, red, 1.0f);
+    /* Without a window this frame the dot keeps its least size. */
+    openingOn = 0;
+    assert(Sight(ATT_BIT(ATT_REFLEX), 1.0f) == 1);
+    Ring(&draws[0], 1, 1.2f * 1.5f, red, 1.0f);
+    openingOn = 1;
+    openingToUnit[0] = openingToUnit[3] = 1.0f / 50.0f;
     /* Behind the ring, nothing of it. */
     openingCentre[0] = CX + 1000.0f;
     assert(Sight(ATT_BIT(ATT_LENS), 1.0f) == 2);
@@ -206,7 +224,12 @@ mutants = [
     ('            indices[indexCount++] = (unsigned short)(a + SIGHT_SEGMENTS);', '            indices[indexCount++] = a;'),
     ('    CalcScreenPlacement(&x, &y, &w, &scale, 2, 2);\n', ''),
     ('        CG_DrawSightRings(x, y, dot, dotAlphas, 4, s_sightLens, alpha);\n', ''),
-    ('(SIGHT_REFLEX_RADIUS + SIGHT_REFLEX_GLOW) * scale', '(SIGHT_REFLEX_RADIUS + SIGHT_REFLEX_GLOW)'),
+    ('fmaxf(SIGHT_REFLEX_RADIUS * scale, SIGHT_REFLEX_OPENING * CG_SightOpeningRadius())', 'SIGHT_REFLEX_RADIUS * scale'),
+    ('fmaxf(SIGHT_REFLEX_RADIUS * scale, SIGHT_REFLEX_OPENING * CG_SightOpeningRadius())',
+     'SIGHT_REFLEX_OPENING * CG_SightOpeningRadius()'),
+    ('core * SIGHT_REFLEX_GLOW', 'core + SIGHT_REFLEX_GLOW'),
+    ('1.0f / sqrtf(fabsf(det))', '1.0f / fabsf(det)'),
+    ('s_sightOpening.on && det != 0.0f', 'det != 0.0f'),
     ('color[3] * alpha * CG_SightOpeningAlpha(x, y)', 'color[3] * CG_SightOpeningAlpha(x, y)'),
     ('color[3] * alpha * CG_SightOpeningAlpha(x, y)', 'color[3] * alpha'),
     ('    u = s_sightOpening.toUnit[0] * dx + s_sightOpening.toUnit[1] * dy;',

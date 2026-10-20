@@ -149,7 +149,7 @@ float g_webScopeLens[13];
 static const unsigned char s_sights[CG_WWIISCOPE_SIGHTS] = { ATT_OPTIC4X, ATT_REFLEX, ATT_LENS };
 /* How many times its opening each sight's ring reaches: the generator's
  * SIGHT_RINGS. */
-static const float s_sightRings[CG_WWIISCOPE_SIGHTS] = { 1.0f, 1.25f, 1.2f };
+static const float s_sightRings[CG_WWIISCOPE_SIGHTS] = { 1.0f, 1.15625f, 1.2f };
 
 static const dvar_t *cg_wwiiScope;
 static signed char s_glassIndex[CG_WWIISCOPE_MAX_WEAPONS];

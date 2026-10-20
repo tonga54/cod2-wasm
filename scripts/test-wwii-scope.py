@@ -1080,7 +1080,7 @@ int main(void) {
         int before = reads;
 
         glass = CG_WwiiScopeWindowGlass(&reflex, 2, &ring);
-        assert(glass && ring == 1.25f && glass->radius == 0.64f && glass->eye[0] == 8.0f && reads == before + 1);
+        assert(glass && ring == 1.15625f && glass->radius == 0.64f && glass->eye[0] == 8.0f && reads == before + 1);
         assert(!strcmp(glass->gunModel, "viewmodel_m1garand") && frees == reads - 1);
         assert(CG_WwiiScopeWindowGlass(&reflex, 2, &ring) == glass && reads == before + 1);
         glass = CG_WwiiScopeWindowGlass(&lensSight, 2, &ring);
