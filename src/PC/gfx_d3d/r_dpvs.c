@@ -4,6 +4,7 @@ extern refimport_t ri;
 extern GfxScene scene;
 #include "imports.h"
 #include "bytematch.h"
+#include <stdlib.h>
 
 COD2_ASSERT_FIELD(GfxScene, viewCount, 0x0);
 COD2_ASSERT_FIELD(GfxScene, def, 0x4);
@@ -158,6 +159,119 @@ void R_DrawModel(int entIndex)
     sceneEnt->cullState = 5;
     R_AddXModelSurfaces(entIndex);
 }
+
+#ifdef __EMSCRIPTEN__
+/* A scene holds 2,046 entities, and every effect particle takes one. On
+ * Brecourt thousands of grass clumps pass culling, so the static models must
+ * not take slots before the effects: culling queues them, and once the
+ * effects are in they fill the slots left, the largest on screen first. */
+#define R_SMODEL_RANKS 256
+
+typedef struct {
+    int smodelIndex;
+    int rank;
+} QueuedStaticModel;
+
+static QueuedStaticModel *s_smodelQueue;
+static int *s_smodelRanked;
+static int s_smodelQueueSize;
+static int s_smodelQueueCount;
+static int s_smodelQueueOpen;
+
+static void R_AddStaticModelSurfaces(int smodelIndex)
+{
+    int entIndex = R_AddStaticModelToScene(smodelIndex);
+    if (entIndex < 0)
+        return;
+
+    GfxSceneEntity *sceneEnt = &scene.sceneEnts[entIndex];
+    GfxEntity *ent = &scene.def.entities[entIndex];
+    R_SkinStaticModel(sceneEnt, ent, smodelIndex);
+    sceneEnt->cullState = 5;
+    R_AddXModelSurfaces(entIndex);
+}
+
+/* Distance over size in 16 steps to each doubling, from 1/16 (the eye within
+ * the model) to 4,096; the bits of a positive float rise with its value. */
+static int R_StaticModelRank(const GfxStaticModelInstance *smodelInst)
+{
+    float size = Vec3Distance(smodelInst->mins, smodelInst->maxs);
+    float ratio = Vec3Distance(smodelInst->origin, rg.lodParms.origin) / (size > 1.0f ? size : 1.0f);
+    unsigned int bits;
+    int rank;
+
+    memcpy(&bits, &ratio, sizeof(bits));
+    rank = (int)(bits >> 19) - (123 << 4);
+    if (rank < 0)
+        return 0;
+    return rank < R_SMODEL_RANKS ? rank : R_SMODEL_RANKS - 1;
+}
+
+static void R_BeginStaticModelQueue(void)
+{
+    int smodelCount = rgp.world ? rgp.world->smodelCount : 0;
+
+    s_smodelQueueCount = 0;
+    s_smodelQueueOpen = 1;
+    if (smodelCount <= s_smodelQueueSize)
+        return;
+
+    QueuedStaticModel *queue = (QueuedStaticModel *)realloc(s_smodelQueue, (size_t)smodelCount * sizeof(*queue));
+    if (queue)
+        s_smodelQueue = queue;
+    int *ranked = (int *)realloc(s_smodelRanked, (size_t)smodelCount * sizeof(*ranked));
+    if (ranked)
+        s_smodelRanked = ranked;
+    if (queue && ranked)
+        s_smodelQueueSize = smodelCount;
+}
+
+static void R_QueueStaticModel(int smodelIndex)
+{
+    if (!s_smodelQueueOpen || s_smodelQueueCount >= s_smodelQueueSize) {
+        R_AddStaticModelSurfaces(smodelIndex);
+        return;
+    }
+
+    QueuedStaticModel *queued = &s_smodelQueue[s_smodelQueueCount++];
+    queued->smodelIndex = smodelIndex;
+    queued->rank = R_StaticModelRank(&rgp.world->smodelInsts[smodelIndex]);
+}
+
+void R_AddQueuedStaticModels(void)
+{
+    int rankStart[R_SMODEL_RANKS];
+    int count = s_smodelQueueCount;
+    int room, total, i;
+
+    if (!s_smodelQueueOpen)
+        return;
+    s_smodelQueueOpen = 0;
+    s_smodelQueueCount = 0;
+
+    room = 0x7fe - scene.def.entityCount;
+    if (room > 0x1ff8 - frontEndDataOut->entityCount)
+        room = 0x1ff8 - frontEndDataOut->entityCount;
+    if (count <= room) {
+        for (i = 0; i < count; i++)
+            R_AddStaticModelSurfaces(s_smodelQueue[i].smodelIndex);
+        return;
+    }
+
+    memset(rankStart, 0, sizeof(rankStart));
+    for (i = 0; i < count; i++)
+        rankStart[s_smodelQueue[i].rank]++;
+    for (i = 0, total = 0; i < R_SMODEL_RANKS; i++) {
+        int rankCount = rankStart[i];
+        rankStart[i] = total;
+        total += rankCount;
+    }
+    for (i = 0; i < count; i++)
+        s_smodelRanked[rankStart[s_smodelQueue[i].rank]++] = s_smodelQueue[i].smodelIndex;
+    for (i = 0; i < room; i++)
+        R_AddStaticModelSurfaces(s_smodelRanked[i]);
+}
+#endif
 
 float R_GetFarPlaneDist(void)
 {
@@ -485,6 +599,9 @@ static void R_DPVS_REGPARM3_ABI R_AddStaticModelWithCull_impl(int smodelIndex, c
         R_AddDebugString(debugGlobals, smodelInst->origin, (const void *)imp_colorWhite, 0.3f, name);
     }
 
+#ifdef __EMSCRIPTEN__
+    R_QueueStaticModel(smodelIndex);
+#else
     int entIndex = R_AddStaticModelToScene(smodelIndex);
     if (entIndex < 0)
         return;
@@ -496,6 +613,7 @@ static void R_DPVS_REGPARM3_ABI R_AddStaticModelWithCull_impl(int smodelIndex, c
     sceneEnt->cullState = 5;
 
     R_AddXModelSurfaces(entIndex);
+#endif
 }
 
 static void R_DPVS_REGPARM3_ABI R_AddStaticModelWithCull(int smodelIndex, const DpvsPlane *planes, int planeCount, int stackLevel)
@@ -590,6 +708,9 @@ static void R_AddStaticModelDirect(int smodelIndex)
         R_AddDebugString(debugGlobals, inst->origin, (const void *)imp_colorWhite, 0.3f, name);
     }
 
+#ifdef __EMSCRIPTEN__
+    R_QueueStaticModel(smodelIndex);
+#else
     int entIndex = R_AddStaticModelToScene(smodelIndex);
     if (entIndex < 0)
         return;
@@ -599,6 +720,7 @@ static void R_AddStaticModelDirect(int smodelIndex)
     R_SkinStaticModel(sceneEnt, ent, smodelIndex);
     sceneEnt->cullState = 5;
     R_AddXModelSurfaces(entIndex);
+#endif
 }
 
 static void R_AddWorldSurfaceDirect(int surfIndex)
@@ -1766,6 +1888,9 @@ static void R_AddWorldSurfacesDpvs_impl(const GfxViewParms *viewParms, int camer
 
     dpvsG.occluderList = (GfxOccluder **)activeOccluderBuf;
     dpvsG.viewPlanes = (struct DpvsPlane *)occluderPlaneBuf;
+#ifdef __EMSCRIPTEN__
+    R_BeginStaticModelQueue();
+#endif
 
     byte drawWorld = (byte)(*(const dvar_t **)imp_r_drawWorld)->current.integer;
     dpvsG.drawWorld = drawWorld;

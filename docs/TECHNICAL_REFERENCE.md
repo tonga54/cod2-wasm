@@ -273,7 +273,10 @@ retail CoD2:
   draw distances double by default. The archived `r_lodDistanceScale` setting
   ranges from 1 (original distances) to 4; profiles that saved the old 1.5
   default take 2 once. Authored lower-detail models, wall/frustum culling,
-  texture resolution and mip filtering remain in use.
+  texture resolution and mip filtering remain in use. When more static models
+  pass culling than a scene's 2,046 entities hold, as on Brecourt, effects
+  keep their slots and the nearest and largest models fill the rest (see
+  [Effects and grass on Brecourt](GRAPHICS_2026-10-16.md#effects-and-grass-on-brecourt-october-21-2026)).
 - **Browser hosting and controls:** create/delete rooms without a desktop game
   installation on each client, cached asset downloads with actual byte progress,
   English interface text, update notices, compact chat, and F10 for

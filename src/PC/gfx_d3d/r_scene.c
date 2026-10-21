@@ -776,6 +776,9 @@ void R_RenderScene(const refdef_t *refdef)
     FX_DrawScheduledEffects();
 
 #ifdef __EMSCRIPTEN__
+    extern void R_AddQueuedStaticModels(void);
+    R_AddQueuedStaticModels();
+
     extern void WebPointLights_SetScene(const GfxLight *, int);
     extern void WebPointLights_SetShadowCasters(const GfxEntity *, int, const float *);
     extern void WebSceneFx_SetAds(float, float, float, float);

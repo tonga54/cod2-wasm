@@ -4790,8 +4790,9 @@ Brecourt's BSP is in `iw_03.iwd`.
 Brecourt has 8,558 static models, mostly grass, hedges and trees. In every
 view tested more of them pass culling than the 2,046 entities a scene holds,
 also at the original `r_lodDistanceScale` of 1, so `R_AddStaticModelToScene`
-leaves the rest out and warns once a frame. The cgame adds players, weapons
-and effects before the world, so only static models are left out. The cap is
+leaves the rest out and warns once a frame. Players and weapons go in before
+the world but effects after it, so effects were left out too, until "Effects
+and grass on Brecourt — 2026-10-21". The cap is
 the original's: `sceneEnts[2046]` and entity indices below the world's
 `0x800`. The same views at both distance scales looked alike, with no
 missing tree, hedge or wall. Its map CSV, like four other retail maps',
@@ -5833,6 +5834,33 @@ Validation:
   `out/motion-blur-2-qa`.
 - The full `test-static.sh` was not run; the scripts above are the ones that
   read the compositor.
+
+## Effects and grass on Brecourt — 2026-10-21
+
+The owner found Brecourt badly broken: no muzzle flash, no grenade explosion,
+and grass that vanished when aiming and came back at the hip. A scene holds
+2,046 entities, and culling filled them with Brecourt's static models, mostly
+grass, before the effects went in, so every effect particle was refused; the
+old client warned of it 1,389 times in 20 seconds. Culling does not go by
+distance, and aiming keeps models out farther, so through the sights far grass
+took the near grass's slots. In the browser, culling now queues the static
+models and `R_RenderScene` adds them after `FX_DrawScheduledEffects` into the
+slots left: all of them in culling order when they fit, otherwise the nearest
+and largest first. Details in `docs/GRAPHICS_2026-10-16.md`, "Effects and
+grass on Brecourt".
+
+Validation:
+
+- `test-static-model-queue.py` (new, in `test-static.sh`) passes: the queue,
+  compiled with the sanitizers, on a Brecourt-sized scene; 17 mutants of it
+  and 3 of its hooks fail. The full `test-static.sh` passes, and the web
+  client builds.
+- On an isolated Brecourt DM stack, the old client against the new in the
+  same field: the new one never warned, showed the MP44's flash where the old
+  one fired without one, showed two grenades' smoke and dirt where the old one
+  showed nothing, and kept the grass and hedges as full aimed as at the hip.
+  Its main thread was 6% busier, drawing what the old one left out, at 60 fps.
+  Captures, profiles and the harness are in `out/brecourt-effects-qa`.
 
 ## Shorter, bent tracers — 2026-10-21
 
