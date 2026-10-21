@@ -43,12 +43,15 @@ const CgScopeGlintLens cg_scopeGlintLenses[CG_SCOPEGLINT_LENS_COUNT] = {
  * when the player comes back after going unseen this long. */
 #define CG_SCOPEGLINT_RAISE_MSEC 250
 #define CG_SCOPEGLINT_GAP_MSEC 200
-/* The flare's half width: this share of half the view's height, so a far
- * scope shows through any zoom, but at least MIN_RADIUS units, so a near one
- * covers its glass; this share of it at the edge of the glint. */
+/* The flare's half width: this share of half the view's height through any
+ * zoom, but at least MIN_RADIUS units, so a near one covers its glass; this
+ * share of it at the edge of the glint. */
 #define CG_SCOPEGLINT_SCREEN_RADIUS 0.02f
 #define CG_SCOPEGLINT_MIN_RADIUS 1.5f
 #define CG_SCOPEGLINT_EDGE_SIZE 0.6f
+/* Beyond this many units the flare keeps less of the view's height, by the
+ * square root of FAR over its distance, and dims by the fourth root. */
+#define CG_SCOPEGLINT_FAR 512.0f
 /* The streak across the flare and the shorter one up it, in flare half
  * widths, at this share of its brightness. */
 #define CG_SCOPEGLINT_STREAK_LENGTH 3.0f
@@ -58,7 +61,7 @@ const CgScopeGlintLens cg_scopeGlintLenses[CG_SCOPEGLINT_LENS_COUNT] = {
 #define CG_SCOPEGLINT_STREAK 0.55f
 /* The brightest the flare gets, and how much of it shimmers away and back
  * over each period. */
-#define CG_SCOPEGLINT_BRIGHTNESS 1.0f
+#define CG_SCOPEGLINT_BRIGHTNESS 0.8f
 #define CG_SCOPEGLINT_SHIMMER 0.25f
 #define CG_SCOPEGLINT_SHIMMER_MSEC 900
 /* Units the flare is drawn toward the eye, ahead of the rim around the glass. */
@@ -163,13 +166,26 @@ static float CG_ScopeGlintFacing(const vec_t *forward, const vec_t *toEye)
     return CG_ScopeGlintSmoothstep(CG_SCOPEGLINT_EDGE_DEG, CG_SCOPEGLINT_FULL_DEG, degrees);
 }
 
+/* FAR over distance units from the eye, all of it within FAR. */
+static float CG_ScopeGlintFarShare(float distance)
+{
+    return distance > CG_SCOPEGLINT_FAR ? CG_SCOPEGLINT_FAR / distance : 1.0f;
+}
+
 /* The flare's half width in units, distance units from the eye of a view
  * whose half height is tanHalfFovY a unit ahead. */
 static float CG_ScopeGlintRadius(float distance, float tanHalfFovY)
 {
-    float radius = distance * tanHalfFovY * CG_SCOPEGLINT_SCREEN_RADIUS;
+    float radius = distance * tanHalfFovY * CG_SCOPEGLINT_SCREEN_RADIUS * sqrtf(CG_ScopeGlintFarShare(distance));
 
     return radius > CG_SCOPEGLINT_MIN_RADIUS ? radius : CG_SCOPEGLINT_MIN_RADIUS;
+}
+
+/* The flare's brightness distance units from the eye, before its cone, smoke
+ * and shimmer. */
+static float CG_ScopeGlintBrightness(float distance)
+{
+    return CG_SCOPEGLINT_BRIGHTNESS * sqrtf(sqrtf(CG_ScopeGlintFarShare(distance)));
 }
 
 /* Each player's scope shimmers on its own beat. */
@@ -330,7 +346,8 @@ void CG_DrawScopeGlints(void)
             centre[k] = sight->lens[k] + toEye[k] * CG_SCOPEGLINT_PULL;
         radius = CG_ScopeGlintRadius(distance, tanHalfFovY) *
                  (CG_SCOPEGLINT_EDGE_SIZE + (1.0f - CG_SCOPEGLINT_EDGE_SIZE) * facing);
-        brightness = CG_SCOPEGLINT_BRIGHTNESS * facing * visibility * CG_ScopeGlintShimmer(cg->time, sight->clientNum);
+        brightness = CG_ScopeGlintBrightness(distance) * facing * visibility *
+                     CG_ScopeGlintShimmer(cg->time, sight->clientNum);
         CG_ScopeGlintQuads(centre, cg->refdef.viewaxis[1], cg->refdef.viewaxis[2], radius, brightness, verts);
         for (k = 0; k < CG_SCOPEGLINT_QUADS; k++) {
             CL_DefaultVertexFrames(4, &verts[4 * k]);

@@ -6,9 +6,9 @@
 /* A rival's sniper rifle raised to his eye glints at the players it is aimed
  * at, as scopes do in Modern Warfare (2019), though more faintly: a small
  * white flare with a streak across it on the front of the scope, brightest
- * along his aim and gone CG_SCOPEGLINT_EDGE_DEG off it, coming in as the
- * rifle is raised. A wall, another player or smoke that hides the scope hides
- * it. cg_scopeGlint 0 turns it off. */
+ * along his aim and gone CG_SCOPEGLINT_EDGE_DEG off it, smaller and fainter
+ * the farther he is, coming in as the rifle is raised. A wall, another player
+ * or smoke that hides the scope hides it. cg_scopeGlint 0 turns it off. */
 
 /* The centre of the front of a sniper rifle's scope, in the space of its
  * world model's tag_flash, which the models leave unturned. */

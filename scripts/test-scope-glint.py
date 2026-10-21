@@ -200,9 +200,10 @@ void CL_AddPolyToScene(MaterialHandle mtlHandle, unsigned short lmapIndex, unsig
 
 checks = r'''
 /* The values pinned here, not the module's own names for them. */
-#define FULL 1.0f
+#define FULL 0.8f
 #define SCREEN_RADIUS 0.02f
 #define MIN_RADIUS 1.5f
+#define FAR_RANGE 512.0f
 #define ADS 0x40000
 #define PERIOD 900
 #define LEVEL (1.0f / 255.0f)
@@ -359,11 +360,11 @@ int main(void)
     look();
     viewer(0, TEAM_ALLIES);
 
-    /* An Axis sniper 1000 units ahead facing the eye: nothing while his
+    /* An Axis sniper 500 units ahead facing the eye: nothing while his
      * sights are down. He raises his scoped Kar98k: nothing as they start up,
      * a little more each frame, half of it half way through the 250 ms raise,
      * all of it once up. */
-    player(1, TEAM_AXIS, 1000, 0, 0, 180, 1, 0);
+    player(1, TEAM_AXIS, 500, 0, 0, 180, 1, 0);
     aim(1, 0, 0);
     assert(frame(t) == 0 && traces == 0);
     {
@@ -601,20 +602,46 @@ int main(void)
     smoke = 1.0f;
     cases++;
 
-    /* A far scope keeps its share of the view's height, through a zoom too;
-     * a near one its 1.5 units; none within 24 units of the eye. */
-    player(1, TEAM_AXIS, 4000, 0, 0, 180, 1, ADS);
-    aim(1, 0, 0);
-    assert(frame(t + 16) == 1);
-    lensAt(1, 0, lens);
-    distance = sqrtf(lens[0] * lens[0] + lens[1] * lens[1] + (lens[2] - 60.0f) * (lens[2] - 60.0f));
-    quadShape(0, centre, &width, &height);
-    assert(near(width, distance * tan30 * SCREEN_RADIUS, 1e-2f));
-    cg->refdef.fov_y = 8.0f;
-    assert(frame(t + 32) == 1);
-    quadShape(0, centre, &width, &height);
-    assert(near(width, distance * tanf(4.0f * 3.14159265f / 180.0f) * SCREEN_RADIUS, 1e-2f));
-    cg->refdef.fov_y = 60.0f;
+    /* Out to 512 units a scope keeps its share of the view's height and all
+     * of its brightness. Farther, the square root of 512 over its distance
+     * of that share, through a zoom too, and the fourth root of it of its
+     * brightness: smaller on screen and fainter the farther, though bigger in
+     * the world. A near one keeps its 1.5 units; none within 24 units of the
+     * eye. */
+    {
+        static const float ranges[] = { 300, 510, 530, 700, 1000, 2000, 4000, 8000 };
+        float lastShare = 1.0f, lastWidth = 0.0f, lastAlpha = 1.0f, beyond;
+        for (unsigned k = 0; k < sizeof(ranges) / sizeof(ranges[0]); k++) {
+            player(1, TEAM_AXIS, ranges[k], 0, 0, 180, 1, ADS);
+            aim(1, 0, 0);
+            t = toPeak(1, t);
+            assert(frame(t) == 1);
+            lensAt(1, 0, lens);
+            distance = sqrtf(lens[0] * lens[0] + lens[1] * lens[1] + (lens[2] - 60.0f) * (lens[2] - 60.0f));
+            beyond = distance > FAR_RANGE ? FAR_RANGE / distance : 1.0f;
+            assert((ranges[k] < 512) == (beyond == 1.0f));
+            quadShape(0, centre, &width, &height);
+            assert(near(width, distance * tan30 * SCREEN_RADIUS * sqrtf(beyond), 1e-2f));
+            assert(near(alphaOf(0), FULL * sqrtf(sqrtf(beyond)), LEVEL));
+            assert(width / distance <= lastShare + 1e-6f && width > lastWidth && alphaOf(0) <= lastAlpha);
+            lastShare = width / distance;
+            lastWidth = width;
+            lastAlpha = alphaOf(0);
+        }
+        /* Its lens 8192 units away: a quarter of its share, through a zoom
+         * too, and half of its brightness. */
+        player(1, TEAM_AXIS, 8192.0f + tagAt[0] + cg_scopeGlintLenses[0].lens[0], 0, 0, 180, 1, ADS);
+        aim(1, 0, 0);
+        t = toPeak(1, t);
+        assert(frame(t) == 1);
+        quadShape(0, centre, &width, &height);
+        assert(near(width / 8192.0f, tan30 * SCREEN_RADIUS * 0.25f, 1e-6f) && near(alphaOf(0), FULL * 0.5f, LEVEL));
+        cg->refdef.fov_y = 8.0f;
+        assert(frame(t + 16) == 1);
+        quadShape(0, centre, &width, &height);
+        assert(near(width, 8192.0f * tanf(4.0f * 3.14159265f / 180.0f) * SCREEN_RADIUS * 0.25f, 1e-2f));
+        cg->refdef.fov_y = 60.0f;
+    }
     player(1, TEAM_AXIS, 60, 0, 0, 180, 1, ADS);
     aim(1, 0, 0);
     assert(frame(t + 48) == 1);
@@ -636,7 +663,7 @@ int main(void)
         float fwd[3] = { cosf(th), 0, -sinf(th) }, up0[3] = { sinf(th), 0, cosf(th) };
         float left[3], up[3], local[3], expect[3], yaw = 150.0f * 3.14159265f / 180.0f;
         const float *l = cg_scopeGlintLenses[0].lens;
-        player(1, TEAM_AXIS, 800, 100, 0, 150, 1, ADS);
+        player(1, TEAM_AXIS, 400, 50, 0, 150, 1, ADS);
         /* The roll about the barrel, then the pitch. */
         tags[1].quat[0] = qp[3] * qr[0] + qp[0] * qr[3] + qp[1] * qr[2] - qp[2] * qr[1];
         tags[1].quat[1] = qp[3] * qr[1] - qp[0] * qr[2] + qp[1] * qr[3] + qp[2] * qr[0];
@@ -648,8 +675,8 @@ int main(void)
             up[i] = up0[i] * cosf(roll) - y * sinf(roll);
             local[i] = tagAt[i] + l[0] * fwd[i] + l[1] * left[i] + l[2] * up[i];
         }
-        expect[0] = 800 + local[0] * cosf(yaw) - local[1] * sinf(yaw);
-        expect[1] = 100 + local[0] * sinf(yaw) + local[1] * cosf(yaw);
+        expect[0] = 400 + local[0] * cosf(yaw) - local[1] * sinf(yaw);
+        expect[1] = 50 + local[0] * sinf(yaw) + local[1] * cosf(yaw);
         expect[2] = local[2];
         aimFrom(1, expect, 0);
         t = toPeak(1, t);
@@ -713,7 +740,19 @@ mutants = [
     ('#define CG_SCOPEGLINT_GAP_MSEC 200', '#define CG_SCOPEGLINT_GAP_MSEC 400'),
     ('#define CG_SCOPEGLINT_SCREEN_RADIUS 0.02f', '#define CG_SCOPEGLINT_SCREEN_RADIUS 0.03f'),
     ('#define CG_SCOPEGLINT_MIN_RADIUS 1.5f', '#define CG_SCOPEGLINT_MIN_RADIUS 3.0f'),
-    ('#define CG_SCOPEGLINT_BRIGHTNESS 1.0f', '#define CG_SCOPEGLINT_BRIGHTNESS 0.85f'),
+    ('#define CG_SCOPEGLINT_FAR 512.0f', '#define CG_SCOPEGLINT_FAR 1024.0f'),
+    ('#define CG_SCOPEGLINT_FAR 512.0f', '#define CG_SCOPEGLINT_FAR 384.0f'),
+    ('    return distance > CG_SCOPEGLINT_FAR ? CG_SCOPEGLINT_FAR / distance : 1.0f;',
+     '    return CG_SCOPEGLINT_FAR / distance;'),
+    ('    float radius = distance * tanHalfFovY * CG_SCOPEGLINT_SCREEN_RADIUS * sqrtf(CG_ScopeGlintFarShare(distance));',
+     '    float radius = distance * tanHalfFovY * CG_SCOPEGLINT_SCREEN_RADIUS;'),
+    ('    float radius = distance * tanHalfFovY * CG_SCOPEGLINT_SCREEN_RADIUS * sqrtf(CG_ScopeGlintFarShare(distance));',
+     '    float radius = distance * tanHalfFovY * CG_SCOPEGLINT_SCREEN_RADIUS * CG_ScopeGlintFarShare(distance);'),
+    ('    return CG_SCOPEGLINT_BRIGHTNESS * sqrtf(sqrtf(CG_ScopeGlintFarShare(distance)));',
+     '    return CG_SCOPEGLINT_BRIGHTNESS;'),
+    ('    return CG_SCOPEGLINT_BRIGHTNESS * sqrtf(sqrtf(CG_ScopeGlintFarShare(distance)));',
+     '    return CG_SCOPEGLINT_BRIGHTNESS * sqrtf(CG_ScopeGlintFarShare(distance));'),
+    ('#define CG_SCOPEGLINT_BRIGHTNESS 0.8f', '#define CG_SCOPEGLINT_BRIGHTNESS 1.0f'),
     ('#define CG_SCOPEGLINT_SHIMMER 0.25f', '#define CG_SCOPEGLINT_SHIMMER 0.5f'),
     ('#define CG_SCOPEGLINT_PULL 2.0f', '#define CG_SCOPEGLINT_PULL -2.0f'),
     ('#define CG_SCOPEGLINT_NEAR 24.0f', '#define CG_SCOPEGLINT_NEAR 0.0f'),
@@ -754,8 +793,8 @@ mutants = [
     ('        if (trace.fraction < 1.0f && trace.entityNum != sight->clientNum)', '        if (trace.fraction < 1.0f)'),
     ('        if (trace.fraction < 1.0f && trace.entityNum != sight->clientNum)\n            continue;\n', ''),
     ('        if (!(visibility >= CG_SCOPEGLINT_MIN_VISIBILITY))', '        if (visibility < CG_SCOPEGLINT_MIN_VISIBILITY)'),
-    ('CG_SCOPEGLINT_BRIGHTNESS * facing * visibility * CG_ScopeGlintShimmer(cg->time, sight->clientNum);',
-     'CG_SCOPEGLINT_BRIGHTNESS * facing * CG_ScopeGlintShimmer(cg->time, sight->clientNum);'),
+    ('        brightness = CG_ScopeGlintBrightness(distance) * facing * visibility *',
+     '        brightness = CG_ScopeGlintBrightness(distance) * facing *'),
     ('                 (CG_SCOPEGLINT_EDGE_SIZE + (1.0f - CG_SCOPEGLINT_EDGE_SIZE) * facing);', '                 1.0f;'),
     ('    return radius > CG_SCOPEGLINT_MIN_RADIUS ? radius : CG_SCOPEGLINT_MIN_RADIUS;', '    return radius;'),
     ('    float phase = (float)((unsigned int)(time + clientNum * 211) % CG_SCOPEGLINT_SHIMMER_MSEC) /',
@@ -913,6 +952,7 @@ if archives:
 print(f'PASS: a player is noted once his model is in the scene, whatever his teleport bit, and the glints drawn once '
       f'the view is placed; {cases} '
       f'cases of a rival\'s raised sniper scope glinting at the eye: coming in over the raise, all of it within 6 '
-      f'degrees of his aim and none from 24, shimmering, sized to the view, on its lens with the gun\'s tag, hidden '
+      f'degrees of his aim and none from 24, shimmering, sized to the view, smaller on screen and fainter beyond 512 '
+      f'units, on its lens with the gun\'s tag, hidden '
       f'by walls, players and thick smoke and dimmed by thin, never for teammates, spectators, the viewer, a scope '
       f'the table lacks, binoculars, a turret, the hidden or the dead; {len(mutants)} mutants fail; {asset_note}')

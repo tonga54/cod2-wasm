@@ -5781,3 +5781,27 @@ Validation:
   on what the pointer was over the frame before, as on every class screen: one
   sent from a sniper rifle's row to a tab equipped that rifle. Clicked with the
   pointer at rest, the tab showed its kind.
+
+## Fainter scope glint from afar — 2026-10-21
+
+The owner found the scope glint too strong, above all from afar. Its flare
+kept the same size on screen at full brightness at any distance, so a far
+sniper's glint was wider than he was. It now peaks at 80% of its old
+brightness, and beyond 512 units it shrinks on screen with the square root of
+512 over the distance and dims with the fourth root: at 1,500 units it is 58%
+of its old size at 61% of its old brightness. Through a zoom it keeps its size
+on screen as before. Details in `docs/GRAPHICS_2026-10-16.md`, "Fainter scope
+glint from afar".
+
+Validation:
+
+- `test-scope-glint.py` passes: 16 cases, 54 mutants fail, and the lenses
+  against the retail world models.
+- The module compiles under Emscripten with `-Wall -Wextra -Werror`, and the
+  web client builds.
+- On an isolated Carentan stack, an observer on the old client beside one on
+  the new: at 700 and 1,500 units the new glint was a smaller, fainter point
+  on the sniper's scope where the old one covered his head and shoulders.
+  Captures are in `out/scope-glint-fade-qa`.
+- The full `test-static.sh` was not run; no other script reads the glint
+  module.
