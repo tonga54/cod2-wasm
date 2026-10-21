@@ -208,8 +208,8 @@ committed and needs a byte-identical copy on every host that prepares the
 published build (`data/main/` and `~/cod2-original/main/`). The generator
 stores it unchanged as `sound/browser/menumusic.mp3` in
 `cod2_browser_audio.iwd`, and moves both aliases to
-`soundaliases/browser_menumusic.csv`. The rows keep the original volume
-(0.3), `menu` channel, looping and load spec. The original
+`soundaliases/browser_menumusic.csv`. The rows keep the original `menu`
+channel, looping and load spec, at volume 0.2 in place of 0.3. The original
 `music/menu_GRTEMP.mp3` is then left out. `check-private-assets.py` verifies
 the rows and the packaged bytes against the owner file. Without the file the
 archive keeps the original music.
@@ -231,10 +231,10 @@ published build (`data/main/` and `~/cod2-original/main/`).
 
 The game has no countdown music to replace, so the music streams as an alias
 of its own, `browser_prematch_music` in `soundaliases/browser_prematchmusic.csv`,
-on a copy of the retail row of El Daba's opening music: volume 0.8, the
-`music` channel, volume group and speaker map, streamed, now loaded in every
-multiplayer map (`all_mp`) and without its half-second start delay. The
-generator stores the first 65 seconds of the file's frames as
+on a copy of the retail row of El Daba's opening music: the `music` channel,
+volume group and speaker map, streamed, now at volume 0.55 in place of 0.8,
+loaded in every multiplayer map (`all_mp`) and without its half-second start
+delay. The generator stores the first 65 seconds of the file's frames as
 `sound/browser/prematchmusic.mp3` in `cod2_browser_audio.iwd`, the longest
 countdown a room holds and the 5 seconds after it, and leaves out its ID3
 tags and an encoder's Xing, Info or VBRI frame, which would count frames no
@@ -259,11 +259,11 @@ prepares the published build (`data/main/` and `~/cod2-original/main/`).
 
 It streams the same way as an alias of its own, `browser_endgame_music` in
 `soundaliases/browser_endgamemusic.csv`, on the same copy of El Daba's opening
-music row. The generator keeps the first 28 seconds of the file's frames as
-`sound/browser/endgamemusic.mp3`, without tags or an encoder's header frame,
-and `check-private-assets.py` verifies the row and the bytes. Without the file
-the end of a match is silent. On October 19, 2026 the owner's file was 11.9 MB;
-the archive keeps 1.1 MB of it.
+music row, keeping its volume of 0.8. The generator keeps the first 28 seconds
+of the file's frames as `sound/browser/endgamemusic.mp3`, without tags or an
+encoder's header frame, and `check-private-assets.py` verifies the row and the
+bytes. Without the file the end of a match is silent. On October 19, 2026 the
+owner's file was 11.9 MB; the archive keeps 1.1 MB of it.
 
 ### Owner last minute music
 
@@ -289,13 +289,14 @@ the music channel, the last minute's music starts once that channel is free.
 
 The music streams as `browser_lastminute_music` in
 `soundaliases/browser_lastminutemusic.csv`, on the same copy of El Daba's
-opening music row. The generator stores 65 seconds of the track's frames,
-from the first frame 30 seconds in, as `sound/browser/lastminutemusic.mp3`,
-without tags or an encoder's header frame. It cuts at a frame boundary, so the
-music enters within 26 ms of the 30-second mark, and the fade-in covers the
-first frames, which reach back into frames left out. `check-private-assets.py`
-verifies the row and the bytes. On October 20, 2026 the owner's countdown
-track served for both. The audio archive grew from 64.8 to 67.4 MB.
+opening music row, at the countdown's volume of 0.55. The generator stores 65
+seconds of the track's frames, from the first frame 30 seconds in, as
+`sound/browser/lastminutemusic.mp3`, without tags or an encoder's header
+frame. It cuts at a frame boundary, so the music enters within 26 ms of the
+30-second mark, and the fade-in covers the first frames, which reach back into
+frames left out. `check-private-assets.py` verifies the row and the bytes. On
+October 20, 2026 the owner's countdown track served for both. The audio
+archive grew from 64.8 to 67.4 MB.
 
 ### Owner sound pack
 

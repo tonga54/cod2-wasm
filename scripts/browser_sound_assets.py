@@ -12,26 +12,28 @@ HIT_SOUND_ALIAS = 'mp_hit_alert'
 HIT_SOUND_FILE = 'browser/hitmarker.wav'
 HIT_SOUND_TABLE = 'soundaliases/browser_hitmarker.csv'
 # Main menu music of the owner's may sit there too, likewise never in Git. It
-# replaces the stream of the menus' music aliases.
+# replaces the stream of the menus' music aliases, quieter than their 0.3.
 MENU_MUSIC_OWNER_FILE = 'menumusic.mp3'
 MENU_MUSIC_ALIASES = ('music_mainmenu', 'music_mainmenu_mp')
 MENU_MUSIC_FILE = 'browser/menumusic.mp3'
 MENU_MUSIC_TABLE = 'soundaliases/browser_menumusic.csv'
+MENU_MUSIC_VOLUME = '0.2'
 # The browser decodes a stream whole, 384 KB a second at 48 kHz in stereo.
 MENU_MUSIC_MAX_SECONDS = 240
 # Music of the owner's for the countdown before a match may sit there too,
 # likewise never in Git. It streams as an alias of its own, which takes the
-# columns of the retail mission opening music.
+# columns of the retail mission opening music, quieter than its 0.8.
 PREMATCH_MUSIC_OWNER_FILE = 'prematchmusic.mp3'
 PREMATCH_MUSIC_ALIAS = 'browser_prematch_music'
 PREMATCH_MUSIC_SOURCE = 'eldaba_intro_music'
 PREMATCH_MUSIC_FILE = 'browser/prematchmusic.mp3'
 PREMATCH_MUSIC_TABLE = 'soundaliases/browser_prematchmusic.csv'
+PREMATCH_MUSIC_VOLUME = '0.55'
 # The longest countdown the server holds, 60 s, and the 5 s the music outlasts
 # it: the archive keeps that much of the music, about 25 MB decoded.
 PREMATCH_MUSIC_SECONDS = 65
 # Music of the owner's for the end of a match, likewise never in Git, streams
-# the same way as an alias of its own.
+# the same way as an alias of its own, at the retail row's volume.
 ENDGAME_MUSIC_OWNER_FILE = 'endgamemusic.mp3'
 ENDGAME_MUSIC_ALIAS = 'browser_endgame_music'
 ENDGAME_MUSIC_FILE = 'browser/endgamemusic.mp3'
@@ -40,12 +42,14 @@ ENDGAME_MUSIC_TABLE = 'soundaliases/browser_endgamemusic.csv'
 # about 11 MB decoded.
 ENDGAME_MUSIC_SECONDS = 28
 # Music for the last minute of a match streams the same way as an alias of its
-# own, entering LASTMINUTE_MUSIC_START seconds into the file: the owner's own
-# track for it, likewise never in Git, or else the countdown's.
+# own, as quiet as the countdown's, entering LASTMINUTE_MUSIC_START seconds
+# into the file: the owner's own track for it, likewise never in Git, or else
+# the countdown's.
 LASTMINUTE_MUSIC_OWNER_FILE = 'lastminutemusic.mp3'
 LASTMINUTE_MUSIC_ALIAS = 'browser_lastminute_music'
 LASTMINUTE_MUSIC_FILE = 'browser/lastminutemusic.mp3'
 LASTMINUTE_MUSIC_TABLE = 'soundaliases/browser_lastminutemusic.csv'
+LASTMINUTE_MUSIC_VOLUME = '0.55'
 LASTMINUTE_MUSIC_START = 30
 # The minute it plays and 5 s more, about 25 MB decoded.
 LASTMINUTE_MUSIC_SECONDS = 65
@@ -295,15 +299,17 @@ def owner_sound_row(header, fields, name, values, sequence=None):
 
 
 def menu_music_row(header, fields):
-    """An original menu music row streaming the owner's music."""
-    values = dict(fields, file=MENU_MUSIC_FILE)
+    """An original menu music row streaming the owner's music, at MENU_MUSIC_VOLUME."""
+    values = dict(fields, file=MENU_MUSIC_FILE, vol_min=MENU_MUSIC_VOLUME, vol_max=MENU_MUSIC_VOLUME)
     return [values.get(name, '') for name in header]
 
 
-def prematch_music_row(header, fields, alias=PREMATCH_MUSIC_ALIAS, file=PREMATCH_MUSIC_FILE):
+def prematch_music_row(header, fields, alias=PREMATCH_MUSIC_ALIAS, file=PREMATCH_MUSIC_FILE, volume=None):
     """The retail mission opening music's row, streaming the owner's countdown music, or other owner music as its
-    alias, at once in every multiplayer map."""
+    alias, at once in every multiplayer map, and at volume when given in place of the row's own."""
     values = dict(fields, name=alias, file=file, loadspec='all_mp', startdelay='')
+    if volume is not None:
+        values.update(vol_min=volume, vol_max=volume)
     return [values.get(name, '') for name in header]
 
 
@@ -361,7 +367,8 @@ def verify_menu_music(entries, original_rows, owner):
                        for row in other_rows), 'Original menu music kept beside the owner\'s: ' + name
 
 
-def verify_owner_music(entries, source_rows, owner, table_name, file_name, alias, limit, owner_file, what, skip=0):
+def verify_owner_music(entries, source_rows, owner, table_name, file_name, alias, limit, owner_file, what, skip=0,
+                       volume=None):
     """Check that a package streams the owner's music, and only it, as its alias.
 
     source_rows holds (header, fields) for every original row of the mission
@@ -375,7 +382,7 @@ def verify_owner_music(entries, source_rows, owner, table_name, file_name, alias
     assert table is not None, f'Missing the {what} alias'
     header, rows = alias_table(table.decode('utf-8'))
     assert len(rows) == 1 and any(source_header == header and rows[0] == prematch_music_row(header, fields, alias,
-                                                                                            file_name)
+                                                                                            file_name, volume)
                                   for source_header, fields in source_rows), \
         f'The {what} alias differs from the original mission opening music'
     for name, data in entries.items():
@@ -387,7 +394,8 @@ def verify_owner_music(entries, source_rows, owner, table_name, file_name, alias
 
 def verify_prematch_music(entries, source_rows, owner):
     verify_owner_music(entries, source_rows, owner, PREMATCH_MUSIC_TABLE, PREMATCH_MUSIC_FILE, PREMATCH_MUSIC_ALIAS,
-                       PREMATCH_MUSIC_SECONDS, PREMATCH_MUSIC_OWNER_FILE, 'countdown music')
+                       PREMATCH_MUSIC_SECONDS, PREMATCH_MUSIC_OWNER_FILE, 'countdown music',
+                       volume=PREMATCH_MUSIC_VOLUME)
 
 
 def verify_endgame_music(entries, source_rows, owner):
@@ -398,7 +406,7 @@ def verify_endgame_music(entries, source_rows, owner):
 def verify_lastminute_music(entries, source_rows, owner):
     verify_owner_music(entries, source_rows, owner, LASTMINUTE_MUSIC_TABLE, LASTMINUTE_MUSIC_FILE,
                        LASTMINUTE_MUSIC_ALIAS, LASTMINUTE_MUSIC_SECONDS, LASTMINUTE_MUSIC_OWNER_FILE,
-                       'last minute music', LASTMINUTE_MUSIC_START)
+                       'last minute music', LASTMINUTE_MUSIC_START, LASTMINUTE_MUSIC_VOLUME)
 
 
 def verify_owner_sounds(entries, original_rows, owner):
@@ -563,7 +571,7 @@ def collect_sound_assets(root, asset_index, originals, renderer, maps, hit_sound
         output = io.StringIO(newline='')
         writer = csv.writer(output, lineterminator='\r\n')
         writer.writerow(header)
-        writer.writerow(prematch_music_row(header, fields))
+        writer.writerow(prematch_music_row(header, fields, volume=PREMATCH_MUSIC_VOLUME))
         files[PREMATCH_MUSIC_TABLE] = output.getvalue().encode('utf-8')
         files['sound/' + PREMATCH_MUSIC_FILE] = package_prematch_music(prematch_music)
         print(f'Countdown music: the owner\'s {PREMATCH_MUSIC_OWNER_FILE} streams as {PREMATCH_MUSIC_ALIAS}')
@@ -588,7 +596,8 @@ def collect_sound_assets(root, asset_index, originals, renderer, maps, hit_sound
         output = io.StringIO(newline='')
         writer = csv.writer(output, lineterminator='\r\n')
         writer.writerow(header)
-        writer.writerow(prematch_music_row(header, fields, LASTMINUTE_MUSIC_ALIAS, LASTMINUTE_MUSIC_FILE))
+        writer.writerow(prematch_music_row(header, fields, LASTMINUTE_MUSIC_ALIAS, LASTMINUTE_MUSIC_FILE,
+                                           LASTMINUTE_MUSIC_VOLUME))
         files[LASTMINUTE_MUSIC_TABLE] = output.getvalue().encode('utf-8')
         files['sound/' + LASTMINUTE_MUSIC_FILE] = package_prematch_music(
             lastminute_music, LASTMINUTE_MUSIC_SECONDS, LASTMINUTE_MUSIC_OWNER_FILE, LASTMINUTE_MUSIC_START)

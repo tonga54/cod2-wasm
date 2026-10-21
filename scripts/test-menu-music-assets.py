@@ -28,6 +28,8 @@ MUSIC = dict(file='music\\menu_GRTEMP.mp3', vol_min='0.3', vol_mod='music', chan
              loop='looping', loadspec='menu', speakermap='music')
 MENU_ROW = row(name='music_mainmenu', **MUSIC)
 MENU_MP_ROW = row(name='music_mainmenu_mp', **MUSIC)
+# The owner's music streams quieter than the retail 0.3.
+OWNED_MUSIC = dict(MUSIC, file='browser/menumusic.mp3', vol_min='0.2', vol_max='0.2')
 AMBIENT_ROW = row(name='ambient_africa', file='ambient/africa.mp3', vol_min='0.5', channel='ambient',
                   type='streamed', loop='looping', loadspec='all_mp')
 # Every archive carries the retail rows the explosives' aliases start from.
@@ -170,15 +172,14 @@ def checks(m, archive_path):
         assert stock['sound/music/menu_grtemp.mp3'] == ORIGINAL
         m.verify_menu_music(stock, music_rows, None)
 
-        # With it, both aliases stream it, as the retail rows did, and nothing else changes.
+        # With it, both aliases stream it, as the retail rows did but quieter, and nothing else changes.
         owned = m.collect_sound_assets(root, index, originals, renderer, maps, menu_music=OWNER)
         assert owned['sound/' + m.MENU_MUSIC_FILE] == OWNER
         _, rows = m.alias_table(owned['soundaliases/iw_code.csv'].decode())
         assert rows == [AMBIENT_ROW]
         table_header, rows = m.alias_table(owned[m.MENU_MUSIC_TABLE].decode())
-        assert table_header == HEADER and rows == [
-            row(name='music_mainmenu', **dict(MUSIC, file='browser/menumusic.mp3')),
-            row(name='music_mainmenu_mp', **dict(MUSIC, file='browser/menumusic.mp3'))]
+        assert table_header == HEADER and rows == [row(name='music_mainmenu', **OWNED_MUSIC),
+                                                   row(name='music_mainmenu_mp', **OWNED_MUSIC)]
         assert m.MENU_MUSIC_TABLE.startswith('soundaliases/') and m.MENU_MUSIC_TABLE.endswith('.csv')
         replaced = {'soundaliases/iw_code.csv', 'sound/music/menu_grtemp.mp3'}
         assert {name: data for name, data in stock.items() if name not in replaced} == \
@@ -186,10 +187,13 @@ def checks(m, archive_path):
              if name not in {'soundaliases/iw_code.csv', m.MENU_MUSIC_TABLE, 'sound/' + m.MENU_MUSIC_FILE}}
         m.verify_menu_music(owned, music_rows, OWNER)
 
-        # The checker accepts exactly that.
-        louder = dict(owned)
-        louder[m.MENU_MUSIC_TABLE] = owned[m.MENU_MUSIC_TABLE].replace(b',0.3,', b',0.6,')
-        assert louder[m.MENU_MUSIC_TABLE] != owned[m.MENU_MUSIC_TABLE]
+        # The checker accepts exactly that: not the retail level, nor a range up to it.
+        retail = dict(owned)
+        retail[m.MENU_MUSIC_TABLE] = owned[m.MENU_MUSIC_TABLE].replace(b',0.2,0.2,', b',0.3,,')
+        assert retail[m.MENU_MUSIC_TABLE] != owned[m.MENU_MUSIC_TABLE]
+        ranged = dict(owned)
+        ranged[m.MENU_MUSIC_TABLE] = owned[m.MENU_MUSIC_TABLE].replace(b',0.2,0.2,', b',0.2,0.3,')
+        assert ranged[m.MENU_MUSIC_TABLE] != owned[m.MENU_MUSIC_TABLE]
         one = dict(owned)
         one[m.MENU_MUSIC_TABLE] = owned[m.MENU_MUSIC_TABLE].rsplit(b'music_mainmenu_mp', 1)[0].rsplit(b'\r\n', 1)[0] + b'\r\n'
         doubled = dict(owned)
@@ -199,8 +203,8 @@ def checks(m, archive_path):
         swapped = dict(owned)
         swapped['sound/' + m.MENU_MUSIC_FILE] = mp3(30)[0]
         missing = {name: data for name, data in owned.items() if name != m.MENU_MUSIC_TABLE}
-        for package, owner in ((louder, OWNER), (one, OWNER), (doubled, OWNER), (kept, OWNER), (swapped, OWNER),
-                               (missing, OWNER), (stock, OWNER), (owned, None)):
+        for package, owner in ((retail, OWNER), (ranged, OWNER), (one, OWNER), (doubled, OWNER), (kept, OWNER),
+                               (swapped, OWNER), (missing, OWNER), (stock, OWNER), (owned, None)):
             raises(AssertionError, lambda: m.verify_menu_music(package, music_rows, owner))
         raises(ValueError, lambda: m.verify_menu_music(owned, music_rows, rejected['under 1 s']))
 
@@ -247,7 +251,13 @@ with tempfile.TemporaryDirectory(prefix='cod2-menu-music-') as directory:
          "if menu_music is not None and alias == MENU_MUSIC_ALIASES[0]:"),
         ("                music.setdefault(alias, (tables[table][0], fields))\n                continue\n",
          "                music.setdefault(alias, (tables[table][0], fields))\n"),
-        ("values = dict(fields, file=MENU_MUSIC_FILE)", "values = dict(fields)"),
+        ("values = dict(fields, file=MENU_MUSIC_FILE, vol_min=MENU_MUSIC_VOLUME, vol_max=MENU_MUSIC_VOLUME)",
+         "values = dict(fields, vol_min=MENU_MUSIC_VOLUME, vol_max=MENU_MUSIC_VOLUME)"),
+        ("values = dict(fields, file=MENU_MUSIC_FILE, vol_min=MENU_MUSIC_VOLUME, vol_max=MENU_MUSIC_VOLUME)",
+         "values = dict(fields, file=MENU_MUSIC_FILE)"),
+        ("values = dict(fields, file=MENU_MUSIC_FILE, vol_min=MENU_MUSIC_VOLUME, vol_max=MENU_MUSIC_VOLUME)",
+         "values = dict(fields, file=MENU_MUSIC_FILE, vol_max=MENU_MUSIC_VOLUME)"),
+        ("MENU_MUSIC_VOLUME = '0.2'", "MENU_MUSIC_VOLUME = '0.3'"),
         ("files['sound/' + MENU_MUSIC_FILE] = check_menu_music(menu_music)",
          "files[MENU_MUSIC_FILE] = check_menu_music(menu_music)"),
         ("        if len(music) != len(MENU_MUSIC_ALIASES):\n", "        if not music:\n"),
@@ -275,6 +285,6 @@ with tempfile.TemporaryDirectory(prefix='cod2-menu-music-') as directory:
         raise AssertionError(f'mutant survived: {old!r} -> {new!r}')
 
 print(f'PASS: without the owner file the menus keep the retail stream; with it music_mainmenu and '
-      f'music_mainmenu_mp stream only the owner\'s MP3, as the retail rows did, the rest of the archive unchanged; '
-      f'{len(accepted)} accepted and {len(rejected)} rejected MP3s, read as the engine reads them under ASan/UBSan; '
-      f'the checker rejects 8 altered packages; all {len(mutants)} mutants fail')
+      f'music_mainmenu_mp stream only the owner\'s MP3, as the retail rows did but at 0.2 in place of 0.3, the rest '
+      f'of the archive unchanged; {len(accepted)} accepted and {len(rejected)} rejected MP3s, read as the engine '
+      f'reads them under ASan/UBSan; the checker rejects 9 altered packages; all {len(mutants)} mutants fail')

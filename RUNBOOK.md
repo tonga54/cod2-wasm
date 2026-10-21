@@ -5976,3 +5976,31 @@ Validation:
   stone grooves in the shade and distant houses in the haze. GPU time per
   frame with the four dvars off and on: 4.91 to 5.15 ms in a Brecourt field,
   3.04 to 3.43 ms at Burgundy's burning tank, almost all of it the feather.
+
+## Quieter countdown, last minute and menu music — 2026-10-21
+
+The owner asked for the countdown's music, the last minute's and the main
+menu's to play a little quieter. Each plays at the volume of its alias row,
+which the `music` volume group scales by 0.9, and the browser applies it as a
+linear gain. The countdown's and the last minute's rows copied El Daba's
+opening music at 0.8; they now play at 0.55, 3.3 dB lower. The owner's menu
+music kept the retail rows' 0.3 and now plays at 0.2, 3.5 dB lower. `vol_min`
+and `vol_max` both carry the new volume, so it is fixed whatever range a
+source row has. The end of match music keeps 0.8. Only three alias tables of
+`cod2_browser_audio.iwd` change, and `site/wasm-game-data.json` is regenerated
+with this commit. Details are in docs/UPDATES.md.
+
+Validation:
+
+- `test-menu-music-assets.py` (22 mutants, 3 new) and
+  `test-prematch-music-assets.py` (47 mutants, 12 new): the new volumes, the
+  end of match music at 0.8, and a checker that refuses the old levels and a
+  range up to them.
+- `test-hit-sound-assets.py`, `test-owner-sound-pack.py`, `test-prematch.py`
+  and `test-endgame.py` pass.
+- The archives are regenerated from the owner's files. The bootstrap, renderer
+  and localized archives keep their hashes; in the audio archive only the menu,
+  countdown and last minute tables differ, and `check-private-assets.py`
+  passes.
+- Neither the full `test-static.sh` nor an in-game check was run; no engine
+  code changes.

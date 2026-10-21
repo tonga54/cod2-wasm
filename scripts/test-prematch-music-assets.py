@@ -36,12 +36,15 @@ AMBIENT_ROW = row(name='ambient_africa', file='ambient/africa.mp3', vol_min='0.5
 GRENADE_ROWS = [row(name=source, file=f'weapons/{source}.wav', channel='auto', loadspec='all_mp')
                 for source in sorted(set(EXPLOSIVE_ALIASES.values()))]
 GRENADE_SOUND = b'RIFF' + struct.pack('<I', 36) + b'WAVEfmt ' + bytes(28)
+# The countdown's and the last minute's music stream quieter than the retail
+# 0.8, which the end of a match's keeps.
 PACKAGED_ROW = row(name='browser_prematch_music', **dict(INTRO, file='browser/prematchmusic.mp3', loadspec='all_mp',
-                                                          startdelay=''))
+                                                          startdelay='', vol_min='0.55', vol_max='0.55'))
 ENDGAME_ROW = row(name='browser_endgame_music', **dict(INTRO, file='browser/endgamemusic.mp3', loadspec='all_mp',
                                                        startdelay=''))
 LASTMINUTE_ROW = row(name='browser_lastminute_music', **dict(INTRO, file='browser/lastminutemusic.mp3',
-                                                             loadspec='all_mp', startdelay=''))
+                                                             loadspec='all_mp', startdelay='', vol_min='0.55',
+                                                             vol_max='0.55'))
 
 
 def csv_text(rows):
@@ -222,8 +225,9 @@ def checks(m, archive_path, no_source_path):
 
         # The checker accepts exactly that.
         altered = []
-        for old, new in ((b',0.8,', b',0.6,'), (b',all_mp,', b',eldaba,'), (b',music,streamed', b',menu,streamed'),
-                         (b'browser_prematch_music', b'eldaba_intro_music'), (b'prematchmusic.mp3', b'menumusic.mp3')):
+        for old, new in ((b',0.55,0.55,', b',0.8,,'), (b',0.55,0.55,', b',0.55,0.8,'), (b',all_mp,', b',eldaba,'),
+                         (b',music,streamed', b',menu,streamed'), (b'browser_prematch_music', b'eldaba_intro_music'),
+                         (b'prematchmusic.mp3', b'menumusic.mp3')):
             package = dict(owned)
             package[m.PREMATCH_MUSIC_TABLE] = owned[m.PREMATCH_MUSIC_TABLE].replace(old, new)
             assert package[m.PREMATCH_MUSIC_TABLE] != owned[m.PREMATCH_MUSIC_TABLE], old
@@ -262,7 +266,10 @@ def checks(m, archive_path, no_source_path):
         m.verify_endgame_music(owned, source_rows, None)
         longer = dict(both)
         longer['sound/' + m.ENDGAME_MUSIC_FILE] = OWNER_KEPT
-        for package, owner in ((owned, OWNER), (both, None), (longer, OWNER)):
+        quieter = dict(both)
+        quieter[m.ENDGAME_MUSIC_TABLE] = both[m.ENDGAME_MUSIC_TABLE].replace(b',0.8,,', b',0.55,0.55,')
+        assert quieter[m.ENDGAME_MUSIC_TABLE] != both[m.ENDGAME_MUSIC_TABLE]
+        for package, owner in ((owned, OWNER), (both, None), (longer, OWNER), (quieter, OWNER)):
             raises(AssertionError, lambda: m.verify_endgame_music(package, source_rows, owner))
 
         # The last minute's music beside them: 65 s of its frames from the
@@ -281,7 +288,10 @@ def checks(m, archive_path, no_source_path):
         m.verify_lastminute_music(both, source_rows, None)
         from_start = dict(all_three)
         from_start['sound/' + m.LASTMINUTE_MUSIC_FILE] = OWNER_KEPT
-        for package, owner in ((both, OWNER), (all_three, None), (from_start, OWNER)):
+        louder = dict(all_three)
+        louder[m.LASTMINUTE_MUSIC_TABLE] = all_three[m.LASTMINUTE_MUSIC_TABLE].replace(b',0.55,0.55,', b',0.8,,')
+        assert louder[m.LASTMINUTE_MUSIC_TABLE] != all_three[m.LASTMINUTE_MUSIC_TABLE]
+        for package, owner in ((both, OWNER), (all_three, None), (from_start, OWNER), (louder, OWNER)):
             raises(AssertionError, lambda: m.verify_lastminute_music(package, source_rows, owner))
         # A track that ends before a second past its entry is refused.
         brief, _ = frames(30.5)
@@ -389,11 +399,29 @@ with tempfile.TemporaryDirectory(prefix='cod2-prematch-music-') as directory:
         ("LASTMINUTE_MUSIC_SECONDS = 65", "LASTMINUTE_MUSIC_SECONDS = 60"),
         ("        if skipped < skip:\n            skipped += duration\n            continue\n", ""),
         ("        if skipped < skip:\n", "        if skipped + duration < skip:\n"),
-        ("        writer.writerow(prematch_music_row(header, fields, LASTMINUTE_MUSIC_ALIAS, LASTMINUTE_MUSIC_FILE))",
-         "        writer.writerow(prematch_music_row(header, fields, ENDGAME_MUSIC_ALIAS, LASTMINUTE_MUSIC_FILE))"),
+        ("prematch_music_row(header, fields, LASTMINUTE_MUSIC_ALIAS, LASTMINUTE_MUSIC_FILE,",
+         "prematch_music_row(header, fields, ENDGAME_MUSIC_ALIAS, LASTMINUTE_MUSIC_FILE,"),
         ("            lastminute_music, LASTMINUTE_MUSIC_SECONDS, LASTMINUTE_MUSIC_OWNER_FILE, LASTMINUTE_MUSIC_START)",
          "            lastminute_music, LASTMINUTE_MUSIC_SECONDS, LASTMINUTE_MUSIC_OWNER_FILE)"),
-        ("                       'last minute music', LASTMINUTE_MUSIC_START)", "                       'last minute music')"),
+        ("'last minute music', LASTMINUTE_MUSIC_START, LASTMINUTE_MUSIC_VOLUME)",
+         "'last minute music', volume=LASTMINUTE_MUSIC_VOLUME)"),
+        # The volumes: the countdown's and the last minute's below the retail
+        # row's, the end of a match's at it, and the checker holding each.
+        ("PREMATCH_MUSIC_VOLUME = '0.55'", "PREMATCH_MUSIC_VOLUME = '0.8'"),
+        ("LASTMINUTE_MUSIC_VOLUME = '0.55'", "LASTMINUTE_MUSIC_VOLUME = '0.8'"),
+        ("    if volume is not None:\n        values.update(vol_min=volume, vol_max=volume)\n", ""),
+        ("values.update(vol_min=volume, vol_max=volume)", "values.update(vol_max=volume)"),
+        ("file=PREMATCH_MUSIC_FILE, volume=None):", "file=PREMATCH_MUSIC_FILE, volume=PREMATCH_MUSIC_VOLUME):"),
+        ("        writer.writerow(prematch_music_row(header, fields, volume=PREMATCH_MUSIC_VOLUME))",
+         "        writer.writerow(prematch_music_row(header, fields))"),
+        ("LASTMINUTE_MUSIC_FILE,\n                                           LASTMINUTE_MUSIC_VOLUME))",
+         "LASTMINUTE_MUSIC_FILE))"),
+        ("ENDGAME_MUSIC_ALIAS, ENDGAME_MUSIC_FILE))", "ENDGAME_MUSIC_ALIAS, ENDGAME_MUSIC_FILE, PREMATCH_MUSIC_VOLUME))"),
+        ("'countdown music',\n                       volume=PREMATCH_MUSIC_VOLUME)", "'countdown music')"),
+        ("'last minute music', LASTMINUTE_MUSIC_START, LASTMINUTE_MUSIC_VOLUME)",
+         "'last minute music', LASTMINUTE_MUSIC_START)"),
+        ("what, skip=0,\n                       volume=None):", "what, skip=0,\n                       volume='0.55'):"),
+        ("file_name, volume)", "file_name)"),
         ("    for name in (LASTMINUTE_MUSIC_OWNER_FILE, PREMATCH_MUSIC_OWNER_FILE):",
          "    for name in (PREMATCH_MUSIC_OWNER_FILE, LASTMINUTE_MUSIC_OWNER_FILE):"),
         ("    for name in (LASTMINUTE_MUSIC_OWNER_FILE, PREMATCH_MUSIC_OWNER_FILE):",
@@ -410,7 +438,7 @@ with tempfile.TemporaryDirectory(prefix='cod2-prematch-music-') as directory:
 
 print(f'PASS: without the owner file the archive has no countdown music; with it browser_prematch_music streams the '
       f'first 65 s of its frames, tags and encoder frame left out, as El Daba\'s opening music in every map and at '
-      f'once, the rest of the archive unchanged; {len(cases)} kept and {len(rejected)} refused MP3s, the kept ones '
-      f'read as the engine reads them under ASan/UBSan; the checker rejects 13 altered packages; the last minute\'s '
-      f'music streams 65 s of the owner\'s track from 30 s in, the countdown\'s unless they keep one for it; '
-      f'all {len(mutants)} mutants fail')
+      f'once but at 0.55 in place of 0.8, the rest of the archive unchanged; {len(cases)} kept and {len(rejected)} '
+      f'refused MP3s, the kept ones read as the engine reads them under ASan/UBSan; the checker rejects 14 altered '
+      f'packages; the last minute\'s music streams 65 s of the owner\'s track from 30 s in at 0.55, the countdown\'s '
+      f'unless they keep one for it, and the end of a match\'s at 0.8; all {len(mutants)} mutants fail')
