@@ -63,6 +63,8 @@ static const char *const s_hudImageNames[R_HUD_IMAGE_COUNT] = {
     "*hud_scope_lens2",
     "*hud_scope_lens3",
     "*hud_squad_emblems",
+    "*hud_scope_reticle0",
+    "*hud_scope_reticle1",
 };
 
 static GfxImage s_hudImages[R_HUD_IMAGE_COUNT];
@@ -544,6 +546,52 @@ float R_ClearOutsideLens(byte *bgra, int width, int height)
     return edge / half;
 }
 
+/* The stock reticles' posts reach 0.03 of the half width from the centre row
+ * or column, the British and Russian chevrons 0.06 along the diagonals. */
+#define LENS_RETICLE_BAND 0.07f
+
+/* The count texels between first and last, stride bytes apart, become the
+ * blend of the two, their colours weighted by alpha. */
+static void R_BlendLensTexels(byte *first, const byte *last, int stride, int count)
+{
+    float a0 = (float)first[3], a1 = (float)last[3];
+    int i, c;
+
+    for (i = 1; i <= count; i++) {
+        byte *texel = first + i * stride;
+        float t = (float)i / (float)(count + 1);
+        float alpha = a0 + (a1 - a0) * t;
+
+        for (c = 0; c < 3; c++) {
+            float color = alpha > 0.0f ? ((float)first[c] * a0 * (1.0f - t) + (float)last[c] * a1 * t) / alpha
+                                       : (float)first[c] + ((float)last[c] - (float)first[c]) * t;
+
+            texel[c] = (byte)(color + 0.5f);
+        }
+        texel[3] = (byte)(alpha + 0.5f);
+    }
+}
+
+void R_ClearLensReticle(byte *bgra, int width, int height)
+{
+    int band = (int)ceilf(LENS_RETICLE_BAND * 0.5f * (float)(width < height ? width : height));
+    int top = height / 2 - band - 1, left = width / 2 - band - 1;
+    int x, y;
+
+    if (top < 0 || left < 0)
+        return;
+    /* The centre row's band beside the column's, then the whole column's
+     * band, its ends in the row's band already filled. */
+    for (x = 0; x < width; x++) {
+        if (x > left && x <= left + 2 * band)
+            continue;
+        R_BlendLensTexels(bgra + (top * width + x) * 4, bgra + ((top + 2 * band + 1) * width + x) * 4, width * 4,
+                          2 * band);
+    }
+    for (y = 0; y < height; y++)
+        R_BlendLensTexels(bgra + (y * width + left) * 4, bgra + (y * width + left + 2 * band + 1) * 4, 4, 2 * band);
+}
+
 MaterialHandle R_CreateHudLensMaterial(int slot, MaterialHandle overlay, float *edge)
 {
     const Material *material = (const Material *)overlay;
@@ -565,8 +613,10 @@ MaterialHandle R_CreateHudLensMaterial(int slot, MaterialHandle overlay, float *
         return NULL;
     bgra = (byte *)malloc((size_t)R_HUD_LENS_MAX_SIZE * R_HUD_LENS_MAX_SIZE * 4);
     if (bgra && R_DecodeLensImage((const byte *)file, fileLen, bgra, &width, &height)) {
-        float radius = R_ClearOutsideLens(bgra, width, height);
+        float radius;
 
+        R_ClearLensReticle(bgra, width, height);
+        radius = R_ClearOutsideLens(bgra, width, height);
         lens = R_CreateHudImageMaterial(slot, bgra, width, height);
         if (lens)
             *edge = radius;

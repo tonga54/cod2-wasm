@@ -67,6 +67,32 @@ assert 'normalizedLerp = normalizedLerp * normalizedLerp * (3.0f - 2.0f * normal
 reticle = function((root / 'src/PC/cgame_mp/cg_draw_mp.c').read_text(), 'CG_DrawWeapReticle')
 assert reticle.index('wwiiVisibility = CG_DrawWwiiScopeReticle();\n    if (wwiiVisibility >= 0.0f)\n'
                      '        return wwiiVisibility;\n') < reticle.index('weapDef->szOverlayMaterial[0]')
+# Over the window: the stock overlay's lens with its reticle taken out, then WWII's reticle for the weapon, each on
+# the glass's outline at its own edge.
+draw = function(scope, 'CG_DrawWwiiScopeReticle')
+assert draw.index('    material = CG_WwiiScopeLensImage(CG_WwiiScopeOverlay(ps, weapon), &edge);\n') < \
+    draw.index('    material = CG_WwiiScopeReticleImage(CG_WwiiScopeReticleFor(ps, weapon), &edge);\n')
+assert draw.count('CG_WwiiScopeReticleQuad(lens, edge, (float)vid->width, (float)vid->height, lens->open, verts);') == 2
+assert draw.count('R_AddCmdDrawTriangles2D(verts, 4, indices, 6, material);') == 2
+lens_material = function(hud2d, 'R_CreateHudLensMaterial')
+assert lens_material.index('R_ClearLensReticle(bgra, width, height);') < \
+    lens_material.index('radius = R_ClearOutsideLens(bgra, width, height);')
+# Each reticle has its own HUD slot and name, and is built once per renderer, with the lenses at the start of a
+# match that has scopes.
+hud_slots = {name: int(value) for name, value in re.findall(r'^#define (R_HUD_IMAGE_\w+) (\d+)$', hud2d_header, re.M)}
+hud_names = re.findall(r'"([^"]+)"', re.search(r's_hudImageNames\[R_HUD_IMAGE_COUNT\] = \{(.*?)\};', hud2d, re.S)[1])
+reticle_count = int(re.search(r'^#define CG_WWIISCOPE_RETICLES (\d+)$', scope, re.M)[1])
+assert reticle_count == hud_slots['R_HUD_IMAGE_SCOPE_RETICLE_COUNT'] == 2
+assert hud_slots['R_HUD_IMAGE_SCOPE_RETICLE'] + reticle_count <= hud_slots['R_HUD_IMAGE_COUNT'] == len(hud_names)
+assert [hud_names[hud_slots['R_HUD_IMAGE_SCOPE_RETICLE'] + k] for k in range(reticle_count)] == \
+    ['*hud_scope_reticle0', '*hud_scope_reticle1']
+assert 'R_CreateHudImageMaterial(R_HUD_IMAGE_SCOPE_RETICLE + reticle, bgra, size, size);' in \
+    function(scope, 'CG_WwiiScopeReticleImage')
+scope_init = function(scope, 'CG_WwiiScopeInit')
+assert 'memset(s_reticles, 0, sizeof(s_reticles));' in scope_init
+assert scope_init.index('            scoped = 1;\n') < \
+    scope_init.index('    for (reticle = 0; scoped && reticle < CG_WWIISCOPE_RETICLES; reticle++)\n'
+                     '        CG_WwiiScopeReticleImage(reticle, &edge);\n')
 main = (root / 'src/PC/cgame_mp/cg_main_mp.c').read_text()
 assert main.index('CG_HitMarkerInit();') < main.index('CG_WwiiScopeInit();')
 # The view weapon's anim goes through the scope once chosen; the rifle is centred with the roll it is turned
@@ -640,10 +666,177 @@ math_mutants = [
      '        lens->bellAxes[1][i] = lens->axes[1][i];'),
 ]
 
+# WWII's reticles, rasterized as at full aim on a screen 1080 pixels high or more: a texel a pixel of the glass.
+reticle_body = ''.join(function(scope, name) for name in (
+    'CG_WwiiScopeReticleBar', 'CG_WwiiScopeReticleCovers', 'CG_WwiiScopeReticleRaster', 'CG_WwiiScopeReticleTexels'))
+reticle_support = r'''
+#include <assert.h>
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
+typedef unsigned char byte;
+''' + defines
+reticle_checks = r'''
+#define TEXELS CG_WWIISCOPE_RETICLE_TEXELS_MAX
+#define SIZE (2 * (TEXELS + CG_WWIISCOPE_RETICLE_MARGIN))
+static byte image[SIZE * SIZE * 4];
+static int texelAt(float u, float v) {
+    return (int)floorf(SIZE / 2.0f + v * TEXELS) * SIZE + (int)floorf(SIZE / 2.0f + u * TEXELS);
+}
+/* Texels of reticle the row holding v crosses between u0 and u1, or the column holding u between v0 and v1:
+ * its alpha summed over 255. */
+static float rowCover(float v, float u0, float u1) {
+    int sum = 0;
+    for (int i = texelAt(u0, v); i <= texelAt(u1, v); i++)
+        sum += image[i * 4 + 3];
+    return sum / 255.0f;
+}
+static float columnCover(float u, float v0, float v1) {
+    int sum = 0;
+    for (int i = texelAt(u, v0); i <= texelAt(u, v1); i += SIZE)
+        sum += image[i * 4 + 3];
+    return sum / 255.0f;
+}
+/* The middle of the texel row or column holding v, in glass radii. */
+static float middle(float v) { return (floorf(SIZE / 2.0f + v * TEXELS) + 0.5f - SIZE / 2.0f) / TEXELS; }
+/* How far from the centre, in glass radii, a bar's tip stops along u (or v, down): where the cover across the
+ * axis, past the thin line and the bar crossing the centre, first outgrows the thin line by a texel. */
+static float tip(int down, int sign) {
+    const float line = CG_WWIISCOPE_RETICLE_LINE * TEXELS;
+    for (int k = (int)(CG_WWIISCOPE_RETICLE_BAR * TEXELS); k < TEXELS; k++) {
+        float at = (k + 0.5f) / TEXELS;
+        float cover = down ? rowCover(at, -0.1f, 0.1f) : columnCover(sign * at, -0.1f, 0.1f);
+        if (cover > line + 1.0f)
+            return k / (float)TEXELS;
+    }
+    return 2.0f;
+}
+static int near(float a, float b, float tolerance) { return fabsf(a - b) <= tolerance; }
+int main(void) {
+    const float line = CG_WWIISCOPE_RETICLE_LINE * TEXELS, bar = CG_WWIISCOPE_RETICLE_BAR * TEXELS;
+    const float reach = 0.5f * (CG_WWIISCOPE_RETICLE_POST + CG_WWIISCOPE_RETICLE_POST_FLARE) * TEXELS + 1.0f;
+    int cases = 0;
+
+    /* A texel a pixel of a glass LENS_RADIUS of half the screen's height high, within the bounds. */
+    assert(CG_WwiiScopeReticleTexels(720) == 375 && CG_WwiiScopeReticleTexels(1080) == TEXELS &&
+           CG_WwiiScopeReticleTexels(2160) == TEXELS && CG_WwiiScopeReticleTexels(1e30f) == TEXELS);
+    assert(CG_WwiiScopeReticleTexels(100) == CG_WWIISCOPE_RETICLE_TEXELS_MIN &&
+           CG_WwiiScopeReticleTexels(0) == CG_WWIISCOPE_RETICLE_TEXELS_MIN &&
+           CG_WwiiScopeReticleTexels(-5) == CG_WWIISCOPE_RETICLE_TEXELS_MIN &&
+           CG_WwiiScopeReticleTexels(NAN) == CG_WWIISCOPE_RETICLE_TEXELS_MIN);
+    cases++;
+
+    for (int reticle = 0; reticle < CG_WWIISCOPE_RETICLES; reticle++) {
+        double weight = 0, row = 0, column = 0;
+        int differ = 0;
+
+        memset(image, 0x55, sizeof(image));
+        CG_WwiiScopeReticleRaster(reticle, TEXELS, SIZE, image);
+        /* Black on clear; clear outside the glass and away from the centre row and column; the same on both
+         * sides, and centred on the row and the column. */
+        for (int y = 0; y < SIZE; y++) {
+            for (int x = 0; x < SIZE; x++) {
+                const byte *t = image + (y * SIZE + x) * 4;
+                float dx = fmaxf(fabsf(x + 0.5f - SIZE / 2.0f) - 0.5f, 0), dy = fmaxf(fabsf(y + 0.5f - SIZE / 2.0f) - 0.5f, 0);
+                assert(t[0] == 0 && t[1] == 0 && t[2] == 0);
+                if (dx * dx + dy * dy > (float)TEXELS * TEXELS || (dx > reach && dy > reach))
+                    assert(t[3] == 0);
+                differ += t[3] != image[(y * SIZE + SIZE - 1 - x) * 4 + 3];
+                weight += t[3];
+                if (dx < 0.5f * bar)
+                    column += t[3] * (x + 0.5 - SIZE / 2.0);
+                if (dy < 0.5f * line)
+                    row += t[3] * (y + 0.5 - SIZE / 2.0);
+            }
+        }
+        assert(differ < SIZE / 8 && fabs(column) < 0.01 * weight && fabs(row) < 0.01 * weight);
+        /* A thin line across the whole glass. */
+        for (int sign = -1; sign <= 1; sign += 2)
+            assert(near(columnCover(sign * 0.2f, -0.1f, 0.1f), line, 0.2f) &&
+                   near(columnCover(sign * 0.3f, -0.1f, 0.1f), line, 0.2f));
+        assert(image[texelAt(-0.995f, -0.5f / TEXELS) * 4 + 3] == 255 && image[texelAt(0.995f, 0.5f / TEXELS) * 4 + 3] == 255);
+        if (reticle == CG_WWIISCOPE_RETICLE_OPTIC) {
+            /* Nothing above the centre, nothing thick at the sides. */
+            assert(rowCover(-0.5f, -0.1f, 0.1f) == 0 && rowCover(-0.02f, -0.1f, 0.1f) == 0);
+            assert(near(columnCover(-0.6f, -0.1f, 0.1f), line, 0.2f) && near(columnCover(0.6f, -0.1f, 0.1f), line, 0.2f));
+            /* The post, POST wide where it would meet the centre and widening by POST_FLARE a radius down to
+             * the glass's foot; over its last POST_POINT it narrows as the root of its height to its point at
+             * the centre, under the line. */
+            static const float depths[] = { 0.02f, 0.04f, 0.06f, 0.1f, 0.3f, 0.5f, 0.7f, 0.9f };
+            for (unsigned k = 0; k < sizeof(depths) / sizeof(depths[0]); k++) {
+                float v = middle(depths[k]);
+                float width = CG_WWIISCOPE_RETICLE_POST + CG_WWIISCOPE_RETICLE_POST_FLARE * fmaxf(v, CG_WWIISCOPE_RETICLE_POST_POINT);
+                if (v < CG_WWIISCOPE_RETICLE_POST_POINT)
+                    width *= sqrtf(v / CG_WWIISCOPE_RETICLE_POST_POINT);
+                assert(near(rowCover(depths[k], -0.1f, 0.1f), width * TEXELS, 0.35f));
+            }
+            float last = 0;
+            for (int k = (int)ceilf(line / 2); k < CG_WWIISCOPE_RETICLE_POST_POINT * TEXELS; k += 8) {
+                float width = rowCover((k + 0.5f) / TEXELS, -0.1f, 0.1f);
+                assert(width > last);
+                last = width;
+            }
+            assert(rowCover((ceilf(line / 2) + 0.5f) / TEXELS, -0.1f, 0.1f) <
+                   rowCover(CG_WWIISCOPE_RETICLE_POST_POINT, -0.1f, 0.1f) / 3);
+            assert(image[texelAt(0, 0.99f) * 4 + 3] == 255);
+        } else {
+            /* A thin line down the whole glass, and no bar above the centre. */
+            assert(near(rowCover(-0.5f, -0.1f, 0.1f), line, 0.2f) && near(rowCover(-0.9f, -0.1f, 0.1f), line, 0.2f));
+            /* Bars from both sides and from the foot, their tips SIDE_GAP and FOOT_GAP from the centre, only
+             * the thin lines nearer. */
+            for (int sign = -1; sign <= 1; sign += 2) {
+                assert(near(columnCover(sign * 0.6f, -0.1f, 0.1f), bar, 0.3f) && near(columnCover(sign * 0.9f, -0.1f, 0.1f), bar, 0.3f));
+                assert(near(columnCover(sign * 0.3f, -0.1f, 0.1f), line, 0.2f) && near(columnCover(sign * 0.37f, -0.1f, 0.1f), line, 0.2f));
+                assert(near(tip(0, sign), CG_WWIISCOPE_RETICLE_SIDE_GAP, 1.5f / TEXELS));
+                /* Round: a quarter of the way into the tip's half-disc it spans 0.66 of the bar. */
+                float cover = columnCover(sign * middle(CG_WWIISCOPE_RETICLE_SIDE_GAP + 0.125f * CG_WWIISCOPE_RETICLE_BAR), -0.1f, 0.1f);
+                assert(cover > 0.5f * bar && cover < 0.8f * bar);
+            }
+            assert(near(rowCover(0.5f, -0.1f, 0.1f), bar, 0.3f) && near(rowCover(0.95f, -0.1f, 0.1f), bar, 0.3f));
+            assert(near(rowCover(0.1f, -0.1f, 0.1f), line, 0.2f) && near(rowCover(0.16f, -0.1f, 0.1f), line, 0.2f));
+            assert(near(tip(1, 1), CG_WWIISCOPE_RETICLE_FOOT_GAP, 1.5f / TEXELS));
+            float cover = rowCover(middle(CG_WWIISCOPE_RETICLE_FOOT_GAP + 0.125f * CG_WWIISCOPE_RETICLE_BAR), -0.1f, 0.1f);
+            assert(cover > 0.5f * bar && cover < 0.8f * bar);
+        }
+        cases++;
+    }
+    printf("%d\n", cases);
+    return 0;
+}
+'''
+reticle_mutants = [
+    ('    if (u * u + v * v > 1.0f)\n        return 0;\n', ''),
+    ('    if (fabsf(v) <= 0.5f * CG_WWIISCOPE_RETICLE_LINE)\n', '    if (fabsf(v) <= CG_WWIISCOPE_RETICLE_LINE)\n'),
+    ('            half *= sqrtf(v / CG_WWIISCOPE_RETICLE_POST_POINT);\n', ''),
+    ('CG_WWIISCOPE_RETICLE_POST_FLARE * fmaxf(v, CG_WWIISCOPE_RETICLE_POST_POINT)',
+     'CG_WWIISCOPE_RETICLE_POST_FLARE * CG_WWIISCOPE_RETICLE_POST_POINT'),
+    ('    return fabsf(across) <= half && (cap >= 0.0f || cap * cap + across * across <= half * half);',
+     '    return fabsf(across) <= half && cap + half >= 0.0f;'),
+    ('    float cap = along - end - half;', '    float cap = along - end;'),
+    ('CG_WwiiScopeReticleBar(v, u, CG_WWIISCOPE_RETICLE_FOOT_GAP, half)',
+     'CG_WwiiScopeReticleBar(v, u, CG_WWIISCOPE_RETICLE_SIDE_GAP, half)'),
+    ('CG_WwiiScopeReticleBar(v, u, CG_WWIISCOPE_RETICLE_FOOT_GAP, half)',
+     'CG_WwiiScopeReticleBar(fabsf(v), u, CG_WWIISCOPE_RETICLE_FOOT_GAP, half)'),
+    ('    return fabsf(u) <= 0.5f * CG_WWIISCOPE_RETICLE_LINE ||\n           CG_WwiiScopeReticleBar',
+     '    return CG_WwiiScopeReticleBar'),
+    ('    if (reticle == CG_WWIISCOPE_RETICLE_OPTIC) {', '    if (reticle != CG_WWIISCOPE_RETICLE_OPTIC) {'),
+    ('                                                             v + ((float)sy + 0.5f) * step);',
+     '                                                             v + (float)sy * step);'),
+    ('            if (fabsf(u + 0.5f * scale) <= reach || fabsf(v + 0.5f * scale) <= reach) {',
+     '            if (fabsf(u) <= reach && fabsf(v) <= reach) {'),
+    ('(byte)(covered * 255 / (CG_WWIISCOPE_RETICLE_SAMPLES * CG_WWIISCOPE_RETICLE_SAMPLES))', '(byte)(covered * 16)'),
+    ('            texel[0] = texel[1] = texel[2] = 0;', '            texel[0] = texel[1] = texel[2] = 24;'),
+    ('    return texels < CG_WWIISCOPE_RETICLE_TEXELS_MAX ? (int)texels : CG_WWIISCOPE_RETICLE_TEXELS_MAX;',
+     '    return (int)texels;'),
+    ('    float texels = ceilf(CG_WWIISCOPE_LENS_RADIUS * 0.5f * height);', '    float texels = ceilf(0.5f * height);'),
+    ('    if (!(texels > CG_WWIISCOPE_RETICLE_TEXELS_MIN))', '    if (texels < CG_WWIISCOPE_RETICLE_TEXELS_MIN)'),
+]
+
 # The lens image, from r_hud2d.c.
 lens_body = ''.join(function(hud2d, name) for name in (
     'R_DecodeBlockAlpha', 'R_GrayBlockBytes', 'R_GetGrayImageSize', 'R_DecodeColorBlock', 'R_DecodeLensImage',
-    'R_ClearOutsideLens'))
+    'R_ClearOutsideLens')) + re.search(r'^#define LENS_RETICLE_BAND [^\n]+\n', hud2d, re.M)[0] + \
+    ''.join(function(hud2d, name) for name in ('R_BlendLensTexels', 'R_ClearLensReticle'))
 lens_defines = ''.join(re.search(r'^#define ' + name + r' .*\n', hud2d, re.M)[0] for name in (
     'IWI_VERSION', 'IWI_FORMAT_DXT1', 'IWI_FORMAT_DXT3', 'IWI_FORMAT_DXT5', 'DXT_BLOCK_BYTES', 'DXT1_BLOCK_BYTES',
     'LENS_OPAQUE_ALPHA', 'LENS_DIRECTIONS'))
@@ -661,7 +854,7 @@ typedef struct GfxImageFileHeader { char tag[3]; byte version, format, flags; sh
 ''' + lens_defines
 lens_checks = r'''
 static byte fileData[1 << 22];
-static byte out[512 * 512 * 4];
+static byte out[512 * 512 * 4], cleared[512 * 512 * 4];
 /* An IWi file: the header, then mips smallest first, the top one last. */
 static int iwi(byte *file, int format, int w, int h, const byte *top, int topBytes) {
     GfxImageFileHeader header = { { 'I', 'W', 'i' }, 5, (byte)format, 0, { (short)w, (short)h, 1 }, { 0 } };
@@ -766,6 +959,71 @@ int main(int argc, char **argv) {
     assert(R_ClearOutsideLens(lens, 64, 64) == 1.0f);
     cases += 3;
 
+    /* The stock reticle runs along the centre row and column: the band about each, BAND of the half width to
+     * either side, becomes the blend of the texels just beyond it, colours weighted by alpha, the row's band
+     * first; nothing else changes. A clear texel's colour does not tint an opaque one's in the blend, and an
+     * image too small for a band is left alone. */
+    {
+        enum { N = 128 };
+        static byte img[N * N * 4], before[N * N * 4];
+        const int band = (int)ceilf(LENS_RETICLE_BAND * N / 2), top = N / 2 - band - 1, left = top;
+        static const byte clearRed[4] = { 0, 0, 255, 0 }, green[4] = { 0, 255, 0, 200 };
+
+        /* Wide enough for the retail overlays' chevrons, 0.057 of the half width from both axes, and not
+         * much wider. */
+        assert(band >= 0.06f * N / 2 && band <= 0.08f * N / 2);
+
+        for (int y = 0; y < N; y++) {
+            for (int x = 0; x < N; x++) {
+                byte *t = img + (y * N + x) * 4;
+                t[0] = (byte)(2 * x);
+                t[1] = (byte)(3 * y);
+                t[2] = (byte)(x ^ y);
+                t[3] = (byte)((x * 7 + y * 13) % 256);
+            }
+        }
+        memcpy(img + (top * N + 10) * 4, clearRed, 4);
+        memcpy(img + ((top + 2 * band + 1) * N + 10) * 4, green, 4);
+        memcpy(before, img, sizeof(img));
+        R_ClearLensReticle(img, N, N);
+        for (int y = 0; y < N; y++) {
+            for (int x = 0; x < N; x++) {
+                const int inRow = y > top && y <= top + 2 * band, inColumn = x > left && x <= left + 2 * band;
+                const byte *t = img + (y * N + x) * 4, *a, *b;
+                float f, alpha;
+
+                if (!inRow && !inColumn) {
+                    assert(!memcmp(t, before + (y * N + x) * 4, 4));
+                    continue;
+                }
+                if (inColumn) {
+                    a = img + (y * N + left) * 4;
+                    b = img + (y * N + left + 2 * band + 1) * 4;
+                    f = (float)(x - left) / (2 * band + 1);
+                } else {
+                    a = before + (top * N + x) * 4;
+                    b = before + ((top + 2 * band + 1) * N + x) * 4;
+                    f = (float)(y - top) / (2 * band + 1);
+                }
+                alpha = a[3] + (b[3] - a[3]) * f;
+                assert(abs(t[3] - (int)(alpha + 0.5f)) <= 1);
+                for (int c = 0; c < 3; c++) {
+                    float color = alpha > 0 ? (a[c] * a[3] * (1 - f) + b[c] * b[3] * f) / alpha : a[c] + (b[c] - a[c]) * f;
+                    assert(abs(t[c] - (int)(color + 0.5f)) <= 1);
+                }
+            }
+        }
+        for (int y = top + 1; y <= top + 2 * band; y++) {
+            const byte *t = img + (y * N + 10) * 4;
+            assert(t[0] == 0 && t[1] == 255 && t[2] == 0 && abs(t[3] - (int)(200.0f * (y - top) / (2 * band + 1) + 0.5f)) <= 1);
+        }
+        byte tiny[2 * 2 * 4] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 }, tinyBefore[sizeof(tiny)];
+        memcpy(tinyBefore, tiny, sizeof(tiny));
+        R_ClearLensReticle(tiny, 2, 2);
+        assert(!memcmp(tiny, tinyBefore, sizeof(tiny)));
+    }
+    cases++;
+
     /* The retail overlays: each lens reaches nearly to its image's sides
      * (0.976 of the half width, the Russian 0.904) and is clear between its
      * reticle's lines. */
@@ -775,7 +1033,10 @@ int main(int argc, char **argv) {
         n = (int)fread(fileData, 1, sizeof(fileData), f);
         fclose(f);
         assert(R_DecodeLensImage(fileData, n, out, &w, &h) && w <= 512 && h <= 512 && w == h);
+        memcpy(cleared, out, (size_t)w * h * 4);
+        R_ClearLensReticle(cleared, w, h);
         float edge = R_ClearOutsideLens(out, w, h), half = w / 2.0f;
+        assert(R_ClearOutsideLens(cleared, w, h) == edge);
         int clear = 0, inside = 0;
         assert(edge > 0.85f && edge < 1.0f);
         for (int y = 0; y < h; y++) {
@@ -792,6 +1053,53 @@ int main(int argc, char **argv) {
         assert(clear > inside / 2);
         printf("edge %s %.3f\n", argv[k], edge);
         cases++;
+        /* The reticle taken out: across each arm of the cross, from 0.2 to 0.8 of the edge, where the stock
+         * reticle's lines and posts stood out, nothing stands out of the dirt and the darkening; in the bands
+         * about the centre, where its chevrons and crossings were, nothing is opaque; and the darkening rim
+         * runs on through the bands. */
+        {
+            const int band = (int)ceilf(LENS_RETICLE_BAND * half), c = w / 2;
+            float stood = 0, stands = 0, ringBand = 0, ringOut = 0;
+            int ringBandCount = 0, ringOutCount = 0, centreBefore = 0, centreAfter = 0;
+
+            for (int arm = 0; arm < 4; arm++) {
+                for (int d = -2 * band; d < 2 * band; d++) {
+                    float sumBefore = 0, sumAfter = 0;
+                    int count = 0;
+                    for (int r = (int)(0.2f * edge * half); r < (int)(0.8f * edge * half); r++, count++) {
+                        int x = arm < 2 ? (arm ? c + r : c - 1 - r) : c + d;
+                        int y = arm < 2 ? c + d : (arm == 2 ? c - 1 - r : c + r);
+                        sumBefore += out[(y * w + x) * 4 + 3];
+                        sumAfter += cleared[(y * w + x) * 4 + 3];
+                    }
+                    stood = fmaxf(stood, sumBefore / count);
+                    stands = fmaxf(stands, sumAfter / count);
+                }
+            }
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    float fx = x + 0.5f - half, fy = y + 0.5f - half, r = sqrtf(fx * fx + fy * fy) / (edge * half);
+                    int inBand = fabsf(fx) < band || fabsf(fy) < band, a = cleared[(y * w + x) * 4 + 3];
+                    if (r < 0.15f && inBand) {
+                        centreBefore = centreBefore > out[(y * w + x) * 4 + 3] ? centreBefore : out[(y * w + x) * 4 + 3];
+                        centreAfter = centreAfter > a ? centreAfter : a;
+                    } else if (r > 0.88f && r < 0.97f && inBand) {
+                        ringBand += a;
+                        ringBandCount++;
+                    } else if (r > 0.88f && r < 0.97f && (fabsf(fx) < 2 * band || fabsf(fy) < 2 * band)) {
+                        ringOut += a;
+                        ringOutCount++;
+                    }
+                }
+            }
+            ringBand /= ringBandCount;
+            ringOut /= ringOutCount;
+            printf("reticle %s stood %.0f stands %.0f centre %d to %d rim %.0f in the bands, %.0f beside\n", argv[k],
+                   stood, stands, centreBefore, centreAfter, ringBand, ringOut);
+            assert(stood > 100 && stands < 40 && centreBefore > 128 && centreAfter < 64);
+            assert(fabsf(ringBand - ringOut) < 0.08f * ringOut);
+        }
+        cases++;
     }
     printf("%d\n", cases);
     return 0;
@@ -807,6 +1115,13 @@ lens_mutants = [
     ('    edge = found ? edges[found / 2] : half;', '    edge = found ? edges[0] : half;'),
     ('            if (cover <= 0.0f)\n                *alpha = 0;\n            else if', '            if'),
     ('            if (bgra[(ty * width + tx) * 4 + 3] >= LENS_OPAQUE_ALPHA) {', '            if (bgra[(ty * width + tx) * 4 + 3]) {'),
+    ('#define LENS_RETICLE_BAND 0.07f', '#define LENS_RETICLE_BAND 0.03f'),
+    ('    for (y = 0; y < height; y++)\n        R_BlendLensTexels(', '    for (y = 0; y < 0; y++)\n        R_BlendLensTexels('),
+    ('            float color = alpha > 0.0f ? ((float)first[c] * a0 * (1.0f - t) + (float)last[c] * a1 * t) / alpha\n'
+     '                                       : ', '            float color = 0 ? 0.0f : '),
+    ('        float t = (float)i / (float)(count + 1);', '        float t = (float)i / (float)count;'),
+    ('bgra + ((top + 2 * band + 1) * width + x) * 4', 'bgra + ((top + 2 * band) * width + x) * 4'),
+    ('    if (top < 0 || left < 0)\n        return;\n', ''),
 ]
 
 
@@ -954,7 +1269,8 @@ zoom_mutants = [('frac < CG_WWIISCOPE_ZOOM_IN_FRAC', 'frac > CG_WWIISCOPE_ZOOM_I
 
 # The glass a player's weapon is drawn with: a scoped rifle's own; a 4x Optic's, read once from beside the optic's
 # model, while the player has one on a gun without a scope of its own and the optic brought its overlay; the
-# reticle cut from that overlay. Every match starts with the 4x Optics' glass unread.
+# lens cut from that overlay; WWII's 4x Optic's reticle with the optic, else its sniper scopes'. Every match starts
+# with the 4x Optics' glass unread.
 assert 'memset(s_sightKnown, CG_WWIISCOPE_UNKNOWN, sizeof(s_sightKnown));' in function(scope, 'CG_WwiiScopeInit')
 # A Reflex or Lens Sight's window, when no WWII scope draws the weapon: its ring's disc projected as the view
 # draws the rifle, coming in over the last of the raise, handed to the compositor in the scope's place.
@@ -978,7 +1294,7 @@ select_body = ''.join(function(scope, name) for name in (
     'CG_WwiiScopeFindGlass', 'CG_WwiiScopeParseGlass', 'CG_WwiiScopeWeaponGlass', 'CG_WwiiScopeOpticBell',
     'CG_WwiiScopeSightGlass',
     'CG_WwiiScopeWindowGlass', 'CG_WwiiScopePlayerGlass', 'CG_WwiiScopeOverlay', 'CG_WwiiScopeViewAnim',
-    'CG_WwiiScopeOpeningPixels'))
+    'CG_WwiiScopeOpeningPixels', 'CG_WwiiScopeReticleFor'))
 select_support = r'''
 #include <assert.h>
 #include <math.h>
@@ -1146,7 +1462,7 @@ int main(void) {
     assert(!CG_WwiiScopePlayerGlass(&all, 0) && !CG_WwiiScopePlayerGlass(&all, -1));
     assert(!CG_WwiiScopePlayerGlass(&all, WEAPONS + 1) && !CG_WwiiScopePlayerGlass(&all, CG_WWIISCOPE_MAX_WEAPONS));
     cases++;
-    /* The reticle is cut from the weapon's own overlay, or from the one its 4x Optic borrows. */
+    /* The lens is cut from the weapon's own overlay, or from the one its 4x Optic borrows. */
     assert(CG_WwiiScopeOverlay(&none, 1) == &own && CG_WwiiScopeOverlay(&optic, 1) == &own && registered == 0);
     MaterialHandle borrowed = CG_WwiiScopeOverlay(&optic, 2);
     assert(borrowed && !strcmp(borrowed->name, "scope_overlay_american") && registered == 1);
@@ -1248,11 +1564,21 @@ int main(void) {
         assert(seen && seen->radius == 0.635f && seen->bell[0] == 0 && seen->bell[1] == 0);
     }
     cases++;
+    /* WWII's 4x Optic's reticle wherever the player has one, a sniper rifle's own scope included; its sniper
+     * scopes' on a scoped rifle without one, whatever else is on it. */
+    assert(CG_WwiiScopeReticleFor(&optic, 1) == CG_WWIISCOPE_RETICLE_OPTIC &&
+           CG_WwiiScopeReticleFor(&optic, 2) == CG_WWIISCOPE_RETICLE_OPTIC &&
+           CG_WwiiScopeReticleFor(&all, 7) == CG_WWIISCOPE_RETICLE_OPTIC);
+    assert(CG_WwiiScopeReticleFor(&none, 1) == CG_WWIISCOPE_RETICLE_SNIPER &&
+           CG_WwiiScopeReticleFor(&reflex, 7) == CG_WWIISCOPE_RETICLE_SNIPER);
+    cases++;
     printf("%d\n", cases);
     return 0;
 }
 '''
 select_mutants = [
+    ('BG_GetWeaponAttachments(ps, weapon) & ATT_BIT(ATT_OPTIC4X) ? CG_WWIISCOPE_RETICLE_OPTIC',
+     'BG_GetWeaponAttachments(ps, weapon) ? CG_WWIISCOPE_RETICLE_OPTIC'),
     ('!(BG_GetWeaponAttachments(ps, weapon) & ATT_BIT(ATT_OPTIC4X))', '!BG_GetWeaponAttachments(ps, weapon)'),
     ('    if (!weapDef || !weapDef->overlayReticle || !weapDef->szOverlayMaterial[0])\n        return NULL;\n', ''),
     ('        s_sightKnown[weapon][sight] = CG_WWIISCOPE_NONE;\n', ''),
@@ -1294,6 +1620,10 @@ with tempfile.TemporaryDirectory(prefix='cod2-wwii-scope-') as directory:
     for index, (before, after) in enumerate(select_mutants):
         run(directory, f'select{index}', select_support + mutate(select_body, before, after) + select_checks, ['-w'],
             False)
+    reticle_cases = int(run(directory, 'reticle', reticle_support + reticle_body + reticle_checks, strict, True).stdout)
+    for index, (before, after) in enumerate(reticle_mutants):
+        run(directory, f'reticle{index}', reticle_support + mutate(reticle_body, before, after) + reticle_checks,
+            ['-w'], False)
     math_cases = int(run(directory, 'scope', math_support + math_body + math_checks, strict, True).stdout)
     for index, (before, after) in enumerate(math_mutants):
         if before.startswith('static const float s_rechamberKeep'):
@@ -1314,9 +1644,12 @@ with tempfile.TemporaryDirectory(prefix='cod2-wwii-scope-') as directory:
 print(f'PASS: the WWII scope\'s hooks in the view weapon, reticle, zoom and start-up; {math_cases} cases of its glass '
       f'outline, its eyepiece\'s bell and the drawn eyepiece taking its place over the zoom, rifle projection, zoom, '
       f'blackout, centring, bolt and reticle math, the rifle\'s pose held by its '
-      f'fire and rechamber anims\' weights past their states; {lens_cases} cases of lens images decoded, halved by '
-      f'alpha and cleared outside their edge; the zoom\'s share of the raise as the attachments leave it; '
+      f'fire and rechamber anims\' weights past their states; {reticle_cases} cases of WWII\'s 4x Optic and sniper '
+      f'reticles rasterized; {lens_cases} cases of lens images decoded, halved by '
+      f'alpha, their stock reticle taken out and cleared outside their edge; the zoom\'s share of the raise as the '
+      f'attachments leave it; '
       f'{select_cases} cases of the glass a player\'s weapon is drawn with, a 4x Optic\'s read once beside its model '
-      f'with its scope\'s eyepiece, the overlay its reticle is cut from, the bolt worked in the idle pose through it, '
-      f'a Reflex or Lens Sight\'s window and its opening in pixels; '
-      f'{len(math_mutants) + len(lens_mutants) + len(zoom_mutants) + len(select_mutants)} mutants fail; {asset_note}')
+      f'with its scope\'s eyepiece, the overlay its lens is cut from, the reticle it shows, the bolt worked in the '
+      f'idle pose through it, a Reflex or Lens Sight\'s window and its opening in pixels; '
+      f'{len(math_mutants) + len(lens_mutants) + len(zoom_mutants) + len(select_mutants) + len(reticle_mutants)} '
+      f'mutants fail; {asset_note}')

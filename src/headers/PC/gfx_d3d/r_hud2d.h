@@ -39,7 +39,11 @@ typedef struct HudVertex2D {
 #define R_HUD_IMAGE_SCOPE_LENS 20
 #define R_HUD_IMAGE_SCOPE_LENS_COUNT 4
 #define R_HUD_IMAGE_SQUAD_EMBLEMS 24
-#define R_HUD_IMAGE_COUNT 25
+/* The reticles drawn over those lenses (cg_wwiiscope_mp.c), in two slots from
+ * this one. */
+#define R_HUD_IMAGE_SCOPE_RETICLE 25
+#define R_HUD_IMAGE_SCOPE_RETICLE_COUNT 2
+#define R_HUD_IMAGE_COUNT 27
 
 /* Icons whose white silhouette or emblem has been built; each is read once. */
 #define R_HUD_SILHOUETTE_COUNT 64
@@ -95,8 +99,14 @@ int R_DecodeLensImage(const byte *file, int fileLen, byte *bgra, int *width, int
  * and the darkening rim, and outside it is clear. Returns that radius as a
  * fraction of the image's half width. */
 float R_ClearOutsideLens(byte *bgra, int width, int height);
-/* R_ClearOutsideLens applied to a 2D material's image, built into slot. edge
- * gets the lens radius as a fraction of the half width, 0 on failure. */
+/* Takes the stock reticle out of a scope overlay's lens, keeping its dirt and
+ * darkening rim: the bands about the image's centre row and column that hold
+ * every stock reticle's lines, posts and chevrons are filled with the blend of
+ * the texels beyond their sides. */
+void R_ClearLensReticle(byte *bgra, int width, int height);
+/* R_ClearLensReticle and R_ClearOutsideLens applied to a 2D material's image,
+ * built into slot. edge gets the lens radius as a fraction of the half width,
+ * 0 on failure. */
 MaterialHandle R_CreateHudLensMaterial(int slot, MaterialHandle overlay, float *edge);
 void R_ShutdownHudImages(void);
 /* Changes whenever R_ShutdownHudImages releases the images and the fonts

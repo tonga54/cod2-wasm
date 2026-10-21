@@ -8,7 +8,9 @@
  * a window onto the magnified world in a round ring of worn metal, the world
  * around the eyepiece is blurred and blacked out while the breath is held,
  * and the reticle turns with the scope as the bolt is worked. A 4x Optic on
- * a gun without a scope of its own is drawn the same way. Through a Reflex
+ * a gun without a scope of its own is drawn the same way. The reticles are
+ * WWII's: the 4x Optic's a thin line over a pointed post, the sniper scopes'
+ * its scoped Kar98k's thin cross with thick bars. Through a Reflex
  * or Lens Sight the world shows in the sight's ring with nothing of the rest
  * of the gun over it.
  * cg_wwiiScope 0, a rifle whose eyepiece is not known or a browser without
@@ -104,8 +106,9 @@ void CG_WwiiScopePlaceViewWeapon(const playerState_t *ps, int weapon, vec_t *ori
 qboolean CG_WwiiScopeUpdate(const playerState_t *ps, int weapon, qboolean drawGun);
 /* Whether this frame's view weapon keeps only the light of its muzzle flash. */
 qboolean CG_WwiiScopeMuzzleLightsOnly(void);
-/* Draws the reticle over the window. Returns the remaining visibility of the
- * hip crosshair, as CG_DrawWeapReticle, or -1 when the stock overlay draws. */
+/* Draws the stock overlay's lens, its reticle taken out, and the WWII reticle
+ * over the window. Returns the remaining visibility of the hip crosshair, as
+ * CG_DrawWeapReticle, or -1 when the stock overlay draws. */
 float CG_DrawWwiiScopeReticle(void);
 const CgWwiiScopeLens *CG_WwiiScopeLens(void);
 /* While a Reflex or Lens Sight's window comes in or is up, the opening of the

@@ -614,7 +614,8 @@ on canvases the generator accepts, for the day a class weapon matches one.
 - Only the player's own first-person gun shows its attachments. Other players'
   guns, and every gun in third person, look the same with any of them: the
   attachments travel in the player state, which only its player receives.
-  The 4x Optic's reticle is its nation's sniper scope's.
+  With `cg_wwiiScope 0` the 4x Optic shows its nation's stock sniper scope
+  overlay, reticle included, instead of WWII's.
 - The cans, sights, clamps and box magazines are this port's, made from simple
   shapes; the 4x Optics are CoD2's scopes, not WWII's shorter one, and the
   Mosin-Nagant's own sniper scope, cut into its cloth, cannot be lifted. A

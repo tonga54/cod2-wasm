@@ -65,8 +65,10 @@ One optic can be fitted at a time. Reflex and Lens Sights have modeled frames
 in the gun's own metal finish and illuminated reticles; their openings show
 the world clearly while aiming. Sniper scopes and the 4x Optic keep the eyepiece
 on screen with a magnified view through its glass, framed by a round ring of
-worn metal with the blurred world around it. Holding your breath isolates the
-scope view.
+worn metal with the blurred world around it. Their reticles are WWII's: a thin
+line over a pointed post in the 4x Optic, and the scoped Kar98k's thin cross
+with thick bars in every sniper scope. Holding your breath isolates the scope
+view.
 
 Camouflage paints the gun in play, including the weapon other players see.
 Each primary and pistol can keep its own pattern.

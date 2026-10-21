@@ -6,6 +6,7 @@
 #include "headers/PC/gfx_d3d/r_hud2d.h"
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* Each scope's glass in the space of the gun's j_gun bone, read from the
@@ -139,6 +140,32 @@ extern const dvar_t *cg_fovMin;
 /* A rim seen off its axis spreads a little past the ends of its projected
  * diameters: the bell's outline is kept this much wider. */
 #define CG_WWIISCOPE_BELL_MARGIN 1.05f
+/* The reticles drawn on the glass, measured in glass radii on the owner's
+ * WWII captures. The 4x Optic's is a thin line across the glass over a post
+ * that rises from the glass's foot, narrowing, to a point at the centre. The
+ * sniper scopes', as on WWII's scoped Kar98k, are thin lines across and down
+ * the glass with thick bars, round at their tips, from both sides and from
+ * the foot, stopping short of the centre. */
+#define CG_WWIISCOPE_RETICLE_OPTIC 0
+#define CG_WWIISCOPE_RETICLE_SNIPER 1
+#define CG_WWIISCOPE_RETICLES 2
+#define CG_WWIISCOPE_RETICLE_LINE 0.0085f
+/* The post would be POST wide at the centre, widening by POST_FLARE a radius
+ * down; over its last POST_POINT it narrows to nothing as the root of its
+ * height. */
+#define CG_WWIISCOPE_RETICLE_POST 0.0263f
+#define CG_WWIISCOPE_RETICLE_POST_FLARE 0.0387f
+#define CG_WWIISCOPE_RETICLE_POST_POINT 0.08f
+/* The bars' width and how far from the centre their tips stop. */
+#define CG_WWIISCOPE_RETICLE_BAR 0.035f
+#define CG_WWIISCOPE_RETICLE_SIDE_GAP 0.38f
+#define CG_WWIISCOPE_RETICLE_FOOT_GAP 0.166f
+/* Texels a glass radius: a texel a pixel of the glass at full aim, within
+ * these. The image keeps MARGIN texels clear round the glass. */
+#define CG_WWIISCOPE_RETICLE_TEXELS_MIN 64
+#define CG_WWIISCOPE_RETICLE_TEXELS_MAX 512
+#define CG_WWIISCOPE_RETICLE_MARGIN 2
+#define CG_WWIISCOPE_RETICLE_SAMPLES 4
 
 typedef struct CgWwiiScopeImage {
     MaterialHandle overlay;
@@ -146,6 +173,14 @@ typedef struct CgWwiiScopeImage {
     float edge;
     int generation;
 } CgWwiiScopeImage;
+
+/* A reticle's image, built once per renderer: NULL when it could not be. */
+typedef struct CgWwiiScopeReticle {
+    MaterialHandle material;
+    float edge;
+    int generation;
+    int built;
+} CgWwiiScopeReticle;
 
 /* This frame's bolt: the weights of the view weapon's fire anims and of its
  * animated rechamber, and how far out a procedural rechamber is. */
@@ -174,6 +209,7 @@ static unsigned char s_idleBolt[CG_WWIISCOPE_MAX_WEAPONS];
 /* The scoped rechamber anim gave way to the idle pose. */
 static unsigned char s_heldBolt[CG_WWIISCOPE_MAX_WEAPONS];
 static CgWwiiScopeImage s_images[R_HUD_IMAGE_SCOPE_LENS_COUNT];
+static CgWwiiScopeReticle s_reticles[CG_WWIISCOPE_RETICLES];
 static CgWwiiScopeLens s_lens;
 /* A Reflex or Lens Sight's window this frame: its ring's disc, which the
  * rifle stays off but for the sight itself, and the opening's share of it. */
@@ -315,8 +351,8 @@ const CgWwiiScopeGlass *CG_WwiiScopeGlassForWeapon(int weapon)
     return CG_WwiiScopeGlassFor(&cg->predictedPlayerState, weapon);
 }
 
-/* The overlay the reticle is cut from: the weapon's own, or the sniper
- * scope's a 4x Optic borrows. */
+/* The overlay the lens is cut from: the weapon's own, or the sniper scope's a
+ * 4x Optic borrows. */
 static MaterialHandle CG_WwiiScopeOverlay(const playerState_t *ps, int weapon)
 {
     const WeaponDef *weapDef = BG_GetPlayerWeaponDef(ps, weapon);
@@ -356,9 +392,119 @@ static MaterialHandle CG_WwiiScopeLensImage(MaterialHandle overlay, float *edge)
     return s_images[slot].lens;
 }
 
+/* WWII's 4x Optic's reticle on a gun the player has one on, else its sniper
+ * scopes'. */
+static int CG_WwiiScopeReticleFor(const playerState_t *ps, int weapon)
+{
+    return BG_GetWeaponAttachments(ps, weapon) & ATT_BIT(ATT_OPTIC4X) ? CG_WWIISCOPE_RETICLE_OPTIC
+                                                                       : CG_WWIISCOPE_RETICLE_SNIPER;
+}
+
+/* A bar half wide along an axis, its round tip end from the centre; along
+ * and across that axis, in glass radii. */
+static int CG_WwiiScopeReticleBar(float along, float across, float end, float half)
+{
+    float cap = along - end - half;
+
+    return fabsf(across) <= half && (cap >= 0.0f || cap * cap + across * across <= half * half);
+}
+
+/* Whether the reticle covers the point u right of and v below the glass's
+ * centre, in glass radii. */
+static int CG_WwiiScopeReticleCovers(int reticle, float u, float v)
+{
+    float half;
+
+    if (u * u + v * v > 1.0f)
+        return 0;
+    if (fabsf(v) <= 0.5f * CG_WWIISCOPE_RETICLE_LINE)
+        return 1;
+    if (reticle == CG_WWIISCOPE_RETICLE_OPTIC) {
+        if (!(v > 0.0f))
+            return 0;
+        half = 0.5f * (CG_WWIISCOPE_RETICLE_POST +
+                       CG_WWIISCOPE_RETICLE_POST_FLARE * fmaxf(v, CG_WWIISCOPE_RETICLE_POST_POINT));
+        if (v < CG_WWIISCOPE_RETICLE_POST_POINT)
+            half *= sqrtf(v / CG_WWIISCOPE_RETICLE_POST_POINT);
+        return fabsf(u) <= half;
+    }
+    half = 0.5f * CG_WWIISCOPE_RETICLE_BAR;
+    return fabsf(u) <= 0.5f * CG_WWIISCOPE_RETICLE_LINE ||
+           CG_WwiiScopeReticleBar(fabsf(u), v, CG_WWIISCOPE_RETICLE_SIDE_GAP, half) ||
+           CG_WwiiScopeReticleBar(v, u, CG_WWIISCOPE_RETICLE_FOOT_GAP, half);
+}
+
+/* The reticle in black on clear, texels a glass radius about the centre of a
+ * size by size image, each texel's cover sampled SAMPLES by SAMPLES. Only the
+ * bands about the centre row and column hold any of it. */
+static void CG_WwiiScopeReticleRaster(int reticle, int texels, int size, byte *bgra)
+{
+    const float scale = 1.0f / (float)texels;
+    const float reach = 0.5f * fmaxf(CG_WWIISCOPE_RETICLE_BAR,
+                                     CG_WWIISCOPE_RETICLE_POST + CG_WWIISCOPE_RETICLE_POST_FLARE) + scale;
+    const float step = scale / CG_WWIISCOPE_RETICLE_SAMPLES;
+    int x, y, sx, sy;
+
+    for (y = 0; y < size; y++) {
+        for (x = 0; x < size; x++) {
+            byte *texel = bgra + (y * size + x) * 4;
+            float u = ((float)x - 0.5f * (float)size) * scale, v = ((float)y - 0.5f * (float)size) * scale;
+            int covered = 0;
+
+            if (fabsf(u + 0.5f * scale) <= reach || fabsf(v + 0.5f * scale) <= reach) {
+                for (sy = 0; sy < CG_WWIISCOPE_RETICLE_SAMPLES; sy++) {
+                    for (sx = 0; sx < CG_WWIISCOPE_RETICLE_SAMPLES; sx++)
+                        covered += CG_WwiiScopeReticleCovers(reticle, u + ((float)sx + 0.5f) * step,
+                                                             v + ((float)sy + 0.5f) * step);
+                }
+            }
+            texel[0] = texel[1] = texel[2] = 0;
+            texel[3] = (byte)(covered * 255 / (CG_WWIISCOPE_RETICLE_SAMPLES * CG_WWIISCOPE_RETICLE_SAMPLES));
+        }
+    }
+}
+
+/* Texels a glass radius for a screen height pixels high. */
+static int CG_WwiiScopeReticleTexels(float height)
+{
+    float texels = ceilf(CG_WWIISCOPE_LENS_RADIUS * 0.5f * height);
+
+    if (!(texels > CG_WWIISCOPE_RETICLE_TEXELS_MIN))
+        return CG_WWIISCOPE_RETICLE_TEXELS_MIN;
+    return texels < CG_WWIISCOPE_RETICLE_TEXELS_MAX ? (int)texels : CG_WWIISCOPE_RETICLE_TEXELS_MAX;
+}
+
+/* A reticle's image, built once per renderer into one of the HUD's reticle
+ * slots. edge gets the glass's radius as a fraction of its half width. */
+static MaterialHandle CG_WwiiScopeReticleImage(int reticle, float *edge)
+{
+    CgWwiiScopeReticle *image = &s_reticles[reticle];
+    int generation = R_GetHudImageGeneration();
+    int texels, size;
+    byte *bgra;
+
+    if (!image->built || image->generation != generation) {
+        image->built = 1;
+        image->generation = generation;
+        image->material = NULL;
+        texels = CG_WwiiScopeReticleTexels((float)((clientStatic_t *)imp_cls)->vidConfig.height);
+        size = 2 * (texels + CG_WWIISCOPE_RETICLE_MARGIN);
+        image->edge = (float)texels / (float)(texels + CG_WWIISCOPE_RETICLE_MARGIN);
+        bgra = (byte *)malloc((size_t)size * size * 4);
+        if (bgra) {
+            CG_WwiiScopeReticleRaster(reticle, texels, size, bgra);
+            image->material = R_CreateHudImageMaterial(R_HUD_IMAGE_SCOPE_RETICLE + reticle, bgra, size, size);
+            free(bgra);
+        }
+    }
+    *edge = image->edge;
+    return image->material;
+}
+
 void CG_WwiiScopeInit(void)
 {
-    int weapon;
+    int weapon, reticle, scoped = 0;
+    float edge;
 
     cg_wwiiScope = Dvar_RegisterBool_mac("cg_wwiiScope", 1, 0x1001);
     memset(s_glassIndex, CG_WWIISCOPE_UNKNOWN, sizeof(s_glassIndex));
@@ -366,6 +512,7 @@ void CG_WwiiScopeInit(void)
     memset(s_idleBolt, 0, sizeof(s_idleBolt));
     memset(s_heldBolt, 0, sizeof(s_heldBolt));
     memset(s_images, 0, sizeof(s_images));
+    memset(s_reticles, 0, sizeof(s_reticles));
     memset(&s_lens, 0, sizeof(s_lens));
     memset(&s_window, 0, sizeof(s_window));
     memset(g_webScopeLens, 0, sizeof(g_webScopeLens));
@@ -374,15 +521,18 @@ void CG_WwiiScopeInit(void)
     s_lightsOnly = 0;
     s_dark = 0.0f;
     s_darkTime = 0;
-    /* The match's scopes are registered with the level; their lenses are
-     * built now rather than on the first raise. */
+    /* The match's scopes are registered with the level; their lenses and the
+     * reticles are built now rather than on the first raise. */
     for (weapon = 1; weapon <= BG_GetNumWeapons() && weapon < CG_WWIISCOPE_MAX_WEAPONS; weapon++) {
         const weaponInfo_t *weapInfo = &(*(weaponInfo_t **)imp_cg_weapons)[weapon];
-        float edge;
 
-        if (weapInfo->registered && CG_WwiiScopeWeaponGlass(weapon))
+        if (weapInfo->registered && CG_WwiiScopeWeaponGlass(weapon)) {
             CG_WwiiScopeLensImage(weapInfo->hADSOverlay, &edge);
+            scoped = 1;
+        }
     }
+    for (reticle = 0; scoped && reticle < CG_WWIISCOPE_RETICLES; reticle++)
+        CG_WwiiScopeReticleImage(reticle, &edge);
 }
 
 void CG_WwiiScopeClear(void)
@@ -895,16 +1045,24 @@ float CG_DrawWwiiScopeReticle(void)
     HudVertex2D verts[4];
     MaterialHandle material;
     float edge = 0.0f;
+    int weapon;
 
     if (!s_viewWeapon)
         return -1.0f;
     if (!(lens->presence > 0.0f) || !(lens->open > 0.01f))
         return 1.0f - lens->open;
-    material = CG_WwiiScopeLensImage(CG_WwiiScopeOverlay(ps, BG_GetViewmodelWeaponIndex(ps)), &edge);
-    if (!material || !(edge > 0.0f))
-        return 1.0f - lens->open;
-    CG_WwiiScopeReticleQuad(lens, edge, (float)vid->width, (float)vid->height, lens->open, verts);
-    R_AddCmdDrawTriangles2D(verts, 4, indices, 6, material);
+    weapon = BG_GetViewmodelWeaponIndex(ps);
+    /* The stock lens's dirt and darkening rim, under the WWII reticle. */
+    material = CG_WwiiScopeLensImage(CG_WwiiScopeOverlay(ps, weapon), &edge);
+    if (material && edge > 0.0f) {
+        CG_WwiiScopeReticleQuad(lens, edge, (float)vid->width, (float)vid->height, lens->open, verts);
+        R_AddCmdDrawTriangles2D(verts, 4, indices, 6, material);
+    }
+    material = CG_WwiiScopeReticleImage(CG_WwiiScopeReticleFor(ps, weapon), &edge);
+    if (material) {
+        CG_WwiiScopeReticleQuad(lens, edge, (float)vid->width, (float)vid->height, lens->open, verts);
+        R_AddCmdDrawTriangles2D(verts, 4, indices, 6, material);
+    }
     return 1.0f - lens->open;
 }
 
