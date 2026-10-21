@@ -157,10 +157,11 @@ weapon's headshot stops one point short of killing on its own, so the rule
 that no automatic weapon kills with one headshot (`weapon-balance.json`)
 holds with the attachment too.
 
-A gun dropped on death or swapped keeps its camouflage and attachments: on the
-ground it shows its paint, and whoever picks it up gets them on it, its longer
-clip and reserve included. Picking up a gun the player already has only takes
-its ammunition, and theirs keeps its own set. The next spawn paints the class's
+A gun dropped on death or swapped keeps its camouflage, its attachments and its
+rounds: on the ground it shows its paint, and whoever picks it up gets it as its
+player left it, with the same rounds in the clip and in reserve, its longer
+clip included. Picking up a gun the player already has only takes its
+ammunition, and theirs keeps its own set. The next spawn paints the class's
 guns again, or nothing for a player without a class.
 
 Sources: [Prima's WWII guide](https://primagames.com/eguides/call-of-duty-wwii/multiplayer-introduction/firing-range/primary-weapons)
@@ -204,7 +205,9 @@ for the machine gun's Rapid Fire.
   sent. `Touch_Item` gives a picked-up gun's slot those of them its weapon
   takes, sizes the clip and reserve with them, and rewrites the picker's
   camouflage configstring for the guns now in their slots; the client paints
-  a gun on the ground from the item.
+  a gun on the ground from the item. The rounds travel as in `CoD2MP_s.exe`:
+  the reserve in the item's `count` and the clip in `item.count2`, -1 for
+  none.
 - `BG_GetPlayerWeaponDef` gives a copy of the weapon's definition with the
   player's attachments, kept in a cache of 128 that empties when the weapons
   reload. Reloads, fire timing, aiming, spread, recoil, sway, zoom, the scope,
@@ -681,10 +684,14 @@ on canvases the generator accepts, for the day a class weapon matches one.
   kept; and that `cg_weapons.c` rebuilds the view weapon when its visible
   attachments change. It rejects 16 mutations.
 - `python3 scripts/test-dropped-weapon-state.py` compiles `g_items_mp.c`'s
-  dropped-gun helpers with sanitizers: the clip and reserve by the attachments,
-  the attachments the weapon takes, given to the slot the gun lands in with its
-  camouflage; and that `Drop_Weapon` and `Touch_Item` write and read them where
-  the ammunition moves. It rejects 7 mutations.
+  dropped-gun helpers and `Touch_Item`'s weapon case with sanitizers: the clip
+  and reserve by the attachments, the attachments the weapon takes, given to
+  the slot the gun lands in with its camouflage, and the rounds its player left
+  in the clip and reserve handed over, including a full clip with no reserve,
+  an empty clip, a gun the map placed and a taker who carries the gun; and
+  that `Drop_Weapon` and `Touch_Item` write and read them where the ammunition
+  moves. It rejects 10 mutations, the clip read from `chain` as before among
+  them.
 - `python3 scripts/test-xanim-final-frame.py` checks that a finished anim holds
   its last key, over every key table, which is what puts an aimed gun's sights
   on the view axis. It rejects the frame-short mutation.
@@ -799,9 +806,10 @@ on canvases the generator accepts, for the day a class weapon matches one.
 - `python3 scripts/test-dropped-weapon-runtime.py --assets PREPARED_MAIN`
   plays two test clients through the dedicated server, with no network: a
   Thompson with an Extended Mag and a Suppressor spawns with its 30-round
-  clip and drops on death, and the other player, standing on it and holding
-  Use, takes it with that clip and its 240 reserve. The server from before
-  dropped guns kept their attachments gives that player 20 and 160 and fails.
+  clip, is left with 23 rounds in it and 95 in reserve and drops on death, and
+  the other player, standing on it and holding Use, takes it with those 23 and
+  95. The server from before dropped guns kept their rounds gives that player
+  30 and 65 and fails.
 - In the browser, against an isolated stack:
   - Every screen was created, edited and renamed. The edits persisted across a
     reload, and the class list, the editor and back all worked with the mouse.

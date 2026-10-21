@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""A gun dropped on death keeps its attachments through the real dedicated server.
+"""A gun dropped on death keeps its attachments and its rounds through the real
+dedicated server.
 
 Requires Docker, the native server image and the private browser archives;
 no network. A test client answers the class menu with a Thompson with an
-Extended Mag and a Suppressor and dies; a second one, its primary slot empty,
-stands on the gun it dropped and takes it with Use, as a player does, with its
-longer clip and reserve. Before dropped guns kept their attachments the second
-took a plain Thompson's 20 and 160.
+Extended Mag and a Suppressor, is left with 23 rounds in the magazine and 95
+in reserve, and dies; a second one, its primary slot empty, stands on the gun
+it dropped and takes it with Use, as a player does, and has those 23 rounds,
+more than a plain Thompson's clip holds, and 95. The server before dropped
+guns kept their rounds gave 30 and 65, a full magazine taken from the reserve.
 """
 import argparse
 from pathlib import Path
@@ -93,6 +95,9 @@ run()
 	check("spawns-with-the-longer-clip", isAlive(a) && a getWeaponSlotWeapon("primary") == "thompson_mp" &&
 		a getWeaponSlotClipAmmo("primary") == 30, state(a));
 
+	// Part of the magazine and of the reserve spent, as in a fight.
+	a setWeaponSlotClipAmmo("primary", 23);
+	a setWeaponSlotAmmo("primary", 95);
 	a suicide();
 	wait .2;
 	check("drops-it-on-death", !isAlive(a) && guns().size == 1, state(a));
@@ -100,8 +105,8 @@ run()
 	b takeWeapon("m1garand_mp");
 	walkOnto(b);
 	check("taken-by-another", b getWeaponSlotWeapon("primary") == "thompson_mp" && guns().size == 0, state(b));
-	check("with-its-longer-clip", b getWeaponSlotClipAmmo("primary") == 30 &&
-		b getWeaponSlotAmmo("primary") == 240, state(b));
+	check("with-the-rounds-it-was-dropped-with", b getWeaponSlotClipAmmo("primary") == 23 &&
+		b getWeaponSlotAmmo("primary") == 95, state(b));
 	println("[drop-qa] DONE");
 }
 '''
@@ -157,8 +162,8 @@ def main():
     if errors or failures or len(passes) != EXPECTED:
         raise SystemExit('\n'.join(errors + failures) + f'\n{len(passes)}/{EXPECTED} passed; log: {args.log}')
     print(f'PASS: {EXPECTED} dropped-gun checks on {args.map} through the dedicated server: a Thompson with an '
-          'Extended Mag and a Suppressor spawns with its longer clip, drops on death, and the player who takes it '
-          'has that clip and reserve')
+          'Extended Mag and a Suppressor spawns with its longer clip, drops on death with 23 rounds in it and 95 in '
+          'reserve, and the player who takes it has those 23 and 95')
 
 
 if __name__ == '__main__':

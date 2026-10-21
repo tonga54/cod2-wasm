@@ -5885,3 +5885,29 @@ Validation:
   the MP44, at the normal tracer speed and slowed: the old tracer was a
   straight line from the muzzle to the crates, the new a short curved streak
   ending well short of them. Captures are in `out/tracer-qa`.
+
+## Dropped guns keep their rounds — 2026-10-21
+
+The owner asked that a gun taken from the ground hold the rounds its player
+had when he died. `Drop_Weapon` leaves a gun's reserve in the item's `count`
+and its clip in `item.count2`, as `CoD2MP_s.exe` does: its `Drop_Weapon`
+writes them at 0x1a0 and 0x1a8 and its `Pickup_Weapon` reads them there. The
+reconstructed `Touch_Item` read the clip from `chain`, which nothing writes,
+so the dead player's clip was lost and the taker's filled from the reserve; a
+gun dropped with a full clip and no reserve was taken empty. It now reads and
+updates `item.count2`.
+
+Validation:
+
+- `test-dropped-weapon-state.py` also compiles `Touch_Item`'s weapon case now:
+  a gun dropped with 23 rounds in its Extended Mag and 95 in reserve, a full
+  clip and no reserve, an empty clip, a clip beyond what the gun holds, a gun
+  the map placed, and a taker who carries the gun; 10 mutants fail, the clip
+  read from `chain` among them, and it fails on the previous `g_items_mp.c`.
+- `test-dropped-weapon-runtime.py` through the dedicated server, on Toujane and
+  Carentan: a Thompson with an Extended Mag left with 23 rounds and 95 in
+  reserve drops on death, and the player who takes it has 23 and 95. The
+  server built before this change gave 30 and 65.
+- `test-weapon-view-ground.py`, `test-corpse-lifetime.py` and
+  `test-dropped-item-lifetime.py` pass, and the native server builds. The full
+  `test-static.sh` was not run.

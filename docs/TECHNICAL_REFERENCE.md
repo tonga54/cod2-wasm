@@ -404,7 +404,10 @@ retail CoD2:
   retained. Scopes stay clear of muzzle sprites and smoke.
 - Other players use lateral/diagonal movement animations and blended stance
   transitions. Separate corpse bodies survive respawning, and dropped weapons
-  remain available for pickup until their cleanup deadline.
+  remain available for pickup until their cleanup deadline. A dropped gun
+  holds the rounds its player left in the clip and in reserve, and whoever
+  picks it up gets those; the reconstructed pickup read the clip from a field
+  nothing wrote, so it was lost and a full clip taken from the reserve.
 - Original audio, tracers, wall impacts, bullet marks, map props, ladders and
   killcam are available. Smoke effects and sustained mounted-MG firing have
   dedicated crash regressions. Collision fixes cover angled walls and finite

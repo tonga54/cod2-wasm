@@ -1149,6 +1149,8 @@ void Touch_Item(gentity_t *ent, gentity_t *other, qboolean bTouched)
         int clipAmmo;
         gentity_t *dropped = NULL;
 
+        /* Drop_Weapon leaves the reserve in count and the clip in
+         * item.count2, -1 for none. */
         if (ent->count < 0) {
             quantity = 0;
         } else if (ent->count != 0) {
@@ -1182,18 +1184,18 @@ void Touch_Item(gentity_t *ent, gentity_t *other, qboolean bTouched)
             quantity = ent->count;
         }
 
-        if (ent->chain < 0) {
+        if (ent->item.count2 < 0) {
             clipAmmo = 0;
-        } else if (ent->chain != 0) {
-            clipAmmo = ent->chain;
+        } else if (ent->item.count2 != 0) {
+            clipAmmo = ent->item.count2;
         } else if (ent->count < 0) {
-            ent->chain = 0;
+            ent->item.count2 = 0;
             clipAmmo = 0;
         } else {
             clipAmmo = G_ItemClipSize(weapon, attachments);
             if (clipAmmo > ent->count)
                 clipAmmo = ent->count;
-            ent->chain = clipAmmo;
+            ent->item.count2 = clipAmmo;
             ent->count -= clipAmmo;
             quantity = ent->count;
         }
@@ -1221,13 +1223,13 @@ void Touch_Item(gentity_t *ent, gentity_t *other, qboolean bTouched)
             if (added != total) {
                 ent->count -= added;
                 if (ent->count <= 0) {
-                    ent->chain += ent->count;
+                    ent->item.count2 += ent->count;
                     ent->count = -1;
-                    if (ent->chain <= 0)
-                        ent->chain = -1;
+                    if (ent->item.count2 <= 0)
+                        ent->item.count2 = -1;
                 }
 
-                if (ent->count > 0 || ent->chain > 0) {
+                if (ent->count > 0 || ent->item.count2 > 0) {
                     const dvar_t *weaponAmmoPools = *(const dvar_t **)imp_g_weaponAmmoPools;
                     if (!weaponAmmoPools->current.enabled)
                         return;
