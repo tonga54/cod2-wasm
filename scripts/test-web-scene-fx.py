@@ -109,8 +109,8 @@ assert compose_shader.index('if (u_glow.x > 0.0)') < compose_shader.index('if (u
 # side writes them (55-58), resolves the multisampled depth it needs, runs at
 # half the scene's size in two passes, and darkens only world pixels in the
 # compose pass, before the aim blur mixes in; its result is the eighth source.
-assert 'var ao = H[o + 55] > 0;' in compositor
-assert 'dof || motion > 0 || vm || ao ? (gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT) : gl.COLOR_BUFFER_BIT' in compositor
+assert 'var ao = H[o + 55] > 0, haze = H[o + 62] > 0;' in compositor
+assert 'dof || motion > 0 || vm || ao || haze ? (gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT) : gl.COLOR_BUFFER_BIT' in compositor
 assert 'gl.uniform4f(A.u_aoView, H[o + 15], 0.9995002746582031, H[o + 57], H[o + 58]);' in compositor
 assert 'gl.uniform4f(A.u_aoParams, H[o + 56], H[o + 55], w, h);' in compositor
 assert 'fx.pass(A, t.aoFbo[0], t.hw, t.hh);' in compositor and 'fx.pass(P.aoBlur, t.aoFbo[1], t.hw, t.hh);' in compositor
@@ -125,6 +125,28 @@ assert compose_shader.index('col *= texture(u_ao, v_uv + u_aoMix.yz).r;') < \
     compose_shader.index('if (u_dof2.x > 0.0 || u_dof2.w > 0.0 || u_lens.z > 0.0) {')
 assert 'if (u_aoMix.x > 0.0 && texelFetch(u_depth, ivec2(gl_FragCoord.xy), 0).r >= 0.2)' in compose_shader
 assert 'r_ssao = ri.Dvar_RegisterBool("r_ssao", 1, 0x2001);' in dvars
+# The haze (r_atmosphere) reads its color and density (59-62), the view's up
+# (63-65), the sun's direction and color (66-71), the projection (57-58) and
+# its falloff with height (72). It hazes world pixels only, after the aim blur
+# mixes in and before the scope's glass, the glow and the grade.
+assert 'gl.uniform4f(C.u_haze, H[o + 59], H[o + 60], H[o + 61], haze ? H[o + 62] : 0);' in compositor
+assert 'gl.uniform3f(C.u_hazeUp, H[o + 63], H[o + 64], H[o + 65]);' in compositor
+assert 'gl.uniform3f(C.u_hazeSun, H[o + 66], H[o + 67], H[o + 68]);' in compositor
+assert 'gl.uniform3f(C.u_hazeSunColor, H[o + 69], H[o + 70], H[o + 71]);' in compositor
+assert 'gl.uniform3f(C.u_hazeProj, H[o + 57], H[o + 58], H[o + 72]);' in compositor
+assert '"u_haze", "u_hazeUp", "u_hazeSun", "u_hazeSunColor", "u_hazeProj"]' in compositor
+haze_at = compose_shader.index('if (u_haze.a > 0.0) {')
+assert compose_shader.index('if (u_dof2.x > 0.0 || u_dof2.w > 0.0 || u_lens.z > 0.0) {') < haze_at < \
+    compose_shader.index('if (lensIn > 0.0 && u_lens.w < 1.0) {') < compose_shader.index('if (u_glow.x > 0.0)')
+assert '"    if (hd >= 0.2 && hd < 0.99999) {\\n"' in compose_shader, 'the viewmodel and the sky keep their own'
+assert '"      float haze = 1.0 - exp(-u_haze.a * hdist * clamp(hf, 0.25, 3.0));\\n"' in compose_shader
+assert 'r_atmosphere = ri.Dvar_RegisterBool("r_atmosphere", 1, 0x2001);' in dvars
+# R_RenderScene hands over the map's exponential fog, under r_fog, and its sun.
+assert scene.index('WebMaterials_SetSun(&s_world);') < scene.index('WebSceneFx_SetAtmosphere(fogColor, fogged ? fog->density : 0.0f,')
+assert ('int fogged = rg_p->fogIndex && fog->registered && fog->techniqueOffset == 2 &&\n'
+        '                         (*(const dvar_t **)imp_r_fog)->current.enabled;') in scene
+assert ('const float fogColor[3] = {fog->color.array[2] / 255.0f, fog->color.array[1] / 255.0f,\n'
+        '                                       fog->color.array[0] / 255.0f};') in scene
 # And the scope's window after the viewmodel's motion: centre 42-43,
 # half-axes 44-47, presence 48, open 49, blur 50, darkness 51.
 assert 'var lensPresence = H[o + 48], lensBlur = H[o + 50];' in compositor
@@ -200,7 +222,7 @@ test = r'''
 #include <string.h>
 #include "SOURCE"
 static dvar_t glow, radius0, radius1, intensity0, intensity1, cutoff, desaturation, fullbright, samples, dof, film,
-    motion, scene, ssao;
+    motion, scene, ssao, atmosphere;
 const dvar_t *r_glow = &glow;
 const dvar_t *r_glowRadius[2] = {&radius0, &radius1};
 const dvar_t *r_glowBloomIntensity[2] = {&intensity0, &intensity1};
@@ -213,6 +235,7 @@ const dvar_t *r_filmTweakEnable = &film;
 const dvar_t *r_motionBlur = &motion;
 const dvar_t *r_sceneHeight = &scene;
 const dvar_t *r_ssao = &ssao;
+const dvar_t *r_atmosphere = &atmosphere;
 static int shadowRenders, bindsAtShadowRender;
 static double clockMs = 1000.0;
 double emscripten_get_now(void)
@@ -259,7 +282,7 @@ static void defaults(void)
     intensity0.current.value = 1; intensity1.current.value = 1; cutoff.current.value = 0.9f;
     desaturation.current.value = 0.75f; fullbright.current.enabled = 0; samples.current.integer = 4;
     dof.current.enabled = 1; film.current.enabled = 1; motion.current.enabled = 1; scene.current.integer = 720;
-    ssao.current.enabled = 1;
+    ssao.current.enabled = 1; atmosphere.current.enabled = 1;
 }
 static void frameNear(int x, int width, float nearClip, float worldNearClip)
 {
@@ -522,7 +545,7 @@ int main(void)
 
     /* A menu's blurred backdrop composes on its own, whatever the other
      * effects, and stays between none and all of it. */
-    assert(SCENE_FX_BACKDROP == 33 && SCENE_FX_BACKDROP_GRAY == 34 && SCENE_FX_PARAM_COUNT == 59);
+    assert(SCENE_FX_BACKDROP == 33 && SCENE_FX_BACKDROP_GRAY == 34 && SCENE_FX_PARAM_COUNT == 73);
     defaults();
     glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
     motion.current.enabled = 0; ssao.current.enabled = 0;
@@ -902,7 +925,151 @@ int main(void)
         WebSceneFx_EndFrame();
         bindResult = 1;
     }
-    puts("PASS: 600 composed frames, single compose per frame before Present, partial/fullbright/disabled views drawn directly, bounded glow, viewmodel and near world focus parameters, camera motion reprojected over a 16 ms exposure with aim fade, cuts and still cameras, a bounded menu backdrop and its gray, scenes rendered at r_sceneHeight lines and the screen's aspect on taller screens, a scope window composed with its rifle projection and near clip and a stencil drawn once per view and lifted on every exit, bounded window floats, the outline a scope's rifle is kept off handed to the stencil and none for a sight's window, the stock overlay without a composed target, the sun's shadow map drawn once at the first full-screen view before its target binds, ambient occlusion composed on its own from the composed view's projection, and the color maps' mip bias of a scaled scene");
+
+    /* Effects take the composed view's near clip back to distance while it
+     * is open, and none outside it. */
+    {
+        defaults();
+        assert(WebSceneFx_WorldNearClip() == 0);
+        WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 3.998f);
+        assert(WebSceneFx_WorldNearClip() == 3.998f);
+        WebSceneFx_EndView();
+        assert(WebSceneFx_WorldNearClip() == 0);
+        WebSceneFx_EndFrame();
+    }
+
+    /* The haze (r_atmosphere) composes on its own from the map's exponential
+     * fog: its color, a share of its density, how fast it thins with height,
+     * and the world's up, the sun and its glow in the composed view's space,
+     * taken when the view begins. Off, without fog or under r_fullbright it
+     * adds nothing; a broken fog turns it off, a broken sun its glow. */
+    {
+        const float fog[3] = {0.9f, 0.95f, 1.0f}, sun[3] = {0, 3, 4}, sunColor[3] = {1.2f, 1.0f, 0.8f};
+        const float noSun[3] = {0, 0, 0}, badColor[3] = {0.5f, NAN, 0.5f};
+        assert(SCENE_FX_HAZE == 59 && SCENE_FX_HAZE_DENSITY == 62 && SCENE_FX_HAZE_UP == 63 && SCENE_FX_HAZE_SUN == 66 &&
+               SCENE_FX_HAZE_SUN_COLOR == 69 && SCENE_FX_HAZE_FALLOFF == 72 && SCENE_FX_PARAM_COUNT == 73);
+        defaults();
+        glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
+        motion.current.enabled = 0; ssao.current.enabled = 0;
+        WebSceneFx_SetAds(0, 6, 15, 512);
+        WebSceneFx_SetAtmosphere(fog, 0, sun, sunColor);
+        binds = composes = 0;
+        clockMs += 10;
+        camera(0.3f, 0.1f, 100, 200, 60);
+        frame(0, 1280, 0.1f);
+        assert(!binds && !composes);
+        WebSceneFx_SetAtmosphere(fog, 0.00015f, sun, sunColor);
+        clockMs += 10;
+        camera(0.3f, 0.1f, 100, 200, 60);
+        frame(0, 1280, 0.1f);
+        assert(binds == 1 && composes == 1);
+        assert(fabsf(composed[SCENE_FX_HAZE_DENSITY] - 0.00015f * SCENE_FX_HAZE_SHARE) < 1e-10f);
+        for (int i = 0; i < 3; ++i) {
+            /* A view turns a world direction w into R w, R[j][i] = view[i * 4 + j]. */
+            float up = view[8 + i], toSun = (view[4 + i] * 3 + view[8 + i] * 4) / 5;
+            assert(composed[SCENE_FX_HAZE + i] == fog[i]);
+            assert(fabsf(composed[SCENE_FX_HAZE_UP + i] - up) < 1e-6f);
+            assert(fabsf(composed[SCENE_FX_HAZE_SUN + i] - toSun) < 1e-6f);
+            assert(fabsf(composed[SCENE_FX_HAZE_SUN_COLOR + i] - sunColor[i] * SCENE_FX_HAZE_SUN_GLOW) < 1e-6f);
+        }
+        /* Looking down 0.1 rad, the world's up leans away from the view. */
+        assert(composed[SCENE_FX_HAZE_UP + 1] > 0.99f && composed[SCENE_FX_HAZE_UP + 2] < -0.09f);
+        assert(composed[SCENE_FX_HAZE_FALLOFF] == 1.0f / SCENE_FX_HAZE_SCALE_HEIGHT);
+        /* A camera set for a later view does not reach the composed one. */
+        {
+            float up = composed[SCENE_FX_HAZE_UP + 2];
+            clockMs += 10;
+            camera(0.3f, 0.1f, 100, 200, 60);
+            WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 4.0f);
+            camera(0.3f, -0.8f, 100, 200, 60);
+            WebSceneFx_EndView();
+            WebSceneFx_EndFrame();
+            assert(composed[SCENE_FX_HAZE_UP + 2] == up);
+        }
+        /* A view without a camera, or with a broken projection, takes none. */
+        frame(0, 1280, 0.1f);
+        assert(composed[SCENE_FX_HAZE_DENSITY] > 0);
+        WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 4.0f);
+        WebSceneFx_EndView();
+        WebSceneFx_EndFrame();
+        assert(composed[SCENE_FX_HAZE_DENSITY] == 0);
+        lens[0] = 0;
+        clockMs += 10;
+        camera(0.3f, 0.1f, 100, 200, 60);
+        frame(0, 1280, 0.1f);
+        assert(composed[SCENE_FX_HAZE_DENSITY] == 0);
+        lens[0] = 1.19f;
+        /* Dawnville's thick fog adds no more than the thinnest map's whole
+         * fog, and nothing larger does either. */
+        const float capped[] = {0.00025f, 1.0f};
+        for (int i = 0; i < 2; ++i) {
+            WebSceneFx_SetAtmosphere(fog, capped[i], sun, sunColor);
+            clockMs += 10;
+            camera(0.3f, 0.1f, 100, 200, 60);
+            frame(0, 1280, 0.1f);
+            assert(composed[SCENE_FX_HAZE_DENSITY] == SCENE_FX_HAZE_MAX_DENSITY);
+        }
+        WebSceneFx_SetAtmosphere(fog, 0.0001f, sun, sunColor);
+        clockMs += 10;
+        camera(0.3f, 0.1f, 100, 200, 60);
+        frame(0, 1280, 0.1f);
+        assert(fabsf(composed[SCENE_FX_HAZE_DENSITY] - 0.0001f * SCENE_FX_HAZE_SHARE) < 1e-10f);
+        /* A broken sun keeps the haze without its glow. */
+        WebSceneFx_SetAtmosphere(fog, 0.00015f, noSun, sunColor);
+        clockMs += 10;
+        camera(0.3f, 0.1f, 100, 200, 60);
+        frame(0, 1280, 0.1f);
+        assert(composed[SCENE_FX_HAZE_DENSITY] > 0);
+        for (int i = 0; i < 3; ++i)
+            assert(composed[SCENE_FX_HAZE_SUN + i] == 0 && composed[SCENE_FX_HAZE_SUN_COLOR + i] == 0);
+        WebSceneFx_SetAtmosphere(fog, 0.00015f, sun, badColor);
+        clockMs += 10;
+        camera(0.3f, 0.1f, 100, 200, 60);
+        frame(0, 1280, 0.1f);
+        assert(composed[SCENE_FX_HAZE_DENSITY] > 0);
+        for (int i = 0; i < 3; ++i)
+            assert(composed[SCENE_FX_HAZE_SUN + i] == 0 && composed[SCENE_FX_HAZE_SUN_COLOR + i] == 0);
+        WebSceneFx_SetAtmosphere(fog, 0.00015f, NULL, sunColor);
+        clockMs += 10;
+        camera(0.3f, 0.1f, 100, 200, 60);
+        frame(0, 1280, 0.1f);
+        assert(composed[SCENE_FX_HAZE_DENSITY] > 0 && composed[SCENE_FX_HAZE_SUN + 2] == 0);
+        /* A broken fog adds none, and alone composes nothing. */
+        const float densities[] = {NAN, -1, INFINITY};
+        for (int i = 0; i < 4; ++i) {
+            WebSceneFx_SetAtmosphere(i < 3 ? fog : badColor, i < 3 ? densities[i] : 0.00015f, sun, sunColor);
+            binds = composes = 0;
+            clockMs += 10;
+            camera(0.3f, 0.1f, 100, 200, 60);
+            frame(0, 1280, 0.1f);
+            assert(!binds && !composes);
+        }
+        WebSceneFx_SetAtmosphere(NULL, 0.00015f, sun, sunColor);
+        clockMs += 10;
+        camera(0.3f, 0.1f, 100, 200, 60);
+        frame(0, 1280, 0.1f);
+        assert(!binds && !composes);
+        /* r_atmosphere 0 and r_fullbright add none. */
+        WebSceneFx_SetAtmosphere(fog, 0.00015f, sun, sunColor);
+        atmosphere.current.enabled = 0;
+        clockMs += 10;
+        camera(0.3f, 0.1f, 100, 200, 60);
+        frame(0, 1280, 0.1f);
+        assert(!binds && !composes);
+        film.current.enabled = 1;
+        clockMs += 10;
+        camera(0.3f, 0.1f, 100, 200, 60);
+        frame(0, 1280, 0.1f);
+        assert(composes == 1 && composed[SCENE_FX_HAZE_DENSITY] == 0);
+        defaults();
+        fullbright.current.enabled = 1;
+        binds = composes = 0;
+        frame(0, 1280, 0.1f);
+        assert(!binds && !composes);
+        fullbright.current.enabled = 0;
+        WebSceneFx_SetAtmosphere(fog, 0, sun, sunColor);
+    }
+    puts("PASS: 600 composed frames, single compose per frame before Present, partial/fullbright/disabled views drawn directly, bounded glow, viewmodel and near world focus parameters, camera motion reprojected over a 16 ms exposure with aim fade, cuts and still cameras, a bounded menu backdrop and its gray, scenes rendered at r_sceneHeight lines and the screen's aspect on taller screens, a scope window composed with its rifle projection and near clip and a stencil drawn once per view and lifted on every exit, bounded window floats, the outline a scope's rifle is kept off handed to the stencil and none for a sight's window, the stock overlay without a composed target, the sun's shadow map drawn once at the first full-screen view before its target binds, ambient occlusion composed on its own from the composed view's projection, the color maps' mip bias of a scaled scene, the composed view's near clip for effects, and the map's haze with the view's up and sun taken when it begins");
     return 0;
 }
 '''
@@ -926,11 +1093,35 @@ mutants = [
     ('WebSceneFx_Enabled(r_motionBlur) && ', ''),
     (' && s_motionScale <= 0.0f && ', ' && '),
     (' && s_backdropFrac <= 0.0f &&\n', ' &&\n'),
-    ('        s_backdropGray <= 0.0f && !WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled())',
-     '        !WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled())'),
-    ('s_backdropGray <= 0.0f && !WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled())',
-     's_backdropGray <= 0.0f && !WebSceneFx_AoEnabled())'),
-    ('!WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled())', '!WebSceneFx_ScopeRequested())'),
+    ('        s_backdropGray <= 0.0f && !WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled() && !WebSceneFx_HazeEnabled())',
+     '        !WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled() && !WebSceneFx_HazeEnabled())'),
+    ('s_backdropGray <= 0.0f && !WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled()',
+     's_backdropGray <= 0.0f && !WebSceneFx_AoEnabled()'),
+    ('!WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled() && !WebSceneFx_HazeEnabled())',
+     '!WebSceneFx_ScopeRequested() && !WebSceneFx_HazeEnabled())'),
+    (' && !WebSceneFx_HazeEnabled())', ')'),
+    ('fminf(s_hazeDensity * SCENE_FX_HAZE_SHARE, SCENE_FX_HAZE_MAX_DENSITY)', 'fminf(s_hazeDensity, SCENE_FX_HAZE_MAX_DENSITY)'),
+    ('fminf(s_hazeDensity * SCENE_FX_HAZE_SHARE, SCENE_FX_HAZE_MAX_DENSITY)', 's_hazeDensity * SCENE_FX_HAZE_SHARE'),
+    ('    return WebSceneFx_Enabled(r_atmosphere) && !WebSceneFx_Enabled(r_fullbright) && s_hazeDensity > 0.0f;',
+     '    return !WebSceneFx_Enabled(r_fullbright) && s_hazeDensity > 0.0f;'),
+    ('    return WebSceneFx_Enabled(r_atmosphere) && !WebSceneFx_Enabled(r_fullbright) && s_hazeDensity > 0.0f;',
+     '    return WebSceneFx_Enabled(r_atmosphere) && !WebSceneFx_Enabled(r_fullbright);'),
+    ('        s_hazeUp[j] = view[8 + j];', '        s_hazeUp[j] = view[j * 4 + 2];'),
+    ('view[j] * s_hazeSunWorld[0] + view[4 + j] * s_hazeSunWorld[1] + view[8 + j] * s_hazeSunWorld[2]',
+     'view[j * 4] * s_hazeSunWorld[0] + view[j * 4 + 1] * s_hazeSunWorld[1] + view[j * 4 + 2] * s_hazeSunWorld[2]'),
+    ('        s_viewProjection[1] = s_cameraProjection[1];\n        WebSceneFx_HazeView();\n',
+     '        s_viewProjection[1] = s_cameraProjection[1];\n'),
+    ('        s_hazeSunWorld[i] = valid ? sunDirection[i] / length : 0.0f;',
+     '        s_hazeSunWorld[i] = valid ? sunDirection[i] : 0.0f;'),
+    ('    valid = isfinite(length) && length > 0.0f;', '    valid = isfinite(length);'),
+    ('WebSceneFx_Clamp(fogDensity, 0.0f, 0.01f)', 'fogDensity'),
+    ('        valid = isfinite(fogColor[i]);', '        valid = 1;'),
+    ('        valid = isfinite(sunColor[i]);', '        valid = 1;'),
+    ('    params[SCENE_FX_HAZE_SUN_COLOR] = s_hazeSunColor[0] * SCENE_FX_HAZE_SUN_GLOW;',
+     '    params[SCENE_FX_HAZE_SUN_COLOR] = s_hazeSunColor[0];'),
+    ('    params[SCENE_FX_HAZE_FALLOFF] = 1.0f / SCENE_FX_HAZE_SCALE_HEIGHT;',
+     '    params[SCENE_FX_HAZE_FALLOFF] = SCENE_FX_HAZE_SCALE_HEIGHT;'),
+    ('    return s_active ? s_worldNearClip : 0.0f;', '    return s_worldNearClip;'),
     ('    params[SCENE_FX_AO] = WebSceneFx_AoEnabled() && s_viewProjection[0] > 0.0f ? SCENE_FX_AO_STRENGTH : 0.0f;',
      '    params[SCENE_FX_AO] = SCENE_FX_AO_STRENGTH;'),
     ('    return WebSceneFx_Enabled(r_ssao) && !WebSceneFx_Enabled(r_fullbright);', '    return 1;'),

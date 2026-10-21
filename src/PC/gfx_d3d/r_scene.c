@@ -805,6 +805,17 @@ void R_RenderScene(const refdef_t *refdef)
         extern void WebSunShadows_EndCapture(const float *eye, const float *forward, const float *sun,
                                              const float *sunColor);
         WebMaterials_SetSun(&s_world);
+        {
+            /* The map's exponential fog and its sun color the haze. */
+            extern void WebSceneFx_SetAtmosphere(const float *, float, const float *, const float *);
+            const GfxFog *fog = &rg_p->fogSettings[2];
+            const float fogColor[3] = {fog->color.array[2] / 255.0f, fog->color.array[1] / 255.0f,
+                                       fog->color.array[0] / 255.0f};
+            int fogged = rg_p->fogIndex && fog->registered && fog->techniqueOffset == 2 &&
+                         (*(const dvar_t **)imp_r_fog)->current.enabled;
+            WebSceneFx_SetAtmosphere(fogColor, fogged ? fog->density : 0.0f, s_world.sunLight.position,
+                                     s_world.sunLight.color);
+        }
         /* The main view's models are skinned: they are the sun's casters. */
         if (!refdef->x && !refdef->y && refdef->width == ((const vidConfig_t *)imp_vidConfig)->width &&
             refdef->height == ((const vidConfig_t *)imp_vidConfig)->height) {

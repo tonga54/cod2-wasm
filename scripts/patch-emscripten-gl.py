@@ -188,6 +188,9 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
             "uniform int u_cod2LightCount; uniform highp vec4 u_cod2LightEye[4]; uniform vec4 u_cod2LightColor[4];" +
             (pointNormal ? "" : "uniform int u_cod2ShadowCount; uniform highp vec4 u_cod2ShadowEye[4];") : "";
           var pointPass = "";
+          // COD2_EFFECTS: the feather and heat of effects (web_effects.c),
+          // after the material's light and before its fog.
+          var cod2EffectPass = "";
           if (pointLights) {
             var pointUV = GLImmediate.useTextureMatrix ? "(u_textureMatrix0 * v_texCoord0).xy" : "v_texCoord0.xy";
             // Reuse the material's base texel for illumination. This removes
@@ -256,8 +259,10 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
             // Derivatives of fp16 UVs are noise on GPUs that honor mediump.
             texUnitVaryingList = texUnitVaryingList.replace(/varying vec4 v_texCoord([01]);/g,
               "varying highp vec4 v_texCoord$1;");
+            // Effects: multisample coverage, the signed feather scale (negative
+            // fades the color), the heat and the near clip the depth needs.
             pointDefs += "uniform sampler2D u_cod2DetailMap; uniform sampler2D u_cod2NormalMap; uniform sampler2D u_cod2SpecMap;\n" +
-              "uniform vec4 u_cod2Surface; uniform vec4 u_cod2Detail; uniform vec4 u_cod2Model;\n" +
+              "uniform vec4 u_cod2Surface; uniform vec4 u_cod2Detail; uniform vec4 u_cod2Model; uniform highp vec4 u_cod2Effect;\n" +
               // The sky's direction in eye space; w is 1 while surfaces with a
               // specular map mirror their surroundings (r_reflections).
               "uniform highp vec3 u_cod2SunEye; uniform highp vec4 u_cod2SkyEye; uniform vec4 u_cod2SunColor;\n" +
@@ -286,7 +291,13 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
               "  return min(-2.3025851 / log(c), 2048.0);\n}\n" +
               // Indirect light comes mostly from the sky: a normal map shades it
               // relative to the surface's own normal.
-              "float cod2Sky(highp vec3 n) { return 1.0 + 0.35 * dot(n, u_cod2SkyEye.xyz); }\n" +
+              "float cod2Sky(highp vec3 n) { return 1.0 + 0.5 * dot(n, u_cod2SkyEye.xyz); }\n" +
+              // COD2_RELIEF_CAVITY: where the map leans far from the surface,
+              // at the edges of stones, bricks and planks and in the grooves
+              // between them, less of that light reaches it. The sun already
+              // models relief where it shines, so only the shade takes it.
+              "float cod2Cavity(highp vec3 b, highp vec3 n, float sunlit) {\n" +
+              "  return 1.0 - 0.5 * (1.0 - max(dot(b, n), 0.0)) * (1.0 - clamp(sunlit, 0.0, 1.0));\n}\n" +
               "float cod2Phong(highp vec3 n, highp vec3 l, highp float power) {\n" +
               "  highp vec3 v = -v_cod2Eye * inversesqrt(max(dot(v_cod2Eye, v_cod2Eye), 1e-30));\n" +
               "  highp float h = max(dot(n, normalize(l + v)), 0.0);\n" +
@@ -338,7 +349,8 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "float cod2NLG = max(dot(cod2N, u_cod2SunEye), 0.0), cod2NLB = max(dot(cod2B, u_cod2SunEye), 0.0);\n" +
                 "float cod2Incidence = mix(1.0 + cod2NLB - cod2NLG, cod2NLB, u_cod2SunColor.a);\n" +
                 "cod2Flat += cod2Ambient;\n" +
-                "cod2Bumped += (cod2Ambient - cod2Sun) * (cod2Sky(cod2B) / cod2Sky(cod2N)) + cod2Sun * cod2Incidence;\n" +
+                "cod2Bumped += (cod2Ambient - cod2Sun) * (cod2Sky(cod2B) / cod2Sky(cod2N) * cod2Cavity(cod2B, cod2N, u_cod2Model.x)) +\n" +
+                "  cod2Sun * cod2Incidence;\n" +
                 "gl_FragColor.rgb *= max(cod2Bumped, vec3(0.0)) / max(cod2Flat, vec3(0.004));\n" +
                 "cod2Spec += cod2Sun * cod2Phong(cod2B, u_cod2SunEye, cod2P);\n" +
                 "gl_FragColor.rgb += cod2S.rgb * cod2Spec * (2.0 * u_cod2Surface.w);\n" +
@@ -386,7 +398,7 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "cod2N *= inversesqrt(max(dot(cod2N, cod2N), 1e-30));\n" +
                 "if (dot(cod2N, v_cod2Eye) > 0.0) cod2N = -cod2N;\n" +
                 "highp vec3 cod2B = cod2N;\n" +
-                "if (u_cod2Surface.x > 0.5) cod2B = cod2Bump(cod2N, " + pointUV + ", 0.75);\n" +
+                "if (u_cod2Surface.x > 0.5) cod2B = cod2Bump(cod2N, " + pointUV + ", 1.0);\n" +
                 "vec4 cod2S = u_cod2Surface.y > 0.5 ? texture2D(u_cod2SpecMap, " + pointUV + ") : vec4(0.0);\n" +
                 "highp float cod2P = cod2SpecPower(cod2S.a);\n" +
                 "vec4 cod2L = " + lightmapTexel + ";\n" +
@@ -397,7 +409,8 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "float cod2Incidence = mix(1.0 + cod2NLB - cod2NLG, cod2NLB, u_cod2SunColor.a);\n" +
                 "vec3 cod2Indirect = max(cod2L.rgb - cod2SunPart, vec3(0.0));\n" +
                 "cod2SunPart *= cod2SunShadow(cod2L.a);\n" +
-                "vec3 cod2Lit = cod2Indirect * (cod2Sky(cod2B) / cod2Sky(cod2N)) + cod2SunPart * cod2Incidence;\n" +
+                "vec3 cod2Lit = cod2Indirect * (cod2Sky(cod2B) / cod2Sky(cod2N) * cod2Cavity(cod2B, cod2N, cod2L.a)) +\n" +
+                "  cod2SunPart * cod2Incidence;\n" +
                 "gl_FragColor.rgb *= max(cod2Lit, vec3(0.0)) / max(cod2L.rgb, vec3(0.004));\n" +
                 "gl_FragColor.rgb += cod2S.rgb * cod2SunPart * (2.0 * u_cod2Surface.w * cod2Phong(cod2B, u_cod2SunEye, cod2P));\n" +
                 // COD2_WORLD_REFLECTION: the light around the surface, the
@@ -420,6 +433,22 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "  max(cod2L.rgb, vec3(0.004));\n}\n";
             }
             pointPass = materialPass + pointPass;
+            if (!pointNormal && !materialLightmap) {
+              // The DX9 zfeather: an effect fades where the scene's depth
+              // (unit 19, copied before the first feathered draw) comes within
+              // 1 / featherParms.x units of it, and as close to the eye.
+              pointDefs += "uniform highp sampler2D u_cod2FeatherDepth;\n";
+              cod2EffectPass = "if (u_cod2Effect.y != 0.0) {\n" +
+                "highp float cod2Z = -v_cod2Eye.z, cod2Scale = abs(u_cod2Effect.y);\n" +
+                "highp float cod2SceneZ = u_cod2Effect.w / max(0.9995002746582031 -\n" +
+                "  texelFetch(u_cod2FeatherDepth, ivec2(gl_FragCoord.xy), 0).r, 0.000001);\n" +
+                "float cod2Feather = clamp(abs(cod2SceneZ - cod2Z) * cod2Scale, 0.0, 1.0) *\n" +
+                "  clamp((cod2Z - u_cod2Effect.w / 0.9995002746582031) * cod2Scale, 0.0, 1.0);\n" +
+                "if (u_cod2Effect.y > 0.0) gl_FragColor.a *= cod2Feather; else gl_FragColor *= cod2Feather;\n}\n" +
+                // Fire burns hotter the brighter it already is.
+                "if (u_cod2Effect.z > 0.0)\n" +
+                "  gl_FragColor.rgb *= 1.0 + u_cod2Effect.z * dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114));\n";
+            }
           }
           var vsSource = ['''
 POINT_VERTEX_ORIGINAL = 'vsPointSizeDefs, vsClipPlaneDefs, vsLightingDefs, "void main()"'
@@ -433,7 +462,28 @@ POINT_POSITION_REPLACEMENT = POINT_POSITION_LEGACY.replace('"  v_color = a_color
 POINT_FRAGMENT_ORIGINAL = 'fogHeaderIfNeeded, fsClipPlaneDefs, fsAlphaTestDefs, "void main()"'
 POINT_FRAGMENT_REPLACEMENT = 'fogHeaderIfNeeded, fsClipPlaneDefs, fsAlphaTestDefs, pointDefs, "void main()"'
 POINT_PASS_ORIGINAL = 'fsClipPlanePass, fsTexEnvPass, fogPass, fsAlphaTestPass'
-POINT_PASS_REPLACEMENT = 'fsClipPlanePass, fsTexEnvPass, pointPass, fogPass, fsAlphaTestPass'
+POINT_PASS_LEGACY = 'fsClipPlanePass, fsTexEnvPass, pointPass, fogPass, fsAlphaTestPass'
+POINT_PASS_REPLACEMENT = 'fsClipPlanePass, fsTexEnvPass, pointPass, cod2EffectPass, fogPass, fsAlphaTestPass'
+
+COVERAGE_MARKER = '          // COD2_ALPHA_COVERAGE:'
+COVERAGE_ORIGINAL = '          var fsSource = [ "precision mediump float;",'
+COVERAGE_REPLACEMENT = r'''          // COD2_ALPHA_COVERAGE: an alpha-tested surface the device flags
+          // (web_effects.c) resolves its edge into the multisampled scene's
+          // coverage. Its alpha, scaled up a quarter per mip level so leaves
+          // and grass stay as full far away as near, turns from clear to
+          // solid across one pixel about the reference.
+          if (pointLights && (GLEmulation.alphaTestFunc == 516 || GLEmulation.alphaTestFunc == 518) && fsAlphaTestPass) {
+            fsAlphaTestPass = "if (u_cod2Effect.x > 0.5) {\n" +
+              "  highp vec2 cod2Texels = " + pointUV + " * vec2(textureSize(u_texUnit0, 0));\n" +
+              "  highp vec2 cod2Dx = dFdx(cod2Texels), cod2Dy = dFdy(cod2Texels);\n" +
+              "  float cod2Mip = max(0.5 * log2(max(max(dot(cod2Dx, cod2Dx), dot(cod2Dy, cod2Dy)), 1e-8)) + u_cod2Detail.w, 0.0);\n" +
+              "  gl_FragColor.a *= 1.0 + 0.25 * cod2Mip;\n" +
+              "  gl_FragColor.a = (gl_FragColor.a - u_alphaTestRef) / max(fwidth(gl_FragColor.a), 0.0001) + 0.5;\n" +
+              "  if (gl_FragColor.a <= 0.0) discard;\n" +
+              "  gl_FragColor.a = min(gl_FragColor.a, 1.0);\n" +
+              "} else {\n" + fsAlphaTestPass + "\n}\n";
+          }
+          var fsSource = [ "precision mediump float;",'''
 POINT_UNIFORMS_LEGACY = r'''        this.normalMatrixLocation = GLctx.getUniformLocation(this.program, "u_normalMatrix");
         this.cod2LightCountLocation = GLctx.getUniformLocation(this.program, "u_cod2LightCount");
         this.cod2LightEyeLocation = GLctx.getUniformLocation(this.program, "u_cod2LightEye[0]");
@@ -465,6 +515,8 @@ POINT_UNIFORMS_REPLACEMENT = r'''        this.normalMatrixLocation = GLctx.getUn
         this.cod2SunShadowLocation = GLctx.getUniformLocation(this.program, "u_cod2SunShadow");
         this.cod2SunShadowRectLocation = GLctx.getUniformLocation(this.program, "u_cod2SunShadowRect");
         this.cod2SunShadowMapLocation = GLctx.getUniformLocation(this.program, "u_cod2SunShadowMap");
+        this.cod2EffectLocation = GLctx.getUniformLocation(this.program, "u_cod2Effect");
+        this.cod2FeatherDepthLocation = GLctx.getUniformLocation(this.program, "u_cod2FeatherDepth");
         this.cod2MaterialUniforms = null;
         this.cod2LightCount = -1;
         this.cod2LightRevision = -1;
@@ -526,14 +578,17 @@ POINT_UPLOAD_REPLACEMENT = r'''        // COD2_POINT_LIGHT_UNIFORMS: cache per p
             }
             // Only lightmapped world programs take the sun's depth map.
             if (this.cod2SunShadowMapLocation) GLctx.uniform1i(this.cod2SunShadowMapLocation, 18);
+            // Only unlit programs feather effects into the scene's depth.
+            if (this.cod2FeatherDepthLocation) GLctx.uniform1i(this.cod2FeatherDepthLocation, 19);
             // Values are compared per program: world and model draws
             // alternate, but each program mostly sees the same ones.
             materialUniforms = this.cod2MaterialUniforms = [];
             var materialNames = ["surface", "detail", "sunEye", "sunColor", "skyEye", "model", "camo",
-              "sunShadowEye", "sunShadow", "sunShadowRect"];
+              "sunShadowEye", "sunShadow", "sunShadowRect", "effect"];
             var materialLocations = [this.cod2SurfaceLocation, this.cod2DetailLocation, this.cod2SunEyeLocation,
               this.cod2SunColorLocation, this.cod2SkyEyeLocation, this.cod2ModelLocation, this.cod2CamoLocation,
-              this.cod2SunShadowEyeLocation, this.cod2SunShadowLocation, this.cod2SunShadowRectLocation];
+              this.cod2SunShadowEyeLocation, this.cod2SunShadowLocation, this.cod2SunShadowRectLocation,
+              this.cod2EffectLocation];
             for (var materialIndex = 0; materialIndex < materialNames.length; ++materialIndex) {
               if (!materialLocations[materialIndex]) continue;
               materialUniforms.push({name: materialNames[materialIndex], location: materialLocations[materialIndex],
@@ -664,12 +719,17 @@ def main():
         start = source.index(upload_marker)
         end = source.index(POINT_UPLOAD_ORIGINAL, start)
         source = source[:start] + source[end:]
+    if source.count(COVERAGE_MARKER) == 1:
+        start = source.index(COVERAGE_MARKER)
+        end = source.index(COVERAGE_ORIGINAL, start)
+        source = source[:start] + source[end:]
     for legacy, original in ((LIGHT_COLOR_LEGACY, LIGHT_COLOR_ORIGINAL),
                              (POINT_VERTEX_LEGACY, POINT_VERTEX_ORIGINAL),
                              (POINT_POSITION_LEGACY, POINT_POSITION_ORIGINAL),
                              (POINT_DEFS_LEGACY, POINT_DEFS_ORIGINAL),
                              (POINT_UNIFORMS_LEGACY, POINT_UNIFORMS_ORIGINAL),
-                             (POINT_UPLOAD_LEGACY, POINT_UPLOAD_ORIGINAL)):
+                             (POINT_UPLOAD_LEGACY, POINT_UPLOAD_ORIGINAL),
+                             (POINT_PASS_LEGACY, POINT_PASS_ORIGINAL)):
         if source.count(legacy) == 1:
             source = source.replace(legacy, original, 1)
     for original, replacement in ((ORIGINAL, REPLACEMENT), (DRAW_ORIGINAL, DRAW_REPLACEMENT),
@@ -682,6 +742,7 @@ def main():
                                   (POINT_POSITION_ORIGINAL, POINT_POSITION_REPLACEMENT),
                                   (POINT_FRAGMENT_ORIGINAL, POINT_FRAGMENT_REPLACEMENT),
                                   (POINT_PASS_ORIGINAL, POINT_PASS_REPLACEMENT),
+                                  (COVERAGE_ORIGINAL, COVERAGE_REPLACEMENT),
                                   (POINT_UNIFORMS_ORIGINAL, POINT_UNIFORMS_REPLACEMENT),
                                   (POINT_UPLOAD_ORIGINAL, POINT_UPLOAD_REPLACEMENT),
                                   (SHADER_CHECK_ORIGINAL, SHADER_CHECK_REPLACEMENT),

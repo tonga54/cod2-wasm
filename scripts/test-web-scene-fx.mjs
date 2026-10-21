@@ -227,6 +227,39 @@ try {
     check(pixel(flick, 730, 360) > 0 && pixel(flick, 741, 360) === 0 && pixel(flick, 538, 360) === 0,
       'a flick smears 10% of the screen height at most');
 
+    // r_atmosphere: the map's haze over world pixels by their distance, denser
+    // below the eye than above it, brighter toward the sun; the viewmodel and
+    // the sky keep their own. Parameters 57-72 as WebSceneFx_FillParams lays them.
+    const hazeAt = (density, sunColor = [0, 0, 0], sun = [0, 0, 1]) =>
+      HEAPF32.set([1, 16 / 9, 0.2, 0.5, 0.8, density, 0, 1, 0, ...sun, ...sunColor, 1 / 640], 16 + 57);
+    function hazeLayout() {
+      rect(-1, -1, 0.5, 0.6, worldDepth(2000), [0, 0, 0], 0);   // the world 2,000 units away
+      rect(0.5, -1, 1, 1, vmDepth(5), [1, 1, 1], 0);           // the viewmodel; the sky above the world
+    }
+    const clearAir = render(1, 0, {glow: 0, film: 0, layout: hazeLayout});
+    hazeAt(0);
+    check(same(render(1, 0, {glow: 0, film: 0, layout: hazeLayout}), clearAir, [-1, -1, 1, 1]), 'no fog, no haze');
+    hazeAt(0.0001);
+    const hazy = render(1, 0, {glow: 0, film: 0, layout: hazeLayout}); snapshot('haze');
+    const level = r => region(hazy, ...r).mean;
+    const atEye = 127.5 * (1 - Math.exp(-0.0001 * 2000 * Math.hypot(1, 0.25)));
+    check(Math.abs(level([-0.27, -0.02, -0.23, 0.02]) - atEye) < 2, `at the eye's height the fog's color over 2,000 units: ${level([-0.27, -0.02, -0.23, 0.02])} vs ${atEye}`);
+    check(level([-0.27, -0.62, -0.23, -0.58]) > level([-0.27, -0.02, -0.23, 0.02]) + 3 &&
+      level([-0.27, 0.38, -0.23, 0.42]) < level([-0.27, -0.02, -0.23, 0.02]) - 3, 'denser below the eye, thinner above');
+    check(same(hazy, clearAir, [0.55, -0.9, 1, 0.9]), 'the viewmodel keeps its own');
+    check(same(hazy, clearAir, [-1, 0.65, 0.45, 1]), 'the sky keeps its own');
+    hazeAt(0.0001, [0.45, 0.45, 0.45]);
+    const sunward = render(1, 0, {glow: 0, film: 0, layout: hazeLayout});
+    check(region(sunward, -0.27, -0.02, -0.23, 0.02).mean > level([-0.27, -0.02, -0.23, 0.02]) + 10, 'toward the sun it glows');
+    hazeAt(0.0001, [0.45, 0.45, 0.45], [-1, 0, 0]);
+    const away = render(1, 0, {glow: 0, film: 0, layout: hazeLayout});
+    check(Math.abs(region(away, -0.27, -0.02, -0.23, 0.02).mean - level([-0.27, -0.02, -0.23, 0.02])) < 0.5,
+      `away from the sun it does not: ${region(away, -0.27, -0.02, -0.23, 0.02).mean} vs ${level([-0.27, -0.02, -0.23, 0.02])}`);
+    hazeAt(0.01);
+    check(same(render(1, 0, {glow: 0, film: 0, layout: hazeLayout}), clearAir, [0.55, -0.9, 1, 0.9]),
+      'the viewmodel keeps its own in the thickest haze');
+    hazeAt(0, [0, 0, 0], [0, 0, 0]);
+
     // The viewmodel's own motion. A white viewmodel square over the black
     // world covers pixels 576-703 by 324-395 and moves right with a half
     // smear of 15 pixels; its tiles reach pixels 504-791.

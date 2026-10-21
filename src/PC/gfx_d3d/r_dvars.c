@@ -37,6 +37,9 @@ const dvar_t *r_sunShading;
 const dvar_t *r_sunShadows;
 const dvar_t *r_ssao;
 const dvar_t *r_reflections;
+const dvar_t *r_zfeather;
+const dvar_t *r_fxHeat;
+const dvar_t *r_atmosphere;
 #endif
 extern const dvar_t *r_znear;
 extern const dvar_t *r_znear_depthhack;
@@ -536,6 +539,16 @@ void R_RegisterDvars(void)
      * above and the ground's below, more at grazing angles and the glossier
      * they are. */
     r_reflections = ri.Dvar_RegisterBool("r_reflections", 1, 0x2001);
+    /* Effects whose materials carry featherParms (fire, smoke, dust) fade
+     * into the surfaces they meet and before the eye, as the DX9 zfeather
+     * techniques did; Soften Smoke Edges in the graphics options sets it
+     * (downstream/wasm/web_effects.c). */
+    r_zfeather = ri.Dvar_RegisterBool("r_zfeather", 1, 0x2001);
+    /* How much hotter fire and explosions burn, 0 for the original. */
+    r_fxHeat = ri.Dvar_RegisterFloat("r_fxHeat", 1.0f, 0.0f, 2.0f, 0x2001);
+    /* The map's haze thickens toward the ground and in the distance and
+     * glows toward the sun (downstream/wasm/web_scene_fx.c). */
+    r_atmosphere = ri.Dvar_RegisterBool("r_atmosphere", 1, 0x2001);
 #endif
 
     r_outdoorAwayBias = ri.Dvar_RegisterFloat("r_outdoorAwayBias", 32.0f, -3.4028235e+38f, 3.4028235e+38f, 0x2000);

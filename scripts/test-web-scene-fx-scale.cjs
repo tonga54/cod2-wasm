@@ -196,7 +196,7 @@ const mutants = [
   ['Math.round((x + w) * sx) - x0', 'Math.round(w * sx)'],
   ['            fx.canvasViewport = Array.from(gl.getParameter(gl.VIEWPORT));\n',
    '            fx.canvasViewport = Array.from(gl.getParameter(gl.VIEWPORT));\n            gl.getParameter(gl.SCISSOR_BOX);\n'],
-  ['    else if (fx) fx.unscale();\n', ''],
+  ['    else if (fx) { fx.unscale(); fx.drawing = false; }\n', '    else if (fx) fx.drawing = false;\n'],
   ['var sx = fx.width / screenWidth, sy = fx.height / screenHeight;', 'var sx = 1, sy = 1;'],
 ];
 for (const [before, after] of mutants) {

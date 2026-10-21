@@ -82,7 +82,7 @@ const defsStart = linked.indexOf('          // COD2_POINT_LIGHT_SHADER:');
 const defsEnd = linked.indexOf('          var vsSource =', defsStart);
 assert(defsStart >= 0 && defsEnd > defsStart);
 const generate = Function('GLImmediate', 'GLEmulation', 'fsTexEnvPass', 'texUnitVaryingList = ""',
-  linked.slice(defsStart, defsEnd) + '\nreturn {pointVarying,pointDefs,pointPass,fsTexEnvPass,texUnitVaryingList};');
+  linked.slice(defsStart, defsEnd) + '\nreturn {pointVarying,pointDefs,pointPass,fsTexEnvPass,texUnitVaryingList,cod2EffectPass};');
 for (const model of [false, true]) for (const type of [0, 0x0DE1, 0x8513]) for (const matrix of [false, true]) for (const units of [[], [1], [0], [0, 1]]) {
   const uv = matrix ? '(u_textureMatrix0 * v_texCoord0).xy' : 'v_texCoord0.xy';
   const material = `gl_FragColor = texture2D(u_texUnit0, ${uv}) * v_color;`;
@@ -109,7 +109,8 @@ for (const model of [false, true]) for (const type of [0, 0x0DE1, 0x8513]) for (
 const noSample = generate.call({usedTexUnitList:[0]}, {useTextureMatrix:false,TexEnvJIT:{getTexUnitType:()=>0x0DE1}}, {lightingEnabled:false}, 'gl_FragColor = v_color;');
 assert.equal(noSample.fsTexEnvPass, 'gl_FragColor = v_color;');
 assert(noSample.pointPass.includes('texture2D(u_texUnit0, v_texCoord0.xy).rgb'));
-assert(linked.includes('fsTexEnvPass, pointPass, fogPass, fsAlphaTestPass'), 'light fades into the original fog');
+assert(linked.includes('fsTexEnvPass, pointPass, cod2EffectPass, fogPass, fsAlphaTestPass'),
+  'light, then the feather and heat of effects, fade into the original fog');
 const glslStart = linked.indexOf('          function cod2Glsl300(');
 const glslEnd = linked.indexOf('          this.vertexShader =', glslStart);
 assert(glslStart >= 0 && glslEnd > glslStart);
@@ -287,14 +288,19 @@ assert(material.sunShadowDefault);
 // and their sampler stay clear of them, within WebGL2's 32 combined units.
 {
   const sceneFx = fs.readFileSync('downstream/wasm/web_scene_fx.c', 'utf8');
-  assert.deepEqual([...new Set(sceneFx.match(/gl\.TEXTURE\d+/g))], ['gl.TEXTURE8'], 'the compositor binds from unit 8');
+  // ... and the effects' copy of the scene's depth stays bound on unit 19.
+  assert.deepEqual([...new Set(sceneFx.match(/gl\.TEXTURE\d+/g))].sort(), ['gl.TEXTURE19', 'gl.TEXTURE8'],
+    'the compositor binds from unit 8, the effects\' depth on 19');
+  assert(linked.includes('GLctx.uniform1i(this.cod2FeatherDepthLocation, 19);'));
+  assert(sceneFx.includes('gl.activeTexture(gl.TEXTURE19);\n                gl.bindTexture(gl.TEXTURE_2D, f.depth);'));
   assert(sceneFx.includes('gl.activeTexture(gl.TEXTURE8 + unit);'));
   const sources = sceneFx.match(/var sources = \[(.*)\];/);
   assert(sources, 'the compositor names its sources');
   const fxUnits = sources[1].split(',').map((_, i) => 8 + i);
   assert.deepEqual(fxUnits, [8, 9, 10, 11, 12, 13, 14, 15]);
   assert.deepEqual(material.units, [5, 6, 7, 16, 17]);
-  for (const unit of [...material.units, 18]) assert(!fxUnits.includes(unit) && unit < 32, `unit ${unit}`);
+  for (const unit of [...material.units, 18, 19]) assert(!fxUnits.includes(unit) && unit < 32, `unit ${unit}`);
+  assert(!material.units.includes(19), 'the effects\' depth shares no unit with the material maps or the sun\'s');
   // The sun's depth map stays bound on unit 18 across frames.
   const sunShadows = fs.readFileSync('downstream/wasm/web_sun_shadows.c', 'utf8');
   assert.deepEqual([...new Set(sunShadows.match(/gl\.TEXTURE\d+/g))], ['gl.TEXTURE18']);
@@ -483,7 +489,14 @@ for (const matrix of [false, true]) {
   const lit = world.pointPass.indexOf('if (u_cod2Surface.z > 0.5) {');
   assert(lit > 0 && lit < world.pointPass.indexOf('if (u_cod2LightCount > 0)'), 'flashes add after the material');
   assert(world.pointPass.includes('vec4 cod2L = cod2LightmapTexel;'));
-  assert(world.pointPass.includes(`cod2Bump(cod2N, ${uv(0)}, 0.75)`));
+  // COD2_RELIEF_CAVITY: the world's normal maps at the DX9 shaders' full
+  // strength; where they lean far from the surface less indirect light comes.
+  assert(world.pointPass.includes(`cod2Bump(cod2N, ${uv(0)}, 1.0)`));
+  assert(world.pointPass.includes('vec3 cod2Lit = cod2Indirect * (cod2Sky(cod2B) / cod2Sky(cod2N) * cod2Cavity(cod2B, cod2N, cod2L.a)) +\n' +
+    '  cod2SunPart * cod2Incidence;\n'), 'only the indirect light, not the sun, reads the cavity, where the bake sees no sun');
+  assert(world.pointDefs.includes('float cod2Cavity(highp vec3 b, highp vec3 n, float sunlit) {\n' +
+    '  return 1.0 - 0.5 * (1.0 - max(dot(b, n), 0.0)) * (1.0 - clamp(sunlit, 0.0, 1.0));\n}\n'));
+  assert(world.pointDefs.includes('float cod2Sky(highp vec3 n) { return 1.0 + 0.5 * dot(n, u_cod2SkyEye.xyz); }\n'));
   assert(!world.pointPass.includes('gl_FragColor.a'), 'materials keep their alpha');
   // COD2_WORLD_REFLECTION: a specular map mirrors the lightmap's indirect
   // light after the sun's highlight, behind r_reflections in the sky's w.
@@ -507,6 +520,8 @@ for (const matrix of [false, true]) {
   assert.deepEqual(model.pointPass.match(/cod2Spec \+= u_lightDiffuse\d/g),
     ['cod2Spec += u_lightDiffuse0', 'cod2Spec += u_lightDiffuse3'], 'highlights from the strongest grid light and the sun');
   assert(model.pointPass.includes(`cod2Bump(cod2N, ${uv(0)}, 1.0)`));
+  assert(model.pointPass.includes('cod2Bumped += (cod2Ambient - cod2Sun) * (cod2Sky(cod2B) / cod2Sky(cod2N) * cod2Cavity(cod2B, cod2N, u_cod2Model.x)) +\n' +
+    '  cod2Sun * cod2Incidence;\n'));
   assert(!model.pointPass.includes('cod2LightmapTexel') && !world.pointPass.includes('u_cod2Model'));
   assert(model.pointPass.includes('if (u_cod2Surface.y > 0.5 && u_cod2SkyEye.w > 0.0) {'), 'r_reflections turns the models\' reflection off too');
   assert.equal(model.pointPass.match(/texture2D\(u_cod2SpecMap/g).length, 1);
@@ -612,3 +627,133 @@ console.log('PASS: lightmapped world and lit model material passes, with and wit
   assert(!/cod2SunShadow/.test(noSample.pointDefs + noSample.pointPass));
 }
 console.log('PASS: the sun\'s depth map in 3 views\' eye space for world draws only, cached per frame and view, uploaded per program and value, and compared only where the bake sees the sun');
+
+// COD2_EFFECTS (web_effects.c): every textured program takes the draw's
+// effect uniform; only unlit ones, the effects', feather into the scene's
+// depth on unit 19 and burn hotter, after their light and before their fog.
+{
+  const make = (units, lighting) => generate.call({usedTexUnitList: units}, {...twoD, useTextureMatrix: false},
+    {lightingEnabled: lighting, MAX_LIGHTS: 8, lightEnabled: [true, false, false, false, false, false, false, false]},
+    units.includes(1) ? 'gl_FragColor = texture2D(u_texUnit0, v_texCoord0.xy) * (texture2D(u_texUnit1, v_texCoord1.xy) * 2.0);' :
+      'gl_FragColor = texture2D(u_texUnit0, v_texCoord0.xy) * v_color;', 'varying vec4 v_texCoord0;\nvarying vec4 v_texCoord1;\n');
+  const effect = make([0], false), world = make([0, 1], false), model = make([0], true), untextured = make([], false);
+  for (const shader of [effect, world, model])
+    assert(shader.pointDefs.includes('uniform highp vec4 u_cod2Effect;\n'), 'coverage reaches every textured program');
+  assert.equal(untextured.cod2EffectPass, '');
+  for (const shader of [world, model]) {
+    assert.equal(shader.cod2EffectPass, '', 'the lit world and models neither feather nor burn');
+    assert(!shader.pointDefs.includes('u_cod2FeatherDepth'));
+  }
+  assert(effect.pointDefs.includes('uniform highp sampler2D u_cod2FeatherDepth;\n'));
+  assert.equal(effect.cod2EffectPass, 'if (u_cod2Effect.y != 0.0) {\n' +
+    'highp float cod2Z = -v_cod2Eye.z, cod2Scale = abs(u_cod2Effect.y);\n' +
+    'highp float cod2SceneZ = u_cod2Effect.w / max(0.9995002746582031 -\n' +
+    '  texelFetch(u_cod2FeatherDepth, ivec2(gl_FragCoord.xy), 0).r, 0.000001);\n' +
+    'float cod2Feather = clamp(abs(cod2SceneZ - cod2Z) * cod2Scale, 0.0, 1.0) *\n' +
+    '  clamp((cod2Z - u_cod2Effect.w / 0.9995002746582031) * cod2Scale, 0.0, 1.0);\n' +
+    'if (u_cod2Effect.y > 0.0) gl_FragColor.a *= cod2Feather; else gl_FragColor *= cod2Feather;\n}\n' +
+    'if (u_cod2Effect.z > 0.0)\n' +
+    '  gl_FragColor.rgb *= 1.0 + u_cod2Effect.z * dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114));\n',
+    'the DX9 zfeather: fade by the gap to the scene\'s depth and to the near clip, then the heat');
+  assert(!effect.pointPass.includes('gl_FragColor.a'), 'the light keeps transparency; only the feather fades it');
+  assert(linked.includes('this.cod2EffectLocation = GLctx.getUniformLocation(this.program, "u_cod2Effect");'));
+  assert(linked.includes('this.cod2FeatherDepthLocation = GLctx.getUniformLocation(this.program, "u_cod2FeatherDepth");'));
+
+  // COD2_ALPHA_COVERAGE: textured GREATER/GEQUAL tests turn into coverage
+  // when the draw asks for it; every other test, and untextured draws, keep
+  // the original.
+  const coverageStart = linked.indexOf('          // COD2_ALPHA_COVERAGE:');
+  const coverageEnd = linked.indexOf('          var fsSource = [ "precision mediump float;",', coverageStart);
+  assert(coverageStart >= 0 && coverageEnd > coverageStart);
+  const wrap = Function('pointLights', 'GLEmulation', 'fsAlphaTestPass', 'pointUV',
+    linked.slice(coverageStart, coverageEnd) + '\nreturn fsAlphaTestPass;');
+  const greater = 'if (!(gl_FragColor.a > u_alphaTestRef)) { discard; }', gequal = 'if (!(gl_FragColor.a >= u_alphaTestRef)) { discard; }';
+  for (const [func, test] of [[516, greater], [518, gequal]]) {
+    for (const uv of ['v_texCoord0.xy', '(u_textureMatrix0 * v_texCoord0).xy']) {
+      const pass = wrap(true, {alphaTestFunc: func}, test, uv);
+      assert(pass.startsWith('if (u_cod2Effect.x > 0.5) {\n'));
+      assert(pass.includes(`  highp vec2 cod2Texels = ${uv} * vec2(textureSize(u_texUnit0, 0));\n`));
+      assert(pass.includes('  float cod2Mip = max(0.5 * log2(max(max(dot(cod2Dx, cod2Dx), dot(cod2Dy, cod2Dy)), 1e-8)) + u_cod2Detail.w, 0.0);\n' +
+        '  gl_FragColor.a *= 1.0 + 0.25 * cod2Mip;\n'), 'a quarter more alpha per mip level, after the scaled scene\'s bias');
+      assert(pass.includes('  gl_FragColor.a = (gl_FragColor.a - u_alphaTestRef) / max(fwidth(gl_FragColor.a), 0.0001) + 0.5;\n' +
+        '  if (gl_FragColor.a <= 0.0) discard;\n  gl_FragColor.a = min(gl_FragColor.a, 1.0);\n'));
+      assert(pass.endsWith('} else {\n' + test + '\n}\n'), 'the original test without coverage');
+    }
+  }
+  for (const [lit, func, test] of [[false, 518, gequal], [true, 515, 'if (!(gl_FragColor.a <= u_alphaTestRef)) { discard; }'],
+                                   [true, 512, 'discard;'], [true, 519, '']])
+    assert.equal(wrap(lit, {alphaTestFunc: func}, test, 'v_texCoord0.xy'), test);
+
+  // The per-draw bridge: coverage only in the composed view's multisampled
+  // scene, toggled when it changes; a feather only with the scene's depth
+  // copied and the view's near clip, which goes along with it.
+  const effectsSource = fs.readFileSync('downstream/wasm/web_effects.c', 'utf8');
+  const bridgeStart = effectsSource.indexOf('EM_JS(void, WebEffects_Draw, (float coverage, float feather, float heat, float worldNearClip), {');
+  assert(bridgeStart >= 0);
+  let bodyStart = effectsSource.indexOf('{', effectsSource.indexOf('), {', bridgeStart) + 2), bodyEnd = bodyStart + 1, depth = 1;
+  while (depth) { depth += (effectsSource[bodyEnd] === '{') - (effectsSource[bodyEnd] === '}'); ++bodyEnd; }
+  const capabilities = [];
+  const effectGL = {SAMPLE_ALPHA_TO_COVERAGE: 0x809E, enable: c => capabilities.push(['enable', c]),
+    disable: c => capabilities.push(['disable', c])};
+  const M = {};
+  const bridge = Function('Module', 'GLctx', 'coverage', 'feather', 'heat', 'worldNearClip',
+    effectsSource.slice(bodyStart + 1, bodyEnd - 1)).bind(null, M, effectGL);
+  const f = Math.fround;
+  bridge(1, 0.25, 0.65, 4);
+  assert.deepEqual(capabilities, [], 'nothing before the first material');
+  const effectValues = M.cod2Material = {effect: new Float32Array(4)};
+  let copies = 0, copied = true;
+  M.cod2SceneFx = {t: {}, drawing: true, samples: 4, featherDepth: () => (++copies, copied)};
+  bridge(1, 0, 0, f(3.998));
+  assert.deepEqual([...effectValues.effect], [1, 0, 0, 0]);
+  assert.deepEqual(capabilities.splice(0), [['enable', 0x809E]]);
+  for (let i = 0; i < 1000; ++i) bridge(1, 0, 0, f(3.998));
+  assert.deepEqual(capabilities, [], '1000 draws of leaves toggle nothing more');
+  bridge(0, 0.25, f(0.65), f(3.998));
+  assert.deepEqual(capabilities.splice(0), [['disable', 0x809E]]);
+  assert.deepEqual([...effectValues.effect], [0, 0.25, f(0.65), f(3.998)]);
+  assert.equal(copies, 1);
+  bridge(0, f(-0.025), 0, f(3.998));
+  assert.deepEqual([...effectValues.effect], [0, f(-0.025), 0, f(3.998)], 'a blend without alpha fades the color');
+  copied = false;
+  bridge(0, 0.25, f(0.65), f(3.998));
+  assert.deepEqual([...effectValues.effect], [0, 0, f(0.65), 0], 'no depth copy, no feather; the heat stays');
+  copied = true;
+  copies = 0;
+  bridge(0, 0.25, 0, 0);
+  assert.deepEqual([...effectValues.effect], [0, 0, 0, 0]);
+  assert.equal(copies, 0, 'no near clip, no copy');
+  M.cod2SceneFx.drawing = false;
+  bridge(1, 0.25, 0, f(3.998));
+  assert.deepEqual([...effectValues.effect], [0, 0, 0, 0]);
+  assert.equal(copies, 0, 'outside the composed view nothing is copied');
+  M.cod2SceneFx.drawing = true;
+  M.cod2SceneFx.samples = 1;
+  bridge(1, 0, 0, f(3.998));
+  assert.equal(effectValues.effect[0], 0, 'a single-sampled scene keeps the alpha test');
+  delete M.cod2SceneFx;
+  bridge(1, 0.25, f(0.65), f(3.998));
+  assert.deepEqual([...effectValues.effect], [0, 0, f(0.65), 0]);
+  assert.deepEqual(capabilities, []);
+
+  // Programs with the effects upload the depth's unit once and their values
+  // when they change.
+  const uploads = [];
+  const effectUploadGL = {uniform1i: (location, value) => uploads.push(['1i', location, value]),
+    uniform3fv: location => uploads.push(['3fv', location]), uniform4fv: (location, value) => uploads.push(['4fv', location, [...value]]),
+    uniformMatrix4fv: () => {}};
+  const effectProgram = materialProgram({cod2EffectLocation: 'effect', cod2FeatherDepthLocation: 'featherDepth'});
+  drawScene(256, 1, 1, 0, 22, 23, 21, 8, 6, 1, 1.5, 0.65, 0);
+  Module.cod2Material.effect.set([0, 0.25, 0.65, 3.998]);
+  upload.call(effectProgram, Module, effectUploadGL);
+  assert(uploads.some(([type, location, value]) => type === '1i' && location === 'featherDepth' && value === 19));
+  assert.deepEqual(uploads.find(([, location]) => location === 'effect'), ['4fv', 'effect', [...Module.cod2Material.effect]]);
+  uploads.length = 0;
+  for (let i = 0; i < 1000; ++i) upload.call(effectProgram, Module, effectUploadGL);
+  assert.deepEqual(uploads, []);
+  Module.cod2Material.effect[1] = 0;
+  upload.call(effectProgram, Module, effectUploadGL);
+  assert.deepEqual(uploads.splice(0), [['4fv', 'effect', [0, 0, f(0.65), f(3.998)]]]);
+  Module.cod2Material.effect.fill(0);
+}
+console.log('PASS: the effect uniform in every textured program, the zfeather and heat in unlit ones only, coverage wrapping GREATER/GEQUAL tests with the mip-level alpha, toggled once per change in the multisampled scene, feathering only with the depth copy and the near clip, uploads per program and value');

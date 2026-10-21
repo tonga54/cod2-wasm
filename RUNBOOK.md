@@ -5941,3 +5941,38 @@ Validation:
   seconds the old cloud filled the square from the house to the wall beyond
   the crates and rose into the sky; the new one filled the gap beside the
   crates, as thick, to the treetops. Captures are in `out/smoke-size-qa/shots`.
+
+## Grass, fire, textures and depth — 2026-10-21
+
+The owner asked for better textures, grass and fire and maps that look more
+real, above all their textures and depth, without costing much frame rate.
+Details and measurements are in `docs/GRAPHICS_2026-10-16.md` ("Grass, fire,
+textures and depth").
+
+- `downstream/wasm/web_effects.c` (new) picks three per-draw effects the DX7
+  techniques lack, from the device state `CDirect3DDevice_DrawIndexedPrimitive`
+  already has: alpha-to-coverage for opaque GE128-style alpha tests in the
+  multisampled scene (`r_aaAlpha`), with the alpha kept as full a quarter per
+  mip level; the DX9 z-feather of effects whose materials carry
+  `featherParms` (`r_zfeather`, which Soften Smoke Edges already set),
+  against a once-a-view copy of the scene's depth on unit 19; and heat for
+  additive fire and explosions (`r_fxHeat`).
+- The world's normal maps decode at full strength, relief leans more with the
+  sky, and grooves take less indirect light where the bake sees no sun.
+- The compositor adds the map's own exponential fog, at most 0.0001 more per
+  unit, thickening below the eye and glowing toward the sun (`r_atmosphere`),
+  over world pixels only.
+
+Validation:
+
+- `test-web-effects.py` (new, in `test-static.sh`, 27 mutants),
+  `test-web-point-lights.cjs`, `test-web-scene-fx.py` (82 mutants, from 66),
+  `test-viewmodel-motion.py` and `test-web-scene-fx-scale.cjs`; the GPU scripts
+  `test-web-effects.mjs` (new, 22 checks), `test-web-material-lighting.mjs`
+  (87) and `test-web-scene-fx.mjs` (134) on the M4.
+- On the isolated `out/visual-qa` stack the old and new clients at the same
+  views on Burgundy, Toujane and Brecourt: fire fading into the tank it burns
+  on and hotter, smooth leaf and grass edges and full distant crowns, deeper
+  stone grooves in the shade and distant houses in the haze. GPU time per
+  frame with the four dvars off and on: 4.91 to 5.15 ms in a Brecourt field,
+  3.04 to 3.43 ms at Burgundy's burning tank, almost all of it the feather.

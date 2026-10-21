@@ -55,6 +55,8 @@ EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShado
             sunEye: new Float32Array(3), skyEye: new Float32Array(4), sunColor: new Float32Array(4),
             model: new Float32Array(4), camo: new Float32Array(4), view: new Float32Array(16),
             sunShadowEye: new Float32Array(16), sunShadow: new Float32Array(4), sunShadowRect: new Float32Array(4),
+            // Coverage, feather, heat and near clip: web_effects.c sets them after these.
+            effect: new Float32Array(4),
             sunShadowRevision: -1,
             bound: [null, null, null, null, null], present: [0, 0, 0, 0, 0], sunRevision: -1,
             // The detail, normal and specular maps, then the camouflage's pattern

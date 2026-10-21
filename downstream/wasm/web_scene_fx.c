@@ -33,6 +33,7 @@ extern const dvar_t *r_filmTweakEnable;
 extern const dvar_t *r_motionBlur;
 extern const dvar_t *r_sceneHeight;
 extern const dvar_t *r_ssao;
+extern const dvar_t *r_atmosphere;
 
 /* Draws the sun's shadow map of the frame's moving models (web_sun_shadows.c). */
 void WebSunShadows_Render(void);
@@ -100,7 +101,17 @@ enum {
     SCENE_FX_AO = SCENE_FX_SCOPE_END,
     SCENE_FX_AO_RADIUS,
     SCENE_FX_AO_PROJECTION,
-    SCENE_FX_PARAM_COUNT = SCENE_FX_AO_PROJECTION + 2
+    /* The map's haze (r_atmosphere): its color and its added density per
+     * unit, 0 for none; then in this view's space the world's up and the
+     * direction toward the sun, the sun's glow in it, and how fast it thins
+     * with height, per unit. */
+    SCENE_FX_HAZE = SCENE_FX_AO_PROJECTION + 2,
+    SCENE_FX_HAZE_DENSITY = SCENE_FX_HAZE + 3,
+    SCENE_FX_HAZE_UP,
+    SCENE_FX_HAZE_SUN = SCENE_FX_HAZE_UP + 3,
+    SCENE_FX_HAZE_SUN_COLOR = SCENE_FX_HAZE_SUN + 3,
+    SCENE_FX_HAZE_FALLOFF = SCENE_FX_HAZE_SUN_COLOR + 3,
+    SCENE_FX_PARAM_COUNT
 };
 
 #define SCENE_FX_SCOPE_FLOATS (SCENE_FX_SCOPE_END - SCENE_FX_SCOPE)
@@ -108,6 +119,15 @@ enum {
 /* r_ssao's darkening of an enclosed point, and the radius it measures. */
 #define SCENE_FX_AO_STRENGTH 0.85f
 #define SCENE_FX_AO_WORLD_RADIUS 22.0f
+
+/* r_atmosphere adds this share of the map's own fog density, at most the
+ * thinnest map's whole fog (Dawnville's own is the thickest), thickest at
+ * the eye's height and below and thinning above it over the scale height
+ * in units; toward the sun the haze takes up to this share of its light. */
+#define SCENE_FX_HAZE_SHARE 0.6f
+#define SCENE_FX_HAZE_MAX_DENSITY 0.0001f
+#define SCENE_FX_HAZE_SCALE_HEIGHT 640.0f
+#define SCENE_FX_HAZE_SUN_GLOW 0.45f
 
 /* InfinitePerspectiveMatrix's depth scale times the default r_znear of 4. */
 #define SCENE_FX_DEFAULT_WORLD_NEAR_CLIP (0.9995002746582031f * 4.0f)
@@ -176,6 +196,14 @@ static float s_motionProjection[2];
 static float s_backdropFrac;
 static float s_backdropGray;
 static float s_grayFrac;
+/* The scene's fog and sun for its haze, and its up and sun in the composed
+ * view's space. */
+static float s_hazeColor[3];
+static float s_hazeDensity;
+static float s_hazeSunWorld[3];
+static float s_hazeSunColor[3];
+static float s_hazeUp[3];
+static float s_hazeSun[3];
 
 typedef struct {
     const void *key;
@@ -230,7 +258,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
     if (!fx || fx.gl !== gl) {
         fx = Module.cod2SceneFx = {
             gl: gl, failed: false, width: 0, height: 0, requested: -1, samples: 0,
-            t: null, programs: null, vao: null,
+            t: null, programs: null, vao: null, drawing: false,
             maxSamples: gl.getParameter(gl.MAX_SAMPLES) | 0,
             discard: [gl.COLOR_ATTACHMENT0, gl.DEPTH_STENCIL_ATTACHMENT],
             still: new Float32Array([128 / 255, 128 / 255, 0, 0]), far: new Float32Array([1])
@@ -497,6 +525,8 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "uniform highp sampler2D u_vmVelocity;\nuniform highp sampler2D u_vmMesh;\nuniform highp vec4 u_vm;\n" +
                 "uniform highp vec4 u_lens;\nuniform highp vec4 u_lensInv;\nuniform vec4 u_lensFx;\n" +
                 "uniform sampler2D u_ao;\nuniform highp vec4 u_aoMix;\n" +
+                "uniform highp vec4 u_haze;\nuniform highp vec3 u_hazeUp;\nuniform highp vec3 u_hazeSun;\n" +
+                "uniform vec3 u_hazeSunColor;\nuniform highp vec3 u_hazeProj;\n" +
                 coc + nearWorld + viewmodelMotion +
                 drawnEyepiece + "void main() {\n" +
                 "  vec3 c = texture(u_scene, v_uv).rgb;\n" +
@@ -640,6 +670,23 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "          mix(med, large.rgb, (k - u_tier.y) / (1.0 - u_tier.y)));\n" +
                 "    }\n" +
                 "  }\n" +
+                /* The air between the eye and the world, in the map's fog
+                 * color: denser at the eye's height and below, thinner above
+                 * it, integrated along the ray, and brighter toward the sun.
+                 * The viewmodel and the sky keep their own. */
+                "  if (u_haze.a > 0.0) {\n" +
+                "    highp float hd = texelFetch(u_depth, ivec2(gl_FragCoord.xy), 0).r;\n" +
+                "    if (hd >= 0.2 && hd < 0.99999) {\n" +
+                "      highp float hz = u_near.x / max(u_dof.x - hd, 0.000001);\n" +
+                "      highp vec3 hp = vec3((v_uv * 2.0 - 1.0) * hz / u_hazeProj.xy, hz);\n" +
+                "      highp float hdist = length(hp);\n" +
+                "      highp float hk = dot(hp, u_hazeUp) * u_hazeProj.z;\n" +
+                "      float hf = abs(hk) > 0.001 ? (1.0 - exp(-hk)) / hk : 1.0;\n" +
+                "      float haze = 1.0 - exp(-u_haze.a * hdist * clamp(hf, 0.25, 3.0));\n" +
+                "      float glow = pow(max(dot(hp / hdist, u_hazeSun), 0.0), 6.0);\n" +
+                "      col = mix(col, u_haze.rgb + u_hazeSunColor * glow, haze);\n" +
+                "    }\n" +
+                "  }\n" +
                 /* Until the scope is at the eye its glass shows a dim, curved
                  * reflection of the world. */
                 "  if (lensIn > 0.0 && u_lens.w < 1.0) {\n" +
@@ -679,7 +726,8 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "  o = vec4(col, 1.0);\n}\n",
                 ["u_scene", "u_bloom", "u_depth", "u_dofMed", "u_dofLarge", "u_vmVelocity", "u_vmMesh", "u_ao"],
                 ["u_px", "u_glow", "u_dof", "u_dof2", "u_film", "u_near", "u_tier",
-                 "u_motion", "u_motionRotation", "u_motionMove", "u_vm", "u_lens", "u_lensInv", "u_lensFx", "u_aoMix"]);
+                 "u_motion", "u_motionRotation", "u_motionMove", "u_vm", "u_lens", "u_lensInv", "u_lensFx", "u_aoMix",
+                 "u_haze", "u_hazeUp", "u_hazeSun", "u_hazeSunColor", "u_hazeProj"]);
             /* A scene smaller than the canvas, filtered up to it with Catmull-Rom
              * in five bilinear taps (the corner taps weigh under 0.5%), as the
              * page scales the canvas again with its own bilinear filter. */
@@ -887,6 +935,49 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             if (!vm.ok) console.warn("[scene-fx] viewmodel motion target unavailable; the viewmodel does not blur");
             return vm.ok;
         };
+        /* The scene's depth for z-feathered effects (web_effects.c), copied
+         * once a view before its first feathered draw: effects write no depth,
+         * so it holds the world they fade into. The scene's own depth cannot
+         * be sampled while it is the target. It stays bound on unit 19, past
+         * the units the compositor binds. */
+        fx.featherDepth = function() {
+            var t = fx.t;
+            if (!t || !fx.drawing) return false;
+            var f = t.feather;
+            if (!f) {
+                f = t.feather = { ok: false, ready: false };
+                var unit = gl.getParameter(gl.ACTIVE_TEXTURE);
+                f.depth = gl.createTexture();
+                t.textures.push(f.depth);
+                gl.activeTexture(gl.TEXTURE19);
+                gl.bindTexture(gl.TEXTURE_2D, f.depth);
+                gl.texStorage2D(gl.TEXTURE_2D, 1, gl.DEPTH24_STENCIL8, fx.width, fx.height);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+                gl.activeTexture(unit);
+                f.fbo = gl.createFramebuffer();
+                t.framebuffers.push(f.fbo);
+                gl.bindFramebuffer(gl.FRAMEBUFFER, f.fbo);
+                gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT, gl.TEXTURE_2D, f.depth, 0);
+                f.ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+                gl.bindFramebuffer(gl.FRAMEBUFFER, t.ms || t.scene);
+                if (!f.ok) console.warn("[scene-fx] effects' depth copy unavailable; effects are not feathered");
+            }
+            if (!f.ok) return false;
+            if (!f.ready) {
+                var scissor = gl.isEnabled(gl.SCISSOR_TEST);
+                if (scissor) gl.disable(gl.SCISSOR_TEST);
+                gl.bindFramebuffer(gl.READ_FRAMEBUFFER, t.ms || t.scene);
+                gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, f.fbo);
+                gl.blitFramebuffer(0, 0, fx.width, fx.height, 0, 0, fx.width, fx.height, gl.DEPTH_BUFFER_BIT, gl.NEAREST);
+                gl.bindFramebuffer(gl.FRAMEBUFFER, t.ms || t.scene);
+                if (scissor) gl.enable(gl.SCISSOR_TEST);
+                f.ready = true;
+            }
+            return true;
+        };
         /* Normalized Gaussian over texels 0..2 * pairs, folded into bilinear taps:
          * [center weight, pair weights...] and [pair offsets...]. */
         fx.kernel = function(sigma, pairs) {
@@ -906,6 +997,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
         fx.compose = function(o, mesh) {
             var t = fx.t, P = fx.programs, H = HEAPF32;
             var scaled = fx.unscale();
+            fx.drawing = false;
             if (!t || !P) return;
             var w = fx.width, h = fx.height, qw = t.qw, qh = t.qh, ew = t.ew, eh = t.eh;
             var glow0 = H[o], glow1 = H[o + 1], ads = H[o + 6], motion = H[o + 18], backdrop = H[o + 33];
@@ -914,13 +1006,14 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             /* Any window the stencil cut also needs its glass. */
             var lens = lensPresence > 0, scopeBlur = lens && lensBlur > 0.004;
             var glow = glow0 > 0 || glow1 > 0, blurBehind = backdrop > 0.004, dof = ads > 0.004 || blurBehind || lens;
-            var ao = H[o + 55] > 0;
+            var ao = H[o + 55] > 0, haze = H[o + 62] > 0;
             var lines = h / 480;
             var program = gl.getParameter(gl.CURRENT_PROGRAM);
             var vao = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
             var unit = gl.getParameter(gl.ACTIVE_TEXTURE);
             var viewport = gl.getParameter(gl.VIEWPORT);
-            var caps = [gl.SCISSOR_TEST, gl.BLEND, gl.DEPTH_TEST, gl.CULL_FACE, gl.STENCIL_TEST, gl.POLYGON_OFFSET_FILL];
+            var caps = [gl.SCISSOR_TEST, gl.BLEND, gl.DEPTH_TEST, gl.CULL_FACE, gl.STENCIL_TEST, gl.POLYGON_OFFSET_FILL,
+                gl.SAMPLE_ALPHA_TO_COVERAGE];
             var enabled = [];
             for (var c = 0; c < caps.length; ++c) {
                 enabled.push(gl.isEnabled(caps[c]));
@@ -931,7 +1024,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 gl.bindFramebuffer(gl.READ_FRAMEBUFFER, t.ms);
                 gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, t.scene);
                 gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h,
-                    dof || motion > 0 || vm || ao ? (gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT) : gl.COLOR_BUFFER_BIT, gl.NEAREST);
+                    dof || motion > 0 || vm || ao || haze ? (gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT) : gl.COLOR_BUFFER_BIT, gl.NEAREST);
                 gl.invalidateFramebuffer(gl.READ_FRAMEBUFFER, fx.discard);
             }
             /* Reading the write masks back would stall on the GPU process. Every
@@ -1053,6 +1146,13 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 gl.uniform4f(C.u_lens, 0, 0, 0, 0);
             }
             gl.uniform4f(C.u_aoMix, ao ? 1 : 0, 0.5 / t.hw, 0.5 / t.hh, 0);
+            gl.uniform4f(C.u_haze, H[o + 59], H[o + 60], H[o + 61], haze ? H[o + 62] : 0);
+            if (haze) {
+                gl.uniform3f(C.u_hazeUp, H[o + 63], H[o + 64], H[o + 65]);
+                gl.uniform3f(C.u_hazeSun, H[o + 66], H[o + 67], H[o + 68]);
+                gl.uniform3f(C.u_hazeSunColor, H[o + 69], H[o + 70], H[o + 71]);
+                gl.uniform3f(C.u_hazeProj, H[o + 57], H[o + 58], H[o + 72]);
+            }
             var sources = [t.color, t.e[1], t.depth, t.q[0], t.q[1], vm ? vm.smear : null, vm ? vm.mesh : null, ao ? t.ao[1] : null];
             for (var s = 0; s < sources.length; ++s) fx.texture(s, sources[s]);
             if (scaled) {
@@ -1087,13 +1187,15 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
     fx.unscale();
     gl.bindFramebuffer(gl.FRAMEBUFFER, fx.t.ms || fx.t.scene);
     if (width !== screenWidth || height !== screenHeight) fx.scale(screenWidth, screenHeight);
+    fx.drawing = true;
+    if (fx.t.feather) fx.t.feather.ready = false;
     return 1;
 });
 
 EM_JS(void, WebSceneFx_Compose, (const float *params, const float *mesh), {
     var fx = Module.cod2SceneFx;
     if (fx && fx.t) fx.compose(params >>> 2, mesh >>> 2);
-    else if (fx) fx.unscale();
+    else if (fx) { fx.unscale(); fx.drawing = false; }
 });
 
 /* Marks the scope's glass in the scene's stencil, bit 0x80, before the
@@ -1175,6 +1277,11 @@ static int WebSceneFx_AoEnabled(void)
     return WebSceneFx_Enabled(r_ssao) && !WebSceneFx_Enabled(r_fullbright);
 }
 
+static int WebSceneFx_HazeEnabled(void)
+{
+    return WebSceneFx_Enabled(r_atmosphere) && !WebSceneFx_Enabled(r_fullbright) && s_hazeDensity > 0.0f;
+}
+
 static int WebSceneFx_Samples(void)
 {
     return r_aaSamples ? r_aaSamples->current.integer : 1;
@@ -1224,6 +1331,44 @@ void WebSceneFx_SetBackdropGray(float gray)
 void WebSceneFx_SetGray(float grayFrac)
 {
     s_grayFrac = WebSceneFx_Clamp(grayFrac, 0.0f, 1.0f);
+}
+
+/* The scene's exponential fog, its color and density per unit (0 without
+ * fog), and the direction toward its sun and the sun's color, for the haze.
+ * A broken value turns the haze off, or its glow. */
+void WebSceneFx_SetAtmosphere(const float *fogColor, float fogDensity, const float *sunDirection, const float *sunColor)
+{
+    float length = 0.0f;
+    int i, valid = fogColor != NULL;
+
+    for (i = 0; valid && i < 3; ++i)
+        valid = isfinite(fogColor[i]);
+    s_hazeDensity = valid ? WebSceneFx_Clamp(fogDensity, 0.0f, 0.01f) : 0.0f;
+    for (i = 0; i < 3; ++i)
+        s_hazeColor[i] = valid ? WebSceneFx_Clamp(fogColor[i], 0.0f, 1.0f) : 0.0f;
+    if (sunDirection && sunColor)
+        length = sqrtf(sunDirection[0] * sunDirection[0] + sunDirection[1] * sunDirection[1] +
+                       sunDirection[2] * sunDirection[2]);
+    valid = isfinite(length) && length > 0.0f;
+    for (i = 0; valid && i < 3; ++i)
+        valid = isfinite(sunColor[i]);
+    for (i = 0; i < 3; ++i) {
+        s_hazeSunWorld[i] = valid ? sunDirection[i] / length : 0.0f;
+        s_hazeSunColor[i] = valid ? WebSceneFx_Clamp(sunColor[i], 0.0f, 2.0f) : 0.0f;
+    }
+}
+
+/* The world's up and the sun's direction in the composed view's space: a view
+ * turns a world direction w into R w, R[j][i] = view[i * 4 + j]. */
+static void WebSceneFx_HazeView(void)
+{
+    const float *view = s_cameraView;
+    int j;
+
+    for (j = 0; j < 3; ++j) {
+        s_hazeUp[j] = view[8 + j];
+        s_hazeSun[j] = view[j] * s_hazeSunWorld[0] + view[4 + j] * s_hazeSunWorld[1] + view[8 + j] * s_hazeSunWorld[2];
+    }
 }
 
 /* The cgame's scope window for the scene about to render, as the floats of a
@@ -1732,12 +1877,28 @@ static void WebSceneFx_FillParams(float *params)
     params[SCENE_FX_AO_RADIUS] = SCENE_FX_AO_WORLD_RADIUS;
     params[SCENE_FX_AO_PROJECTION] = s_viewProjection[0];
     params[SCENE_FX_AO_PROJECTION + 1] = s_viewProjection[1];
+    memcpy(params + SCENE_FX_HAZE, s_hazeColor, sizeof(s_hazeColor));
+    params[SCENE_FX_HAZE_DENSITY] = WebSceneFx_HazeEnabled() && s_viewProjection[0] > 0.0f ?
+        fminf(s_hazeDensity * SCENE_FX_HAZE_SHARE, SCENE_FX_HAZE_MAX_DENSITY) : 0.0f;
+    memcpy(params + SCENE_FX_HAZE_UP, s_hazeUp, sizeof(s_hazeUp));
+    memcpy(params + SCENE_FX_HAZE_SUN, s_hazeSun, sizeof(s_hazeSun));
+    params[SCENE_FX_HAZE_SUN_COLOR] = s_hazeSunColor[0] * SCENE_FX_HAZE_SUN_GLOW;
+    params[SCENE_FX_HAZE_SUN_COLOR + 1] = s_hazeSunColor[1] * SCENE_FX_HAZE_SUN_GLOW;
+    params[SCENE_FX_HAZE_SUN_COLOR + 2] = s_hazeSunColor[2] * SCENE_FX_HAZE_SUN_GLOW;
+    params[SCENE_FX_HAZE_FALLOFF] = 1.0f / SCENE_FX_HAZE_SCALE_HEIGHT;
 }
 
 /* The mip bias the 3D draws of the composed view give their color maps. */
 float WebSceneFx_TextureLodBias(void)
 {
     return s_active ? s_lodBias : 0.0f;
+}
+
+/* The composed view's near clip times the infinite projection's depth scale,
+ * which takes its depth back to distance; 0 outside it. */
+float WebSceneFx_WorldNearClip(void)
+{
+    return s_active ? s_worldNearClip : 0.0f;
 }
 
 void WebSceneFx_EndView(void)
@@ -1773,6 +1934,7 @@ void WebSceneFx_BeginView(int x, int y, int width, int height, int screenWidth, 
     if (s_cameraPending && WebSceneFx_CameraValid()) {
         s_viewProjection[0] = s_cameraProjection[0];
         s_viewProjection[1] = s_cameraProjection[1];
+        WebSceneFx_HazeView();
     }
     WebSceneFx_TrackCamera();
     WebSceneFx_TrackViewmodel(sceneWidth, sceneHeight, nearClip);
@@ -1785,7 +1947,7 @@ void WebSceneFx_BeginView(int x, int y, int width, int height, int screenWidth, 
     scaled = sceneWidth != width || sceneHeight != height;
     if (!scaled && s_grayFrac <= 0.0f && s_vmMotion <= 0.0f && !WebSceneFx_GlowEnabled() && !WebSceneFx_Enabled(r_filmTweakEnable) && samples <= 1 &&
         !(WebSceneFx_Enabled(r_dof_enable) && s_adsFrac > 0.0f) && s_motionScale <= 0.0f && s_backdropFrac <= 0.0f &&
-        s_backdropGray <= 0.0f && !WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled())
+        s_backdropGray <= 0.0f && !WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled() && !WebSceneFx_HazeEnabled())
         return;
     s_nearClip = nearClip;
     s_worldNearClip = isfinite(worldNearClip) && worldNearClip > 0.0f ? worldNearClip : SCENE_FX_DEFAULT_WORLD_NEAR_CLIP;

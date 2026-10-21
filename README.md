@@ -38,7 +38,7 @@ two. The host can be a desktop machine or a Raspberry Pi 5.
 | **Fight with bots** | Up to 32 bots per room, three difficulties, navigation, cover and objectives across all five game modes. |
 | **Read the battlefield** | Circular minimap, shot indicators, hit markers, score popups, kill feed, team score panel, ammo display and redesigned scoreboard. |
 | **Feel the combat** | Sprint, cover penetration, S-Mine 44, remote C4, mounted MG42 heat, custom weapon balance and safer respawns. |
-| **See the difference** | WWII-style scopes, Reflex and Lens Sights, material lighting, real-time sun shadows, ambient occlusion, aim depth of field, motion blur and improved effects. |
+| **See the difference** | WWII-style scopes, Reflex and Lens Sights, material lighting, real-time sun shadows, ambient occlusion, distance haze, antialiased foliage, soft fire and smoke, aim depth of field, motion blur and improved effects. |
 | **Play your way** | Keyboard and mouse or a remappable controller with vibration, stick settings and optional aim assist. |
 | **Run your own matches** | In-game room creation, map rotation, custom rules, browser server list, persistent settings and Docker/Pi hosting. |
 
@@ -147,13 +147,18 @@ remain areas of active development. [Behavior, navigation and validation →](do
 
 ### Rendering beyond the original browser port
 
-The WebGL 2 renderer uses the original normal, specular and detail maps for
-surface relief, sunlight response, highlights and reflections on weapons and
-glossy surfaces. Players, bodies and other moving models cast real-time sun
-shadows, ambient occlusion darkens corners and contact points, and blended
-ground layers take the light of the surface under them. Softer baked shadow
-edges, map fog and model detail at twice its original distance improve the
-environments.
+The WebGL 2 renderer uses the original normal, specular and detail maps, at
+the DX9 renderer's full strength, for surface relief, sunlight response,
+highlights and reflections on weapons and glossy surfaces; grooves between
+stones and bricks darken in the shade. Players, bodies and other moving models
+cast real-time sun shadows, ambient occlusion darkens corners and contact
+points, and blended ground layers take the light of the surface under them.
+Softer baked shadow edges, map fog that thickens toward the ground and glows
+toward the sun, and model detail at twice its original distance improve the
+environments. Leaves, grass and hedges resolve their edges into the
+multisampled image and stay full in the distance, and fire, smoke and dust
+fade where they meet the world, as CoD2's DX9 renderer drew them, with fire
+burning hotter.
 
 Aim depth of field, world and weapon motion blur, visible ejected casings,
 reworked tracers, larger muzzle/grenade effects and nearby muzzle lighting add

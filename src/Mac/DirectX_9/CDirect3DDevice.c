@@ -13,8 +13,10 @@ extern void WebPointLights_Draw(const float *view, int enabled, int worldShadowE
                                int camoMap, int camoMask, float camoTiles, float camoReference, float lodBias,
                                float reflection);
 extern float WebSceneFx_TextureLodBias(void);
+extern float WebSceneFx_WorldNearClip(void);
 extern float g_webEntitySunVisibility;
 #include "web_materials.h"
+#include "web_effects.h"
 #include "headers/PC/gfx_d3d/r_weapon_camo.h"
 extern const dvar_t *r_materialLighting;
 extern const dvar_t *r_normalMap;
@@ -2483,6 +2485,22 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                 (int)camoMap, (int)camoMask, camoTiles, camoReference,
                 is2D ? 0.0f : WebSceneFx_TextureLodBias(),
                 r_reflections && r_reflections->current.enabled ? 1.0f : 0.0f);
+        }
+        {
+            /* Multisample coverage for alpha-tested surfaces, and the feather
+             * and heat of effects (web_effects.c). */
+            extern void *imp_tess;
+            WebEffectState effectState;
+            effectState.is2D = is2D || stage0Target != 0x0DE1;
+            effectState.alphaTest = g_alphaTestEnable != 0;
+            effectState.alphaFunc = dev->alphaFuncVal;
+            effectState.alphaRef = dev->alphaRef;
+            effectState.alphaBlend = dev->alphaBlendEnable;
+            effectState.depthWrite = dev->zWriteEnable != 0;
+            effectState.srcBlend = dev->srcBlend;
+            effectState.dstBlend = dev->destBlend;
+            effectState.fullDepthRange = dev->viewportMinZ == 0.0f && dev->viewportMaxZ == 1.0f;
+            WebEffects_Apply(((materialCommands_t *)imp_tess)->material, &effectState, WebSceneFx_WorldNearClip());
         }
 #endif
 #ifdef __EMSCRIPTEN__

@@ -135,6 +135,19 @@ try {
           check(toward[0] > flat[0] + 8 && away[0] < flat[0] - 8, `${kind}: relief along ${axis} faces the sun (${away[0]} < ${flat[0]} < ${toward[0]})`);
           close(flat, L.map(l => base * 2 * l), 1, `${kind}: a flat normal map along ${axis} keeps the bake`);
         }
+        // COD2_RELIEF_CAVITY: a map leaning 45 degrees from the surface takes
+        // 0.85 of the indirect light where the bake sees no sun; in sunlight
+        // only the sun's incidence shades it.
+        const cavityLit = {surface: [1, 0, 1, 1], shading: 0, sun: [0, 0, 1]};
+        lightmap(0);
+        texture(6, 16, solid([128, 128, 255, 128]));
+        const shadeFlat = center(draw(after, cavityLit));
+        texture(6, 16, solid([128, 128, 255, 255]));
+        close(center(draw(after, cavityLit)), L.map(l => base * 2 * l * (0.5 + 0.5 * Math.SQRT1_2)), 2,
+          `${kind}: a leaning map takes less indirect light in the shade (flat ${shadeFlat})`);
+        lightmap(255);
+        close(center(draw(after, cavityLit)), L.map((l, c) => base * 2 * (l - S[c] + S[c] * Math.SQRT1_2)), 2,
+          `${kind}: in sunlight only the sun's incidence shades it`);
         texture(6, 16, solid([128, 128, 255, 128]));
         // Highlights: the sun's, in sunlight only, scaled by the map.
         const spec = center(draw(after, {surface: [0, 1, 1, 1], shading: 1, reflection: 0}));
