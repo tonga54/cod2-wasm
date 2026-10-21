@@ -224,7 +224,8 @@ void CG_BulletHitClientEvent(int sourceEntityNum, vec_t *position, int surfType,
 void CG_AddPlayerWeapon(GfxEntity *parent, weapProjExposion_t (*ps)[8], centity_t *cent, qboolean bDrawGun);
 void CG_AddViewWeapon(weapProjExposion_t (*ps)[8]);
 void CG_BulletHitEvent(int sourceEntityNum, vec_t *position, vec_t *normal, vec_t *reflected, int surfType, int event);
-void CG_DrawTracer(vec_t *start, vec_t *finish);
+unsigned int CG_TracerSeed(const trajectory_t *pos);
+void CG_DrawTracer(vec_t *start, vec_t *finish, unsigned int seed);
 void CG_WeaponSlot_f(qboolean next, qboolean ignoreEmpty);
 qboolean CG_SelectFirstWeaponNotInSlot(qboolean bNext, qboolean bIgnoreEmpty);
 void CG_CycleWeap(qboolean bNext, qboolean bIgnoreEmpty);

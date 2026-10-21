@@ -297,8 +297,10 @@ retail CoD2:
 - **Combat presentation within the existing render budget:** aiming preserves
   the weapon's original texture detail; material blur no longer lowers its mip
   resolution. Lighting reuses the same unmodified base texture sample.
-  Tracers face the camera from their actual position, with a tapered, fading
-  tail using the same four vertices. Near-miss audio remains audible when
+  Tracers face the camera from their actual position as a tapered ribbon of
+  eight segments, 100 units long, that bends a little and differently for every
+  round (see [Shorter, bent tracers](GRAPHICS_2026-10-16.md#shorter-bent-tracers-october-21-2026)).
+  Near-miss audio remains audible when
   visual tracers are disabled. The four default FX light slots prioritize
   camera proximity, radius and brightness. Shared lighting/shadow transforms
   and active texture attributes avoid redundant browser work; resolution,

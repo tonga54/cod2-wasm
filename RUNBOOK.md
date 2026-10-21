@@ -5833,3 +5833,27 @@ Validation:
   `out/motion-blur-2-qa`.
 - The full `test-static.sh` was not run; the scripts above are the ones that
   read the compositor.
+
+## Shorter, bent tracers — 2026-10-21
+
+The owner found the tracer's yellow line far too long, seeming to run from the
+muzzle to the hit, and almost perfectly straight. The browser streak is now
+100 units long instead of 240, 15 ms of the round's flight instead of 37, and
+it is a ribbon of eight segments whose centre line bends across itself by a
+share of its length on screen: a bow of 60 to 100% of 7% either way, a smaller
+S and a ripple, mixed by a seed fixed for each round's flight, with both ends
+on the shot's line. The joints are spaced evenly as seen, so the bend is an
+arc from the gun as well as from the side. A tracer costs nine polygons instead
+of two. Details in `docs/GRAPHICS_2026-10-16.md`, "Shorter, bent tracers".
+
+Validation:
+
+- `test-combat-presentation.py` passes: 1,961 drawn streaks, 20,000 seeds,
+  153 frames of the length limit, and 22 mutants fail.
+- The changed files compile under Emscripten with `-Wall -Wextra` without new
+  warnings, the web client builds, and the full `test-static.sh` passes on
+  that build.
+- On an isolated Carentan stack, the old client and the new from the hip with
+  the MP44, at the normal tracer speed and slowed: the old tracer was a
+  straight line from the muzzle to the crates, the new a short curved streak
+  ending well short of them. Captures are in `out/tracer-qa`.

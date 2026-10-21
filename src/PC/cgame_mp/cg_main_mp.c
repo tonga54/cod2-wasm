@@ -1000,7 +1000,7 @@ static inline __attribute__((always_inline)) void CG_RegisterDvars(void)
     cg_tracerChance = Dvar_RegisterFloat("cg_tracerchance", 0.85f, 0.0f, 1.0f, 0x1080);
     cg_tracerWidth = Dvar_RegisterFloat("cg_tracerwidth", 2.0f, 0.0f, 8.0f, 0x1080);
     cg_tracerSpeed = Dvar_RegisterFloat("cg_tracerSpeed", 6500.0f, 0.0f, FLT_MAX, 0x1080);
-    cg_tracerLength = Dvar_RegisterFloat("cg_tracerlength", 240.0f, 0.0f, FLT_MAX, 0x1080);
+    cg_tracerLength = Dvar_RegisterFloat("cg_tracerlength", 100.0f, 0.0f, FLT_MAX, 0x1080);
 #else
     cg_tracerChance = Dvar_RegisterFloat("cg_tracerchance", 0.400000006f, 0.0f, 1.0f, 0x1080);
     cg_tracerWidth = Dvar_RegisterFloat("cg_tracerwidth", 0.800000012f, 0.0f, 8.0f, 0x1080);

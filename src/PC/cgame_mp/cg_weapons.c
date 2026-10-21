@@ -270,7 +270,8 @@ void CG_BulletHitClientEvent(int sourceEntityNum, vec_t *position, int surfType,
 void CG_AddPlayerWeapon(GfxEntity *parent, playerState_t *ps, centity_t *cent, qboolean bDrawGun);
 void CG_AddViewWeapon(playerState_t *ps);
 void CG_BulletHitEvent(int sourceEntityNum, vec_t *position, vec_t *normal, vec_t *reflected, int surfType, int event);
-void CG_DrawTracer(vec_t *start, vec_t *finish);
+unsigned int CG_TracerSeed(const trajectory_t *pos);
+void CG_DrawTracer(vec_t *start, vec_t *finish, unsigned int seed);
 void CG_WeaponSlot_f(qboolean next, qboolean ignoreEmpty);
 qboolean CG_SelectFirstWeaponNotInSlot(qboolean bNext, qboolean bIgnoreEmpty);
 void CG_CycleWeap(qboolean bNext, qboolean bIgnoreEmpty);
@@ -1985,7 +1986,34 @@ static float CG_TracerScaleForDistance(float dist, float width, float tracerScal
     return width * tracerScale;
 }
 
+static unsigned int CG_TracerHash(unsigned int x)
+{
+    x ^= x >> 16;
+    x *= 0x7feb352du;
+    x ^= x >> 15;
+    x *= 0x846ca68bu;
+    x ^= x >> 16;
+    return x;
+}
+
+/* The same every frame of a round's flight, and different from round to round. */
+unsigned int CG_TracerSeed(const trajectory_t *pos)
+{
+    unsigned int words[7];
+    unsigned int seed = 0;
+
+    memcpy(&words[0], &pos->trTime, sizeof(words[0]));
+    memcpy(&words[1], pos->trBase, 3 * sizeof(words[0]));
+    memcpy(&words[4], pos->trDelta, 3 * sizeof(words[0]));
+    for (int i = 0; i < 7; ++i)
+        seed = CG_TracerHash(seed ^ words[i]);
+    return seed;
+}
+
 #ifdef __EMSCRIPTEN__
+#define CG_TRACER_SEGMENTS 8
+#define CG_TRACER_BEND 0.07f
+
 static void CG_SetTracerVertex(GfxWorldVertex *vert, const vec_t *center, const vec_t *axis, float offset,
                                unsigned int color, float s, float t)
 {
@@ -1997,9 +2025,29 @@ static void CG_SetTracerVertex(GfxWorldVertex *vert, const vec_t *center, const 
     vert->lmapCoord[0] = s;
     vert->lmapCoord[1] = t;
 }
+
+/* -1 to 1. */
+static float CG_TracerRandom(unsigned int seed, unsigned int index)
+{
+    return (float)(CG_TracerHash(seed + index * 0x9e3779b9u) >> 8) * (1.0f / 8388608.0f) - 1.0f;
+}
+
+/* How far the streak bends across itself at frac of the way along it as seen,
+ * in shares of its length on screen: a bow one way or the other, a smaller S
+ * and a ripple, mixed by the round's seed. Both ends stay on the shot's line. */
+static float CG_TracerBend(unsigned int seed, float frac)
+{
+    const float pi = 3.14159265f;
+    const float bow = CG_TracerRandom(seed, 0);
+    const float s = CG_TracerRandom(seed, 1);
+    const float ripple = CG_TracerRandom(seed, 2);
+
+    return CG_TRACER_BEND * ((bow < 0.0f ? 0.4f * bow - 0.6f : 0.4f * bow + 0.6f) * sinf(pi * frac) +
+                             0.5f * s * sinf(2.0f * pi * frac) + 0.25f * ripple * sinf(3.0f * pi * frac));
+}
 #endif
 
-void CG_DrawTracer(vec_t *start, vec_t *finish)
+void CG_DrawTracer(vec_t *start, vec_t *finish, unsigned int seed)
 {
     vec3_t dir;
     vec3_t right;
@@ -2052,12 +2100,63 @@ void CG_DrawTracer(vec_t *start, vec_t *finish)
      * its length: seen from the gun, most of the line on screen is the few
      * units nearest the muzzle, so any fade there hides the shot leaving the
      * barrel. */
-    CG_SetTracerVertex(&verts[0], finish, right, finishWidth, 0xffffffff, 0.5f, 1.0f);
-    CG_SetTracerVertex(&verts[1], finish, right, -finishWidth, 0xffffffff, 0.5f, 0.0f);
-    CG_SetTracerVertex(&verts[2], start, right, -startWidth, 0xffffffff, 0.5f, 0.0f);
-    CG_SetTracerVertex(&verts[3], start, right, startWidth, 0xffffffff, 0.5f, 1.0f);
-    CL_DefaultVertexFrames(4, verts);
-    CL_AddPolyToScene(cgs->media.tracerMaterial, 0x1f, 4, verts);
+    {
+        vec3_t points[CG_TRACER_SEGMENTS + 1];
+        vec3_t sides[CG_TRACER_SEGMENTS + 1];
+        float widths[CG_TRACER_SEGMENTS + 1];
+        vec3_t toFinish, normal;
+        const float startDist = Vec3Distance(start, viewOrg);
+        const float finishDist = Vec3Distance(finish, viewOrg);
+        float angle;
+
+        for (int i = 0; i < 3; ++i)
+            toFinish[i] = finish[i] - viewOrg[i];
+        Vec3Cross(toBeam, toFinish, normal);
+        angle = atan2f(sqrtf(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]),
+                       toBeam[0] * toFinish[0] + toBeam[1] * toFinish[1] + toBeam[2] * toFinish[2]);
+        for (int k = 0; k <= CG_TRACER_SEGMENTS; ++k) {
+            const float frac = (float)k / CG_TRACER_SEGMENTS;
+            /* Joints evenly spaced as seen: from the gun the streak runs away
+             * from the eye, so evenly spaced in the world most of them would
+             * crowd its far end on screen. */
+            const float nearPart = startDist * sinf(frac * angle);
+            const float farPart = finishDist * sinf((1.0f - frac) * angle);
+            const float along = nearPart + farPart > 0.0f ? nearPart / (nearPart + farPart) : frac;
+            float offset;
+
+            for (int i = 0; i < 3; ++i)
+                points[k][i] = start[i] + along * dir[i];
+            /* right is perpendicular to every ray from the eye to the straight
+             * streak, so the bend is a share of the streak's length on screen
+             * whether it is seen end-on from the gun or side-on. */
+            offset = CG_TracerBend(seed, frac) * angle * Vec3Distance(points[k], viewOrg);
+            for (int i = 0; i < 3; ++i)
+                points[k][i] += offset * right[i];
+            widths[k] = startWidth + along * (finishWidth - startWidth);
+        }
+        for (int k = 0; k <= CG_TRACER_SEGMENTS; ++k) {
+            const vec_t *ahead = points[k < CG_TRACER_SEGMENTS ? k + 1 : k];
+            const vec_t *behind = points[k > 0 ? k - 1 : k];
+            vec3_t tangent, toPoint;
+
+            for (int i = 0; i < 3; ++i) {
+                tangent[i] = ahead[i] - behind[i];
+                toPoint[i] = points[k][i] - viewOrg[i];
+            }
+            Vec3Cross(tangent, toPoint, sides[k]);
+            if (Vec3Normalize(sides[k]) < 0.0001f)
+                for (int i = 0; i < 3; ++i)
+                    sides[k][i] = right[i];
+        }
+        for (int k = 0; k < CG_TRACER_SEGMENTS; ++k) {
+            CG_SetTracerVertex(&verts[0], points[k + 1], sides[k + 1], widths[k + 1], 0xffffffff, 0.5f, 1.0f);
+            CG_SetTracerVertex(&verts[1], points[k + 1], sides[k + 1], -widths[k + 1], 0xffffffff, 0.5f, 0.0f);
+            CG_SetTracerVertex(&verts[2], points[k], sides[k], -widths[k], 0xffffffff, 0.5f, 0.0f);
+            CG_SetTracerVertex(&verts[3], points[k], sides[k], widths[k], 0xffffffff, 0.5f, 1.0f);
+            CL_DefaultVertexFrames(4, verts);
+            CL_AddPolyToScene(cgs->media.tracerMaterial, 0x1f, 4, verts);
+        }
+    }
 
     {
         const float glow = finishWidth * 2.0f;
@@ -2074,6 +2173,7 @@ void CG_DrawTracer(vec_t *start, vec_t *finish)
         CL_AddPolyToScene(cgs->media.tracerMaterial, 0x1f, 4, verts);
     }
 #else
+    (void)seed;
     verts[0].xyz[0] = finish[0] + right[0] * finishWidth;
     verts[0].xyz[1] = finish[1] + right[1] * finishWidth;
     verts[0].xyz[2] = finish[2] + right[2] * finishWidth;
