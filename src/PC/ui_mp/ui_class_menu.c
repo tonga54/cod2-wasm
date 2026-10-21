@@ -91,6 +91,12 @@ extern void Web_ClassesSave(const char *player, const char *lines, int generatio
 #define CAC_PICK_HEIGHT 25.0f
 #define CAC_PICK_WIDTH 217.0f
 #define CAC_PICK_VISIBLE 8
+/* Over it, the slot's weapon kinds as Select Class's tabs from the title's
+ * left: the shown kind's from 94 down, the others' from 96.5, all ending 12
+ * above the list. */
+#define CAC_PICK_TAB_TOP 94.0f
+#define CAC_PICK_TAB_IDLE_TOP 96.5f
+#define CAC_PICK_TAB_BOTTOM 110.0f
 /* Stat rows at the right edge, 17 apart, bars 104 long. */
 #define CAC_STAT_TOP 300.0f
 #define CAC_STAT_ROW 17.0f
@@ -275,6 +281,10 @@ static struct {
 static const char *const s_cacGroups[] = {
     "Submachine Gun", "Rifle", "Automatic Rifle", "Sniper Rifle", "Shotgun", "Pistol",
     "Lethal Fragmentation Grenade", "Tactical Smoke Grenade", "Lethal Proximity Mine", "Lethal Remote Charge",
+};
+/* The guns' kinds on the weapon list's tabs. */
+static const char *const s_cacGroupTabs[] = {
+    "SUBMACHINE GUNS", "RIFLES", "AUTOMATIC RIFLES", "SNIPER RIFLES", "SHOTGUNS", "PISTOLS",
 };
 static const char *const s_cacNations[] = { "United States", "United Kingdom", "Soviet Union", "Germany", NULL };
 static const char *const s_cacSlots[] = { "Primary", "Secondary", "Lethal", "Tactical" };
@@ -845,6 +855,45 @@ static int Cac_SlotCandidates(int slot, int *indexes)
     return ClassData_SlotWeapons(slot, indexes, 64);
 }
 
+/* The kinds among the slot's candidates, in table order; the count. */
+static int Cac_SlotGroups(int slot, int *groups)
+{
+    int indexes[64], count = Cac_SlotCandidates(slot, indexes), found = 0, i, j;
+
+    for (i = 0; i < count; i++) {
+        for (j = 0; j < found && groups[j] != g_classWeapons[indexes[i]].group; j++)
+            ;
+        if (j == found)
+            groups[found++] = g_classWeapons[indexes[i]].group;
+    }
+    return found;
+}
+
+/* The kind of one of the slot's candidates, or -1. */
+static int Cac_CandidateGroup(int slot, int candidate)
+{
+    int indexes[64], count = Cac_SlotCandidates(slot, indexes);
+
+    return candidate >= 0 && candidate < count ? g_classWeapons[indexes[candidate]].group : -1;
+}
+
+/* The slot's candidates of a kind in table order, as indexes among all its
+ * candidates; the count, and in row the place of candidate among them, or 0. */
+static int Cac_GroupCandidates(int slot, int group, int candidate, int *candidates, int *row)
+{
+    int indexes[64], count = Cac_SlotCandidates(slot, indexes), found = 0, i;
+
+    *row = 0;
+    for (i = 0; i < count; i++) {
+        if (g_classWeapons[indexes[i]].group != group)
+            continue;
+        if (i == candidate)
+            *row = found;
+        candidates[found++] = i;
+    }
+    return found;
+}
+
 /* The attachments the class's gun in the slot takes, in table order. */
 static int Cac_AttachmentCandidates(const ClassLoadout *loadout, int slot, int *attachments)
 {
@@ -897,9 +946,34 @@ static void Cac_OpenPicker(int slot)
 
     s_cac.pickSlot = slot;
     s_cac.pickFocus = Cac_CandidateOf(slot, loadout->weapon[slot]);
-    s_cac.pickScroll = s_cac.pickFocus - CAC_PICK_VISIBLE / 2;
+    s_cac.pickScroll = 0;
     s_cac.screen = slot <= CLASS_SLOT_SECONDARY ? CAC_SCREEN_WEAPONS : CAC_SCREEN_EQUIPMENT;
     s_cac.hover = -1;
+}
+
+/* The weapon list on another of the slot's kinds: on the class's weapon when
+ * it is of that kind, else on the kind's first. */
+static void Cac_ShowGroup(int group)
+{
+    int equipped = Cac_CandidateOf(s_cac.pickSlot, s_cac.classes[s_cac.classFocus].weapon[s_cac.pickSlot]);
+    int candidates[64], row, count = Cac_GroupCandidates(s_cac.pickSlot, group, equipped, candidates, &row);
+
+    if (!count || group == Cac_CandidateGroup(s_cac.pickSlot, s_cac.pickFocus))
+        return;
+    s_cac.pickFocus = candidates[row];
+    s_cac.pickScroll = 0;
+}
+
+/* The slot's next or previous kind, around. */
+static void Cac_CycleGroup(int delta)
+{
+    int groups[64], count = Cac_SlotGroups(s_cac.pickSlot, groups), i;
+    int group = Cac_CandidateGroup(s_cac.pickSlot, s_cac.pickFocus);
+
+    for (i = 0; i < count && groups[i] != group; i++)
+        ;
+    if (count)
+        Cac_ShowGroup(groups[(i + delta + count) % count]);
 }
 
 /* The grid opens on the attachment in the box, or the first. */
@@ -1149,6 +1223,13 @@ static void Cac_Move(int delta)
     case CAC_SCREEN_CAMO:
         s_cac.camoFocus = (s_cac.camoFocus + delta + WEAPON_CAMO_COUNT) % WEAPON_CAMO_COUNT;
         break;
+    case CAC_SCREEN_WEAPONS:
+        /* Through the shown kind's weapons, around. */
+        count = Cac_GroupCandidates(s_cac.pickSlot, Cac_CandidateGroup(s_cac.pickSlot, s_cac.pickFocus),
+                                    s_cac.pickFocus, indexes, &i);
+        if (count)
+            s_cac.pickFocus = indexes[(i + delta + count) % count];
+        break;
     default:
         count = Cac_SlotCandidates(s_cac.pickSlot, indexes);
         s_cac.pickFocus = (s_cac.pickFocus + delta + count) % count;
@@ -1192,6 +1273,9 @@ static void Cac_Navigate(int key)
         Cac_OpenPicker(s_cac.pickSlot == CLASS_SLOT_LETHAL ? CLASS_SLOT_TACTICAL : CLASS_SLOT_LETHAL);
     } else if (s_cac.screen == CAC_SCREEN_CAMO && (key == CAC_KEY_UP || key == CAC_KEY_DOWN)) {
         Cac_CamoRows(key == CAC_KEY_UP ? -1 : 1);
+    } else if (!vertical && s_cac.screen == CAC_SCREEN_WEAPONS) {
+        /* The kinds' tabs lie side by side; Tab goes to the next. */
+        Cac_CycleGroup(backward ? -1 : 1);
     } else {
         Cac_Move(key == CAC_KEY_UP || key == CAC_KEY_LEFT || key == CAC_KEY_WHEEL_UP ? -1 : 1);
     }
@@ -1251,7 +1335,9 @@ static void Cac_FocusHover(void)
         s_cac.attachFocus = s_cac.hover;
         break;
     default:
-        s_cac.pickFocus = s_cac.hover;
+        /* Over a kind's tab, the focus stays. */
+        if (s_cac.hover < CAC_HOVER_TAB)
+            s_cac.pickFocus = s_cac.hover;
         break;
     }
 }
@@ -1322,7 +1408,9 @@ static void Cac_Key(displayContextDef_t *dc, int key)
         Cac_Activate(dc);
         break;
     case CAC_KEY_MOUSE1:
-        if (s_cac.hover >= CAC_HOVER_TAB) {
+        if (s_cac.screen == CAC_SCREEN_WEAPONS && s_cac.hover >= CAC_HOVER_TAB) {
+            Cac_ShowGroup(s_cac.hover - CAC_HOVER_TAB);
+        } else if (s_cac.hover >= CAC_HOVER_TAB) {
             s_cac.tab = s_cac.hover - CAC_HOVER_TAB;
         } else if (s_cac.screen == CAC_SCREEN_EDIT && s_cac.hover >= CAC_HOVER_CAMO) {
             Cac_OpenCamo(s_cac.hover - CAC_HOVER_CAMO);
@@ -1806,42 +1894,74 @@ static void Cac_PaintAttachments(displayContextDef_t *dc)
     Cac_Stats(weapon, mask, preview);
 }
 
+/* A tab as Select Division's: the chosen one filled cream with dark Bold
+ * capitals, another framed with Regular ones in the idle gray, each centred. */
+static void Cac_Tab(const CacRect *tab, const char *label, int chosen)
+{
+    float cap = chosen ? CAC_SELECT_TAB_CAP : CAC_SELECT_TAB_IDLE_CAP;
+    float tracking = chosen ? CAC_SELECT_TAB_TRACKING : CAC_SELECT_TAB_IDLE_TRACKING;
+
+    if (chosen)
+        Cac_Fill(tab, s_cacSelectTab);
+    else
+        Cac_FrameWidth(tab, s_cacSelectTabEdge, CAC_SELECT_LINE);
+    Cac_Text(label, chosen, tab->x + 0.5f * (tab->w - UI_WWIIMenu_Width(label, chosen, cap, tracking)),
+             tab->y + 0.5f * (tab->h + cap), tab->horz, cap, tracking,
+             chosen ? s_cacSelectTabText : UI_WWIIMenu_Color(WWII_COLOR_IDLE));
+}
+
+/* One kind of the slot's weapons at a time, under the slot's kinds' tabs. */
 static void Cac_PaintWeapons(displayContextDef_t *dc)
 {
     const ClassLoadout *loadout = &s_cac.classes[s_cac.classFocus];
-    int indexes[64], count = Cac_SlotCandidates(s_cac.pickSlot, indexes), i;
+    int indexes[64], groups[64], rows[64], focusRow, i;
+    int group = Cac_CandidateGroup(s_cac.pickSlot, s_cac.pickFocus);
+    int groupCount = Cac_SlotGroups(s_cac.pickSlot, groups);
+    int rowCount = Cac_GroupCandidates(s_cac.pickSlot, group, s_cac.pickFocus, rows, &focusRow);
     char page[32];
     CacRect box;
 
+    Cac_SlotCandidates(s_cac.pickSlot, indexes);
     Cac_Title("Equip Weapon", s_cacSlots[s_cac.pickSlot]);
-    if (s_cac.pickFocus < s_cac.pickScroll)
-        s_cac.pickScroll = s_cac.pickFocus;
-    if (s_cac.pickFocus >= s_cac.pickScroll + CAC_PICK_VISIBLE)
-        s_cac.pickScroll = s_cac.pickFocus - CAC_PICK_VISIBLE + 1;
-    if (s_cac.pickScroll > count - CAC_PICK_VISIBLE)
-        s_cac.pickScroll = count - CAC_PICK_VISIBLE;
+    for (i = 0; i < groupCount; i++) {
+        int chosen = groups[i] == group;
+        float top = chosen ? CAC_PICK_TAB_TOP : CAC_PICK_TAB_IDLE_TOP;
+        CacRect tab = Cac_Rect(CAC_LEFT + (float)i * (CAC_SELECT_TAB_WIDTH + CAC_SELECT_TAB_GAP), top,
+                               CAC_SELECT_TAB_WIDTH, CAC_PICK_TAB_BOTTOM - top, CAC_ALIGN_LEFT);
+
+        if (Cac_Hover(dc, &tab))
+            s_cac.hover = CAC_HOVER_TAB + groups[i];
+        Cac_Tab(&tab, s_cacGroupTabs[groups[i]], chosen);
+    }
+    if (focusRow < s_cac.pickScroll)
+        s_cac.pickScroll = focusRow;
+    if (focusRow >= s_cac.pickScroll + CAC_PICK_VISIBLE)
+        s_cac.pickScroll = focusRow - CAC_PICK_VISIBLE + 1;
+    if (s_cac.pickScroll > rowCount - CAC_PICK_VISIBLE)
+        s_cac.pickScroll = rowCount - CAC_PICK_VISIBLE;
     if (s_cac.pickScroll < 0)
         s_cac.pickScroll = 0;
-    for (i = s_cac.pickScroll; i < count && i < s_cac.pickScroll + CAC_PICK_VISIBLE; i++) {
+    for (i = s_cac.pickScroll; i < rowCount && i < s_cac.pickScroll + CAC_PICK_VISIBLE; i++) {
         float top = CAC_PICK_TOP + (float)(i - s_cac.pickScroll) * CAC_PICK_ROW;
         CacRect row = Cac_Rect(0.0f, top, CAC_PICK_WIDTH, CAC_PICK_HEIGHT, CAC_ALIGN_LEFT);
-        int isFocus = i == s_cac.pickFocus, equipped = indexes[i] == loadout->weapon[s_cac.pickSlot];
+        int weapon = indexes[rows[i]];
+        int isFocus = rows[i] == s_cac.pickFocus, equipped = weapon == loadout->weapon[s_cac.pickSlot];
 
         if (Cac_Hover(dc, &row))
-            s_cac.hover = i;
+            s_cac.hover = rows[i];
         Cac_Fill(&row, isFocus ? s_cacRowFocus : s_cacRow);
         if (isFocus)
             Cac_Frame(&row, UI_WWIIMenu_Color(WWII_COLOR_GOLD));
-        Cac_Caps(Cac_WeaponName(indexes[i]), isFocus, CAC_LEFT + 16.0f, top + 15.5f, CAC_ALIGN_LEFT, 5.4f, 0.1f,
+        Cac_Caps(Cac_WeaponName(weapon), isFocus, CAC_LEFT + 16.0f, top + 15.5f, CAC_ALIGN_LEFT, 5.4f, 0.1f,
                  UI_WWIIMenu_Color(isFocus ? WWII_COLOR_WHITE : WWII_COLOR_IDLE));
         if (equipped)
             Cac_Caps("Equipped", 0, CAC_PICK_WIDTH - 8.0f - UI_WWIIMenu_Width("EQUIPPED", 0, 3.8f, 0.12f),
                      top + 15.0f, CAC_ALIGN_LEFT, 3.8f, 0.12f, UI_WWIIMenu_Color(WWII_COLOR_GOLD));
     }
-    snprintf(page, sizeof(page), "%d/%d", s_cac.pickFocus + 1, count);
+    snprintf(page, sizeof(page), "%d/%d", focusRow + 1, rowCount);
     Cac_Text(page, 0, CAC_LEFT, CAC_PICK_TOP + (float)CAC_PICK_VISIBLE * CAC_PICK_ROW + 10.0f, CAC_ALIGN_LEFT, 4.4f,
              0.0f, s_cacNote);
-    if (count <= 0)
+    if (rowCount <= 0)
         return;
     Cac_Detail(indexes[s_cac.pickFocus], CAC_DETAIL_LEFT, 135.0f, CAC_ALIGN_LEFT, CAC_DETAIL_WIDTH);
     box = Cac_Rect(-150.0f, 200.0f, 300.0f, 160.0f, CAC_ALIGN_CENTER);
@@ -2050,20 +2170,12 @@ static void Cac_PaintSelect(displayContextDef_t *dc)
     for (i = 0; i < CAC_TAB_COUNT; i++) {
         int chosen = i == s_cac.tab;
         float top = chosen ? CAC_SELECT_TAB_TOP : CAC_SELECT_TAB_IDLE_TOP;
-        float cap = chosen ? CAC_SELECT_TAB_CAP : CAC_SELECT_TAB_IDLE_CAP;
-        float tracking = chosen ? CAC_SELECT_TAB_TRACKING : CAC_SELECT_TAB_IDLE_TRACKING;
         CacRect tab = Cac_Rect(CAC_SELECT_TAB_LEFT + (float)i * (CAC_SELECT_TAB_WIDTH + CAC_SELECT_TAB_GAP), top,
                                CAC_SELECT_TAB_WIDTH, CAC_SELECT_TAB_BOTTOM - top, CAC_ALIGN_LEFT);
 
         if (Cac_Hover(dc, &tab))
             s_cac.hover = CAC_HOVER_TAB + i;
-        if (chosen)
-            Cac_Fill(&tab, s_cacSelectTab);
-        else
-            Cac_FrameWidth(&tab, s_cacSelectTabEdge, CAC_SELECT_LINE);
-        Cac_Text(tabs[i], chosen, tab.x + 0.5f * (tab.w - UI_WWIIMenu_Width(tabs[i], chosen, cap, tracking)),
-                 tab.y + 0.5f * (tab.h + cap), CAC_ALIGN_LEFT, cap, tracking,
-                 chosen ? s_cacSelectTabText : UI_WWIIMenu_Color(WWII_COLOR_IDLE));
+        Cac_Tab(&tab, tabs[i], chosen);
     }
     for (i = 0; i < CLASS_COUNT; i++) {
         float top = CAC_SELECT_ROW_TOP + (float)i * CAC_SELECT_ROW_PITCH;

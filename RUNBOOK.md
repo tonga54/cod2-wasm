@@ -5746,3 +5746,38 @@ Validation:
   without errors.
 - The full `test-static.sh` passed with this change on `b441c62`, together with
   the graphics change of `9090c70`. The files it hooks did not change since.
+
+## Weapons by kind in Equip Weapon — 2026-10-21
+
+The owner asked for the weapon list grouped by kind, submachine guns and the
+rest, instead of every gun in one list. Equip Weapon listed the slot's weapons
+in one scrolling list, the 21 primaries eight rows at a time.
+
+`ui_class_menu.c` now lists one kind at a time under a tab for each kind among
+the slot's weapons, from the class table's `group`: Submachine Guns (6), Rifles
+(7), Automatic Rifles (3), Sniper Rifles (4) and Shotguns (1) for the primary,
+Pistols (4) for the secondary. The tabs are Select Class's, between the title
+and the list, and `Cac_Tab` now draws both. The list opens on the class's gun.
+Left and right (a controller's too), Tab or a click on a tab show another kind,
+on the class's gun when it is one of them and otherwise on the kind's first; up,
+down and the wheel go around the shown kind, and the page counter counts within
+it. The pointer over a tab leaves the focus where it is. Modify Equipment, the
+class table, storage and what a match receives are unchanged.
+
+Validation:
+
+- `scripts/test-class-weapon-groups.py` (new) runs the production screen on a
+  recording UI: 16 cases, 20 mutants fail, and each kind's label fits its tab in
+  Barlow's metrics.
+- `test-class-select.py` passes with two of its mutants moved into `Cac_Tab`;
+  `test-class-camo.py`, `test-class-menu-pause.py` and
+  `test-owner-class-pictures.py` pass. The web client builds.
+- In the browser against an isolated stack, the primary's list opened on
+  Automatic Rifles with the MP44 equipped (3/3); right showed the four sniper
+  rifles, a click on Submachine Guns its six, left from there the Trench Gun
+  alone, and Rifles all seven without scrolling. The secondary's list showed
+  the one Pistols tab over the four pistols.
+- A click the browser automation sends without moving the pointer first acts
+  on what the pointer was over the frame before, as on every class screen: one
+  sent from a sniper rifle's row to a tab equipped that rifle. Clicked with the
+  pointer at rest, the tab showed its kind.

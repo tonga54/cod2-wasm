@@ -17,11 +17,17 @@ the menus already use, or with [pictures the owner keeps](#pictures).
   secondary and lethal over tactical. Under each gun a line names its
   camouflage, and under that are its attachment boxes: three for the primary,
   one for the secondary. The arrows move between the tiles and boxes as they
-  lie; Enter opens the slot's list. **Equip Weapon** lists the slot's weapons
-  from the left edge with a page counter, the weapon's picture, kind and
-  country, its retail description where the game has one, and five rating
-  bars. A different gun starts without attachments. **Modify Equipment** shows
-  the tactical and lethal rows; up and down switch rows.
+  lie; Enter opens the slot's list. **Equip Weapon** lists one kind of the
+  slot's weapons at a time from the left edge, under a tab for each of the
+  slot's kinds: Submachine Guns, Rifles, Automatic Rifles, Sniper Rifles and
+  Shotguns for the primary, Pistols for the secondary. It opens on the class's
+  gun. Left and right, Tab or a click on a tab show another kind, on the
+  class's gun when it is one of them and otherwise on the kind's first; up and
+  down go around the kind's guns, with a page counter. Beside the list are the
+  weapon's picture, kind and country, its retail description where the game
+  has one, and five rating bars. A different gun starts without attachments.
+  **Modify Equipment** shows the tactical and lethal rows; up and down switch
+  rows.
 - Under the primary and secondary tiles, a line names each gun's
   camouflage. F2, a controller's Y (WWII's Customize) or a click on the line
   opens **Primary Camouflage** or **Secondary Camouflage**: eleven swatches
@@ -736,6 +742,14 @@ on canvases the generator accepts, for the day a class weapon matches one.
   Custom classes and the backdrop request that Create a Class does not
   make. It checks the numbers against the capture's in Barlow's metrics and
   rejects 35 mutations.
+- `python3 scripts/test-class-weapon-groups.py` runs the production Equip
+  Weapon on a recording UI with sanitizers: a tab for each of the slot's kinds
+  in the table's order, the shown one chosen, over that kind's guns alone and
+  its page counter; left, right, Tab and a click on a tab moving to another
+  kind, on the class's gun or the kind's first; up, down and the wheel going
+  around a kind; the pointer focusing rows but not tabs; a gun of another kind
+  equipped and saved; and Modify Equipment's rows as before. Each kind's label
+  fits its tab in Barlow's metrics, and it rejects 20 mutations.
 - `python3 scripts/test-endgame.py` and `python3 scripts/test-web-scene-fx.py`
   check that a frame takes the backdrop the last one asked for, once, and that
   the compositor bounds and composes its gray; `node scripts/test-web-scene-fx.mjs`

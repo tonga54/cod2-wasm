@@ -616,10 +616,11 @@ mutants = [
     ('    Cac_SelectTile(right, CAC_SELECT_EQUIPMENT_TOP', '    Cac_SelectTile(CAC_SELECT_LOADOUT_LEFT, CAC_SELECT_EQUIPMENT_TOP'),
     ('    return wide > width && wide > 0.0f ? cap * width / wide : cap;', '    return cap;'),
     ('            left += CAC_SELECT_FOCUS_INDENT;\n', ''),
-    ('        else\n            Cac_FrameWidth(&tab, s_cacSelectTabEdge, CAC_SELECT_LINE);', ''),
+    ('    else\n        Cac_FrameWidth(tab, s_cacSelectTabEdge, CAC_SELECT_LINE);', ''),
     ('chosen ? s_cacSelectTabText : UI_WWIIMenu_Color(WWII_COLOR_IDLE)', 'UI_WWIIMenu_Color(WWII_COLOR_IDLE)'),
     ('        float top = chosen ? CAC_SELECT_TAB_TOP : CAC_SELECT_TAB_IDLE_TOP;', '        float top = CAC_SELECT_TAB_TOP;'),
-    ('                 tab.y + 0.5f * (tab.h + cap),', '                 tab.y + tab.h,'),
+    ('             tab->y + 0.5f * (tab->h + cap), tab->horz, cap, tracking,',
+     '             tab->y + tab->h, tab->horz, cap, tracking,'),
     ('static const vec4_t s_cacSelectShade = { 0.0f, 0.0f, 0.0f, 0.3f };',
      'static const vec4_t s_cacSelectShade = { 0.0f, 0.0f, 0.0f, 0.55f };'),
     # The layout's numbers against the capture's.
