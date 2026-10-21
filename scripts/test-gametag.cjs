@@ -46,6 +46,20 @@ assert.equal(storage.get('cod2-wasm-material-maps-v1'),'1');
 storage.set('cod2-wasm-profile-v1','seta r_picmip_bump "0"\nseta r_picmip_spec "2"');
 context.prepareProfile(ui,memfs);
 assert.ok(files.get(path).endsWith('seta r_picmip_bump "0"\nseta r_picmip_spec "2"\n'));
+// A profile saved with the old 1.5x model detail and grass distance takes the
+// new default once, then keeps whatever the player sets.
+storage.clear();
+storage.set('cod2-wasm-profile-v1','seta r_lodDistanceScale "1.5"\r\nseta snd_volume "0.5"');
+context.prepareProfile(ui,memfs);
+assert.ok(!files.get(path).includes('r_lodDistanceScale') && files.get(path).includes('seta snd_volume "0.5"'));
+assert.equal(storage.get('cod2-wasm-draw-distance-v1'),'1');
+storage.set('cod2-wasm-profile-v1','seta r_lodDistanceScale "1.5"');
+context.prepareProfile(ui,memfs);
+assert.ok(files.get(path).endsWith('seta r_lodDistanceScale "1.5"\n'));
+storage.clear();
+storage.set('cod2-wasm-profile-v1','seta r_lodDistanceScale "3"');
+context.prepareProfile(ui,memfs);
+assert.ok(files.get(path).endsWith('seta r_lodDistanceScale "3"\n'), 'a chosen distance stays');
 storage.clear();
 context.prepareProfile(ui,memfs);
 storage.set('cod2-wasm-gametag','Old name');context.prepareProfile(ui,memfs);
@@ -62,4 +76,4 @@ blocked=true;context.prepareProfile(ui,memfs);context.saveProfile(ui,changed);
 assert.equal(messages.length,1);
 assert.ok(!source.includes('await requireGametag'));
 for(const name of ['x;quit','x" +connect evil','x\nquit','é'.repeat(16)]) assert.equal(context.validGametag(name),'');
-console.log('PASS: native name, key bindings, graphics, mouse and sound persist; legacy name migrates, stored values win, disabled storage is handled; the canvas defaults to 1920x1080 and profiles holding the old 1280x720 default take it once; normal and specular maps default to half resolution, taken once by profiles holding full resolution');
+console.log('PASS: native name, key bindings, graphics, mouse and sound persist; legacy name migrates, stored values win, disabled storage is handled; the canvas defaults to 1920x1080 and profiles holding the old 1280x720 default take it once; normal and specular maps default to half resolution, taken once by profiles holding full resolution; profiles holding the old 1.5x draw distance take the new default once');

@@ -29,6 +29,8 @@
   const displayStorageKey = 'cod2-wasm-display-v2';
   // Likewise for the old full-resolution normal and specular maps.
   const materialMapsStorageKey = 'cod2-wasm-material-maps-v1';
+  // And for the old 1.5x model detail and grass distance.
+  const drawDistanceStorageKey = 'cod2-wasm-draw-distance-v1';
   let browserVersion = 'Browser dev';
   function prepareProfile(context, fs) {
     let saved = '';
@@ -45,6 +47,11 @@
         saved = saved.replace(/^seta r_picmip_(?:bump|spec) "0"\r?$/gm, '');
         localStorage.setItem(profileStorageKey, saved);
         localStorage.setItem(materialMapsStorageKey, '1');
+      }
+      if (!localStorage.getItem(drawDistanceStorageKey)) {
+        saved = saved.replace(/^seta r_lodDistanceScale "1\.5"\r?$/gm, '');
+        localStorage.setItem(profileStorageKey, saved);
+        localStorage.setItem(drawDistanceStorageKey, '1');
       }
     } catch { /* Storage can be disabled; settings still work for this visit. */ }
     gametag = validGametag(legacyName) || validGametag(context.preferences?.values().playerName) || 'Player';

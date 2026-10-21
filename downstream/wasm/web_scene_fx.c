@@ -32,6 +32,10 @@ extern const dvar_t *r_dof_enable;
 extern const dvar_t *r_filmTweakEnable;
 extern const dvar_t *r_motionBlur;
 extern const dvar_t *r_sceneHeight;
+extern const dvar_t *r_ssao;
+
+/* Draws the sun's shadow map of the frame's moving models (web_sun_shadows.c). */
+void WebSunShadows_Render(void);
 
 enum {
     SCENE_FX_GLOW0,
@@ -89,10 +93,21 @@ enum {
     SCENE_FX_SCOPE_DARK,
     SCENE_FX_SCOPE_PROJECTION,
     SCENE_FX_SCOPE_NEAR_CLIP = SCENE_FX_SCOPE_PROJECTION + 2,
-    SCENE_FX_PARAM_COUNT
+    SCENE_FX_SCOPE_END,
+    /* Ambient occlusion from the scene's depth (r_ssao): how much a fully
+     * enclosed point darkens, 0 for none; the radius it looks around in
+     * world units; and the view's projection x and y scales. */
+    SCENE_FX_AO = SCENE_FX_SCOPE_END,
+    SCENE_FX_AO_RADIUS,
+    SCENE_FX_AO_PROJECTION,
+    SCENE_FX_PARAM_COUNT = SCENE_FX_AO_PROJECTION + 2
 };
 
-#define SCENE_FX_SCOPE_FLOATS (SCENE_FX_PARAM_COUNT - SCENE_FX_SCOPE)
+#define SCENE_FX_SCOPE_FLOATS (SCENE_FX_SCOPE_END - SCENE_FX_SCOPE)
+
+/* r_ssao's darkening of an enclosed point, and the radius it measures. */
+#define SCENE_FX_AO_STRENGTH 0.85f
+#define SCENE_FX_AO_WORLD_RADIUS 22.0f
 
 /* InfinitePerspectiveMatrix's depth scale times the default r_znear of 4. */
 #define SCENE_FX_DEFAULT_WORLD_NEAR_CLIP (0.9995002746582031f * 4.0f)
@@ -141,6 +156,10 @@ static int s_frameUsed;
 static float s_aimFrac;
 static float s_cameraView[16];
 static float s_cameraProjection[2];
+/* The composed view's projection x and y scales, for its ambient occlusion. */
+static float s_viewProjection[2];
+/* The composed view's color-map mip bias while it renders below the canvas. */
+static float s_lodBias;
 static float s_cameraLens[16];
 static int s_cameraPending;
 static float s_lastView[16];
@@ -395,6 +414,70 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             link("viewmodel", "in highp vec2 v_smear;\n" +
                 "void main() {\n  o = vec4(clamp(v_smear * (127.0 / 255.0) + 128.0 / 255.0, 0.0, 1.0), 0.0, 1.0);\n}\n",
                 ["u_mesh"], ["u_vm"], viewmodelVertex);
+            /* Ambient occlusion at half the scene's resolution. Each world
+             * pixel's position and normal come from the depth, and eight
+             * depth samples spiral out over a fixed world radius: the closer
+             * a sample sits above the surface, the more light it hides. The
+             * viewmodel and the sky stay open. R holds the result, G and B
+             * the linear depth for the blur. */
+            link("ao", "uniform highp sampler2D u_depth;\nuniform highp vec4 u_aoView;\nuniform highp vec4 u_aoParams;\n" +
+                "highp float aoZ(highp float d) { return u_aoView.x / max(u_aoView.y - d, 0.000001); }\n" +
+                "highp vec3 aoPos(ivec2 q, highp float z) {\n" +
+                "  highp vec2 ndc = (vec2(q) + 0.5) / u_aoParams.zw * 2.0 - 1.0;\n" +
+                "  return vec3(ndc * z / u_aoView.zw, z);\n}\n" +
+                "void main() {\n" +
+                "  ivec2 m = ivec2(u_aoParams.zw) - 1;\n" +
+                "  ivec2 c = min(ivec2(gl_FragCoord.xy) * 2, m);\n" +
+                "  highp float d = texelFetch(u_depth, c, 0).r;\n" +
+                "  highp float z = aoZ(d);\n" +
+                "  highp float zn = clamp(z / 4096.0, 0.0, 1.0) * 255.0;\n" +
+                "  o = vec4(1.0, floor(zn) / 255.0, fract(zn), 1.0);\n" +
+                "  highp float r = u_aoParams.x * u_aoView.w / z * 0.5 * u_aoParams.w;\n" +
+                "  if (d < 0.2 || d >= 0.9999 || r < 1.5) return;\n" +
+                "  r = min(r, 0.1 * u_aoParams.w);\n" +
+                "  highp vec3 p = aoPos(c, z);\n" +
+                "  ivec2 cl = max(c - ivec2(2, 0), ivec2(0)), cr = min(c + ivec2(2, 0), m);\n" +
+                "  ivec2 cd = max(c - ivec2(0, 2), ivec2(0)), cu = min(c + ivec2(0, 2), m);\n" +
+                "  highp float zl = aoZ(texelFetch(u_depth, cl, 0).r), zr = aoZ(texelFetch(u_depth, cr, 0).r);\n" +
+                "  highp float zd = aoZ(texelFetch(u_depth, cd, 0).r), zu = aoZ(texelFetch(u_depth, cu, 0).r);\n" +
+                "  highp vec3 dx = abs(zr - z) < abs(z - zl) ? aoPos(cr, zr) - p : p - aoPos(cl, zl);\n" +
+                "  highp vec3 dy = abs(zu - z) < abs(z - zd) ? aoPos(cu, zu) - p : p - aoPos(cd, zd);\n" +
+                "  highp vec3 n = cross(dx, dy);\n" +
+                "  n *= inversesqrt(max(dot(n, n), 1e-20));\n" +
+                "  if (dot(n, p) > 0.0) n = -n;\n" +
+                "  highp float r2 = u_aoParams.x * u_aoParams.x;\n" +
+                "  float a0 = 6.2831853 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));\n" +
+                "  float occlusion = 0.0;\n" +
+                "  for (int i = 0; i < 8; ++i) {\n" +
+                "    float a = a0 + float(i) * 2.3999632;\n" +
+                "    ivec2 q = clamp(c + ivec2(vec2(cos(a), sin(a)) * (r * (float(i) + 0.5) * 0.125)), ivec2(0), m);\n" +
+                "    highp float dq = texelFetch(u_depth, q, 0).r;\n" +
+                "    if (dq < 0.2) continue;\n" +
+                "    highp vec3 v = aoPos(q, aoZ(dq)) - p;\n" +
+                "    highp float vv = dot(v, v);\n" +
+                "    occlusion += max(dot(v, n) * inversesqrt(max(vv, 1e-6)) - 0.1, 0.0) * max(1.0 - vv / r2, 0.0);\n" +
+                "  }\n" +
+                /* Far surfaces fade out, where fog and texels blur. */
+                "  float fade = 1.0 - smoothstep(1400.0, 2600.0, z);\n" +
+                "  o.r = clamp(1.0 - u_aoParams.y * fade * occlusion * 0.25, 0.0, 1.0);\n}\n",
+                ["u_depth"], ["u_aoView", "u_aoParams"]);
+            /* A 4 x 4 box over the half-resolution occlusion that keeps to
+             * samples near the centre's depth, so edges stay sharp. */
+            link("aoBlur", "uniform sampler2D u_src;\n" +
+                "void main() {\n" +
+                "  ivec2 c = ivec2(gl_FragCoord.xy), m = textureSize(u_src, 0) - 1;\n" +
+                "  vec4 centre = texelFetch(u_src, c, 0);\n" +
+                "  highp float zc = centre.g + centre.b / 255.0;\n" +
+                "  float sum = 0.0, weight = 0.0;\n" +
+                "  for (int y = -2; y < 2; ++y)\n" +
+                "    for (int x = -2; x < 2; ++x) {\n" +
+                "      vec4 t = texelFetch(u_src, clamp(c + ivec2(x, y), ivec2(0), m), 0);\n" +
+                "      float w = max(1.0 - abs(t.g + t.b / 255.0 - zc) / (0.03 * zc + 0.0006), 0.0);\n" +
+                "      sum += t.r * w;\n" +
+                "      weight += w;\n" +
+                "    }\n" +
+                "  o = vec4(weight > 0.0 ? sum / weight : centre.r, 0.0, 0.0, 1.0);\n}\n",
+                ["u_src"], []);
             link("dof", "uniform sampler2D u_src;\nuniform highp sampler2D u_depth;\n" +
                 "uniform highp vec2 u_texel;\nuniform highp vec4 u_dof;\n" + coc +
                 "float cocAt(ivec2 p, ivec2 m) { return vmBlur(texelFetch(u_depth, min(p, m), 0).r); }\n" +
@@ -412,6 +495,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "uniform highp vec4 u_motion;\nuniform highp mat3 u_motionRotation;\nuniform highp vec3 u_motionMove;\n" +
                 "uniform highp sampler2D u_vmVelocity;\nuniform highp sampler2D u_vmMesh;\nuniform highp vec4 u_vm;\n" +
                 "uniform highp vec4 u_lens;\nuniform highp vec4 u_lensInv;\nuniform vec4 u_lensFx;\n" +
+                "uniform sampler2D u_ao;\nuniform highp vec4 u_aoMix;\n" +
                 coc + nearWorld + viewmodelMotion +
                 drawnEyepiece + "void main() {\n" +
                 "  vec3 c = texture(u_scene, v_uv).rgb;\n" +
@@ -521,6 +605,10 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "    vec3 wt = -u_film.x * sqrt(clamp(min(lo, 1.0 - hi) / max(hi, vec3(0.0001)), 0.0, 1.0));\n" +
                 "    col = clamp((c + (n + s + e + w) * wt) / (1.0 + 4.0 * wt), 0.0, 1.0);\n" +
                 "  }\n" +
+                /* The blurred occlusion, half a texel back where its 4 x 4
+                 * box centres; the viewmodel keeps its own light. */
+                "  if (u_aoMix.x > 0.0 && texelFetch(u_depth, ivec2(gl_FragCoord.xy), 0).r >= 0.2)\n" +
+                "    col *= texture(u_ao, v_uv + u_aoMix.yz).r;\n" +
                 "  if (u_dof2.x > 0.0 || u_dof2.w > 0.0 || u_lens.z > 0.0) {\n" +
                 "    highp float depth = texelFetch(u_depth, ivec2(gl_FragCoord.xy), 0).r;\n" +
                 "    vec4 large = texture(u_dofLarge, v_uv);\n" +
@@ -588,9 +676,9 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "  if (u_lens.z > 0.0)\n" +
                 "    col *= 1.0 - u_lensFx.y * (1.0 - lensIn);\n" +
                 "  o = vec4(col, 1.0);\n}\n",
-                ["u_scene", "u_bloom", "u_depth", "u_dofMed", "u_dofLarge", "u_vmVelocity", "u_vmMesh"],
+                ["u_scene", "u_bloom", "u_depth", "u_dofMed", "u_dofLarge", "u_vmVelocity", "u_vmMesh", "u_ao"],
                 ["u_px", "u_glow", "u_dof", "u_dof2", "u_film", "u_near", "u_tier",
-                 "u_motion", "u_motionRotation", "u_motionMove", "u_vm", "u_lens", "u_lensInv", "u_lensFx"]);
+                 "u_motion", "u_motionRotation", "u_motionMove", "u_vm", "u_lens", "u_lensInv", "u_lensFx", "u_aoMix"]);
             /* A scene smaller than the canvas, filtered up to it with Catmull-Rom
              * in five bilinear taps (the corner taps weigh under 0.5%), as the
              * page scales the canvas again with its own bilinear filter. */
@@ -685,7 +773,9 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             var t = {
                 qw: Math.max(1, Math.ceil(w / 4)), qh: Math.max(1, Math.ceil(h / 4)),
                 ew: Math.max(1, Math.ceil(w / 8)), eh: Math.max(1, Math.ceil(h / 8)),
-                textures: [], framebuffers: [], renderbuffers: [], ms: null, q: [], qFbo: [], e: [], eFbo: []
+                hw: Math.max(1, Math.ceil(w / 2)), hh: Math.max(1, Math.ceil(h / 2)),
+                textures: [], framebuffers: [], renderbuffers: [], ms: null, q: [], qFbo: [], e: [], eFbo: [],
+                ao: [], aoFbo: []
             };
             var ok = true;
             var previousUnit = gl.getParameter(gl.ACTIVE_TEXTURE);
@@ -734,6 +824,9 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 t.qFbo.push(framebuffer(t.q[i], null, null, null));
                 t.e.push(texture(gl.RGBA8, t.ew, t.eh, gl.LINEAR));
                 t.eFbo.push(framebuffer(t.e[i], null, null, null));
+                /* The raw occlusion and its depth, then the blurred occlusion. */
+                t.ao.push(texture(gl.RGBA8, t.hw, t.hh, i ? gl.LINEAR : gl.NEAREST));
+                t.aoFbo.push(framebuffer(t.ao[i], null, null, null));
             }
             gl.bindTexture(gl.TEXTURE_2D, null);
             gl.activeTexture(previousUnit);
@@ -820,6 +913,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             /* Any window the stencil cut also needs its glass. */
             var lens = lensPresence > 0, scopeBlur = lens && lensBlur > 0.004;
             var glow = glow0 > 0 || glow1 > 0, blurBehind = backdrop > 0.004, dof = ads > 0.004 || blurBehind || lens;
+            var ao = H[o + 55] > 0;
             var lines = h / 480;
             var program = gl.getParameter(gl.CURRENT_PROGRAM);
             var vao = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
@@ -836,7 +930,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 gl.bindFramebuffer(gl.READ_FRAMEBUFFER, t.ms);
                 gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, t.scene);
                 gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h,
-                    dof || motion > 0 || vm ? (gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT) : gl.COLOR_BUFFER_BIT, gl.NEAREST);
+                    dof || motion > 0 || vm || ao ? (gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT) : gl.COLOR_BUFFER_BIT, gl.NEAREST);
                 gl.invalidateFramebuffer(gl.READ_FRAMEBUFFER, fx.discard);
             }
             /* Reading the write masks back would stall on the GPU process. Every
@@ -862,6 +956,17 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 gl.depthFunc(gl.LESS);
                 gl.drawArrays(gl.TRIANGLES, 0, 3 * H[o + 36]);
                 gl.disable(gl.DEPTH_TEST);
+            }
+            if (ao) {
+                var A = P.ao;
+                gl.useProgram(A.program);
+                gl.uniform4f(A.u_aoView, H[o + 15], 0.9995002746582031, H[o + 57], H[o + 58]);
+                gl.uniform4f(A.u_aoParams, H[o + 56], H[o + 55], w, h);
+                fx.texture(0, t.depth);
+                fx.pass(A, t.aoFbo[0], t.hw, t.hh);
+                gl.useProgram(P.aoBlur.program);
+                fx.texture(0, t.ao[0]);
+                fx.pass(P.aoBlur, t.aoFbo[1], t.hw, t.hh);
             }
             if (glow) {
                 var cutoff = H[o + 2], knee = Math.max(cutoff - 0.3, 0);
@@ -946,7 +1051,8 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             } else {
                 gl.uniform4f(C.u_lens, 0, 0, 0, 0);
             }
-            var sources = [t.color, t.e[1], t.depth, t.q[0], t.q[1], vm ? vm.smear : null, vm ? vm.mesh : null];
+            gl.uniform4f(C.u_aoMix, ao ? 1 : 0, 0.5 / t.hw, 0.5 / t.hh, 0);
+            var sources = [t.color, t.e[1], t.depth, t.q[0], t.q[1], vm ? vm.smear : null, vm ? vm.mesh : null, ao ? t.ao[1] : null];
             for (var s = 0; s < sources.length; ++s) fx.texture(s, sources[s]);
             if (scaled) {
                 fx.pass(C, t.outFbo, w, h);
@@ -1061,6 +1167,11 @@ static int WebSceneFx_Enabled(const dvar_t *dvar)
 static int WebSceneFx_GlowEnabled(void)
 {
     return WebSceneFx_Enabled(r_glow) && !WebSceneFx_Enabled(r_fullbright);
+}
+
+static int WebSceneFx_AoEnabled(void)
+{
+    return WebSceneFx_Enabled(r_ssao) && !WebSceneFx_Enabled(r_fullbright);
 }
 
 static int WebSceneFx_Samples(void)
@@ -1616,6 +1727,16 @@ static void WebSceneFx_FillParams(float *params)
     params[SCENE_FX_VM_TILE] = (float)s_vmTile;
     params[SCENE_FX_VM_TILES_X] = (float)s_vmTilesX;
     memcpy(params + SCENE_FX_SCOPE, s_scope, sizeof(s_scope));
+    params[SCENE_FX_AO] = WebSceneFx_AoEnabled() && s_viewProjection[0] > 0.0f ? SCENE_FX_AO_STRENGTH : 0.0f;
+    params[SCENE_FX_AO_RADIUS] = SCENE_FX_AO_WORLD_RADIUS;
+    params[SCENE_FX_AO_PROJECTION] = s_viewProjection[0];
+    params[SCENE_FX_AO_PROJECTION + 1] = s_viewProjection[1];
+}
+
+/* The mip bias the 3D draws of the composed view give their color maps. */
+float WebSceneFx_TextureLodBias(void)
+{
+    return s_active ? s_lodBias : 0.0f;
 }
 
 void WebSceneFx_EndView(void)
@@ -1644,8 +1765,14 @@ void WebSceneFx_BeginView(int x, int y, int width, int height, int screenWidth, 
         return;
     s_frameUsed = 1;
     s_scopeStencil = 0;
+    WebSunShadows_Render();
     WebSceneFx_SceneSize(width, height, &sceneWidth, &sceneHeight);
     nearClip = isfinite(depthHackNearClip) && depthHackNearClip > 0.0f ? depthHackNearClip : 0.1f;
+    s_viewProjection[0] = s_viewProjection[1] = 0.0f;
+    if (s_cameraPending && WebSceneFx_CameraValid()) {
+        s_viewProjection[0] = s_cameraProjection[0];
+        s_viewProjection[1] = s_cameraProjection[1];
+    }
     WebSceneFx_TrackCamera();
     WebSceneFx_TrackViewmodel(sceneWidth, sceneHeight, nearClip);
     /* r_fullbright clears the frame buffer before it begins the view. */
@@ -1657,12 +1784,15 @@ void WebSceneFx_BeginView(int x, int y, int width, int height, int screenWidth, 
     scaled = sceneWidth != width || sceneHeight != height;
     if (!scaled && s_grayFrac <= 0.0f && s_vmMotion <= 0.0f && !WebSceneFx_GlowEnabled() && !WebSceneFx_Enabled(r_filmTweakEnable) && samples <= 1 &&
         !(WebSceneFx_Enabled(r_dof_enable) && s_adsFrac > 0.0f) && s_motionScale <= 0.0f && s_backdropFrac <= 0.0f &&
-        s_backdropGray <= 0.0f && !WebSceneFx_ScopeRequested())
+        s_backdropGray <= 0.0f && !WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled())
         return;
     s_nearClip = nearClip;
     s_worldNearClip = isfinite(worldNearClip) && worldNearClip > 0.0f ? worldNearClip : SCENE_FX_DEFAULT_WORLD_NEAR_CLIP;
     s_active = WebSceneFx_Bind(sceneWidth, sceneHeight, samples, width, height);
     s_scopeUnavailable = !s_active;
+    /* Sampling a mip finer by the scale's octaves gives the color maps the
+     * detail of the canvas the scene is scaled up to, as upscalers do. */
+    s_lodBias = s_active && scaled ? WebSceneFx_Clamp(log2f((float)sceneHeight / (float)height), -1.0f, 0.0f) : 0.0f;
 }
 
 void WebSceneFx_EndFrame(void)

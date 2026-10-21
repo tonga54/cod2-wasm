@@ -5689,3 +5689,38 @@ Validation:
   `test-weapon-fire-modes.py`, `test-grenade-lifecycle.py` and
   `test-grenade-indicators.py` pass.
 - Not yet played in a browser match.
+
+## Sun shadows, occlusion, reflections and texture detail — 2026-10-20
+
+The owner asked for better graphics, lighting, draw distance, shadows,
+textures and reflections at the highest frame rate possible. Players, bodies
+and other moving models in view now cast the sun's shadow: `r_model.c` hands
+each skinned surface to `web_sun_shadows.c`, which draws them once per frame
+into a 2048 × 2048 depth map, and lightmapped world shaders take away only the
+lightmap's sun share where it hides them (`r_sunShadows`). Lightmapped layers
+blended over the world, such as Toujane's ground overlays, take the material
+lighting and shadows of the surface under them. `web_scene_fx.c` adds
+half-resolution ambient occlusion from the scene's depth (`r_ssao`). Surfaces
+with a specular map mirror the light around them, more at grazing angles the
+glossier they are (`r_reflections`). A 720-line scene samples its color maps
+0.58 mip levels finer, material maps filter at 16× anisotropy, and
+`r_lodDistanceScale` defaults to 2 (1 to 4), taken once by profiles that saved
+1.5. The new dvars are archived and on. Details, measurements and limits are in
+`docs/GRAPHICS_2026-10-16.md`, "Sun shadows, occlusion, reflections and texture
+detail".
+
+Validation:
+
+- `test-sun-shadows.py` (20 mutants), `test-sun-shadows.cjs`,
+  `test-web-scene-fx.py` (59), `test-viewmodel-motion.py` (31 and 9),
+  `test-web-point-lights.cjs`, `test-web-materials.py`,
+  `test-web-lod-distance.py` and `test-gametag.cjs`; `test-static.sh` passes
+  in full against this build.
+- `test-web-material-lighting.mjs` passes 83 real WebGL2 checks on the M4,
+  five temporary reflection regressions failing it.
+- On the M4 in Chrome, uncapped and without bots, all of the changes together
+  measured 217 → 206, 235 → 218 and 245 → 250 fps at three Toujane views.
+  Ambient occlusion is the costliest, about 0.6 ms of GPU time per frame;
+  reflections and the farther draw distance did not measurably cost. With 10
+  bots, capturing shadow casters took 1.4% of the main thread.
+- Not verified: other GPUs and browsers.

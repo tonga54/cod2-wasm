@@ -1475,47 +1475,52 @@ static void R_SkinXSurfaceSkinned(struct GfxModelSkinnedSurface *skinnedSurf,
 #ifdef __EMSCRIPTEN__
 extern void WebSceneFx_AddViewmodelSurface(const void *key, const float *positions, int stride, int vertexCount,
                                            const unsigned short *indices, int triangleCount, const float *transform);
+extern void WebSunShadows_AddSurface(const GfxEntity *ent, const float *positions, int stride, int vertexCount,
+                                     const unsigned short *indices, int triangleCount, const float *transform);
 
 /* The viewmodel draws with the depth hack. The scene compositor blurs it
- * along its own motion, so it takes each of its surfaces as they are skinned. */
+ * along its own motion, so it takes each of its surfaces as they are skinned;
+ * every other model's surfaces go to the sun's shadow map, which picks its
+ * casters. */
 static int R_IsWebViewmodel(const GfxEntity *ent)
 {
     return (ent->renderFxFlags & 0x18) == 8;
 }
 
-static void R_AddWebViewmodelVerts(const XSurface *xsurf, const float *positions, int stride, const float *transform)
+static void R_AddWebSurfaceVerts(const GfxEntity *ent, const XSurface *xsurf, const float *positions, int stride,
+                                 const float *transform)
 {
-    WebSceneFx_AddViewmodelSurface(xsurf, positions, stride, xsurf->vertCount,
-                                   (const unsigned short *)xsurf->triIndices, xsurf->triCount, transform);
+    if (R_IsWebViewmodel(ent))
+        WebSceneFx_AddViewmodelSurface(xsurf, positions, stride, xsurf->vertCount,
+                                       (const unsigned short *)xsurf->triIndices, xsurf->triCount, transform);
+    else
+        WebSunShadows_AddSurface(ent, positions, stride, xsurf->vertCount,
+                                 (const unsigned short *)xsurf->triIndices, xsurf->triCount, transform);
 }
 
 /* Skinned vertices are in the model's space, which the entity places. */
-static void R_AddWebViewmodelSkinnedSurface(const GfxEntity *ent, const struct GfxModelSkinnedSurface *skinnedSurf)
+static void R_AddWebSkinnedSurface(const GfxEntity *ent, const struct GfxModelSkinnedSurface *skinnedSurf)
 {
     float transform[12];
     int i, j;
 
-    if (!R_IsWebViewmodel(ent))
-        return;
     for (i = 0; i < 3; ++i)
         for (j = 0; j < 3; ++j)
             transform[i * 3 + j] = ent->axis[i][j] * ent->scale;
     for (j = 0; j < 3; ++j)
         transform[9 + j] = ent->origin[j];
-    R_AddWebViewmodelVerts(skinnedSurf->surf.xsurf, (const float *)R_SkinnedSurfaceVerts(skinnedSurf),
-                           r_rendererInUse->current.integer == 2 ? 0x24 : 0x40, transform);
+    R_AddWebSurfaceVerts(ent, skinnedSurf->surf.xsurf, (const float *)R_SkinnedSurfaceVerts(skinnedSurf),
+                         r_rendererInUse->current.integer == 2 ? 0x24 : 0x40, transform);
 }
 
 /* A rigid surface draws its bone-space vertices with a transform that
  * already holds the bone and the entity. */
-static void R_AddWebViewmodelRigidSurface(const GfxEntity *ent, const GfxModelRigidSurface *rigidSurf)
+static void R_AddWebRigidSurface(const GfxEntity *ent, const GfxModelRigidSurface *rigidSurf)
 {
     const XSurface *xsurf = rigidSurf->surf.xsurf;
 
-    if (!R_IsWebViewmodel(ent))
-        return;
-    R_AddWebViewmodelVerts(xsurf, ((const XVertexInfo *)xsurf->verts)->offset, (int)sizeof(XVertexInfo),
-                           &rigidSurf->boneAxis[0][0]);
+    R_AddWebSurfaceVerts(ent, xsurf, ((const XVertexInfo *)xsurf->verts)->offset, (int)sizeof(XVertexInfo),
+                         &rigidSurf->boneAxis[0][0]);
 }
 #endif
 
@@ -1584,7 +1589,7 @@ void R_SkinXModelCmd(SkinXModelCmd *skinCmd, int context)
 
             R_SkinXSurfaceSkinned((struct GfxModelSkinnedSurface *)surfPos, boneMatrix);
 #ifdef __EMSCRIPTEN__
-            R_AddWebViewmodelSkinnedSurface(skinCmd->e, (const struct GfxModelSkinnedSurface *)surfPos);
+            R_AddWebSkinnedSurface(skinCmd->e, (const struct GfxModelSkinnedSurface *)surfPos);
 #endif
             surfPos = (const surfaceType_t *)((const byte *)surfPos + 16);
         } else if (surfType == 5) {
@@ -1606,7 +1611,7 @@ void R_SkinXModelCmd(SkinXModelCmd *skinCmd, int context)
                     (vec3_t *)(rigidSurf + 8));
             }
 #ifdef __EMSCRIPTEN__
-            R_AddWebViewmodelRigidSurface(skinCmd->e, (const GfxModelRigidSurface *)rigidSurf);
+            R_AddWebRigidSurface(skinCmd->e, (const GfxModelRigidSurface *)rigidSurf);
 #endif
         }
     }
@@ -1669,7 +1674,7 @@ void R_SkinRigidXModelCmd(SkinRigidXModelCmd *skinRigidCmd)
                 entScale,
                 (vec3_t *)(rigidSurf + 8));
 #ifdef __EMSCRIPTEN__
-            R_AddWebViewmodelRigidSurface(refEnt, (const GfxModelRigidSurface *)rigidSurf);
+            R_AddWebRigidSurface(refEnt, (const GfxModelRigidSurface *)rigidSurf);
 #endif
         } else {
 
@@ -1677,7 +1682,7 @@ void R_SkinRigidXModelCmd(SkinRigidXModelCmd *skinRigidCmd)
             surfPos += 0x10;
             R_SkinXSurfaceSkinned((struct GfxModelSkinnedSurface *)surf, (const DObjSkelMat *)mtx);
 #ifdef __EMSCRIPTEN__
-            R_AddWebViewmodelSkinnedSurface(refEnt, (const struct GfxModelSkinnedSurface *)surf);
+            R_AddWebSkinnedSurface(refEnt, (const struct GfxModelSkinnedSurface *)surf);
 #endif
         }
     }

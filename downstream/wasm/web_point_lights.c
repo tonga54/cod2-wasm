@@ -43,20 +43,41 @@ void WebPointLights_SetScene(const GfxLight *lights, int count)
 EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShadowEnabled, int colorOrder,
                                   int normalMap, int specularMap, int detailMap, float detailX, float detailY,
                                   int lightmapped, float specularScale, float sunShading, float sunVisibility,
-                                  int camoMap, int camoMask, float camoTiles, float camoReference), {
+                                  int camoMap, int camoMask, float camoTiles, float camoReference, float lodBias,
+                                  float reflection), {
     Module.cod2VertexColorOrder = colorOrder;
     // The material's original maps, for the generated shaders' per-pixel pass,
     // and a camouflaged gun's pattern and paint mask.
     var material = Module.cod2Material;
-    if (!material) material = Module.cod2Material = {
-        surface: new Float32Array(4), detail: new Float32Array(4),
-        sunEye: new Float32Array(3), skyEye: new Float32Array(3), sunColor: new Float32Array(4),
-        model: new Float32Array(4), camo: new Float32Array(4), view: new Float32Array(16),
-        bound: [null, null, null, null, null], present: [0, 0, 0, 0, 0], sunRevision: -1,
-        // The detail, normal and specular maps, then the camouflage's pattern
-        // and mask past the units the scene compositor binds (web_scene_fx.c, 8-14).
-        units: [5, 6, 7, 16, 17]
-    };
+    if (!material) {
+        material = Module.cod2Material = {
+            surface: new Float32Array(4), detail: new Float32Array(4),
+            sunEye: new Float32Array(3), skyEye: new Float32Array(4), sunColor: new Float32Array(4),
+            model: new Float32Array(4), camo: new Float32Array(4), view: new Float32Array(16),
+            sunShadowEye: new Float32Array(16), sunShadow: new Float32Array(4), sunShadowRect: new Float32Array(4),
+            sunShadowRevision: -1,
+            bound: [null, null, null, null, null], present: [0, 0, 0, 0, 0], sunRevision: -1,
+            // The detail, normal and specular maps, then the camouflage's pattern
+            // and mask past the units the scene compositor binds (web_scene_fx.c, 8-15).
+            units: [5, 6, 7, 16, 17]
+        };
+        // World shaders compare against the sun's depth map on unit 18
+        // (web_sun_shadows.c). Until it exists, a one-texel map at the far
+        // plane keeps that shadow sampler valid.
+        if (!Module.cod2SunShadowPass || !Module.cod2SunShadowPass.texture) {
+            var shadowUnit = GLctx.getParameter(GLctx.ACTIVE_TEXTURE);
+            GLctx.activeTexture(GLctx.TEXTURE18);
+            material.sunShadowDefault = GLctx.createTexture();
+            GLctx.bindTexture(GLctx.TEXTURE_2D, material.sunShadowDefault);
+            GLctx.texImage2D(GLctx.TEXTURE_2D, 0, GLctx.DEPTH_COMPONENT16, 1, 1, 0, GLctx.DEPTH_COMPONENT,
+                GLctx.UNSIGNED_SHORT, new Uint16Array([65535]));
+            GLctx.texParameteri(GLctx.TEXTURE_2D, GLctx.TEXTURE_MIN_FILTER, GLctx.NEAREST);
+            GLctx.texParameteri(GLctx.TEXTURE_2D, GLctx.TEXTURE_MAG_FILTER, GLctx.NEAREST);
+            GLctx.texParameteri(GLctx.TEXTURE_2D, GLctx.TEXTURE_COMPARE_MODE, GLctx.COMPARE_REF_TO_TEXTURE);
+            GLctx.texParameteri(GLctx.TEXTURE_2D, GLctx.TEXTURE_COMPARE_FUNC, GLctx.LEQUAL);
+            GLctx.activeTexture(shadowUnit);
+        }
+    }
     // The engine sets sampler state only on the stages it binds itself:
     // without mipmaps these maps would sparkle wherever they minify.
     if (material.sampler === undefined) {
@@ -66,8 +87,10 @@ EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShado
             GLctx.samplerParameteri(sampler, GLctx.TEXTURE_MAG_FILTER, GLctx.LINEAR);
             GLctx.samplerParameteri(sampler, GLctx.TEXTURE_WRAP_S, GLctx.REPEAT);
             GLctx.samplerParameteri(sampler, GLctx.TEXTURE_WRAP_T, GLctx.REPEAT);
+            // As sharp at a grazing angle as the color maps' default r_anisotropy.
             var anisotropic = GLctx.getExtension('EXT_texture_filter_anisotropic');
-            if (anisotropic) GLctx.samplerParameterf(sampler, anisotropic.TEXTURE_MAX_ANISOTROPY_EXT, 4);
+            if (anisotropic) GLctx.samplerParameterf(sampler, anisotropic.TEXTURE_MAX_ANISOTROPY_EXT,
+                Math.max(1, Math.min(16, GLctx.getParameter(anisotropic.MAX_TEXTURE_MAX_ANISOTROPY_EXT) || 1)));
             for (var samplerUnit = 0; samplerUnit < 5; ++samplerUnit) GLctx.bindSampler(material.units[samplerUnit], sampler);
         }
     }
@@ -86,16 +109,27 @@ EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShado
     var surface = material.surface, detail = material.detail;
     surface[0] = present[1]; surface[1] = present[2]; surface[2] = lightmapped ? 1 : 0; surface[3] = specularScale;
     detail[0] = present[0] ? detailX : 0; detail[1] = present[0] ? detailY : 0; detail[2] = present[0];
+    // The color map's mip bias: a scene rendered below the canvas's lines
+    // samples the detail of the resolution it is scaled up to.
+    detail[3] = lodBias;
+    // Whether surfaces with a specular map mirror the sky and ground (r_reflections).
+    material.skyEye[3] = reflection;
     material.model[0] = sunVisibility;
     var camo = material.camo, painted = present[3] && present[4] ? 1 : 0;
     camo[0] = painted; camo[1] = painted ? camoTiles : 0; camo[2] = painted ? camoReference : 0;
-    var sun = Module.cod2Sun;
-    if (view && sun) {
-        var viewOffset = view >>> 2, viewChanged = false;
+    var viewChanged = false;
+    if (view) {
+        var viewOffset = view >>> 2;
         for (var i = 0; i < 16; ++i)
             if (material.view[i] !== HEAPF32[viewOffset + i]) { viewChanged = true; break; }
-        if (viewChanged || material.sunRevision !== sun.revision || material.sunColor[3] !== sunShading) {
-            if (viewChanged) material.view.set(HEAPF32.subarray(viewOffset, viewOffset + 16));
+        if (viewChanged) {
+            material.view.set(HEAPF32.subarray(viewOffset, viewOffset + 16));
+            material.sunRevision = material.sunShadowRevision = -1;
+        }
+    }
+    var sun = Module.cod2Sun;
+    if (view && sun) {
+        if (material.sunRevision !== sun.revision || material.sunColor[3] !== sunShading) {
             var v = material.view, w = sun.world;
             var x = v[0] * w[0] + v[4] * w[1] + v[8] * w[2];
             var y = v[1] * w[0] + v[5] * w[1] + v[9] * w[2];
@@ -108,6 +142,28 @@ EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShado
             material.sunColor[3] = sunShading;
             material.sunRevision = sun.revision;
         }
+    }
+    // The sun's depth map (web_sun_shadows.c) for lightmapped world draws, in
+    // this draw's eye space. The view is a rotation and a move: its inverse
+    // is its transpose and the opposite move.
+    var sunShadow = Module.cod2SunShadow;
+    if (view && sunShadow && worldShadowEnabled && sunShadow.params[0] > 0) {
+        if (material.sunShadowRevision !== sunShadow.revision) {
+            var m = material.view, t = sunShadow.world, e = material.sunShadowEye;
+            for (var row = 0; row < 4; ++row) {
+                for (var column = 0; column < 3; ++column)
+                    e[column * 4 + row] = t[row] * m[column] + t[4 + row] * m[4 + column] + t[8 + row] * m[8 + column];
+                var move = t[12 + row];
+                for (var k = 0; k < 3; ++k)
+                    move -= t[k * 4 + row] * (m[k * 4] * m[12] + m[k * 4 + 1] * m[13] + m[k * 4 + 2] * m[14]);
+                e[12 + row] = move;
+            }
+            material.sunShadowRevision = sunShadow.revision;
+            material.sunShadowRect.set(sunShadow.rect);
+        }
+        material.sunShadow.set(sunShadow.params);
+    } else {
+        material.sunShadow[0] = 0;
     }
     var lights = Module.cod2PointLights;
     if (!lights) return;

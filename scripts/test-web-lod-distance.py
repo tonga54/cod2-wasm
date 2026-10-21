@@ -42,7 +42,7 @@ checks = '''
 int main(void) {
     refdef_t view = {{10, 20, 30}, 80}; scale.current.value = 1.f;
     XModel prop = {3, {{500}, {1000}, {0}}}, grass = {1, {{1000}}};
-    for(int i=0;i<=100;i++) {
+    for(int i=0;i<=300;i++) {
         distance.current.value = 1.f + i * .01f;
         R_SetLodOrigin(&view);
         assert(fabsf(rg.lodParms.scale * distance.current.value - 1.f) < 1e-6f);
@@ -65,9 +65,15 @@ int main(void) {
     lock.current.enabled=1;lock.modified=1;view.vieworg[0]=40;R_SetLodOrigin(&view);
     assert(!lock.modified && rg.lodParms.origin[0]==40);
     r_lodDistanceScale=0;view.fov_x=80;R_SetLodOrigin(&view);assert(rg.lodParms.scale==2.f);
-    puts("PASS: extended model detail/grass distance, bounded disappearance, original lower LODs, saved quality/bias and FOV/PVS behavior");
+    puts("PASS: model detail/grass distance extended 1-4x (2x by default), bounded disappearance, original lower LODs, saved quality/bias and FOV/PVS behavior");
 }
 '''
+# Model detail and grass reach twice their authored distance by default, up to
+# four times; the browser profile's old 1.5x default is replaced once.
+dvars = (root / 'src/PC/gfx_d3d/r_dvars.c').read_text()
+assert 'r_lodDistanceScale = ri.Dvar_RegisterFloat("r_lodDistanceScale", 2.0f, 1.0f, 4.0f, 0x2001);' in dvars
+adapter = (root / 'site/native-game-adapter.js').read_text()
+assert "saved = saved.replace(/^seta r_lodDistanceScale \"1\\.5\"\\r?$/gm, '');" in adapter
 # Both static-model cull paths must use the same adjusted distance as LOD selection.
 dpvs = (root / 'src/PC/gfx_d3d/r_dpvs.c').read_text()
 assert dpvs.count('float scaledDist = dist * rg.lodParms.scale + rg.lodParms.bias;') == 2

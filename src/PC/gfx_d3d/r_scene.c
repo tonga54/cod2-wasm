@@ -799,7 +799,16 @@ void R_RenderScene(const refdef_t *refdef)
     {
         extern GfxWorld s_world;
         extern void WebMaterials_SetSun(const GfxWorld *world);
+        extern void WebSunShadows_EndCapture(const float *eye, const float *forward, const float *sun,
+                                             const float *sunColor);
         WebMaterials_SetSun(&s_world);
+        /* The main view's models are skinned: they are the sun's casters. */
+        if (!refdef->x && !refdef->y && refdef->width == ((const vidConfig_t *)imp_vidConfig)->width &&
+            refdef->height == ((const vidConfig_t *)imp_vidConfig)->height) {
+            const float halfSun[3] = {s_world.sunLight.color[0] * 0.5f, s_world.sunLight.color[1] * 0.5f,
+                                      s_world.sunLight.color[2] * 0.5f};
+            WebSunShadows_EndCapture(refdef->vieworg, refdef->viewaxis[0], s_world.sunLight.position, halfSun);
+        }
     }
     WebSceneFx_SetAds(g_webAdsDofFrac, g_webAdsViewmodelStart, g_webAdsViewmodelEnd, g_webAdsNearEnd);
     WebSceneFx_SetAim(g_webAimFrac);

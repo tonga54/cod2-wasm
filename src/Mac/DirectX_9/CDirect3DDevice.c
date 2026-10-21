@@ -10,7 +10,9 @@ EM_JS(void, WebDrawPerfAdd, (const char *name, double elapsed), {
 extern void WebPointLights_Draw(const float *view, int enabled, int worldShadowEnabled, int colorOrder,
                                int normalMap, int specularMap, int detailMap, float detailX, float detailY,
                                int lightmapped, float specularScale, float sunShading, float sunVisibility,
-                               int camoMap, int camoMask, float camoTiles, float camoReference);
+                               int camoMap, int camoMask, float camoTiles, float camoReference, float lodBias,
+                               float reflection);
+extern float WebSceneFx_TextureLodBias(void);
 extern float g_webEntitySunVisibility;
 #include "web_materials.h"
 #include "headers/PC/gfx_d3d/r_weapon_camo.h"
@@ -19,6 +21,7 @@ extern const dvar_t *r_normalMap;
 extern const dvar_t *r_specularMap;
 extern const dvar_t *r_specularColorScale;
 extern const dvar_t *r_sunShading;
+extern const dvar_t *r_reflections;
 #endif
 
 /* This reconstructed translation unit doesn't include the GL header. Keep
@@ -2438,11 +2441,16 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
         {
             int pointLight = !is2D && dev->zWriteEnable && !dev->alphaBlendEnable &&
                 stage0Target == 0x0DE1 && (usesLightmap || dev->lighting);
-            int worldShadow = !is2D && dev->zWriteEnable && !dev->alphaBlendEnable &&
-                stage0Target == 0x0DE1 && usesLightmap;
+            /* Lightmapped layers blended over the world, such as terrain and
+             * decals, take the light and shadows of the surface under them. */
+            int lightmappedBlend = !is2D && dev->alphaBlendEnable && stage0Target == 0x0DE1 &&
+                usesLightmap && stage1Bound == 1;
+            int worldShadow = (!is2D && dev->zWriteEnable && !dev->alphaBlendEnable &&
+                stage0Target == 0x0DE1 && usesLightmap) || lightmappedBlend;
             unsigned int normalMap = 0, specularMap = 0, detailMap = 0, camoMap = 0, camoMask = 0;
             float detailScale[2] = {0, 0}, camoTiles = 0, camoReference = 0;
-            int materialLighting = pointLight && r_materialLighting && r_materialLighting->current.enabled;
+            int materialLighting = (pointLight || lightmappedBlend) &&
+                r_materialLighting && r_materialLighting->current.enabled;
             R_WeaponCamoDraw camo;
             /* A camouflaged gun's material takes its pattern where its mask paints. */
             if (pointLight && dev->lighting &&
@@ -2467,12 +2475,14 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                 }
             }
             WebPointLights_Draw(pointLightViewValid ? pointLightView : NULL,
-                pointLight, worldShadow, webColorOrder, (int)normalMap, (int)specularMap, (int)detailMap,
-                detailScale[0], detailScale[1], materialLighting && stage1Bound == 1,
+                pointLight || lightmappedBlend, worldShadow, webColorOrder, (int)normalMap, (int)specularMap,
+                (int)detailMap, detailScale[0], detailScale[1], materialLighting && stage1Bound == 1,
                 r_specularColorScale ? r_specularColorScale->current.value : 1.0f,
                 r_sunShading ? r_sunShading->current.value : 1.0f,
                 materialLighting && dev->lighting ? g_webEntitySunVisibility : 0.0f,
-                (int)camoMap, (int)camoMask, camoTiles, camoReference);
+                (int)camoMap, (int)camoMask, camoTiles, camoReference,
+                is2D ? 0.0f : WebSceneFx_TextureLodBias(),
+                r_reflections && r_reflections->current.enabled ? 1.0f : 0.0f);
         }
 #endif
 #ifdef __EMSCRIPTEN__

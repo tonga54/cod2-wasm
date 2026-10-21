@@ -203,7 +203,10 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
               // Preserve the authored texture footprint. A positive mip bias
               // erases weapon detail; it cannot reproduce COD4's resolved-scene
               // depth of field, which filters silhouettes and lighting too.
-              fsTexEnvPass = "vec4 cod2BaseTexel = " + pointSample + ";\n" +
+              // COD2_TEXTURE_LOD_BIAS: a scene rendered below the canvas's
+              // lines samples a finer mip by the scale's octaves (u_cod2Detail.w,
+              // web_scene_fx.c), so its color maps keep the canvas's detail.
+              fsTexEnvPass = "vec4 cod2BaseTexel = texture2D(u_texUnit0, " + pointUV + ", u_cod2Detail.w);\n" +
                 (camoPaint ? "float cod2Paint = 0.0;\nif (u_cod2Camo.x > 0.5) cod2BaseTexel.rgb = cod2Camouflage(" +
                   "cod2BaseTexel.rgb, " + pointUV + ", cod2Paint);\n" : "") +
                 fsTexEnvPass.split(pointSample).join("cod2BaseTexel");
@@ -255,7 +258,9 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
               "varying highp vec4 v_texCoord$1;");
             pointDefs += "uniform sampler2D u_cod2DetailMap; uniform sampler2D u_cod2NormalMap; uniform sampler2D u_cod2SpecMap;\n" +
               "uniform vec4 u_cod2Surface; uniform vec4 u_cod2Detail; uniform vec4 u_cod2Model;\n" +
-              "uniform highp vec3 u_cod2SunEye; uniform highp vec3 u_cod2SkyEye; uniform vec4 u_cod2SunColor;\n" +
+              // The sky's direction in eye space; w is 1 while surfaces with a
+              // specular map mirror their surroundings (r_reflections).
+              "uniform highp vec3 u_cod2SunEye; uniform highp vec4 u_cod2SkyEye; uniform vec4 u_cod2SunColor;\n" +
               // Tangent frame from screen derivatives: DX7 vertices have no tangents.
               // The map decodes as CoD2's DX9 shaders do, N + x T + y B, where the
               // BSP's tangents follow +u and +v. Relief flattens as the map
@@ -281,7 +286,7 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
               "  return min(-2.3025851 / log(c), 2048.0);\n}\n" +
               // Indirect light comes mostly from the sky: a normal map shades it
               // relative to the surface's own normal.
-              "float cod2Sky(highp vec3 n) { return 1.0 + 0.35 * dot(n, u_cod2SkyEye); }\n" +
+              "float cod2Sky(highp vec3 n) { return 1.0 + 0.35 * dot(n, u_cod2SkyEye.xyz); }\n" +
               "float cod2Phong(highp vec3 n, highp vec3 l, highp float power) {\n" +
               "  highp vec3 v = -v_cod2Eye * inversesqrt(max(dot(v_cod2Eye, v_cod2Eye), 1e-30));\n" +
               "  highp float h = max(dot(n, normalize(l + v)), 0.0);\n" +
@@ -339,9 +344,9 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "gl_FragColor.rgb += cod2S.rgb * cod2Spec * (2.0 * u_cod2Surface.w);\n" +
                 // A broad reflection of the sky and ground, stronger at grazing
                 // angles: what keeps metal reading as metal in the shade.
-                "if (u_cod2Surface.y > 0.5) {\n" +
+                "if (u_cod2Surface.y > 0.5 && u_cod2SkyEye.w > 0.0) {\n" +
                 "highp vec3 cod2V = -v_cod2Eye * inversesqrt(max(dot(v_cod2Eye, v_cod2Eye), 1e-30));\n" +
-                "float cod2Up = dot(reflect(-cod2V, cod2B), u_cod2SkyEye);\n" +
+                "float cod2Up = dot(reflect(-cod2V, cod2B), u_cod2SkyEye.xyz);\n" +
                 "float cod2Fresnel = 0.2 + 0.8 * pow(1.0 - max(dot(cod2B, cod2V), 0.0), 5.0);\n" +
                 "vec3 cod2Env = (cod2Ambient - cod2Sun) * 2.0 * mix(0.35, 1.0, smoothstep(-0.3, 0.7, cod2Up));\n" +
                 "gl_FragColor.rgb += cod2S.rgb * cod2Env * (cod2Fresnel * clamp(cod2P / 48.0, 0.25, 1.0) * u_cod2Surface.w);\n}\n}\n";
@@ -354,6 +359,26 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                   fsTexEnvPass.split(lightmapSample).join("cod2LightmapTexel");
                 lightmapTexel = "cod2LightmapTexel";
               }
+              // COD2_SUN_SHADOW: moving models' shadow in the sun's depth map
+              // (web_sun_shadows.c, unit 18). It takes away the sun's share of
+              // the lightmap, so baked shade and interiors never darken. Four
+              // filtered comparisons on a rotated grid soften its edge.
+              pointDefs += "uniform highp mat4 u_cod2SunShadowEye; uniform highp vec4 u_cod2SunShadow; uniform highp vec4 u_cod2SunShadowRect;\n" +
+                "uniform mediump sampler2DShadow u_cod2SunShadowMap;\n" +
+                "float cod2SunShadow(float visible) {\n" +
+                "  if (u_cod2SunShadow.x <= 0.0 || visible <= 0.004) return 1.0;\n" +
+                "  highp vec3 p = (u_cod2SunShadowEye * vec4(v_cod2Eye, 1.0)).xyz;\n" +
+                // Only the casters' own rectangle of the map can hold a shadow.
+                "  if (any(lessThan(p.xy, u_cod2SunShadowRect.xy)) || any(greaterThan(p.xy, u_cod2SunShadowRect.zw))) return 1.0;\n" +
+                "  highp vec2 edge = min(p.xy, 1.0 - p.xy);\n" +
+                "  float fade = clamp(min(edge.x, edge.y) * u_cod2SunShadow.z, 0.0, 1.0);\n" +
+                "  if (fade <= 0.0 || p.z >= 1.0) return 1.0;\n" +
+                "  highp float d = p.z - u_cod2SunShadow.w, t = u_cod2SunShadow.y;\n" +
+                "  float lit = textureLod(u_cod2SunShadowMap, vec3(p.xy + vec2(-0.5, -1.5) * t, d), 0.0) +\n" +
+                "    textureLod(u_cod2SunShadowMap, vec3(p.xy + vec2(1.5, -0.5) * t, d), 0.0) +\n" +
+                "    textureLod(u_cod2SunShadowMap, vec3(p.xy + vec2(0.5, 1.5) * t, d), 0.0) +\n" +
+                "    textureLod(u_cod2SunShadowMap, vec3(p.xy + vec2(-1.5, 0.5) * t, d), 0.0);\n" +
+                "  return 1.0 - u_cod2SunShadow.x * fade * (1.0 - 0.25 * lit);\n}\n";
               // The browser stores the sun's visibility in the lightmap alpha;
               // the DX7 bake added the sun at full strength whatever the angle.
               materialPass += "if (u_cod2Surface.z > 0.5) {\n" +
@@ -363,6 +388,7 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "highp vec3 cod2B = cod2N;\n" +
                 "if (u_cod2Surface.x > 0.5) cod2B = cod2Bump(cod2N, " + pointUV + ", 0.75);\n" +
                 "vec4 cod2S = u_cod2Surface.y > 0.5 ? texture2D(u_cod2SpecMap, " + pointUV + ") : vec4(0.0);\n" +
+                "highp float cod2P = cod2SpecPower(cod2S.a);\n" +
                 "vec4 cod2L = " + lightmapTexel + ";\n" +
                 "vec3 cod2SunPart = u_cod2SunColor.rgb * cod2L.a;\n" +
                 "float cod2NLG = max(dot(cod2N, u_cod2SunEye), 0.0), cod2NLB = max(dot(cod2B, u_cod2SunEye), 0.0);\n" +
@@ -370,9 +396,28 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 // applies only the normal map's relief.
                 "float cod2Incidence = mix(1.0 + cod2NLB - cod2NLG, cod2NLB, u_cod2SunColor.a);\n" +
                 "vec3 cod2Indirect = max(cod2L.rgb - cod2SunPart, vec3(0.0));\n" +
+                "cod2SunPart *= cod2SunShadow(cod2L.a);\n" +
                 "vec3 cod2Lit = cod2Indirect * (cod2Sky(cod2B) / cod2Sky(cod2N)) + cod2SunPart * cod2Incidence;\n" +
                 "gl_FragColor.rgb *= max(cod2Lit, vec3(0.0)) / max(cod2L.rgb, vec3(0.004));\n" +
-                "gl_FragColor.rgb += cod2S.rgb * cod2SunPart * (2.0 * u_cod2Surface.w * cod2Phong(cod2B, u_cod2SunEye, cod2SpecPower(cod2S.a)));\n}\n";
+                "gl_FragColor.rgb += cod2S.rgb * cod2SunPart * (2.0 * u_cod2Surface.w * cod2Phong(cod2B, u_cod2SunEye, cod2P));\n" +
+                // COD2_WORLD_REFLECTION: the light around the surface, the
+                // lightmap's indirect share, mirrored as models mirror their
+                // ambient: brighter toward the sky, more at grazing angles.
+                // Rough maps keep little of that gain, their facets hiding
+                // one another, so stone stays matte and polish shines.
+                "if (u_cod2Surface.y > 0.5 && u_cod2SkyEye.w > 0.0) {\n" +
+                "highp vec3 cod2V = -v_cod2Eye * inversesqrt(max(dot(v_cod2Eye, v_cod2Eye), 1e-30));\n" +
+                "float cod2Gloss = clamp(cod2P / 48.0, 0.25, 1.0);\n" +
+                "float cod2Up = dot(reflect(-cod2V, cod2B), u_cod2SkyEye.xyz);\n" +
+                "float cod2Fresnel = 0.2 + 0.8 * cod2Gloss * pow(1.0 - max(dot(cod2B, cod2V), 0.0), 5.0);\n" +
+                "vec3 cod2Env = cod2Indirect * 2.0 * mix(0.35, 1.0, smoothstep(-0.3, 0.7, cod2Up));\n" +
+                "gl_FragColor.rgb += cod2S.rgb * cod2Env * (cod2Fresnel * cod2Gloss * u_cod2Surface.w);\n}\n" +
+                // Without material lighting the lightmap's sun share goes alone.
+                "} else if (u_cod2SunShadow.x > 0.0) {\n" +
+                "vec4 cod2L = " + lightmapTexel + ";\n" +
+                "float cod2Shade = 1.0 - cod2SunShadow(cod2L.a);\n" +
+                "if (cod2Shade > 0.0) gl_FragColor.rgb *= max(cod2L.rgb - u_cod2SunColor.rgb * (cod2L.a * cod2Shade), vec3(0.0)) /\n" +
+                "  max(cod2L.rgb, vec3(0.004));\n}\n";
             }
             pointPass = materialPass + pointPass;
           }
@@ -416,6 +461,10 @@ POINT_UNIFORMS_REPLACEMENT = r'''        this.normalMatrixLocation = GLctx.getUn
         this.cod2CamoLocation = GLctx.getUniformLocation(this.program, "u_cod2Camo");
         this.cod2CamoMapLocation = GLctx.getUniformLocation(this.program, "u_cod2CamoMap");
         this.cod2CamoMaskLocation = GLctx.getUniformLocation(this.program, "u_cod2CamoMask");
+        this.cod2SunShadowEyeLocation = GLctx.getUniformLocation(this.program, "u_cod2SunShadowEye");
+        this.cod2SunShadowLocation = GLctx.getUniformLocation(this.program, "u_cod2SunShadow");
+        this.cod2SunShadowRectLocation = GLctx.getUniformLocation(this.program, "u_cod2SunShadowRect");
+        this.cod2SunShadowMapLocation = GLctx.getUniformLocation(this.program, "u_cod2SunShadowMap");
         this.cod2MaterialUniforms = null;
         this.cod2LightCount = -1;
         this.cod2LightRevision = -1;
@@ -475,12 +524,16 @@ POINT_UPLOAD_REPLACEMENT = r'''        // COD2_POINT_LIGHT_UNIFORMS: cache per p
               GLctx.uniform1i(this.cod2CamoMapLocation, 16);
               GLctx.uniform1i(this.cod2CamoMaskLocation, 17);
             }
+            // Only lightmapped world programs take the sun's depth map.
+            if (this.cod2SunShadowMapLocation) GLctx.uniform1i(this.cod2SunShadowMapLocation, 18);
             // Values are compared per program: world and model draws
             // alternate, but each program mostly sees the same ones.
             materialUniforms = this.cod2MaterialUniforms = [];
-            var materialNames = ["surface", "detail", "sunEye", "sunColor", "skyEye", "model", "camo"];
+            var materialNames = ["surface", "detail", "sunEye", "sunColor", "skyEye", "model", "camo",
+              "sunShadowEye", "sunShadow", "sunShadowRect"];
             var materialLocations = [this.cod2SurfaceLocation, this.cod2DetailLocation, this.cod2SunEyeLocation,
-              this.cod2SunColorLocation, this.cod2SkyEyeLocation, this.cod2ModelLocation, this.cod2CamoLocation];
+              this.cod2SunColorLocation, this.cod2SkyEyeLocation, this.cod2ModelLocation, this.cod2CamoLocation,
+              this.cod2SunShadowEyeLocation, this.cod2SunShadowLocation, this.cod2SunShadowRectLocation];
             for (var materialIndex = 0; materialIndex < materialNames.length; ++materialIndex) {
               if (!materialLocations[materialIndex]) continue;
               materialUniforms.push({name: materialNames[materialIndex], location: materialLocations[materialIndex],
@@ -498,6 +551,7 @@ POINT_UPLOAD_REPLACEMENT = r'''        // COD2_POINT_LIGHT_UNIFORMS: cache per p
             }
             if (!materialChanged) continue;
             if (materialLast.length === 3) GLctx.uniform3fv(materialUniform.location, materialValue);
+            else if (materialLast.length === 16) GLctx.uniformMatrix4fv(materialUniform.location, false, materialValue);
             else GLctx.uniform4fv(materialUniform.location, materialValue);
           }
         }

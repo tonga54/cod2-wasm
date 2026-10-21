@@ -21,20 +21,21 @@ def function(text, signature):
     return text[start:text.index('\n}\n', start) + 3]
 
 
-# The renderer hands over each viewmodel surface right after skinning it, in
-# both skinning commands, from the buffer the skinning wrote.
+# The renderer hands over each model surface right after skinning it, in both
+# skinning commands, from the buffer the skinning wrote: the viewmodel's to
+# the compositor, every other model's to the sun's shadow map.
 skin = function(model, 'void R_SkinXModelCmd(SkinXModelCmd *skinCmd, int context)')
 assert skin.index('R_SkinXSurfaceSkinned((struct GfxModelSkinnedSurface *)surfPos, boneMatrix);') < \
-    skin.index('R_AddWebViewmodelSkinnedSurface(skinCmd->e, (const struct GfxModelSkinnedSurface *)surfPos);')
+    skin.index('R_AddWebSkinnedSurface(skinCmd->e, (const struct GfxModelSkinnedSurface *)surfPos);')
 assert skin.index('(vec3_t *)(rigidSurf + 8));') < \
-    skin.index('R_AddWebViewmodelRigidSurface(skinCmd->e, (const GfxModelRigidSurface *)rigidSurf);')
+    skin.index('R_AddWebRigidSurface(skinCmd->e, (const GfxModelRigidSurface *)rigidSurf);')
 rigid = function(model, 'void R_SkinRigidXModelCmd(SkinRigidXModelCmd *skinRigidCmd)')
 assert rigid.index('(vec3_t *)(rigidSurf + 8));') < \
-    rigid.index('R_AddWebViewmodelRigidSurface(refEnt, (const GfxModelRigidSurface *)rigidSurf);')
+    rigid.index('R_AddWebRigidSurface(refEnt, (const GfxModelRigidSurface *)rigidSurf);')
 assert rigid.index('R_SkinXSurfaceSkinned((struct GfxModelSkinnedSurface *)surf, (const DObjSkelMat *)mtx);') < \
-    rigid.index('R_AddWebViewmodelSkinnedSurface(refEnt, (const struct GfxModelSkinnedSurface *)surf);')
+    rigid.index('R_AddWebSkinnedSurface(refEnt, (const struct GfxModelSkinnedSurface *)surf);')
 for body in (skin, rigid):
-    calls = list(re.finditer(r'R_AddWebViewmodel\w+Surface\(', body))
+    calls = list(re.finditer(r'R_AddWeb(?:Skinned|Rigid)Surface\(', body))
     assert len(calls) == 2
     for call in calls:
         assert body.rfind('#ifdef __EMSCRIPTEN__', 0, call.start()) > body.rfind('#endif', 0, call.start())
@@ -84,7 +85,7 @@ test = r'''
 #include <string.h>
 #include "SOURCE"
 static dvar_t glow, radius0, radius1, intensity0, intensity1, cutoff, desaturation, fullbright, samples, dof, film,
-    motion, scene;
+    motion, scene, ssao;
 const dvar_t *r_glow = &glow;
 const dvar_t *r_glowRadius[2] = {&radius0, &radius1};
 const dvar_t *r_glowBloomIntensity[2] = {&intensity0, &intensity1};
@@ -96,6 +97,10 @@ const dvar_t *r_dof_enable = &dof;
 const dvar_t *r_filmTweakEnable = &film;
 const dvar_t *r_motionBlur = &motion;
 const dvar_t *r_sceneHeight = &scene;
+const dvar_t *r_ssao = &ssao;
+void WebSunShadows_Render(void)
+{
+}
 static double clockMs = 1000.0;
 double emscripten_get_now(void)
 {
@@ -222,7 +227,7 @@ int main(void)
 {
     assert(SCENE_FX_VM_MOTION == 35 && SCENE_FX_VM_TRIANGLES == 36 && SCENE_FX_VM_INDEX_ROW == 37 &&
            SCENE_FX_VM_TILE_ROW == 38 && SCENE_FX_VM_ROWS == 39 && SCENE_FX_VM_TILE == 40 &&
-           SCENE_FX_VM_TILES_X == 41 && SCENE_FX_SCOPE == 42 && SCENE_FX_PARAM_COUNT == 55);
+           SCENE_FX_VM_TILES_X == 41 && SCENE_FX_SCOPE == 42 && SCENE_FX_SCOPE_END == 55 && SCENE_FX_AO == 55 && SCENE_FX_PARAM_COUNT == 59);
     /* The mesh texture holds the most vertices, indices and tiles at once. */
     assert(SCENE_FX_VM_MESH_WIDTH == 1024 && SCENE_FX_VM_MESH_ROWS == 64);
     assert(SCENE_FX_VM_MAX_VERTICES * 2 / 1024 + SCENE_FX_VM_MAX_TRIANGLES * 3 / 4096 +
@@ -483,6 +488,15 @@ capture_support = '\n'.join([
     '    gotIndices = indices; gotTriangles = triangleCount; gotTransform = transform;',
     '    memcpy(gotMatrix, transform, sizeof(gotMatrix));',
     '}',
+    'static const GfxEntity *castEnt; static const float *castPositions, *castTransform; static int castStride, castCount, casts;',
+    'static const unsigned short *castIndices; static int castTriangles; static float castMatrix[12];',
+    'void WebSunShadows_AddSurface(const GfxEntity *ent, const float *positions, int stride, int vertexCount,',
+    '    const unsigned short *indices, int triangleCount, const float *transform)',
+    '{',
+    '    ++casts; castEnt = ent; castPositions = positions; castStride = stride; castCount = vertexCount;',
+    '    castIndices = indices; castTriangles = triangleCount; castTransform = transform;',
+    '    memcpy(castMatrix, transform, sizeof(castMatrix));',
+    '}',
 ])
 capture_test = capture_support + '\n' + verts + '\n' + 'HOOKS' + r'''
 int main(void)
@@ -510,8 +524,9 @@ int main(void)
     skinned.surf.xsurf = &xsurf;
     skinned.skinnedCachedOffset = 72;
     dx.skinnedCacheLockAddr = (char *)cache;
-    R_AddWebViewmodelSkinnedSurface(&gun, &skinned);
+    R_AddWebSkinnedSurface(&gun, &skinned);
     assert(calls == 1 && gotKey == &xsurf && gotPositions == (const float *)((char *)cache + 72) && gotStride == 36);
+    assert(!casts);
     assert(gotCount == 5 && gotTriangles == 3 && gotIndices == triangles);
     for (int i = 0; i < 3; ++i) {
         assert(gotMatrix[9 + i] == gun.origin[i]);
@@ -522,25 +537,36 @@ int main(void)
     skinned.skinnedCachedOffset = -1;
     skinned.skinnedVert.variant = own;
     renderer.current.integer = 1;
-    R_AddWebViewmodelSkinnedSurface(&gun, &skinned);
+    R_AddWebSkinnedSurface(&gun, &skinned);
     assert(calls == 2 && gotPositions == own && gotStride == 64);
     /* A rigid surface reads its bone-space offsets, a vertex info apart, with
      * the transform that already holds its bone and the entity. */
     rigid.surf.xsurf = &xsurf;
-    R_AddWebViewmodelRigidSurface(&gun, &rigid);
+    R_AddWebRigidSurface(&gun, &rigid);
     assert(calls == 3 && gotKey == &xsurf && gotPositions == info[0].offset && gotStride == (int)sizeof(XVertexInfo));
     assert(gotTransform == &rigid.boneAxis[0][0] && gotCount == 5 && gotTriangles == 3);
-    /* Entities without the depth hack are not the viewmodel. */
+    assert(!casts);
+    /* Entities without the depth hack are not the viewmodel: the sun's shadow
+     * map takes their surfaces, from the same buffers with the same placement. */
     gun.renderFxFlags = 0x84;
-    R_AddWebViewmodelSkinnedSurface(&gun, &skinned);
-    R_AddWebViewmodelRigidSurface(&gun, &rigid);
+    R_AddWebSkinnedSurface(&gun, &skinned);
+    assert(casts == 1 && castEnt == &gun && castPositions == own && castStride == 64 && castCount == 5);
+    assert(castIndices == triangles && castTriangles == 3);
+    for (int i = 0; i < 3; ++i) {
+        assert(castMatrix[9 + i] == gun.origin[i]);
+        for (int j = 0; j < 3; ++j)
+            assert(castMatrix[i * 3 + j] == gun.axis[i][j] * 2);
+    }
+    R_AddWebRigidSurface(&gun, &rigid);
+    assert(casts == 2 && castPositions == info[0].offset && castStride == (int)sizeof(XVertexInfo));
+    assert(castTransform == &rigid.boneAxis[0][0]);
     gun.renderFxFlags = 0x10;
-    R_AddWebViewmodelSkinnedSurface(&gun, &skinned);
-    R_AddWebViewmodelRigidSurface(&gun, &rigid);
+    R_AddWebSkinnedSurface(&gun, &skinned);
+    R_AddWebRigidSurface(&gun, &rigid);
     gun.renderFxFlags = 0x18;
-    R_AddWebViewmodelSkinnedSurface(&gun, &skinned);
-    assert(calls == 3);
-    puts("PASS: r_model.c hands the compositor the depth-hacked viewmodel's skinned surfaces from the cache or their own buffer, with the entity's scaled placement and the renderer's vertex stride, and its rigid surfaces' bone-space offsets with their own transform; other entities are left out");
+    R_AddWebSkinnedSurface(&gun, &skinned);
+    assert(calls == 3 && casts == 5);
+    puts("PASS: r_model.c hands the compositor the depth-hacked viewmodel's skinned surfaces from the cache or their own buffer, with the entity's scaled placement and the renderer's vertex stride, and its rigid surfaces' bone-space offsets with their own transform; every other entity's go to the sun's shadow map the same way");
     return 0;
 }
 '''
@@ -552,8 +578,11 @@ capture_mutants = [
     ('    return (char *)dx.skinnedCacheLockAddr + skinnedSurf->skinnedCachedOffset;',
      '    return (char *)dx.skinnedCacheLockAddr;'),
     ('((const XVertexInfo *)xsurf->verts)->offset', '((const XVertexInfo *)xsurf->verts)->normal'),
-    ('    if (!R_IsWebViewmodel(ent))\n        return;\n    R_AddWebViewmodelVerts(xsurf,',
-     '    R_AddWebViewmodelVerts(xsurf,'),
+    ('    if (R_IsWebViewmodel(ent))\n        WebSceneFx_AddViewmodelSurface(',
+     '    if (1)\n        WebSceneFx_AddViewmodelSurface('),
+    ('    else\n        WebSunShadows_AddSurface(ent,', '    else if (0)\n        WebSunShadows_AddSurface(ent,'),
+    ('    R_AddWebSurfaceVerts(ent, xsurf, ((const XVertexInfo *)xsurf->verts)->offset',
+     '    R_AddWebSurfaceVerts(&(GfxEntity){.renderFxFlags = 8}, xsurf, ((const XVertexInfo *)xsurf->verts)->offset'),
 ]
 
 

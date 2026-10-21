@@ -38,7 +38,7 @@ two. The host can be a desktop machine or a Raspberry Pi 5.
 | **Fight with bots** | Up to 32 bots per room, three difficulties, navigation, cover and objectives across all five game modes. |
 | **Read the battlefield** | Circular minimap, shot indicators, hit markers, score popups, kill feed, team score panel, ammo display and redesigned scoreboard. |
 | **Feel the combat** | Sprint, cover penetration, S-Mine 44, remote C4, mounted MG42 heat, custom weapon balance and safer respawns. |
-| **See the difference** | WWII-style scopes, Reflex and Lens Sights, material lighting, aim depth of field, motion blur and improved effects. |
+| **See the difference** | WWII-style scopes, Reflex and Lens Sights, material lighting, real-time sun shadows, ambient occlusion, aim depth of field, motion blur and improved effects. |
 | **Play your way** | Keyboard and mouse or a remappable controller with vibration, stick settings and optional aim assist. |
 | **Run your own matches** | In-game room creation, map rotation, custom rules, browser server list, persistent settings and Docker/Pi hosting. |
 
@@ -146,8 +146,12 @@ remain areas of active development. [Behavior, navigation and validation →](do
 ### Rendering beyond the original browser port
 
 The WebGL 2 renderer uses the original normal, specular and detail maps for
-surface relief, sunlight response and weapon highlights. Softer baked shadow
-edges, map fog and extended model detail distances improve the environments.
+surface relief, sunlight response, highlights and reflections on weapons and
+glossy surfaces. Players, bodies and other moving models cast real-time sun
+shadows, ambient occlusion darkens corners and contact points, and blended
+ground layers take the light of the surface under them. Softer baked shadow
+edges, map fog and model detail at twice its original distance improve the
+environments.
 
 Aim depth of field, world and weapon motion blur, visible ejected casings,
 reworked tracers, larger muzzle/grenade effects and nearby muzzle lighting add
@@ -155,7 +159,8 @@ to combat presentation. The HUD is composed separately from the 3D scene to
 keep interface elements sharp.
 
 The default output is **1920 × 1080**, with the 3D scene rendered at **720 lines**,
-full-resolution base textures and 4× anisotropic filtering where supported.
+full-resolution base textures sampled at the output's detail and 16× anisotropic
+filtering where supported.
 Performance depends on the player's hardware, browser and match load.
 
 [Graphics implementation and visual validation →](docs/GRAPHICS_2026-10-16.md)

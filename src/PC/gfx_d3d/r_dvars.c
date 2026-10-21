@@ -34,6 +34,9 @@ const dvar_t *r_motionBlur;
 const dvar_t *r_sceneHeight;
 const dvar_t *r_materialLighting;
 const dvar_t *r_sunShading;
+const dvar_t *r_sunShadows;
+const dvar_t *r_ssao;
+const dvar_t *r_reflections;
 #endif
 extern const dvar_t *r_znear;
 extern const dvar_t *r_znear_depthhack;
@@ -298,7 +301,7 @@ void R_RegisterDvars(void)
     /* Retain detail/vegetation farther away without removing authored LODs
      * or visibility culling. A separate archived dvar also reaches existing
      * browser profiles without replacing their saved graphics settings. */
-    r_lodDistanceScale = ri.Dvar_RegisterFloat("r_lodDistanceScale", 1.5f, 1.0f, 2.0f, 0x2001);
+    r_lodDistanceScale = ri.Dvar_RegisterFloat("r_lodDistanceScale", 2.0f, 1.0f, 4.0f, 0x2001);
 #endif
 
     r_znear = ri.Dvar_RegisterFloat("r_znear", 4.0f, 0.001f, 16.0f, 0x2080);
@@ -514,6 +517,10 @@ void R_RegisterDvars(void)
 
     r_motionBlur = ri.Dvar_RegisterBool("r_motionBlur", 1, 0x2001);
 
+    /* Ambient occlusion from the scene's depth: corners, crevices and the
+     * ground under models darken. */
+    r_ssao = ri.Dvar_RegisterBool("r_ssao", 1, 0x2001);
+
     /* Lines the first full-screen 3D view renders at on a taller canvas,
      * which then draws the HUD at its own resolution; 0 renders it at the
      * canvas's. */
@@ -522,6 +529,13 @@ void R_RegisterDvars(void)
     r_materialLighting = ri.Dvar_RegisterBool("r_materialLighting", 1, 0x2001);
     /* How much the sun's incidence shades lightmapped surfaces, 0 to 1. */
     r_sunShading = ri.Dvar_RegisterFloat("r_sunShading", 0.65f, 0.0f, 1.0f, 0x2001);
+    /* Characters and other moving models cast the sun's shadow on the world
+     * (downstream/wasm/web_sun_shadows.c). */
+    r_sunShadows = ri.Dvar_RegisterBool("r_sunShadows", 1, 0x2001);
+    /* Surfaces with a specular map mirror the light around them, the sky's
+     * above and the ground's below, more at grazing angles and the glossier
+     * they are. */
+    r_reflections = ri.Dvar_RegisterBool("r_reflections", 1, 0x2001);
 #endif
 
     r_outdoorAwayBias = ri.Dvar_RegisterFloat("r_outdoorAwayBias", 32.0f, -3.4028235e+38f, 3.4028235e+38f, 0x2000);

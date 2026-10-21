@@ -105,6 +105,26 @@ compose_shader = compositor[compositor.index('link("compose"'):compositor.index(
 assert compose_shader.index('if (u_glow.x > 0.0)') < compose_shader.index('if (u_film.w > 0.0) {') < \
     compose_shader.index('col = mix(col, vec3(dot(col, vec3(0.2126, 0.7152, 0.0722))), u_px.w);') < \
     compose_shader.index('o = vec4(col, 1.0);')
+# Ambient occlusion reads its strength, radius and projection where the C
+# side writes them (55-58), resolves the multisampled depth it needs, runs at
+# half the scene's size in two passes, and darkens only world pixels in the
+# compose pass, before the aim blur mixes in; its result is the eighth source.
+assert 'var ao = H[o + 55] > 0;' in compositor
+assert 'dof || motion > 0 || vm || ao ? (gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT) : gl.COLOR_BUFFER_BIT' in compositor
+assert 'gl.uniform4f(A.u_aoView, H[o + 15], 0.9995002746582031, H[o + 57], H[o + 58]);' in compositor
+assert 'gl.uniform4f(A.u_aoParams, H[o + 56], H[o + 55], w, h);' in compositor
+assert 'fx.pass(A, t.aoFbo[0], t.hw, t.hh);' in compositor and 'fx.pass(P.aoBlur, t.aoFbo[1], t.hw, t.hh);' in compositor
+assert 'hw: Math.max(1, Math.ceil(w / 2)), hh: Math.max(1, Math.ceil(h / 2)),' in compositor
+assert 'gl.uniform4f(C.u_aoMix, ao ? 1 : 0, 0.5 / t.hw, 0.5 / t.hh, 0);' in compositor
+assert 'vm ? vm.smear : null, vm ? vm.mesh : null, ao ? t.ao[1] : null];' in compositor
+assert '["u_scene", "u_bloom", "u_depth", "u_dofMed", "u_dofLarge", "u_vmVelocity", "u_vmMesh", "u_ao"]' in compositor
+ao_shader = compositor[compositor.index('link("ao"'):compositor.index('link("aoBlur"')]
+assert '"  if (d < 0.2 || d >= 0.9999 || r < 1.5) return;\\n"' in ao_shader, 'the viewmodel and the sky stay open'
+assert '"    if (dq < 0.2) continue;\\n"' in ao_shader, 'the viewmodel hides nothing behind it'
+assert compose_shader.index('col *= texture(u_ao, v_uv + u_aoMix.yz).r;') < \
+    compose_shader.index('if (u_dof2.x > 0.0 || u_dof2.w > 0.0 || u_lens.z > 0.0) {')
+assert 'if (u_aoMix.x > 0.0 && texelFetch(u_depth, ivec2(gl_FragCoord.xy), 0).r >= 0.2)' in compose_shader
+assert 'r_ssao = ri.Dvar_RegisterBool("r_ssao", 1, 0x2001);' in dvars
 # And the scope's window after the viewmodel's motion: centre 42-43,
 # half-axes 44-47, presence 48, open 49, blur 50, darkness 51.
 assert 'var lensPresence = H[o + 48], lensBlur = H[o + 50];' in compositor
@@ -180,7 +200,7 @@ test = r'''
 #include <string.h>
 #include "SOURCE"
 static dvar_t glow, radius0, radius1, intensity0, intensity1, cutoff, desaturation, fullbright, samples, dof, film,
-    motion, scene;
+    motion, scene, ssao;
 const dvar_t *r_glow = &glow;
 const dvar_t *r_glowRadius[2] = {&radius0, &radius1};
 const dvar_t *r_glowBloomIntensity[2] = {&intensity0, &intensity1};
@@ -192,6 +212,8 @@ const dvar_t *r_dof_enable = &dof;
 const dvar_t *r_filmTweakEnable = &film;
 const dvar_t *r_motionBlur = &motion;
 const dvar_t *r_sceneHeight = &scene;
+const dvar_t *r_ssao = &ssao;
+static int shadowRenders, bindsAtShadowRender;
 static double clockMs = 1000.0;
 double emscripten_get_now(void)
 {
@@ -199,6 +221,13 @@ double emscripten_get_now(void)
 }
 static int binds, composes, bindResult = 1, boundWidth, boundHeight, boundSamples, boundScreenWidth, boundScreenHeight;
 static float composed[SCENE_FX_PARAM_COUNT];
+/* The sun's shadow map draws at the frame's first full-screen view, before
+ * the view binds its target. */
+void WebSunShadows_Render(void)
+{
+    ++shadowRenders;
+    bindsAtShadowRender = binds;
+}
 int WebSceneFx_Bind(int width, int height, int sampleCount, int screenWidth, int screenHeight)
 {
     ++binds; boundWidth = width; boundHeight = height; boundSamples = sampleCount;
@@ -230,6 +259,7 @@ static void defaults(void)
     intensity0.current.value = 1; intensity1.current.value = 1; cutoff.current.value = 0.9f;
     desaturation.current.value = 0.75f; fullbright.current.enabled = 0; samples.current.integer = 4;
     dof.current.enabled = 1; film.current.enabled = 1; motion.current.enabled = 1; scene.current.integer = 720;
+    ssao.current.enabled = 1;
 }
 static void frameNear(int x, int width, float nearClip, float worldNearClip)
 {
@@ -291,16 +321,17 @@ int main(void)
     const float defaultWorldNearClip = 0.9995002746582031f * 4.0f;
     defaults();
     for (int i = 0; i < 600; ++i) {
-        binds = composes = 0;
+        binds = composes = shadowRenders = 0;
         WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 7.996f);
         assert(binds == 1 && boundWidth == 1280 && boundHeight == 720 && boundSamples == 4 && !composes);
+        assert(shadowRenders == 1 && bindsAtShadowRender == 0);
         assert(boundScreenWidth == 1280 && boundScreenHeight == 720);
         /* RB_Set2D composes once; later 2D batches and views draw directly. */
         WebSceneFx_EndView(); WebSceneFx_EndView();
         WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 2.0f);
         WebSceneFx_EndView();
         WebSceneFx_EndFrame();
-        assert(binds == 1 && composes == 1);
+        assert(binds == 1 && composes == 1 && shadowRenders == 1);
     }
     assert(fabsf(composed[SCENE_FX_GLOW0] - 0.42f) < 1e-6f && fabsf(composed[SCENE_FX_GLOW1] - 0.30f) < 1e-6f);
     assert(composed[SCENE_FX_CUTOFF] == 0.9f && composed[SCENE_FX_DESATURATION] == 0.75f);
@@ -325,11 +356,12 @@ int main(void)
     WebSceneFx_EndFrame();
     assert(composes == 1);
 
-    /* Partial views (cg_viewsize, split views) keep the original direct path. */
-    binds = composes = 0;
+    /* Partial views (cg_viewsize, split views) keep the original direct path
+     * and draw no shadow map. */
+    binds = composes = shadowRenders = 0;
     frame(8, 1264, 0.1f);
     frame(0, 1024, 0.1f);
-    assert(!binds && !composes);
+    assert(!binds && !composes && !shadowRenders);
 
     /* r_fullbright clears before its view begins; it renders directly. */
     fullbright.current.enabled = 1;
@@ -338,7 +370,7 @@ int main(void)
     fullbright.current.enabled = 0;
 
     /* With every effect and MSAA off nothing changes, until the player aims. */
-    glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1;
+    glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; ssao.current.enabled = 0;
     WebSceneFx_SetAds(0, 6, 15, 512);
     frame(0, 1280, 0.1f);
     assert(!binds && !composes);
@@ -461,7 +493,7 @@ int main(void)
     assert(moved(10, 1.40f, 0.07f, 193.52f, 198.8f, 60.5f) == 0);
     assert(moved(10, 1.42f, 0.07f, 193.52f, 198.8f, 60.5f) == 1.2f);
     /* With every other effect off, only a moving camera composes. */
-    glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1;
+    glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; ssao.current.enabled = 0;
     binds = composes = 0;
     moved(10, 1.42f, 0.07f, 193.52f, 198.8f, 60.5f);
     assert(!binds && !composes);
@@ -489,10 +521,10 @@ int main(void)
 
     /* A menu's blurred backdrop composes on its own, whatever the other
      * effects, and stays between none and all of it. */
-    assert(SCENE_FX_BACKDROP == 33 && SCENE_FX_BACKDROP_GRAY == 34 && SCENE_FX_PARAM_COUNT == 55);
+    assert(SCENE_FX_BACKDROP == 33 && SCENE_FX_BACKDROP_GRAY == 34 && SCENE_FX_PARAM_COUNT == 59);
     defaults();
     glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
-    motion.current.enabled = 0;
+    motion.current.enabled = 0; ssao.current.enabled = 0;
     binds = composes = 0;
     frame(0, 1280, 0.1f);
     assert(!binds && !composes);
@@ -528,7 +560,7 @@ int main(void)
     /* The countdown before a match grays the view on its own as well, the
      * larger gray winning, and lifts the film grade's contrast with it. */
     glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
-    motion.current.enabled = 0;
+    motion.current.enabled = 0; ssao.current.enabled = 0;
     binds = composes = 0;
     WebSceneFx_SetGray(0.6f);
     frame(0, 1280, 0.1f);
@@ -568,7 +600,7 @@ int main(void)
             defaults();
             if (!effects) {
                 glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
-                motion.current.enabled = 0;
+                motion.current.enabled = 0; ssao.current.enabled = 0;
             }
             scene.current.integer = z[2];
             binds = composes = 0;
@@ -598,7 +630,7 @@ int main(void)
     assert(SCENE_FX_SCOPE == 42 && SCENE_FX_SCOPE_AXES == 44 && SCENE_FX_SCOPE_PRESENCE == 48 &&
            SCENE_FX_SCOPE_OPEN == 49 && SCENE_FX_SCOPE_BLUR == 50 && SCENE_FX_SCOPE_DARK == 51 &&
            SCENE_FX_SCOPE_PROJECTION == 52 && SCENE_FX_SCOPE_NEAR_CLIP == 54 && SCENE_FX_SCOPE_FLOATS == 13 &&
-           SCENE_FX_SCOPE_FLOATS == SCENE_FX_PARAM_COUNT - SCENE_FX_SCOPE && SCENE_FX_SCOPE_LENS_FLOATS == 19);
+           SCENE_FX_SCOPE_FLOATS == SCENE_FX_SCOPE_END - SCENE_FX_SCOPE && SCENE_FX_SCOPE_LENS_FLOATS == 19);
     {
         const float lens[19] = {0.05f, -0.02f, 0.585f, -0.01f, 0.01f, 1.04f, 1, 0.5f, 0.5f, 0.25f, 1.7f, 3.0f, 0.8f,
                                 0.06f, -0.03f, 0.82f, -0.01f, 0.015f, 1.45f};
@@ -607,7 +639,7 @@ int main(void)
 
         defaults();
         glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
-        motion.current.enabled = 0;
+        motion.current.enabled = 0; ssao.current.enabled = 0;
         binds = composes = stencils = masks = 0;
         frame(0, 1280, 0.1f);
         assert(!binds && !composes);
@@ -784,7 +816,92 @@ int main(void)
         frame(0, 1280, 0.1f);
         assert(!binds);
     }
-    puts("PASS: 600 composed frames, single compose per frame before Present, partial/fullbright/disabled views drawn directly, bounded glow, viewmodel and near world focus parameters, camera motion reprojected over a 10 ms exposure with aim fade, cuts and still cameras, a bounded menu backdrop and its gray, scenes rendered at r_sceneHeight lines and the screen's aspect on taller screens, a scope window composed with its rifle projection and near clip and a stencil drawn once per view and lifted on every exit, bounded window floats, the outline a scope's rifle is kept off handed to the stencil and none for a sight's window, and the stock overlay without a composed target");
+
+    /* Ambient occlusion (r_ssao) composes on its own, with its strength, its
+     * world radius and the composed view's own projection, taken when the
+     * view begins; off, or without a usable camera, it adds nothing. */
+    {
+        assert(SCENE_FX_AO == 55 && SCENE_FX_AO_RADIUS == 56 && SCENE_FX_AO_PROJECTION == 57);
+        defaults();
+        glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
+        motion.current.enabled = 0;
+        WebSceneFx_SetAds(0, 6, 15, 512);
+        frame(0, 1280, 0.1f);
+        binds = composes = 0;
+        frame(0, 1280, 0.1f);
+        assert(binds == 1 && composes == 1 && composed[SCENE_FX_AO] == 0);
+        clockMs += 10;
+        camera(0.2f, 0.1f, 10, 20, 30);
+        frame(0, 1280, 0.1f);
+        assert(binds == 2 && composes == 2);
+        assert(composed[SCENE_FX_AO] == SCENE_FX_AO_STRENGTH && composed[SCENE_FX_AO_RADIUS] == SCENE_FX_AO_WORLD_RADIUS);
+        assert(composed[SCENE_FX_AO_PROJECTION] == 1.19f && composed[SCENE_FX_AO_PROJECTION + 1] == 2.11f);
+        /* A camera set for a later view does not reach the composed one. */
+        clockMs += 10;
+        camera(0.2f, 0.1f, 10, 20, 30);
+        WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 4.0f);
+        lens[0] = 3.0f; lens[5] = 4.0f;
+        WebSceneFx_SetCamera(view, lens);
+        WebSceneFx_EndView();
+        WebSceneFx_EndFrame();
+        assert(composed[SCENE_FX_AO_PROJECTION] == 1.19f && composed[SCENE_FX_AO_PROJECTION + 1] == 2.11f);
+        lens[0] = 1.19f; lens[5] = 2.11f;
+        frame(0, 1280, 0.1f);
+        /* A broken projection takes none. */
+        lens[0] = 0;
+        clockMs += 10;
+        camera(0.2f, 0.1f, 10, 20, 30);
+        frame(0, 1280, 0.1f);
+        assert(composed[SCENE_FX_AO] == 0);
+        lens[0] = 1.19f;
+        /* r_ssao 0 adds none, and alone composes nothing. */
+        ssao.current.enabled = 0;
+        binds = composes = 0;
+        clockMs += 10;
+        camera(0.2f, 0.1f, 10, 20, 30);
+        frame(0, 1280, 0.1f);
+        assert(!binds && !composes);
+        film.current.enabled = 1;
+        clockMs += 10;
+        camera(0.2f, 0.1f, 10, 20, 30);
+        frame(0, 1280, 0.1f);
+        assert(composes == 1 && composed[SCENE_FX_AO] == 0);
+        /* r_fullbright draws directly. */
+        defaults();
+        fullbright.current.enabled = 1;
+        binds = composes = 0;
+        frame(0, 1280, 0.1f);
+        assert(!binds && !composes);
+        fullbright.current.enabled = 0;
+    }
+
+    /* The color maps' mip bias while a scaled scene's view is open: the
+     * scale's octaves, never finer than one; none for a full-size scene,
+     * after the view or without a target. */
+    {
+        defaults();
+        assert(WebSceneFx_TextureLodBias() == 0);
+        WebSceneFx_BeginView(0, 0, 1920, 1080, 1920, 1080, 0.1f, 4.0f);
+        assert(fabsf(WebSceneFx_TextureLodBias() - log2f(720.0f / 1080.0f)) < 1e-6f);
+        WebSceneFx_EndView();
+        assert(WebSceneFx_TextureLodBias() == 0);
+        WebSceneFx_EndFrame();
+        scene.current.integer = 200;
+        WebSceneFx_BeginView(0, 0, 1920, 1080, 1920, 1080, 0.1f, 4.0f);
+        assert(WebSceneFx_TextureLodBias() == -1.0f);
+        WebSceneFx_EndFrame();
+        scene.current.integer = 0;
+        WebSceneFx_BeginView(0, 0, 1920, 1080, 1920, 1080, 0.1f, 4.0f);
+        assert(WebSceneFx_TextureLodBias() == 0);
+        WebSceneFx_EndFrame();
+        scene.current.integer = 720;
+        bindResult = 0;
+        WebSceneFx_BeginView(0, 0, 1920, 1080, 1920, 1080, 0.1f, 4.0f);
+        assert(WebSceneFx_TextureLodBias() == 0);
+        WebSceneFx_EndFrame();
+        bindResult = 1;
+    }
+    puts("PASS: 600 composed frames, single compose per frame before Present, partial/fullbright/disabled views drawn directly, bounded glow, viewmodel and near world focus parameters, camera motion reprojected over a 10 ms exposure with aim fade, cuts and still cameras, a bounded menu backdrop and its gray, scenes rendered at r_sceneHeight lines and the screen's aspect on taller screens, a scope window composed with its rifle projection and near clip and a stencil drawn once per view and lifted on every exit, bounded window floats, the outline a scope's rifle is kept off handed to the stencil and none for a sight's window, the stock overlay without a composed target, the sun's shadow map drawn once at the first full-screen view before its target binds, ambient occlusion composed on its own from the composed view's projection, and the color maps' mip bias of a scaled scene");
     return 0;
 }
 '''
@@ -805,8 +922,20 @@ mutants = [
     ('WebSceneFx_Enabled(r_motionBlur) && ', ''),
     (' && s_motionScale <= 0.0f && ', ' && '),
     (' && s_backdropFrac <= 0.0f &&\n', ' &&\n'),
-    ('        s_backdropGray <= 0.0f && !WebSceneFx_ScopeRequested())', '        !WebSceneFx_ScopeRequested())'),
-    (' &&\n        s_backdropGray <= 0.0f && !WebSceneFx_ScopeRequested())', ' &&\n        s_backdropGray <= 0.0f)'),
+    ('        s_backdropGray <= 0.0f && !WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled())',
+     '        !WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled())'),
+    ('s_backdropGray <= 0.0f && !WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled())',
+     's_backdropGray <= 0.0f && !WebSceneFx_AoEnabled())'),
+    ('!WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled())', '!WebSceneFx_ScopeRequested())'),
+    ('    params[SCENE_FX_AO] = WebSceneFx_AoEnabled() && s_viewProjection[0] > 0.0f ? SCENE_FX_AO_STRENGTH : 0.0f;',
+     '    params[SCENE_FX_AO] = SCENE_FX_AO_STRENGTH;'),
+    ('    return WebSceneFx_Enabled(r_ssao) && !WebSceneFx_Enabled(r_fullbright);', '    return 1;'),
+    ('    if (s_cameraPending && WebSceneFx_CameraValid()) {', '    if (WebSceneFx_CameraValid()) {'),
+    ('    params[SCENE_FX_AO_PROJECTION + 1] = s_viewProjection[1];', '    params[SCENE_FX_AO_PROJECTION + 1] = s_cameraProjection[1];'),
+    ('    return s_active ? s_lodBias : 0.0f;', '    return s_lodBias;'),
+    ('WebSceneFx_Clamp(log2f((float)sceneHeight / (float)height), -1.0f, 0.0f)',
+     'WebSceneFx_Clamp(log2f((float)sceneHeight / (float)height), -4.0f, 0.0f)'),
+    ('    s_scopeStencil = 0;\n    WebSunShadows_Render();\n', '    s_scopeStencil = 0;\n'),
     ('    s_scopeUnavailable = !s_active;\n', '    s_scopeUnavailable = 0;\n'),
     ('        s_scopeUnavailable = 1;\n        return;', '        return;'),
     ('    if (!s_scopeStencil) {', '    if (1) {'),

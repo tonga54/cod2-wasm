@@ -474,7 +474,9 @@ void R_BeginFrame(void)
 {
 #ifdef __EMSCRIPTEN__
     extern void WebSceneFx_BeginFrame(void);
+    extern void WebSunShadows_BeginFrame(void);
     WebSceneFx_BeginFrame();
+    WebSunShadows_BeginFrame();
 #endif
     R_BeginFrame_impl();
 }

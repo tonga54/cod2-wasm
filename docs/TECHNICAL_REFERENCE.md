@@ -238,11 +238,26 @@ retail CoD2:
 - **Material lighting:** the browser applies the original normal, specular and
   detail maps that the DX7 renderer never sampled: relief, the sun's incidence
   on lightmapped surfaces (`r_sunShading`, 0 to 1, default 0.65), sun
-  highlights and a sky reflection on weapons and other specular models.
-  `r_materialLighting 0` restores the previous look. Normal and specular maps
-  load at half resolution (`r_picmip_bump`/`r_picmip_spec` 1), about 24 MiB
-  more texture memory per map; uncapped frame rates dropped by about 1%.
+  highlights and a reflection of the surroundings, brighter toward the sky and
+  at grazing angles, on weapons, models and world surfaces with a specular map
+  (`r_reflections`, archived, on); rough maps reflect little. Lightmapped layers
+  blended over the world, such as terrain and decals, take the same lighting
+  and shadows as the surface under them. `r_materialLighting 0` restores the
+  previous look. Normal and specular maps load at half resolution
+  (`r_picmip_bump`/`r_picmip_spec` 1), about 24 MiB more texture memory per map,
+  and filter at up to 16× anisotropy. A 3D view rendered below the canvas's
+  lines samples its color maps one mip level finer per halving of resolution
+  (0.58 levels at 720 of 1080), so textures keep the output's detail.
   See [graphics validation and limits](GRAPHICS_2026-10-16.md).
+- **Sun shadows of moving models:** players, bodies, grenades, dropped weapons
+  and script models in view cast the sun's shadow on the world, from a
+  2048 × 2048 depth map over 2,048 units around the view drawn once per frame
+  (`r_sunShadows`, archived, on). Shadows only darken surfaces the map's bake
+  lights with the sun, so they never fall indoors or into baked shade; static
+  props keep their baked shadows. See [graphics validation and limits](GRAPHICS_2026-10-16.md).
+- **Ambient occlusion:** corners, crevices and the ground under objects darken
+  from the scene's depth, computed at half resolution (`r_ssao`, archived, on).
+  The weapon and the sky stay unaffected, and it fades out past 1,400 units.
 - **WWII sniper scopes:** the scoped Kar98k, Springfield, Lee-Enfield and
   Mosin-Nagant, and the 4x Optic on the other rifles, the BAR and the Bren,
   stay on screen while raised, as in Call of Duty: WWII. The
@@ -255,9 +270,10 @@ retail CoD2:
 - **Map atmosphere and farther model detail:** the browser renders each map's
   original fog color/density, with separate world and HUD state and black fog
   for materials that request it. Model detail transitions and finite vegetation
-  draw distances extend by 50% by default. The archived `r_lodDistanceScale`
-  setting ranges from 1 (original distances) to 2; authored lower-detail models,
-  wall/frustum culling, texture resolution and mip filtering remain in use.
+  draw distances double by default. The archived `r_lodDistanceScale` setting
+  ranges from 1 (original distances) to 4; profiles that saved the old 1.5
+  default take 2 once. Authored lower-detail models, wall/frustum culling,
+  texture resolution and mip filtering remain in use.
 - **Browser hosting and controls:** create/delete rooms without a desktop game
   installation on each client, cached asset downloads with actual byte progress,
   English interface text, update notices, compact chat, and F10 for
@@ -585,7 +601,7 @@ the full guide before running these commands on a new installation.
 
 The default client draws at **1920×1080**, its 3D view at 720 lines
 (`r_sceneHeight`), with full-resolution textures,
-anti-aliasing and 4× anisotropic filtering where supported. Rendering follows
+anti-aliasing and 16× anisotropic filtering where supported. Rendering follows
 the display cadence, including 120 Hz. Performance changes cache static vertex
 buffers, texture/sampler/render state, shader uniforms and animation work;
 they do not reduce texture quality or remove map geometry/effects. Up to four

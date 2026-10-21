@@ -42,10 +42,11 @@ try {
       check(gl.getShaderParameter(s, gl.COMPILE_STATUS), gl.getShaderInfoLog(s) || 'shader compiled'); return s;
     };
     // A plane facing the camera, or tilted for models; UVs grow with x and y.
-    const vs = compile(gl.VERTEX_SHADER, '#version 300 es\nprecision highp float;uniform vec3 normal;uniform float uvScale;' +
+    // A slope turns the world's plane away from the camera about its y axis.
+    const vs = compile(gl.VERTEX_SHADER, '#version 300 es\nprecision highp float;uniform vec3 normal;uniform float uvScale;uniform float slope;' +
       'out highp vec3 v_cod2Eye;out mediump vec3 v_cod2Normal;out highp vec4 v_texCoord0;out highp vec4 v_texCoord1;out mediump vec4 v_color;' +
       'void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.-1.,0,1);v_texCoord0=vec4(p*uvScale,0,1);' +
-      'v_texCoord1=vec4(p,0,1);v_cod2Eye=vec3((p-.5)*16.,-40.);v_cod2Normal=normal;v_color=vec4(.5,.5,.5,1);}');
+      'v_texCoord1=vec4(p,0,1);v_cod2Eye=vec3((p-.5)*16.,-40.+slope*(p.x-.5)*16.);v_cod2Normal=normal;v_color=vec4(.5,.5,.5,1);}');
     const programs = {};
     for (const [name, list] of Object.entries(shaders)) programs[name] = list.map(shader => {
       const p = gl.createProgram(); gl.attachShader(p, vs); gl.attachShader(p, compile(gl.FRAGMENT_SHADER, shader.source));
@@ -62,17 +63,30 @@ try {
     };
     const solid = rgba => () => rgba;
     const identity = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
-    // Uniforms default to off: no maps, no lightmap shading, no model sun.
+    const uniformType = (p, name) => {
+      for (let i = 0, n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS); i < n; ++i)
+        if (gl.getActiveUniform(p, i).name === name) return gl.getActiveUniform(p, i).type;
+      return null;
+    };
+    // Uniforms default to off: no maps, no lightmap shading, no model sun;
+    // r_reflections on where the sky carries it.
     function draw(entry, set = {}) {
       const p = entry.program; gl.useProgram(p);
       const u = name => gl.getUniformLocation(p, name);
       gl.uniformMatrix4fv(u('u_textureMatrix0'), false, identity); gl.uniformMatrix4fv(u('u_textureMatrix1'), false, identity);
       gl.uniform1i(u('u_texUnit0'), 0); gl.uniform1i(u('u_texUnit1'), 1);
       gl.uniform1i(u('u_cod2DetailMap'), 5); gl.uniform1i(u('u_cod2NormalMap'), 6); gl.uniform1i(u('u_cod2SpecMap'), 7);
+      // A shadow sampler may not share a unit with the color maps; with no
+      // map bound the sun's shadow stays off (u_cod2SunShadow is zero).
+      gl.uniform1i(u('u_cod2SunShadowMap'), 18);
       gl.uniform3fv(u('normal'), set.normal || [0, 0, 1]); gl.uniform1f(u('uvScale'), set.uvScale || 1);
+      gl.uniform1f(u('slope'), set.slope || 0);
       gl.uniform4fv(u('u_cod2Surface'), set.surface || [0, 0, 0, 1]); gl.uniform4fv(u('u_cod2Detail'), set.detail || [0, 0, 0, 0]);
       gl.uniform4fv(u('u_cod2Model'), [set.sunVisibility || 0, 0, 0, 0]);
-      gl.uniform3fv(u('u_cod2SunEye'), set.sun || [0, 0, 1]); gl.uniform3fv(u('u_cod2SkyEye'), set.sky || [0, 1, 0]);
+      gl.uniform3fv(u('u_cod2SunEye'), set.sun || [0, 0, 1]);
+      if (uniformType(p, 'u_cod2SkyEye') === gl.FLOAT_VEC4)
+        gl.uniform4fv(u('u_cod2SkyEye'), [...(set.sky || [0, 1, 0]), set.reflection === undefined ? 1 : set.reflection]);
+      else gl.uniform3fv(u('u_cod2SkyEye'), set.sky || [0, 1, 0]);
       gl.uniform4fv(u('u_cod2SunColor'), [0.3, 0.25, 0.2, set.shading === undefined ? 0.65 : set.shading]);
       gl.uniform4fv(u('u_lightModelAmbient'), [0.1, 0.1, 0.1, 1]); gl.uniform4fv(u('u_materialAmbient'), [1, 1, 1, 1]);
       gl.uniform4fv(u('u_materialDiffuse'), [1, 1, 1, 1]);
@@ -123,12 +137,40 @@ try {
         }
         texture(6, 16, solid([128, 128, 255, 128]));
         // Highlights: the sun's, in sunlight only, scaled by the map.
-        const spec = center(draw(after, {surface: [0, 1, 1, 1], shading: 1}));
+        const spec = center(draw(after, {surface: [0, 1, 1, 1], shading: 1, reflection: 0}));
         close(spec, L.map((l, c) => base * 2 * l + 128 / 255 * S[c] * 2), 2, `${kind}: sun highlight at the mirror direction`);
         lightmap(0);
         const shade = draw(before);
-        check(same(draw(after, {surface: [0, 1, 1, 1], shading: 1}), shade, 1), `${kind}: no highlight in shadow`);
+        check(same(draw(after, {surface: [0, 1, 1, 1], shading: 1, reflection: 0}), shade, 1), `${kind}: no highlight in shadow`);
+        // Reflection: the lightmap's indirect light mirrored by the specular
+        // map, brighter toward the sky, more at grazing angles the glossier
+        // the map, none with r_reflections 0 or a black map.
+        const glossy = [255, 255, 255, 247], rough = [255, 255, 255, 0], graze = 3.08;
+        texture(7, 16, solid(glossy));
+        check(same(draw(after, {surface: [0, 1, 1, 1], reflection: 0}), shade, 1), `${kind}: r_reflections 0 mirrors nothing`);
+        // A reflection along the horizon: mix(0.35, 1, smoothstep(-0.3, 0.7, 0)).
+        const sideways = 0.35 + 0.65 * 0.216;
+        close(center(draw(after, {surface: [0, 1, 1, 1]})), L.map(l => base * 2 * l + l * 2 * sideways * 0.2), 2,
+          `${kind}: a glossy map mirrors the indirect light at 0.2 head-on`);
+        const mirrored = (set, from = shade) => center(draw(after, {surface: [0, 1, 1, 1], ...set}))[0] - center(from)[0];
+        const up = mirrored({sky: [0, 0, 1]}), side = mirrored({}), down = mirrored({sky: [0, 0, -1]});
+        check(up > side + 10 && side > down + 3, `${kind}: the sky's side mirrors brighter than the ground's (${down} < ${side} < ${up})`);
+        const tilted = draw(before, {slope: graze});
+        const glossyFront = side, glossyGraze = mirrored({slope: graze}, tilted);
+        texture(7, 16, solid(rough));
+        const roughFront = mirrored({}), roughGraze = mirrored({slope: graze}, tilted);
+        check(glossyGraze >= glossyFront + 10 && roughGraze <= roughFront + 2 && roughFront * 3 < glossyFront,
+          `${kind}: grazing angles mirror more on a glossy map (${glossyFront} to ${glossyGraze}) than a rough one (${roughFront} to ${roughGraze})`);
+        texture(7, 16, solid([0, 0, 0, 247]));
+        check(same(draw(after, {surface: [0, 1, 1, 1], slope: graze}), tilted, 1), `${kind}: a black specular map mirrors nothing`);
+        // In sunlight only the indirect share is mirrored, not the sun's.
+        texture(7, 16, solid(glossy));
         lightmap(255);
+        const sunlit = {surface: [0, 1, 1, 1], shading: 0, sun: [0, 0, -1]};
+        const sunMirror = mirrored(sunlit, draw(after, {...sunlit, reflection: 0}));
+        check(sunMirror > 4 && sunMirror < glossyFront * 0.6,
+          `${kind}: sunlight mirrors its indirect share only (${sunMirror} vs ${glossyFront} in shade)`);
+        texture(7, 16, solid([128, 128, 128, 255]));
         // Detail maps multiply at twice their value, only when flagged.
         texture(5, 16, solid([64, 64, 64, 255]));
         check(same(draw(after), original), `${kind}: an unflagged detail map changes nothing`);
@@ -151,6 +193,8 @@ try {
         const graze = center(draw(after, {surface: [0, 1, 0, 1], normal: [0.95, 0, 0.312]}))[0] -
           center(draw(before, {normal: [0.95, 0, 0.312]}))[0];
         check(front > 4 && graze > front * 1.3, `${kind}: reflection grows toward grazing angles (${front} to ${graze})`);
+        check(same(draw(after, {surface: [0, 1, 0, 1], normal: [0.95, 0, 0.312], reflection: 0}),
+          draw(before, {normal: [0.95, 0, 0.312]}), 1), `${kind}: r_reflections 0 mirrors nothing`);
         texture(7, 16, solid([0, 0, 0, 255]));
         check(same(draw(after, {surface: [0, 1, 0, 1], normal: [0.95, 0, 0.312]}), draw(before, {normal: [0.95, 0, 0.312]}), 1),
           `${kind}: a black specular map reflects nothing`);
