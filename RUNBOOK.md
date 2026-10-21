@@ -5805,3 +5805,31 @@ Validation:
   Captures are in `out/scope-glint-fade-qa`.
 - The full `test-static.sh` was not run; no other script reads the glint
   module.
+
+## Stronger motion blur, second pass — 2026-10-21
+
+The owner still found the camera blur faint when turning with the mouse,
+sideways or a whole 360, and the hands' and weapon's on the sprint pose,
+switches and reloads. Measured on the weapon's visible vertices, the bob
+stays under 0.2 pixels and the sway under 1 while the sprint pose and aiming
+peak near 8 and 9, about the old 5.76-pixel knee, where nothing counted more.
+At 60 fps a fast 360 turned more than 0.35 rad a frame and was taken for a
+cut, drawing no blur at all. `web_scene_fx.c` now puts the viewmodel's knee
+at 0.4% of the height, counts each pixel past it 3.5 times up to a 10% cap
+and gathers up to 24 taps; the camera's exposure goes from 12 to 16 ms, its
+cap from 7% to 10% with up to 16 taps, and two views up to 0.6 rad apart
+blur. Details and evidence are in `docs/GRAPHICS_2026-10-16.md`, "Stronger
+motion blur, second pass".
+
+Validation:
+
+- `test-viewmodel-motion.py` (31 and 9 mutants), `test-web-scene-fx.py`
+  (66), `test-sun-shadows.py`, `test-web-scene-fx-scale.cjs` and
+  `test-web-point-lights.cjs` pass; `test-web-scene-fx.mjs` passes its 120
+  WebGL2 checks in headless Chrome. The web client builds.
+- On an isolated Carentan stack, `main` against this change: per-frame
+  measurements and screencasts of turns from 120 to 1,500°/s, the sprint,
+  aiming, firing, a reload and a switch. Evidence is in
+  `out/motion-blur-2-qa`.
+- The full `test-static.sh` was not run; the scripts above are the ones that
+  read the compositor.

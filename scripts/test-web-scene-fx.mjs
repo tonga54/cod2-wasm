@@ -115,12 +115,12 @@ try {
     }
     // The viewmodel mesh as WebSceneFx_TrackViewmodel lays it out in rows of
     // 1024 texels: two a vertex (GL clip position, half smear in pixels), four
-    // indices a texel, then for each 22-pixel tile the largest smear within
+    // indices a texel, then for each 72-pixel tile the largest smear within
     // one tile of it. Each quad is a rectangle in normalized device
     // coordinates, z units from the eye, with a half smear in pixels.
     const MESH = 4096;
     function viewmodelMesh(quads) {
-      const tile = Math.ceil(0.03 * H), tilesX = Math.ceil(W / tile), tilesY = Math.ceil(H / tile);
+      const tile = Math.ceil(0.10 * H), tilesX = Math.ceil(W / tile), tilesY = Math.ceil(H / tile);
       const indexRow = Math.ceil(quads.length * 8 / 1024), tileRow = indexRow + Math.ceil(quads.length * 6 / 4096);
       const rows = tileRow + Math.ceil(tilesX * tilesY / 1024);
       const mesh = new Float32Array(rows * 4096), tiles = new Float32Array(tilesX * tilesY * 2);
@@ -224,12 +224,12 @@ try {
     check(pixel(smeared, 955, 360) === 0 && pixel(smeared, 950, 200) === 0, 'the viewmodel stays out of the world smear');
     check(pixel(smeared, 960, 360) === 255 && pixel(smeared, 962, 100) === 255, 'the viewmodel edge stays sharp');
     const flick = render(4, 0, {glow: 0, film: 0, layout: squares, motion: turn(0.03, 20)});
-    check(pixel(flick, 722, 360) > 0 && pixel(flick, 733, 360) === 0 && pixel(flick, 546, 360) === 0,
-      'a flick smears 7% of the screen height at most');
+    check(pixel(flick, 730, 360) > 0 && pixel(flick, 741, 360) === 0 && pixel(flick, 538, 360) === 0,
+      'a flick smears 10% of the screen height at most');
 
     // The viewmodel's own motion. A white viewmodel square over the black
     // world covers pixels 576-703 by 324-395 and moves right with a half
-    // smear of 15 pixels; its tiles reach pixels 550-725.
+    // smear of 15 pixels; its tiles reach pixels 504-791.
     function viewmodelSquare() {
       rect(-1, -1, 1, 1, worldDepth(2000), [0, 0, 0], 0);
       rect(-0.1, -0.1, 0.1, 0.1, vmDepth(10), [1, 1, 1], 0);
@@ -245,6 +245,12 @@ try {
     check(pixel(moving, 722, 360) === 0 && pixel(moving, 556, 360) === 0, 'the smear reaches no further than its motion');
     check(pixel(moving, 640, 400) === 0 && pixel(moving, 640, 319) === 0, 'sideways motion does not smear vertically');
     check(same(moving, still, [-1, 0.5, 1, 1]) && same(moving, still, [-1, -1, -0.2, 1]), 'the world away from it stays sharp');
+    // A switch's fast motion smears 60 pixels either side, beyond the old
+    // 43.2-pixel cap, unbroken to its end and no further.
+    const fast = render(4, 0, {glow: 0, film: 0, layout: viewmodelSquare, vm: viewmodelMesh([{...square, smear: [60, 0]}])});
+    check([710, 725, 740, 755].every(x => pixel(fast, x, 360) > 0) && [570, 555, 540, 525].every(x => pixel(fast, x, 360) > 0),
+      'a fast viewmodel motion smears 60 pixels beyond both edges');
+    check(pixel(fast, 766, 360) === 0 && pixel(fast, 513, 360) === 0, 'the fast smear reaches no further than its motion');
     // Where viewmodel parts overlap, the nearer part's smear is drawn. The far
     // part is drawn last; RG8 stores each half smear over the longest, 12.
     const smearAt = (x, y) => {

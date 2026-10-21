@@ -211,11 +211,11 @@ static float smearX(float ndcBefore, float ndcNow, float gap)
 {
     return 0.25f * (ndcNow - ndcBefore) * 1280.0f * 10.0f / gap;
 }
-/* Past the knee, 0.8% of the height (5.76 pixels), each pixel of a half
- * smear counts twice, up to 6% of the height (43.2 pixels). */
+/* Past the knee, 0.4% of the height (2.88 pixels), each pixel of a half
+ * smear counts 3.5 times, up to 10% of the height (72 pixels). */
 static float boosted(float smear)
 {
-    float length = fabsf(smear), out = length <= 5.76f ? length : fminf(5.76f + 2.0f * (length - 5.76f), 43.2f);
+    float length = fabsf(smear), out = length <= 2.88f ? length : fminf(2.88f + 3.5f * (length - 2.88f), 72.0f);
     return smear < 0.0f ? -out : out;
 }
 static float tileX(int tx, int ty)
@@ -248,42 +248,42 @@ int main(void)
         assert(near(s_vmMesh[i * 8], 1.19f * x) && near(s_vmMesh[i * 8 + 1], 2.11f * y));
         assert(near(s_vmMesh[i * 8 + 2], 2 * (0.9995f * z - 0.1f) - z) && near(s_vmMesh[i * 8 + 3], z));
     }
-    /* 9.52 pixels of motion: 5.76 to the knee, and twice the 3.76 past it. */
-    assert(near(composed[SCENE_FX_VM_MOTION], 13.28f) && composed[SCENE_FX_MOTION] == 0);
-    /* Two triangles after one row of vertices, then the tiles: 44 pixels, as
-     * wide as the longest half smear, 30 x 17 of them in one row. */
+    /* 9.52 pixels of motion: 2.88 to the knee, and 3.5 times the 6.64 past it. */
+    assert(near(composed[SCENE_FX_VM_MOTION], 26.12f) && composed[SCENE_FX_MOTION] == 0);
+    /* Two triangles after one row of vertices, then the tiles: 72 pixels, as
+     * wide as the longest half smear, 18 x 10 of them in one row. */
     assert(composed[SCENE_FX_VM_TRIANGLES] == 2 && composed[SCENE_FX_VM_INDEX_ROW] == 1);
     assert(composed[SCENE_FX_VM_TILE_ROW] == 2 && composed[SCENE_FX_VM_ROWS] == 3);
-    assert(composed[SCENE_FX_VM_TILE] == 44 && composed[SCENE_FX_VM_TILES_X] == 30);
+    assert(composed[SCENE_FX_VM_TILE] == 72 && composed[SCENE_FX_VM_TILES_X] == 18);
     for (int k = 0; k < 6; ++k)
         assert(s_vmMesh[SCENE_FX_VM_MESH_WIDTH * 4 + k] == quadTriangles[k]);
-    /* The quad covers pixels 583-735 by 322-398, tiles 13-16 by 7-9. Each
+    /* The quad covers pixels 583-735 by 322-398, tiles 8-10 by 4-5. Each
      * tile holds the largest smear within one tile of it. */
-    for (int ty = 0; ty < 17; ++ty)
-        for (int tx = 0; tx < 30; ++tx) {
-            int reached = tx >= 12 && tx <= 17 && ty >= 6 && ty <= 10;
-            assert(reached ? near(tileX(tx, ty), 13.28f) : tileX(tx, ty) == 0);
+    for (int ty = 0; ty < 10; ++ty)
+        for (int tx = 0; tx < 18; ++tx) {
+            int reached = tx >= 7 && tx <= 11 && ty >= 3 && ty <= 6;
+            assert(reached ? near(tileX(tx, ty), 26.12f) : tileX(tx, ty) == 0);
         }
 
     /* The camera turns and walks with the viewmodel in its hands: the world
      * smears, the viewmodel does not. */
     begin(10, 0.34f, 101.5f); quad(&keyA, 20, 0.5f, 0); present();
-    assert(composes == 2 && composed[SCENE_FX_MOTION] == 1.2f && composed[SCENE_FX_VM_MOTION] == 0);
+    assert(composes == 2 && composed[SCENE_FX_MOTION] == 1.6f && composed[SCENE_FX_VM_MOTION] == 0);
     for (int i = 0; i < 4; ++i)
         assert(still(smearOf(i, 0)) && still(smearOf(i, 1)));
 
     /* Any frame rate smears the same 10 ms of motion; one within the knee,
      * the bob's and sway's, stays as it is. */
     begin(5, 0.34f, 101.5f); quad(&keyA, 20, 0.75f, 0); present();
-    assert(near(composed[SCENE_FX_VM_MOTION], 13.28f));
+    assert(near(composed[SCENE_FX_VM_MOTION], 26.12f));
     begin(40, 0.34f, 101.5f); quad(&keyA, 20, 2.75f, 0); present();
-    assert(near(composed[SCENE_FX_VM_MOTION], 13.28f));
+    assert(near(composed[SCENE_FX_VM_MOTION], 26.12f));
     begin(40, 0.34f, 101.5f); quad(&keyA, 20, 3.25f, 0); present();
     assert(near(composed[SCENE_FX_VM_MOTION], 2.38f));
-    /* No half smear is longer than 6% of the screen's height, 43.2 pixels:
-     * 28.56 pixels of motion would make 51.36. It keeps its direction. */
+    /* No half smear is longer than 10% of the screen's height, 72 pixels:
+     * 28.56 pixels of motion would make 92.76. It keeps its direction. */
     begin(10, 0.34f, 101.5f); quad(&keyA, 20, 1.75f, 0); present();
-    assert(near(composed[SCENE_FX_VM_MOTION], 43.2f) && near(smearOf(0, 0), -43.2f) && still(smearOf(0, 1)));
+    assert(near(composed[SCENE_FX_VM_MOTION], 72.0f) && near(smearOf(0, 0), -72.0f) && still(smearOf(0, 1)));
 
     /* Cuts start over: a camera jump of 48 units or more, a gap past 100 ms
      * or under 1 ms. Each still records where the viewmodel was. */
@@ -293,7 +293,7 @@ int main(void)
     begin(0.5f, 0.34f, 161.5f); quad(&keyA, 20, 2.25f, 0); present();
     assert(composes == before && s_vmMotion == 0);
     begin(10, 0.34f, 161.5f); quad(&keyA, 20, 2.75f, 0); present();
-    assert(composes == before + 1 && near(composed[SCENE_FX_VM_MOTION], 13.28f));
+    assert(composes == before + 1 && near(composed[SCENE_FX_VM_MOTION], 26.12f));
     /* A surface that moved over a whole screen width on average was swapped
      * for another pose. */
     begin(10, 0.34f, 161.5f); quad(&keyA, 20, -10, 0); present();
@@ -318,7 +318,7 @@ int main(void)
      * later surface's indices follow the earlier surfaces' vertices. */
     begin(10, 0.34f, 161.5f); quad(&keyA, 20, 0, 3); quad(&keyA, 20, 0, -3); present();
     begin(10, 0.34f, 161.5f); quad(&keyA, 20, 0.5f, 3); quad(&keyA, 20, -0.5f, -3); present();
-    assert(near(smearOf(0, 0), 13.28f) && near(smearOf(4, 0), -13.28f) && still(smearOf(0, 1)) && still(smearOf(4, 1)));
+    assert(near(smearOf(0, 0), 26.12f) && near(smearOf(4, 0), -26.12f) && still(smearOf(0, 1)) && still(smearOf(4, 1)));
     assert(composed[SCENE_FX_VM_TRIANGLES] == 4);
     for (int k = 0; k < 6; ++k)
         assert(s_vmMesh[SCENE_FX_VM_MESH_WIDTH * 4 + 6 + k] == quadTriangles[k] + 4);
@@ -330,16 +330,16 @@ int main(void)
     assert(composes == before && s_vmMotion == 0);
     motion.current.enabled = 1;
     begin(10, 0.34f, 161.5f); quad(&keyA, 20, 1.5f, 3); quad(&keyA, 20, -1.5f, -3); present();
-    assert(composes == before + 1 && near(composed[SCENE_FX_VM_MOTION], 13.28f));
+    assert(composes == before + 1 && near(composed[SCENE_FX_VM_MOTION], 26.12f));
     /* So do r_fullbright frames, which compose nothing. */
     fullbright.current.enabled = 1;
     begin(10, 0.34f, 161.5f); quad(&keyA, 20, 2, 0); present();
     fullbright.current.enabled = 0;
     assert(composes == before + 1);
     begin(10, 0.34f, 161.5f); quad(&keyA, 20, 2.5f, 0); present();
-    assert(composes == before + 2 && near(composed[SCENE_FX_VM_MOTION], 13.28f));
+    assert(composes == before + 2 && near(composed[SCENE_FX_VM_MOTION], 26.12f));
     /* A partial view tracks nothing: the next full view measures from the
-     * last full one, 20 ms before. */
+     * last full one, 20 ms before, whose 4.76 pixels of motion smear 9.46. */
     clockMs += 10;
     WebSceneFx_BeginFrame();
     camera(0.34f, 0.1f, 161.5f, 200, 60);
@@ -348,7 +348,7 @@ int main(void)
     WebSceneFx_EndView();
     WebSceneFx_EndFrame();
     begin(10, 0.34f, 161.5f); quad(&keyA, 20, 3, 0); present();
-    assert(near(composed[SCENE_FX_VM_MOTION], 4.76f));
+    assert(near(composed[SCENE_FX_VM_MOTION], 9.46f));
     /* A viewmodel standing still composes nothing. */
     before = composes;
     begin(10, 0.34f, 161.5f); quad(&keyA, 20, 3, 0); present();
@@ -388,7 +388,7 @@ int main(void)
         assert(s_vmMotion == 0 && s_vmOverflow);
         begin(10, 0.34f, 161.5f); quad(&keyA, 20, 2, 0); present();
         begin(10, 0.34f, 161.5f); quad(&keyA, 20, 2.5f, 0); present();
-        assert(!s_vmOverflow && near(s_vmMotion, 13.28f));
+        assert(!s_vmOverflow && near(s_vmMotion, 26.12f));
     }
     /* A raised WWII scope draws the rifle with its own 1.7 x 3 projection and
      * 0.8 near clip: the mesh and the smear follow where it is drawn. */
@@ -408,7 +408,7 @@ int main(void)
         begin(10, 0.34f, 161.5f); quad(&keyA, 20, 0.5f, 0); present();
         assert(near(s_vmMesh[0], 1.19f * (0.5f - corners[0][1])));
     }
-    puts("PASS: viewmodel vertices smear by their own screen motion over a 10 ms exposure at any frame rate, the bob's and sway's as they are and faster motion twice past a knee at 0.8% of the height, capped at 6%, the camera's motion cancelled; clip positions use the depth hack's near clip, or a raised WWII scope's projection and near clip; triangles, indices after the vertices and tiles holding the largest smear within a tile; cuts, swapped poses, new or changed surfaces, repeated surfaces, r_motionBlur 0, fullbright and partial views, still and off-screen motion, triangles behind the eye, spread vertices and an oversized viewmodel");
+    puts("PASS: viewmodel vertices smear by their own screen motion over a 10 ms exposure at any frame rate, the bob's and sway's as they are and faster motion 3.5 times past a knee at 0.4% of the height, capped at 10%, the camera's motion cancelled; clip positions use the depth hack's near clip, or a raised WWII scope's projection and near clip; triangles, indices after the vertices and tiles holding the largest smear within a tile; cuts, swapped poses, new or changed surfaces, repeated surfaces, r_motionBlur 0, fullbright and partial views, still and off-screen motion, triangles behind the eye, spread vertices and an oversized viewmodel");
     return 0;
 }
 '''

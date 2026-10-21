@@ -435,7 +435,7 @@ int main(void)
     frame(0, 1280, 0.1f);
     assert(composes == 1);
 
-    /* Motion blur spans 10 ms of the camera's turn and move since the last
+    /* Motion blur spans 16 ms of the camera's turn and move since the last
      * frame. */
     defaults();
     WebSceneFx_SetAds(0, 6, 15, 512);
@@ -443,62 +443,63 @@ int main(void)
     camera(0.3f, 0.1f, 100, 200, 60);
     frame(0, 1280, 0.1f);
     assert(composed[SCENE_FX_MOTION] == 0);
-    assert(moved(10, 0.36f, 0.07f, 101.5f, 198.8f, 60.5f) == 1.2f);
+    assert(moved(10, 0.36f, 0.07f, 101.5f, 198.8f, 60.5f) == 1.6f);
     const float points[][3] = {{400, 260, 80}, {130, 180, 40}, {-500, 900, 300}, {100000, 30000, 2000}};
     for (int i = 0; i < 4; ++i)
         assertReprojects(points[i]);
     assert(composed[SCENE_FX_MOTION_PROJECTION] == 1.19f && composed[SCENE_FX_MOTION_PROJECTION + 1] == 2.11f);
-    assert(moved(10, 0.36f, 0.07f, 103.4f, 198.8f, 60.5f) == 1.2f);
+    assert(moved(10, 0.36f, 0.07f, 103.4f, 198.8f, 60.5f) == 1.6f);
     assertReprojects(points[1]);
     assertReprojects(points[3]);
-    /* Any frame rate draws the same 12 ms exposure: 1.2 times a 10 ms
+    /* Any frame rate draws the same 16 ms exposure: 1.6 times a 10 ms
      * frame's motion. */
-    assert(moved(5, 0.38f, 0.07f, 103.4f, 198.8f, 60.5f) == 2.4f);
-    assert(moved(40, 0.40f, 0.07f, 103.4f, 198.8f, 60.5f) == 0.3f);
+    assert(moved(5, 0.38f, 0.07f, 103.4f, 198.8f, 60.5f) == 3.2f);
+    assert(moved(40, 0.40f, 0.07f, 103.4f, 198.8f, 60.5f) == 0.4f);
     /* Raising the sights fades it out. */
     WebSceneFx_SetAim(0.25f);
-    assert(moved(10, 0.42f, 0.07f, 103.4f, 198.8f, 60.5f) == 1.2f * 0.75f);
+    assert(moved(10, 0.42f, 0.07f, 103.4f, 198.8f, 60.5f) == 1.6f * 0.75f);
     WebSceneFx_SetAim(1);
     assert(moved(10, 0.44f, 0.07f, 103.4f, 198.8f, 60.5f) == 0);
     WebSceneFx_SetAim(NAN);
-    assert(moved(10, 0.46f, 0.07f, 103.4f, 198.8f, 60.5f) == 1.2f);
+    assert(moved(10, 0.46f, 0.07f, 103.4f, 198.8f, 60.5f) == 1.6f);
     WebSceneFx_SetAim(0);
-    /* Cuts start over: a turn past 0.35 rad, a move of 48 units, a gap past
-     * 100 ms or under 1 ms. */
-    assert(moved(10, 0.86f, 0.07f, 103.4f, 198.8f, 60.5f) == 0);
-    assert(moved(10, 1.16f, 0.07f, 103.4f, 198.8f, 60.5f) == 1.2f);
+    /* Cuts start over: a turn past 0.6 rad, a move of 48 units, a gap past
+     * 100 ms or under 1 ms. A 0.5 rad turn, a fast spin's frame at 60 fps,
+     * still blurs. */
+    assert(moved(10, 1.12f, 0.07f, 103.4f, 198.8f, 60.5f) == 0);
+    assert(moved(10, 0.62f, 0.07f, 103.4f, 198.8f, 60.5f) == 1.6f);
     assert(moved(10, 1.16f, 0.07f, 153.4f, 198.8f, 60.5f) == 0);
-    assert(moved(10, 1.16f, 0.07f, 193.4f, 198.8f, 60.5f) == 1.2f);
+    assert(moved(10, 1.16f, 0.07f, 193.4f, 198.8f, 60.5f) == 1.6f);
     assert(moved(150, 1.18f, 0.07f, 193.4f, 198.8f, 60.5f) == 0);
     assert(moved(0.5f, 1.20f, 0.07f, 193.4f, 198.8f, 60.5f) == 0);
-    assert(moved(10, 1.22f, 0.07f, 193.4f, 198.8f, 60.5f) == 1.2f);
+    assert(moved(10, 1.22f, 0.07f, 193.4f, 198.8f, 60.5f) == 1.6f);
     /* A camera standing still or drifting adds nothing. */
     assert(moved(10, 1.22f, 0.07f, 193.4f, 198.8f, 60.5f) == 0);
     assert(moved(10, 1.2201f, 0.07f, 193.4f, 198.8f, 60.5f) == 0);
-    assert(moved(10, 1.2206f, 0.07f, 193.4f, 198.8f, 60.5f) == 1.2f);
+    assert(moved(10, 1.2206f, 0.07f, 193.4f, 198.8f, 60.5f) == 1.6f);
     assert(moved(10, 1.2206f, 0.07f, 193.42f, 198.8f, 60.5f) == 0);
-    assert(moved(10, 1.2206f, 0.07f, 193.52f, 198.8f, 60.5f) == 1.2f);
+    assert(moved(10, 1.2206f, 0.07f, 193.52f, 198.8f, 60.5f) == 1.6f);
     /* r_motionBlur 0 draws none and keeps tracking. */
     motion.current.enabled = 0;
     assert(moved(10, 1.30f, 0.07f, 193.52f, 198.8f, 60.5f) == 0);
     motion.current.enabled = 1;
-    assert(moved(10, 1.32f, 0.07f, 193.52f, 198.8f, 60.5f) == 1.2f);
+    assert(moved(10, 1.32f, 0.07f, 193.52f, 198.8f, 60.5f) == 1.6f);
     /* A broken camera is no reference for the next one. */
     assert(moved(10, NAN, 0.07f, 193.52f, 198.8f, 60.5f) == 0);
     assert(moved(10, 1.34f, 0.07f, 193.52f, 198.8f, 60.5f) == 0);
-    assert(moved(10, 1.36f, 0.07f, 193.52f, 198.8f, 60.5f) == 1.2f);
+    assert(moved(10, 1.36f, 0.07f, 193.52f, 198.8f, 60.5f) == 1.6f);
     lens[0] = 0;
     assert(moved(10, 1.38f, 0.07f, 193.52f, 198.8f, 60.5f) == 0);
     lens[0] = 1.19f;
     assert(moved(10, 1.40f, 0.07f, 193.52f, 198.8f, 60.5f) == 0);
-    assert(moved(10, 1.42f, 0.07f, 193.52f, 198.8f, 60.5f) == 1.2f);
+    assert(moved(10, 1.42f, 0.07f, 193.52f, 198.8f, 60.5f) == 1.6f);
     /* With every other effect off, only a moving camera composes. */
     glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; ssao.current.enabled = 0;
     binds = composes = 0;
     moved(10, 1.42f, 0.07f, 193.52f, 198.8f, 60.5f);
     assert(!binds && !composes);
     moved(10, 1.44f, 0.07f, 193.52f, 198.8f, 60.5f);
-    assert(binds == 1 && composes == 1 && boundSamples == 1 && composed[SCENE_FX_MOTION] == 1.2f);
+    assert(binds == 1 && composes == 1 && boundSamples == 1 && composed[SCENE_FX_MOTION] == 1.6f);
     assert(composed[SCENE_FX_GLOW0] == 0 && composed[SCENE_FX_SHARPEN] == 0 && composed[SCENE_FX_ADS] == 0);
     WebSceneFx_SetAim(1);
     moved(10, 1.46f, 0.07f, 193.52f, 198.8f, 60.5f);
@@ -512,12 +513,12 @@ int main(void)
     assert(binds == 1 && composes == 1);
     /* Fullbright frames keep tracking; a partial view does not, and the next
      * full view measures from the last full one. */
-    assert(moved(10, 1.52f, 0.07f, 193.52f, 198.8f, 60.5f) == 1.2f && binds == 2);
+    assert(moved(10, 1.52f, 0.07f, 193.52f, 198.8f, 60.5f) == 1.6f && binds == 2);
     clockMs += 10;
     camera(1.54f, 0.07f, 193.52f, 198.8f, 60.5f);
     frame(8, 1264, 0.1f);
     assert(binds == 2);
-    assert(moved(10, 1.56f, 0.07f, 193.52f, 198.8f, 60.5f) == 0.6f && binds == 3);
+    assert(moved(10, 1.56f, 0.07f, 193.52f, 198.8f, 60.5f) == 0.8f && binds == 3);
 
     /* A menu's blurred backdrop composes on its own, whatever the other
      * effects, and stays between none and all of it. */
@@ -901,7 +902,7 @@ int main(void)
         WebSceneFx_EndFrame();
         bindResult = 1;
     }
-    puts("PASS: 600 composed frames, single compose per frame before Present, partial/fullbright/disabled views drawn directly, bounded glow, viewmodel and near world focus parameters, camera motion reprojected over a 10 ms exposure with aim fade, cuts and still cameras, a bounded menu backdrop and its gray, scenes rendered at r_sceneHeight lines and the screen's aspect on taller screens, a scope window composed with its rifle projection and near clip and a stencil drawn once per view and lifted on every exit, bounded window floats, the outline a scope's rifle is kept off handed to the stencil and none for a sight's window, the stock overlay without a composed target, the sun's shadow map drawn once at the first full-screen view before its target binds, ambient occlusion composed on its own from the composed view's projection, and the color maps' mip bias of a scaled scene");
+    puts("PASS: 600 composed frames, single compose per frame before Present, partial/fullbright/disabled views drawn directly, bounded glow, viewmodel and near world focus parameters, camera motion reprojected over a 16 ms exposure with aim fade, cuts and still cameras, a bounded menu backdrop and its gray, scenes rendered at r_sceneHeight lines and the screen's aspect on taller screens, a scope window composed with its rifle projection and near clip and a stencil drawn once per view and lifted on every exit, bounded window floats, the outline a scope's rifle is kept off handed to the stencil and none for a sight's window, the stock overlay without a composed target, the sun's shadow map drawn once at the first full-screen view before its target binds, ambient occlusion composed on its own from the composed view's projection, and the color maps' mip bias of a scaled scene");
     return 0;
 }
 '''
@@ -916,6 +917,9 @@ mutants = [
     ('gap >= 1.0 && gap', 'gap'),
     ('moved < SCENE_FX_MOTION_MAX_MOVE', 'moved < 1e9f'),
     ('trace > 1.0f + 2.0f * cosf(SCENE_FX_MOTION_MAX_TURN)', 'trace > -1.0f'),
+    # The old 0.35 rad limit cut a fast spin at 60 fps; past 0.66 rad is a cut.
+    ('#define SCENE_FX_MOTION_MAX_TURN 0.6f', '#define SCENE_FX_MOTION_MAX_TURN 0.35f'),
+    ('#define SCENE_FX_MOTION_MAX_TURN 0.6f', '#define SCENE_FX_MOTION_MAX_TURN 0.7f'),
     ('(turn > SCENE_FX_MOTION_MIN_TURN || moved > SCENE_FX_MOTION_MIN_MOVE)', '1'),
     ('(float)(SCENE_FX_MOTION_EXPOSURE / gap)', '(float)(SCENE_FX_MOTION_EXPOSURE / 10.0)'),
     ('s_lastViewValid = valid;', 's_lastViewValid = 1;'),

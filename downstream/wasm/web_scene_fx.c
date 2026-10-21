@@ -113,19 +113,20 @@ enum {
 #define SCENE_FX_DEFAULT_WORLD_NEAR_CLIP (0.9995002746582031f * 4.0f)
 
 /* Milliseconds of camera motion the blur spans, at any frame rate. */
-#define SCENE_FX_MOTION_EXPOSURE 12.0
+#define SCENE_FX_MOTION_EXPOSURE 16.0
 /* The viewmodel's own motion smears over 10 ms. A half smear up to the knee,
  * a fraction of the screen's height, is the bob and sway and stays as it is;
  * a faster motion (a switch, a reload, the sprint pose) counts each pixel past
  * the knee SCENE_FX_VM_GAIN times, up to the cap. */
 #define SCENE_FX_VM_EXPOSURE 10.0
-#define SCENE_FX_VM_KNEE 0.008f
-#define SCENE_FX_VM_GAIN 2.0f
-#define SCENE_FX_VM_CAP 0.06f
+#define SCENE_FX_VM_KNEE 0.004f
+#define SCENE_FX_VM_GAIN 3.5f
+#define SCENE_FX_VM_CAP 0.10f
 /* Two views further apart in time or space than these are a cut: a spawn,
- * a teleport or a new killcam, not motion. */
+ * a teleport or a new killcam, not motion. A fast spin at 60 fps turns
+ * about half a radian a frame. */
 #define SCENE_FX_MOTION_MAX_GAP 100.0
-#define SCENE_FX_MOTION_MAX_TURN 0.35f
+#define SCENE_FX_MOTION_MAX_TURN 0.6f
 #define SCENE_FX_MOTION_MAX_MOVE 48.0f
 /* Below these, a turn in radians or a move in units, the camera stands still. */
 #define SCENE_FX_MOTION_MIN_TURN 0.0002f
@@ -534,14 +535,14 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "    if (depth >= 0.2 && p.z > 1.0 && len > 1.0) {\n" +
                 "      float n = min(len, u_motion.w);\n" +
                 "      highp vec2 path = v / u_px.xy * (n / len);\n" +
-                "      int taps = int(clamp(ceil(n * 0.25), 3.0, 12.0));\n" +
+                "      int taps = int(clamp(ceil(n * 0.25), 3.0, 16.0));\n" +
                 "      float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));\n" +
                 "      ivec2 last = textureSize(u_scene, 0) - 1;\n" +
                 "      vec3 sum = c;\n" +
                 "      float weight = 1.0;\n" +
                 /* Color and depth come from the same texel, so no filtered tap
                  * blends the viewmodel into the world. */
-                "      for (int i = 0; i < 12; ++i) {\n" +
+                "      for (int i = 0; i < 16; ++i) {\n" +
                 "        if (i >= taps) break;\n" +
                 "        ivec2 q = clamp(ivec2(gl_FragCoord.xy + path * ((float(i) + jitter) / float(taps) - 0.5)),\n" +
                 "          ivec2(0), last);\n" +
@@ -572,10 +573,10 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "      highp float self = 1.0 / max(lenX, 0.5);\n" +
                 "      highp vec3 sum = col * self;\n" +
                 "      highp float weight = self;\n" +
-                "      int taps = int(clamp(ceil(span * 0.5), 3.0, 16.0));\n" +
+                "      int taps = int(clamp(ceil(span * 0.5), 3.0, 24.0));\n" +
                 "      float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));\n" +
                 "      ivec2 last = textureSize(u_scene, 0) - 1;\n" +
-                "      for (int i = 0; i < 16; ++i) {\n" +
+                "      for (int i = 0; i < 24; ++i) {\n" +
                 "        if (i >= taps) break;\n" +
                 "        highp vec2 offset = reach * ((float(i) + jitter) / float(taps) * 2.0 - 1.0);\n" +
                 "        ivec2 q = clamp(ivec2(gl_FragCoord.xy + offset), ivec2(0), last);\n" +
@@ -1029,8 +1030,8 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             /* CoD4 blurs the near world from one unit up to nearEnd. */
             gl.uniform4f(C.u_near, H[o + 15], nearEnd, 1 / Math.max(nearEnd - 1, 1), H[o + 17]);
             gl.uniform2f(C.u_tier, smallTier, medTier);
-            /* The longest smear is 7% of the screen's height. */
-            gl.uniform4f(C.u_motion, motion > 0 ? motion : 0, H[o + 31], H[o + 32], 0.07 * h);
+            /* The longest smear is 10% of the screen's height. */
+            gl.uniform4f(C.u_motion, motion > 0 ? motion : 0, H[o + 31], H[o + 32], 0.10 * h);
             if (motion > 0) {
                 gl.uniformMatrix3fv(C.u_motionRotation, false, H, o + 19, 9);
                 gl.uniform3f(C.u_motionMove, H[o + 28], H[o + 29], H[o + 30]);
