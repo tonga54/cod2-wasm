@@ -5724,3 +5724,25 @@ Validation:
   reflections and the farther draw distance did not measurably cost. With 10
   bots, capturing shadow casters took 1.4% of the main thread.
 - Not verified: other GPUs and browsers.
+
+## Scope glint — 2026-10-20
+
+The owner asked that a sniper aiming at a player be seen by that rival as a
+slight glint. `cg_scopeglint_mp.c` notes every rival whose own sniper scope is
+raised (the Springfield and the scoped Kar98k, Lee-Enfield and Mosin-Nagant)
+and draws a small white flare with a streak on the front of his scope, carried
+with the gun's `tag_flash`. It is brightest within 6° of his aim and gone at
+24°, comes in over the raise, shimmers, keeps its size on screen through a
+zoom, and hides behind walls, players and thick smoke. Teammates and the sniper
+himself never see it; `cg_scopeGlint 0` turns it off for that player. Details
+and the two-browser captures are in `docs/GRAPHICS_2026-10-16.md`, "Scope
+glint".
+
+Validation:
+
+- On `9090c70`, `test-scope-glint.py` passes (16 cases of glinting scopes, 47
+  mutants, and the lenses against the retail world models), the web client
+  builds, and a Carentan match with bots loads and plays in the browser
+  without errors.
+- The full `test-static.sh` passed with this change on `b441c62`, together with
+  the graphics change of `9090c70`. The files it hooks did not change since.

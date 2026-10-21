@@ -5,6 +5,7 @@
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_wwiiscope.h"
 #include "headers/PC/cgame_mp/cg_aimassist.h"
+#include "headers/PC/cgame_mp/cg_scopeglint.h"
 #include <math.h>
 
 #ifdef __EMSCRIPTEN__
@@ -996,6 +997,7 @@ qboolean CG_DrawActiveFrame(int serverTime, DemoType demoType,
 
     CG_AddViewWeapon(&cg->predictedPlayerState);
     CG_AddLocalEntities();
+    CG_DrawScopeGlints();
     CL_FX_AdjustCamera(&cg->refdef);
 
     if (cg->testFxRespawnTime > 0) {

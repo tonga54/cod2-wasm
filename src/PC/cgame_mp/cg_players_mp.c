@@ -1,6 +1,7 @@
 #include "common_types.h"
 #include "imports.h"
 #include "headers/PC/cgame_mp/cg_local.h"
+#include "headers/PC/cgame_mp/cg_scopeglint.h"
 #include <string.h>
 
 extern const dvar_t *cg_debugPosition;
@@ -645,6 +646,7 @@ render:
     ((GfxEntity *)body)->renderFxFlags = 0x80;
 
     CG_AddCEntityToScene(body, obj, cent);
+    CG_ScopeGlintAddPlayer(cent);
 
     if (es->eFlags & 0x2)
         return;
