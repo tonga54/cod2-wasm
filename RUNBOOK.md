@@ -5911,3 +5911,33 @@ Validation:
 - `test-weapon-view-ground.py`, `test-corpse-lifetime.py` and
   `test-dropped-item-lifetime.py` pass, and the native server builds. The full
   `test-static.sh` was not run.
+
+## Smaller smoke clouds — 2026-10-21
+
+The owner found the smoke grenade's cloud far too large. It is CoD2's
+`fx/explosions/smoke_grenade.efx`. A simulation of its curves puts 90% of its
+particles' edges within 10.7 to 12.8 m of the grenade 15 to 30 seconds after
+it pops: about 25 m across. `FX_TryRegisterEffect` now shrinks it the first
+time it parses it (`FX_ShrinkSmokeGrenade`, in `FxScheduler.c`): every
+particle's spawn offset, ring radius and height, gravity, sizes, lengths,
+velocities and frustum radius by 0.6. The cloud keeps its look and its
+density through the middle and spreads 60% as far, 6.4 to 7.7 m, about 15 m
+across. Its particle count and timing, and so the length the server gives the
+smoke entity, are unchanged; the grenade's flash runner and every other
+effect load as they are. The client's smoke test, which hides names, the
+scope glint and aim assist, follows the smaller cloud.
+
+Validation:
+
+- `test-smoke-grenade-size.py` (new, in `test-static.sh`) compiles
+  `FX_TryRegisterEffect` with `FX_ShrinkSmokeGrenade` under the sanitizers: every
+  field of 24 primitives of each type, the effect registered again, four other
+  effects and the effect's length, in 8 cases; 17 mutants fail.
+- `test-smoke-effect-server.py`, `test-fx-emitter-model.py` and
+  `test-fx-flags.py` pass. The native server and the web client build. The
+  full `test-static.sh` was not run.
+- On an isolated Carentan stack, the old client and the new threw the same
+  smoke grenade from the same place, beside the crates in the square. At 25
+  seconds the old cloud filled the square from the house to the wall beyond
+  the crates and rose into the sky; the new one filled the gap beside the
+  crates, as thick, to the treetops. Captures are in `out/smoke-size-qa/shots`.

@@ -232,6 +232,13 @@ retail CoD2:
 - **Larger visual effects:** brief muzzle sprites are 40% larger with stronger
   color/alpha; frag fire, smoke and dust are 35% larger. Original effect textures,
   particle counts, lifetimes and grenade damage remain unchanged.
+- **Smaller smoke screens:** a smoke grenade's cloud spreads 60% as far as
+  CoD2's, about 15 m across at its fullest instead of 25. Each particle's spawn
+  ring and offset, drift, gravity and size shrink alike when the effect loads
+  (`FX_ShrinkSmokeGrenade`), so the cloud keeps its look and its density through
+  the middle; its particle count and how long it lasts, up to 48 seconds, are
+  unchanged. The client's smoke test, which hides names, the scope glint and
+  aim assist, follows the smaller cloud.
 - **Smoother baked shadows:** sun visibility uses all four source samples when
   preparing each lightmap texel at map load. Shadow edges have less aliasing,
   with the same uploaded texture size and no additional gameplay render passes.

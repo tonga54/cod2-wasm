@@ -109,6 +109,43 @@ void FX_InitTemplates(void)
     effectTemplateArrayCount = 0;
 }
 
+/* A smoke grenade's cloud spreads 60% as far as CoD2's: every particle's spawn
+ * ring and offset, drift, gravity and size shrink alike, so the cloud keeps its
+ * look and its density through the middle. Its timing, and so the length the
+ * server gives the smoke entity, is unchanged. */
+#define FX_SMOKE_GRENADE_SCALE 0.6f
+
+static void FxRange_Scale(FxRange *range, float scale)
+{
+    range->mMin *= scale;
+    range->mMax *= scale;
+}
+
+static void FX_ShrinkSmokeGrenade(EffectTemplate *fx)
+{
+    int i, channel;
+
+    if (strcmp(fx->mEffectName, "explosions/smoke_grenade"))
+        return;
+    for (i = 0; i < fx->mPrimitiveCount; i++) {
+        PrimitiveTemplate *prim = fx->mPrimitives[i];
+
+        if (prim->mType != PT_PARTICLE && prim->mType != PT_ORIENTEDPARTICLE && prim->mType != PT_CLOUD)
+            continue;
+        FxRange_Scale(&prim->mOrigin1X, FX_SMOKE_GRENADE_SCALE);
+        FxRange_Scale(&prim->mOrigin1Y, FX_SMOKE_GRENADE_SCALE);
+        FxRange_Scale(&prim->mOrigin1Z, FX_SMOKE_GRENADE_SCALE);
+        FxRange_Scale(&prim->mRadius, FX_SMOKE_GRENADE_SCALE);
+        FxRange_Scale(&prim->mHeight, FX_SMOKE_GRENADE_SCALE);
+        FxRange_Scale(&prim->mGravity, FX_SMOKE_GRENADE_SCALE);
+        for (channel = FXCHAN_SIZE; channel <= FXCHAN_LENGTH_RAND; channel++)
+            FxRange_Scale(&prim->mFxChannels[channel].scaleRange, FX_SMOKE_GRENADE_SCALE);
+        for (channel = FXCHAN_VELOCITY_X; channel < FXCHAN_COUNT; channel++)
+            FxRange_Scale(&prim->mFxChannels[channel].scaleRange, FX_SMOKE_GRENADE_SCALE);
+        prim->spawnFrustumCullRadius *= FX_SMOKE_GRENADE_SCALE;
+    }
+}
+
 EffectTemplate *FX_TryRegisterEffect(const char *name)
 {
     GenericParser2 parser;
@@ -134,6 +171,7 @@ EffectTemplate *FX_TryRegisterEffect(const char *name)
         ZN14GenericParser2D1Ev(&parser);
         return NULL;
     }
+    FX_ShrinkSmokeGrenade(fx);
 
     if (effectTemplateArrayCount == 256) {
         FX_Print("^1Max effect templates of '%i' exceeded\n", 256);
