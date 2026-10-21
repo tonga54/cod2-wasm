@@ -108,6 +108,7 @@ extern float BG_GetSpeed(const void *ps, int serverTime);
 extern float BG_GetVerticalBobFactor(const void *ps, float bobCycle, float xyspeed, float bobMax);
 extern float BG_GetHorizontalBobFactor(const void *ps, float bobCycle, float xyspeed, float bobMax);
 extern void BG_CalculateViewAngles(viewState_t *vs, vec_t *angles);
+extern void BG_CalculateViewIdleAngles(viewState_t *vs, vec_t *angles);
 extern void AddLeanToPosition(vec_t *origin, float viewAngle, float leanFrac, float maxStand, float maxCrouch);
 extern unsigned int CG_ShakeCamera(void);
 extern void CG_PerturbCamera(void);
@@ -690,8 +691,6 @@ static void CG_CalcViewValues(void)
         viewState.v_dmg_roll = cg->v_dmg_roll;
         viewState.xyspeed = speed;
         viewState.frametime = (float)cg->frametime * 0.001f;
-        viewState.fLastIdleFactor = cg->playerEntity.fLastIdleFactor;
-        viewState.weapIdleTime = &cg->weapIdleTime;
 
         BG_CalculateViewAngles(&viewState, viewAnglesResult);
 
@@ -861,27 +860,55 @@ static void CG_IntegrateViewKick(float *angles, float *velocity, float centerSpe
     }
 }
 
+/* A raised scope's idle sway this frame. The camera shows it through the
+ * predicted view angles, from the command, as the server aims with it. */
+static vec3_t s_scopeSway;
+
+static void CG_UpdateScopeSway(const playerState_t *ps)
+{
+    viewState_t vs;
+
+    memset(&vs, 0, sizeof(vs));
+    vs.ps = (playerState_t *)ps;
+    vs.frametime = (float)cg->frametime * 0.001f;
+    vs.fLastIdleFactor = cg->playerEntity.fLastIdleFactor;
+    vs.weapIdleTime = &cg->weapIdleTime;
+    BG_CalculateViewIdleAngles(&vs, s_scopeSway);
+}
+
+void CG_SetUserCmdAim(void)
+{
+    vec3_t aim;
+    int i;
+
+    for (i = 0; i < 3; ++i)
+        aim[i] = cg->kickAngles[i] + cg->offsetAngles[i] + s_scopeSway[i];
+    CL_SetUserCmdAimValues(aim);
+}
+
 static void CG_UpdateViewKick(void)
 {
     const playerState_t *ps = &cg->predictedPlayerState;
     const int weaponIndex = BG_GetViewmodelWeaponIndex((void *)ps);
     const WeaponDef *weapon = BG_GetWeaponDef(weaponIndex);
-    vec3_t aim;
-    int i;
     if (ps->pm_type >= 5 || !weapon) {
         memset(cg->kickAVel, 0, sizeof(cg->kickAVel));
         memset(cg->kickAngles, 0, sizeof(cg->kickAngles));
+        memset(s_scopeSway, 0, sizeof(s_scopeSway));
     } else {
         /* The sights' centring speed from halfway into them. */
         float centerSpeed = !weaponIndex ? CG_KICK_CENTER_SPEED
                             : ps->fWeaponPosFrac > 0.5f ? weapon->fAdsViewKickCenterSpeed
                                                         : weapon->fHipViewKickCenterSpeed;
         CG_IntegrateViewKick(cg->kickAngles, cg->kickAVel, centerSpeed, cg->frametime);
+        /* A followed player's sway is already in their view angles. */
+        if (ps->pm_flags & 0x400000)
+            memset(s_scopeSway, 0, sizeof(s_scopeSway));
+        else
+            CG_UpdateScopeSway(ps);
     }
-    for (i = 0; i < 3; ++i)
-        aim[i] = cg->kickAngles[i] + cg->offsetAngles[i];
-    /* The command carries the same kick used by prediction and server aim. */
-    CL_SetUserCmdAimValues(aim);
+    /* The command carries the same kick and sway used by prediction and server aim. */
+    CG_SetUserCmdAim();
 }
 
 qboolean CG_DrawActiveFrame(int serverTime, DemoType demoType,

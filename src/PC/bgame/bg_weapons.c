@@ -112,6 +112,7 @@ void BG_FillInAmmoItems(BG_RegisterWeapon regWeap);
 void CG_SetWeaponDefToDefaultWeapon(int iWeapon);
 void BG_CalculateWeaponAngles(weaponState_t *ws, vec_t *angles);
 void BG_CalculateViewAngles(viewState_t *vs, vec_t *angles);
+void BG_CalculateViewIdleAngles(viewState_t *vs, vec_t *angles);
 
 void BG_ShutdownWeaponDefFiles(void)
 {
@@ -3158,7 +3159,19 @@ void BG_CalculateViewAngles(viewState_t *vs, vec_t *angles)
     weapDef = BG_GetPlayerWeaponDef(ps, BG_GetViewmodelWeaponIndex(ps));
 
     BG_AddViewDamageKick(vs, angles, weapDef);
-    BG_AddViewIdle(vs, angles, weapDef);
     BG_AddScopedViewBob(vs, angles, weapDef);
     BG_AddAdsViewBob(vs, angles, weapDef);
+}
+
+/* A scope's idle sway, apart from BG_CalculateViewAngles: its phase builds up
+ * frame by frame on the client, which the server cannot follow, so a player's
+ * command carries it in its angles (CG_SetUserCmdAim), as it does the kick. */
+void BG_CalculateViewIdleAngles(viewState_t *vs, vec_t *angles)
+{
+    playerState_t *ps = vs->ps;
+
+    angles[0] = 0.0f;
+    angles[1] = 0.0f;
+    angles[2] = 0.0f;
+    BG_AddViewIdle(vs, angles, BG_GetPlayerWeaponDef(ps, BG_GetViewmodelWeaponIndex(ps)));
 }

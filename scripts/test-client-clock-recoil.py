@@ -34,9 +34,12 @@ static int CL_DvarCurrentBool(void*p){return 0;}
 static float CL_ComTimescaleValue(void){return 1;}
 static void Com_Printf(const char*f,...){}
 typedef float vec_t;typedef vec_t vec3_t[3];
-typedef struct{int pm_type;float fWeaponPosFrac;}playerState_t;
+typedef struct{int pm_type,pm_flags;float fWeaponPosFrac;}playerState_t;
 typedef struct{float fAdsViewKickCenterSpeed,fHipViewKickCenterSpeed;}WeaponDef;
-typedef struct{playerState_t predictedPlayerState;vec3_t kickAVel,kickAngles,offsetAngles;int frametime;}cg_t;
+typedef struct{playerState_t predictedPlayerState;vec3_t kickAVel,kickAngles,offsetAngles;int frametime,weapIdleTime;
+ struct{float fLastIdleFactor;}playerEntity;}cg_t;
+typedef struct{playerState_t *ps;int damageTime,time;float v_dmg_pitch,v_dmg_roll,xyspeed,frametime,fLastIdleFactor;
+ int *weapIdleTime;}viewState_t;
 static cg_t cgState;static cg_t *const cg=&cgState;
 /* None in hand centres nothing; the rifle's sights centre ten times faster. */
 static WeaponDef defs[2]={{0,0},{1000,100}};static int viewWeapon;
@@ -44,6 +47,12 @@ static int BG_GetViewmodelWeaponIndex(void*ps){assert(ps==&cg->predictedPlayerSt
 static void *BG_GetWeaponDef(int i){assert(i>=0&&i<2);return &defs[i];}
 static vec3_t sent;
 static void CL_SetUserCmdAimValues(vec_t*a){memcpy(sent,a,sizeof(sent));}
+/* The scope's idle sway, from the frame's prediction, phase and time. */
+static const vec3_t idleSway={.0625f,-.125f,0};static int idleCalls;
+static void BG_CalculateViewIdleAngles(viewState_t*vs,vec_t*a){
+ assert(vs->ps==&cg->predictedPlayerState&&vs->weapIdleTime==&cg->weapIdleTime);
+ assert(vs->frametime==cg->frametime*.001f&&vs->fLastIdleFactor==cg->playerEntity.fLastIdleFactor);
+ idleCalls++;memcpy(a,idleSway,sizeof(vec3_t));}
 '''
 checks=r'''
 int main(void){
@@ -153,21 +162,33 @@ int main(void){
   assert(peaks[2]>1.2f&&peaks[2]<1.7f);
   memset(&cgState,0,sizeof(cgState));viewWeapon=1;
   cg->kickAVel[0]=-80;cg->frametime=16;cg->offsetAngles[0]=1;cg->offsetAngles[1]=2;cg->offsetAngles[2]=3;
+  cg->playerEntity.fLastIdleFactor=.75f;
+  CG_UpdateViewKick();
+  for(int i=0;i<3;i++)assert(sent[i]==cg->kickAngles[i]+cg->offsetAngles[i]+idleSway[i]);
+  assert(cg->kickAngles[0]<0);
+  /* Following another player, whose sway is in their view angles, or dead:
+   * no sway of the player's own; dead, no kick either. */
+  int calls=idleCalls;
+  cg->predictedPlayerState.pm_flags=0x400000;
   CG_UpdateViewKick();
   for(int i=0;i<3;i++)assert(sent[i]==cg->kickAngles[i]+cg->offsetAngles[i]);
-  assert(cg->kickAngles[0]<0);
+  assert(idleCalls==calls);
+  cg->predictedPlayerState.pm_flags=0;
+  CG_UpdateViewKick();
+  assert(idleCalls==calls+1);
   cg->predictedPlayerState.pm_type=5;
   CG_UpdateViewKick();
   for(int i=0;i<3;i++)assert(cg->kickAngles[i]==0&&cg->kickAVel[i]==0&&sent[i]==cg->offsetAngles[i]);
  }
- puts("PASS: 42 three-minute clocks and 42 delayed-update recoveries stay monotonic within the server horizon; the original camera kick: out fast and back slowly, bursts climbing, 10 degrees at most, stopping at the centre, the sights' centring from halfway in, the same at any frame rate");
+ puts("PASS: 42 three-minute clocks and 42 delayed-update recoveries stay monotonic within the server horizon; the original camera kick: out fast and back slowly, bursts climbing, 10 degrees at most, stopping at the centre, the sights' centring from halfway in, the same at any frame rate; the command carries the kick and the scope's sway, none of it following or dead");
 }
 '''
 with tempfile.TemporaryDirectory() as d:
  p=Path(d)
  kick=''.join(line+'\n' for line in view.splitlines() if line.startswith('#define CG_KICK_'))
- code=(support+function(clock,'CL_AdjustTimeDelta')+step+kick+function(view,'CG_IntegrateViewKick')+
-       function(view,'CG_UpdateViewKick')+checks)
+ sway=re.search(r'^static vec3_t s_scopeSway;\n',view,re.M)[0]
+ code=(support+function(clock,'CL_AdjustTimeDelta')+step+kick+function(view,'CG_IntegrateViewKick')+sway+
+       function(view,'CG_UpdateScopeSway')+function(view,'CG_SetUserCmdAim')+function(view,'CG_UpdateViewKick')+checks)
  reset='''        if (cl->serverTime < cl->snap.serverTime)
             cl->serverTime = cl->snap.serverTime;
         cl->oldServerTime = cl->serverTime;'''
@@ -183,7 +204,10 @@ with tempfile.TemporaryDirectory() as d:
   code.replace('#define CG_KICK_STEP_MSEC 5','#define CG_KICK_STEP_MSEC 10'),
   code.replace('if (angles[i] != 0.0f)\n                velocity[i] +=','if (0)\n                velocity[i] +='),
   code.replace('ps->fWeaponPosFrac > 0.5f','ps->fWeaponPosFrac == 1.0f'),
-  code.replace('!weaponIndex ? CG_KICK_CENTER_SPEED','0 ? CG_KICK_CENTER_SPEED')]
+  code.replace('!weaponIndex ? CG_KICK_CENTER_SPEED','0 ? CG_KICK_CENTER_SPEED'),
+  code.replace(' + s_scopeSway[i];',';'),
+  code.replace('if (ps->pm_flags & 0x400000)','if (0)'),
+  code.replace('    vs.fLastIdleFactor = cg->playerEntity.fLastIdleFactor;\n','')]
  assert all(v!=code for v in variants[1:])
  for mutant,variant in enumerate(variants):
   (p/'test.c').write_text(variant)

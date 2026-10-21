@@ -128,7 +128,11 @@ math_body = ''.join(function(scope, name) for name in (
     'CG_WwiiScopeFindGlass', 'CG_WwiiScopeParseGlass', 'CG_WwiiScopeClamp01', 'CG_WwiiScopeSmoothstep', 'CG_WwiiScopeZoomFraction',
     'CG_WwiiScopeCentreOffset', 'CG_WwiiScopeBoltEnvelope', 'CG_WwiiScopeBoltShift', 'CG_WwiiScopeSteady',
     'CG_WwiiScopeBoltProgress', 'CG_WwiiScopeBoltState', 'CG_WwiiScopeProjectPoint', 'CG_WwiiScopeProjectGlass',
-    'CG_WwiiScopeBell', 'CG_WwiiScopeProjectionScales', 'CG_WwiiScopeDarkStep', 'CG_WwiiScopeReticleQuad'))
+    'CG_WwiiScopeBell', 'CG_WwiiScopeProjectionScales', 'CG_WwiiScopeDarkStep', 'CG_WwiiScopeReticleQuad',
+    'CG_WwiiScopeAdjustViewWeapon'))
+# The rifle's axes from its angles, as CG_AddViewWeapon builds them.
+com_math = (root / 'src/PC/universal/com_math.c').read_text()
+rifle_axes = function(com_math, 'AngleVectors') + function(com_math, 'AnglesToAxis')
 math_support = r'''
 #include <assert.h>
 #include <ctype.h>
@@ -153,7 +157,12 @@ static weaponInfo_t *weaponInfoTable = weaponInfos;
 static void *imp_cg_weapons = &weaponInfoTable;
 static float XAnimGetWeight(const struct XAnimTree_s *t, unsigned int anim) { return t->weights[anim]; }
 static unsigned char s_idleBolt[4], s_heldBolt[4];
-''' + table + keeps
+''' + table + keeps + r'''
+/* The glass the view weapon is drawn with, when the WWII scope draws it. */
+static const CgWwiiScopeGlass *glassFor;
+static const CgWwiiScopeGlass *CG_WwiiScopeGlassFor(const playerState_t *ps, int weapon) { (void)ps; (void)weapon; return glassFor; }
+static int s_lightsOnly;
+''' + rifle_axes
 math_checks = r'''
 static int near(float a, float b, float tolerance) { return fabsf(a - b) <= tolerance; }
 #define EPS 1e-5f
@@ -612,11 +621,74 @@ int main(void) {
             assert(near(v[3].xy[c], v[0].xy[c] + v[2].xy[c] - v[1].xy[c], 1e-2f));
     }
     cases++;
+
+    /* The server shoots along the view, and the reticle is drawn on the glass:
+     * at full aim the rifle gives up its own turns (a sway frozen at the raise,
+     * its kick, a hit's jolt, the lean), so wherever the hand is and however the
+     * rifle was turned, the glass's centre, its rim held by the j_gun bone at its
+     * resting eye position, projects to the screen's centre. Lowered the stock
+     * angles stand; half raised they keep half their turn. */
+    {
+        const CgWwiiScopeGlass bren = { "viewmodel_bren", { -6.7356f, 0.8039f, 3.7633f }, 0.635f,
+                                        { 7.4642f, 0.1022f, 1.3118f }, -4.8838f };
+        vec3_t view[3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } }, eye = { 0, 0, 0 };
+        const float projection[2] = { 1.7f, 3.02f };
+        playerState_t ps = { 0, 0, 1 };
+
+        memset(&tree, 0, sizeof(tree));
+        weaponInfos[1].tree = &tree;
+        s_idleBolt[1] = s_heldBolt[1] = 0;
+        for (int i = 0; i <= CG_WWIISCOPE_GLASS_COUNT; i++) {
+            glassFor = i < CG_WWIISCOPE_GLASS_COUNT ? GLASS(i) : &bren;
+            for (int k = 0; k < 64; k++) {
+                float turned[3] = { 3.0f * sinf(k * 1.3f), 3.0f * cosf(k * 0.7f), 16.0f * sinf(k * 2.1f) };
+                float hand[3] = { 0.5f - 0.03f * k, 0.4f * sinf(k * 0.9f), 0.02f * k - 0.6f }, offset[3];
+                vec3_t axis[3], boneOrigin;
+                CgWwiiScopeLens lens;
+
+                ps.fWeaponPosFrac = 1.0f;
+                CG_WwiiScopeAdjustViewWeapon(&ps, 1, turned);
+                assert(s_lightsOnly && turned[0] == 0 && turned[1] == 0 && near(turned[2], -glassFor->roll, EPS));
+                AnglesToAxis(turned, axis);
+                CG_WwiiScopeCentreOffset(glassFor, hand, 1.0f, glassFor->roll, offset);
+                for (int a = 0; a < 3; a++)
+                    hand[a] += offset[a];
+                for (int a = 0; a < 3; a++) {
+                    boneOrigin[a] = hand[a];
+                    for (int b = 0; b < 3; b++)
+                        boneOrigin[a] += (glassFor->eye[b] - glassFor->rim[b]) * axis[b][a];
+                }
+                memset(&lens, 0, sizeof(lens));
+                assert(CG_WwiiScopeProjectGlass(glassFor, (const vec3_t *)axis, boneOrigin, eye, (const vec3_t *)view,
+                                                projection, &lens));
+                assert(fabsf(lens.center[0]) < 1e-4f && fabsf(lens.center[1]) < 1e-4f);
+            }
+        }
+        {
+            float turned[3] = { 1.5f, -2.0f, 0.75f };
+
+            glassFor = GLASS(1);
+            ps.fWeaponPosFrac = 0.0f;
+            CG_WwiiScopeAdjustViewWeapon(&ps, 1, turned);
+            assert(!s_lightsOnly && turned[0] == 1.5f && turned[1] == -2.0f && turned[2] == 0.75f);
+            ps.fWeaponPosFrac = 0.5f;
+            CG_WwiiScopeAdjustViewWeapon(&ps, 1, turned);
+            assert(s_lightsOnly && near(turned[0], 0.75f, EPS) && near(turned[1], -1.0f, EPS) &&
+                   near(turned[2], 0.375f - 0.5f * glassFor->roll, EPS));
+            glassFor = NULL;
+            turned[0] = 1.5f;
+            CG_WwiiScopeAdjustViewWeapon(&ps, 1, turned);
+            assert(!s_lightsOnly && turned[0] == 1.5f);
+        }
+    }
+    cases++;
     printf("%d\n", cases);
     return 0;
 }
 '''
 math_mutants = [
+    ('    for (i = 0; i < 3; i++)\n        angles[i] *= 1.0f - aim;\n', ''),
+    ('        angles[i] *= 1.0f - aim;', '        angles[i] *= i < 2 ? 1.0f - aim : 1.0f;'),
     ('if (!I_stricmp(cg_wwiiScopeGlasses[i].gunModel, gunModel))', 'if (!strcmp(cg_wwiiScopeGlasses[i].gunModel, gunModel))'),
     ('    return CG_WwiiScopeSmoothstep(0.0f, 1.0f, (posFrac - (1.0f - frac)) / frac);',
      '    return CG_WwiiScopeClamp01((posFrac - (1.0f - frac)) / frac);'),

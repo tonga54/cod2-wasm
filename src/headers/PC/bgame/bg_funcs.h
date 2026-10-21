@@ -130,6 +130,7 @@ void BG_FillInAmmoItems(BG_RegisterWeapon regWeap);
 void CG_SetWeaponDefToDefaultWeapon(int iWeapon);
 void BG_CalculateWeaponAngles(weaponState_t *ws, vec_t *angles);
 void BG_CalculateViewAngles(viewState_t *vs, vec_t *angles);
+void BG_CalculateViewIdleAngles(viewState_t *vs, vec_t *angles);
 
 int BG_GetWeaponSlotForName(const char *pszSlotName);
 const char *BG_GetWeaponSlotNameForIndex(int iSlot);

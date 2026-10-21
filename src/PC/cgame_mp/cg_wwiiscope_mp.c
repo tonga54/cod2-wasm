@@ -676,6 +676,7 @@ void CG_WwiiScopeAdjustViewWeapon(const playerState_t *ps, int weapon, vec_t *an
     const CgWwiiScopeGlass *glass = CG_WwiiScopeGlassFor(ps, weapon);
     CgWwiiScopeBolt bolt;
     float aim;
+    int i;
 
     s_lightsOnly = 0;
     if (!glass || !(ps->fWeaponPosFrac > 0.0f))
@@ -684,6 +685,12 @@ void CG_WwiiScopeAdjustViewWeapon(const playerState_t *ps, int weapon, vec_t *an
      * muzzle sprite would not follow. */
     s_lightsOnly = 1;
     aim = CG_WwiiScopeSmoothstep(0.0f, 1.0f, ps->fWeaponPosFrac);
+    /* The reticle is drawn on the glass, but the server shoots along the view:
+     * at the eye the rifle gives up its own turns (the sway frozen at the
+     * raise, its kick, a hit's jolt, the lean), which would carry the glass
+     * off the line CG_WwiiScopePlaceViewWeapon centres it on. */
+    for (i = 0; i < 3; i++)
+        angles[i] *= 1.0f - aim;
     angles[2] -= glass->roll * aim;
     CG_WwiiScopeBoltState(ps, weapon, &bolt);
     angles[2] -= CG_WWIISCOPE_BOLT_ROLL * bolt.procedural * aim;

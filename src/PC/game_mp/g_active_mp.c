@@ -68,6 +68,8 @@ extern int G_GetNonPVSFriendlyInfo(gentity_t *pSelf, vec_t *vPosition, int iLast
 extern void BG_PlayerStateToEntityState(playerState_t *ps, gentity_t *ent, qboolean snap, qboolean forceSnap);
 extern float BG_GetSpeed(const playerState_t *ps, int serverTime);
 extern void BG_CalculateViewAngles(viewState_t *vs, vec_t *angles);
+extern void BG_CalculateViewIdleAngles(viewState_t *vs, vec_t *angles);
+extern qboolean SV_BotIsTestClient(int clientNum);
 extern void BG_CalculateWeaponPosition_Sway(playerState_t *ps, vec_t *swayViewAngles, vec_t *swayOffset, vec_t *swayAngles, float ssSwayScale, int frametime);
 extern WeaponDef *BG_GetWeaponDef(int iWeapon);
 extern qboolean BG_IsAimDownSightWeapon(int iWeapon);
@@ -881,14 +883,40 @@ static void __attribute_regparm__(3)
     }
 }
 
+/* The view, turned by its own offsets and, through iron sights, by the gun's:
+ * where shots and throws leave. */
+static void G_SetGunAngles(gclient_t *client, const vec_t *viewOffset, const vec_t *sightAngles)
+{
+    vec3_t viewangles;
+
+    viewangles[0] = client->ps.viewangles[0] + viewOffset[0];
+    viewangles[1] = client->ps.viewangles[1] + viewOffset[1];
+    viewangles[2] = client->ps.viewangles[2] + viewOffset[2];
+
+    if (sightAngles) {
+        vec3_t vAxis[3];
+        vec3_t vAxis2[3];
+        vec3_t vAxis3[3];
+
+        AnglesToAxis(sightAngles, vAxis);
+        AnglesToAxis(viewangles, vAxis2);
+        MatrixMultiply((const vec_t *)vAxis, (const vec_t *)vAxis2, (vec_t *)vAxis3);
+        AxisToAngles((const vec_t *)vAxis3, viewangles);
+    }
+
+    client->fGunPitch = viewangles[0];
+    client->fGunYaw = viewangles[1];
+}
+
 void ClientThink_real(gentity_t *ent, usercmd_t *ucmd)
 {
     gclient_t *client;
     pmove_t pm;
     viewState_t vs;
     weaponState_t ws;
-    vec3_t angles;
-    vec3_t viewangles;
+    vec3_t viewOffset;
+    vec3_t gunAngles;
+    qboolean sights;
     WeaponDef *weapDef;
     int oldEventSequence;
     int msec;
@@ -972,11 +1000,15 @@ void ClientThink_real(gentity_t *ent, usercmd_t *ucmd)
     vs.fLastIdleFactor = client->fLastIdleFactor;
     vs.weapIdleTime = &client->weapIdleTime;
 
-    BG_CalculateViewAngles(&vs, angles);
+    BG_CalculateViewAngles(&vs, viewOffset);
+    /* A bot has no client to carry its scope's idle sway in its commands. */
+    if (SV_BotIsTestClient(ent->s.number)) {
+        vec3_t idle;
 
-    viewangles[0] = client->ps.viewangles[0] + angles[0];
-    viewangles[1] = client->ps.viewangles[1] + angles[1];
-    viewangles[2] = client->ps.viewangles[2] + angles[2];
+        BG_CalculateViewIdleAngles(&vs, idle);
+        viewOffset[0] += idle[0];
+        viewOffset[1] += idle[1];
+    }
 
     weapDef = BG_GetPlayerWeaponDef(&client->ps, client->ps.weapon);
 
@@ -1010,18 +1042,8 @@ void ClientThink_real(gentity_t *ent, usercmd_t *ucmd)
     ws.swayAngles[2] = client->swayAngles[2];
     ws.weapIdleTime = &client->weapIdleTime;
 
-    BG_CalculateWeaponAngles(&ws, angles);
-
-    if (BG_IsAimDownSightWeapon(ws.ps->weapon) && ws.ps->fWeaponPosFrac != 0.0f && !weapDef->overlayReticle) {
-        vec3_t vAxis[3];
-        vec3_t vAxis2[3];
-        vec3_t vAxis3[3];
-
-        AnglesToAxis(angles, vAxis);
-        AnglesToAxis(viewangles, vAxis2);
-        MatrixMultiply((const vec_t *)vAxis, (const vec_t *)vAxis2, (vec_t *)vAxis3);
-        AxisToAngles((const vec_t *)vAxis3, viewangles);
-    }
+    BG_CalculateWeaponAngles(&ws, gunAngles);
+    sights = BG_IsAimDownSightWeapon(ws.ps->weapon) && ws.ps->fWeaponPosFrac != 0.0f && !weapDef->overlayReticle;
 
     client->vLastMoveAng[0] = ws.vLastMoveAng[0];
     client->vLastMoveAng[1] = ws.vLastMoveAng[1];
@@ -1033,12 +1055,14 @@ void ClientThink_real(gentity_t *ent, usercmd_t *ucmd)
     client->vGunSpeed[0] = ws.vGunSpeed[0];
     client->vGunSpeed[1] = ws.vGunSpeed[1];
     client->vGunSpeed[2] = ws.vGunSpeed[2];
-    client->fGunPitch = viewangles[0];
-    client->fGunYaw = viewangles[1];
+    /* The spread this command's shot leaves with, before the shot adds to it. */
+    client->currentAimSpreadScale = client->ps.aimSpreadScale / 255.0f;
 
     G_BeginGrenadeInput(ent, &pm.cmd);
     Pmove(&pm);
     G_EndGrenadeInput(ent);
+    /* After Pmove: shots and throws leave along the view this command turned to. */
+    G_SetGunAngles(client, viewOffset, sights ? gunAngles : NULL);
 
     if (pm.mantleStarted) {
         gentity_t *owner;

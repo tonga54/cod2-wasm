@@ -649,6 +649,13 @@ snapshots; past the newest sample, motion continues for at most 50 ms. Their
 stride keeps the pace of the same command times. The server preserves fractional player
 positions so integer rounding does not introduce small speed changes between
 rendered frames; the existing snapshot format carries these coordinates.
+A shot leaves along the view of the command that fired it. That command also
+carries the camera's kick and a raised scope's idle sway, whose phase only the
+client keeps, so the server aims where the scope was drawn; a bot's sway is the
+server's. Anti-lag moves the other playing clients to their archived positions
+at the shooter's command time whenever that time trails the server, even by
+less than a frame. At full aim a WWII scope's rifle holds its resting pose, so
+the reticle on its glass stays on the line the shot leaves along.
 Command time stays monotonic after
 stalls. Local shot effects are predicted once, avoiding duplicate sound/recoil. Local
 prediction finds the first unacknowledged command in at most eight lookups

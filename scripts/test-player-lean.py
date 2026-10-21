@@ -69,7 +69,6 @@ static WeaponDef weapon,*bg_weaponDefs[]={&weapon};
 static WeaponDef *BG_GetPlayerWeaponDef(playerState_t *p,int w){return bg_weaponDefs[w];}
 static int BG_GetViewmodelWeaponIndex(playerState_t *p){return 0;}
 static void BG_AddViewDamageKick(viewState_t *v,vec_t *a,WeaponDef *w){a[2]+=1;}
-static void BG_AddViewIdle(viewState_t *v,vec_t *a,WeaponDef *w){a[0]+=2;}
 static void BG_AddScopedViewBob(viewState_t *v,vec_t *a,WeaponDef *w){a[1]+=3;}
 static void BG_AddAdsViewBob(viewState_t *v,vec_t *a,WeaponDef *w){a[2]+=4;}
 '''
@@ -167,8 +166,9 @@ int main(void) {
     startSolid=allSolid=0;
     for(int direction=-1;direction<=1;direction++) {
         playerState_t p=Player(0,0);p.leanf=direction;
+        /* The scope's idle sway is not the view's: the command carries it. */
         viewState_t v={.ps=&p};vec3_t angles;BG_CalculateViewAngles(&v,angles);
-        assert(angles[0]==2&&angles[1]==3&&angles[2]==direction*16+5);
+        assert(angles[0]==0&&angles[1]==3&&angles[2]==direction*16+5);
         vec3_t eye;Eye(&p,eye);
         assert(fabsf(eye[1]-(20-direction*20*cosf(16*.01745329252f)))<.0001f);
         assert(fabsf(eye[2]-(90-abs(direction)*20*sinf(16*.01745329252f)))<.0001f);

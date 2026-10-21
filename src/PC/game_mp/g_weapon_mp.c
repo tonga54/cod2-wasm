@@ -638,13 +638,9 @@ void Bullet_Fire(gentity_s (*attacker)[16], float spread, weaponParms *wp, genti
     memset(movedClients, 0, sizeof(movedClients));
 
     if (antilag && antilag->current.enabled) {
-        const dvar_t *svFps;
-        int frameMsec;
-
-        svFps = *(const dvar_t **)imp_sv_fps;
-        frameMsec = 1000 / svFps->current.integer;
-
-        if (level.time - gametime > frameMsec) {
+        /* Other players are drawn at the shooter's command time, so even a
+         * lag shorter than a server frame has moved them since. */
+        if (level.time - gametime > 0) {
             for (clientNum = 0; clientNum < level.maxclients; clientNum++) {
                 gclient_t *client;
                 gentity_t *clientEnt;

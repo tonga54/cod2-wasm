@@ -48,7 +48,7 @@ assert 'ws.damageTime = cg->damageTime;' in (root / 'src/PC/cgame_mp/cg_weapons.
 assert 'ws.damageTime = client->damageTime;' in active
 
 client_block = block(view, '        viewState.ps = ps;', '        BG_CalculateViewAngles(&viewState, viewAnglesResult);')
-server_block = block(active, '    memset(&vs, 0, sizeof(vs));', '    BG_CalculateViewAngles(&vs, angles);')
+server_block = block(active, '    memset(&vs, 0, sizeof(vs));', '    BG_CalculateViewAngles(&vs, viewOffset);')
 angles = ''.join(function(weapons, name) for name in (
     'BG_TrackViewIdleFactor', 'BG_AddViewDamageKick', 'BG_AddViewIdle', 'BG_AddScopedViewBob', 'BG_AddAdsViewBob',
     'BG_CalculateViewAngles'))
@@ -94,10 +94,10 @@ CLIENT_BLOCK
 static void ServerKick(int msec, float *out)
 {
     viewState_t vs;
-    float angles[3];
+    float viewOffset[3];
 SERVER_BLOCK
-    out[0] = angles[0];
-    out[1] = angles[2];
+    out[0] = viewOffset[0];
+    out[1] = viewOffset[2];
 }
 
 int main(void)
@@ -113,7 +113,7 @@ int main(void)
             playerState_t ps;
             float limit = 0.0f, peak = 0.0f;
 
-            /* No idle sway, whose phase the two sides keep apart. */
+            /* No idle sway: the command carries it (test-scope-aim-sync.py). */
             memset(&def, 0, sizeof(def));
             def.bADSPositionInfo = 1;
             def.overlayReticle = aims[a].overlay;

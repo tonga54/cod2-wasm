@@ -115,7 +115,7 @@ extern int CL_GetCurrentCmdNumber(void);
 extern int CL_GetKeyCatchers(void);
 extern qboolean CL_GetUserCmd(int cmdNumber, usercmd_t *ucmd);
 extern Bool CL_IsRenderingSplitScreen(void);
-extern void CL_SetUserCmdAimValues(const vec_t *angles);
+extern void CG_SetUserCmdAim(void);
 extern void CL_SetUserCmdValue(int weapon, int offHandIndex, float sensitivity);
 extern void CL_RenderScene(const void *refdef);
 extern qboolean CG_DrawShellShockSavedScreenBlend(const shellshock_parms_t *parms, int start, int duration);
@@ -1400,9 +1400,6 @@ void CG_DrawPlayerSprites(void)
 void CG_DrawActive(void)
 {
     float sensitivity;
-    float angles[3];
-    vec_t *ka;
-    vec_t *oa;
 
     cg->refdef.time = cg->time;
     cg->refdef.viewIndex = 0;
@@ -1414,13 +1411,7 @@ void CG_DrawActive(void)
             sensitivity *= shellshockSensitivity;
     }
 
-    ka = cg->kickAngles;
-    oa = cg->offsetAngles;
-    angles[0] = ka[0] + oa[0];
-    angles[1] = ka[1] + oa[1];
-    angles[2] = ka[2] + oa[2];
-
-    CL_SetUserCmdAimValues(angles);
+    CG_SetUserCmdAim();
 
     CG_UpdateDetonatorSelect();
     CL_SetUserCmdValue(cg->weaponSelect, cg->equippedOffHand, sensitivity);
