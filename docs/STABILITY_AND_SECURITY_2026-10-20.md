@@ -153,6 +153,10 @@ already at 94–97% of a core) are where it is expected to act.
   ten seconds closes the connection (1008).
 - **Datagram size**: at most 2,048 bytes (the client netchan sends at most 1,400
   and `connect` about 1 KiB); larger messages close the connection (1009).
+- **Closed connections** (October 22): when a browser's WebSocket closes, the
+  gateway sends `disconnect` from the UDP port it gave that browser, and the
+  engine drops the player at that exact address at once instead of after
+  `sv_timeout` (30 s). Browsers cannot send it: it is not on the list above.
 - **HTTP**: 15 s to send request headers, 30 s for a whole request;
   `X-Frame-Options: DENY` and `Referrer-Policy: same-origin` on proxied pages
   (the framework already sends COOP, COEP and `nosniff`).
@@ -164,7 +168,8 @@ already at 94–97% of a core) are where it is expected to act.
 | `scripts/test-web-archives.cjs` | Bounded download parts, worker hashing on HTTP and HTTPS, on-demand node reads across chunks and byte-order-mark lookalikes, 32 MiB eviction, worker reads on real threads with shared memory, XHR and copy fallbacks, unreadable storage, GPU reset and memory messages |
 | `scripts/test-lan-validation.cjs` | Downloads hashed in the worker on both origins; cached copies skip the whole-archive hash |
 | `scripts/test-web-net-errors.cjs` | Commands dropped behind more than 8 KiB of backlog |
-| `downstream/gateway/filter.test.mjs` | Command allowlist, size limit, budgets and disconnection, bounded snapshot backlog, headers and timeouts |
+| `downstream/gateway/filter.test.mjs` | Command allowlist, size limit, budgets and disconnection, bounded snapshot backlog, headers and timeouts, `disconnect` from a closed browser's port |
+| `scripts/test-closed-browser-disconnect.py` | The engine drops only the client at that exact address, with mutants |
 | `scripts/test-server-load.py` | The real load meter compiled under ASan/UBSan, with mutants |
 | `scripts/test-bot-governor.cjs` | The production governor second by second, queued kicks included |
 | `scripts/test-pi-updater.py` | Idle re-checks, the candidate watchdog, priorities and CPU weight |

@@ -169,6 +169,17 @@ retail CoD2:
   pulses over them for you and your teammates. Hold Use over your own S-Mine to
   take it back; enemies can shoot it to set it off, and its blast is theirs. See
   [placed explosives](CLASSES.md#placed-explosives).
+- **Rejoining keeps your stats:** a person who leaves a match and joins the
+  same room's match again under the same gametag gets back their match points,
+  kills, assists, headshots, deaths and retail score, in any slot and on
+  whichever team the mode assigns. The gametag matches as the class store's
+  does: color codes, case and surrounding spaces aside; "Player", "Unknown
+  Soldier" and the engine's "UnnamedPlayer" belong to nobody, and bots keep
+  nothing. The server keeps up to 64 departed gametags (two sessions under one
+  add up) until the next map, a restart or S&D starting its match over;
+  `browser_rejoin.gsc` carries S&D's score and deaths through its rounds.
+  Closing or reloading the tab counts as leaving: the gateway tells the engine
+  at once instead of the 30-second `sv_timeout`.
 - **WWII countdown before a match:** players who spawn before a match begins
   wait through one 15-second countdown, free to look around and aim but not to
   move, fire, throw, reload or use. It starts when the first person spawns or
@@ -545,7 +556,8 @@ startup.
 The game network is internal to Docker; raw UDP and the room supervisor are not
 published to the LAN. The gateway forwards only the connectionless commands a
 browser client sends (`getchallenge`, `connect`, `getinfo`, `getstatus`), caps
-each connection's datagram size, rate and snapshot backlog, and containers run
+each connection's datagram size, rate and snapshot backlog, tells the engine
+when a browser's connection closes, and containers run
 without new privileges; see
 [gateway security](STABILITY_AND_SECURITY_2026-10-20.md#gateway-security).
 Private files are mounted read-only. Set `COD2_WEB_PORT`

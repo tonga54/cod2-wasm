@@ -11,6 +11,8 @@ extern void SV_GameSendServerCommand(int clientNum, int type, const char *text);
 
 enum {
     POINTS_MAX_CLIENTS = 64,
+    POINTS_MAX_KEPT = 64,
+    POINTS_KEY_SIZE = 32,
     POINTS_MOD_MELEE = 7,
     POINTS_HITLOC_HEAD = 2,
     POINTS_CTF_CAPTURE_SCORE = 10,
@@ -36,6 +38,17 @@ typedef struct {
     int damageCount;
 } G_PointsClient;
 
+/* What a person who left the match had, under their gametag. */
+typedef struct {
+    char key[POINTS_KEY_SIZE];
+    int points;
+    int kills;
+    int assists;
+    int headshots;
+    int score;
+    int deaths;
+} G_PointsKept;
+
 /* Objectives are worth whole kills: a capture three, a return one, a plant
  * or a defuse two. */
 static const int s_pointsValues[POINTS_EVENT_COUNT] = {
@@ -50,6 +63,8 @@ static const int s_pointsValues[POINTS_EVENT_COUNT] = {
 };
 
 static G_PointsClient s_pointsClients[POINTS_MAX_CLIENTS];
+static G_PointsKept s_pointsKept[POINTS_MAX_KEPT];
+static int s_pointsKeptCount;
 static int s_pointsGametype;
 
 static int G_PointsTeam(int clientNum)
@@ -112,8 +127,107 @@ static void G_PointsForgetAttacker(int clientNum)
         s_pointsClients[i].damagedBy &= mask;
 }
 
+/* A gametag as the gateway keys its classes (classes.mjs playerKey): color
+ * codes, case and surrounding spaces aside. The name every new browser has
+ * and the engine's for a blank one are nobody's. */
+static int G_PointsNameKey(const char *name, char *key)
+{
+    static const char *const shared[] = { "Player", "Unknown Soldier", "UnnamedPlayer" };
+    int length = 0;
+    int i;
+
+    for (; *name; ++name) {
+        if (name[0] == '^' && name[1] >= '0' && name[1] <= '9')
+            ++name;
+        else if ((length || *name != ' ') && length < POINTS_KEY_SIZE - 1)
+            key[length++] = *name;
+    }
+    while (length && key[length - 1] == ' ')
+        --length;
+    key[length] = '\0';
+    for (i = 0; i < (int)(sizeof(shared) / sizeof(shared[0])); ++i) {
+        if (!I_stricmp(key, shared[i]))
+            return 0;
+    }
+    return length > 0;
+}
+
+static G_PointsKept *G_PointsFindKept(const char *key)
+{
+    int i;
+
+    for (i = 0; i < s_pointsKeptCount; ++i) {
+        if (!I_stricmp(s_pointsKept[i].key, key))
+            return &s_pointsKept[i];
+    }
+    return NULL;
+}
+
+static void G_PointsForgetKept(G_PointsKept *kept)
+{
+    int index = (int)(kept - s_pointsKept);
+
+    memmove(kept, kept + 1, (s_pointsKeptCount - index - 1) * sizeof(*kept));
+    --s_pointsKeptCount;
+}
+
+/* A person leaving keeps their tallies for their gametag until the match
+ * starts over; two sessions under one gametag add up, and the oldest gives
+ * way when the list is full. Bots keep nothing. */
+static void G_PointsKeep(int clientNum)
+{
+    const gclient_t *client = &level.clients[clientNum];
+    const G_PointsClient *slot = &s_pointsClients[clientNum];
+    G_PointsKept *kept;
+    char key[POINTS_KEY_SIZE];
+
+    if (client->sess.localClient || !G_PointsNameKey(client->sess.cs.name, key))
+        return;
+    if (!slot->points && !slot->kills && !slot->assists && !slot->headshots && !client->sess.score &&
+        !client->sess.deaths)
+        return;
+    kept = G_PointsFindKept(key);
+    if (!kept) {
+        if (s_pointsKeptCount == POINTS_MAX_KEPT)
+            G_PointsForgetKept(&s_pointsKept[0]);
+        kept = &s_pointsKept[s_pointsKeptCount++];
+        memset(kept, 0, sizeof(*kept));
+        strcpy(kept->key, key);
+    }
+    kept->points += slot->points;
+    kept->kills += slot->kills;
+    kept->assists += slot->assists;
+    kept->headshots += slot->headshots;
+    kept->score += client->sess.score;
+    kept->deaths += client->sess.deaths;
+}
+
+/* A person joining under a gametag that left this match takes back what it
+ * had: the match points beside the retail score and deaths. */
+static void G_PointsTakeBack(int clientNum)
+{
+    gclient_t *client = &level.clients[clientNum];
+    G_PointsClient *slot = &s_pointsClients[clientNum];
+    G_PointsKept *kept;
+    char key[POINTS_KEY_SIZE];
+
+    if (client->sess.localClient || !G_PointsNameKey(client->sess.cs.name, key))
+        return;
+    kept = G_PointsFindKept(key);
+    if (!kept)
+        return;
+    slot->points = kept->points;
+    slot->kills = kept->kills;
+    slot->assists = kept->assists;
+    slot->headshots = kept->headshots;
+    client->sess.score = kept->score;
+    client->sess.deaths = kept->deaths;
+    G_PointsForgetKept(kept);
+}
+
 void G_PointsInitGame(int restart, const char *gametype)
 {
+    int newMatch;
     int i;
 
     if (!I_stricmp(gametype, "dm"))
@@ -126,38 +240,49 @@ void G_PointsInitGame(int restart, const char *gametype)
         s_pointsGametype = POINTS_GT_TEAM;
 
     /* SD plays every round as a map_restart and keeps the match going. */
+    newMatch = !restart || s_pointsGametype != POINTS_GT_SD;
+    if (newMatch)
+        s_pointsKeptCount = 0;
     for (i = 0; i < POINTS_MAX_CLIENTS; ++i) {
         s_pointsClients[i].damagedBy = 0;
-        if (!restart || s_pointsGametype != POINTS_GT_SD)
+        if (newMatch)
             G_PointsClear(&s_pointsClients[i]);
     }
 }
 
-/* ClientConnect runs for every client on each map load and restart. Script
- * pers ids are recycled, so a disconnect also clears the slot. */
+/* ClientConnect calls this for every client on each map load and restart,
+ * once the client's name is set. Script pers ids are recycled, so a
+ * disconnect also clears the slot; a slot it freed takes a person joining. */
 void G_PointsClientConnect(int clientNum, int scriptPersId)
 {
     G_PointsClient *slot;
+    int joining;
 
     if (clientNum < 0 || clientNum >= POINTS_MAX_CLIENTS)
         return;
     slot = &s_pointsClients[clientNum];
-    if (!slot->inUse || slot->persId != scriptPersId)
+    joining = !slot->inUse;
+    if (joining || slot->persId != scriptPersId)
         G_PointsClear(slot);
     slot->inUse = 1;
     slot->persId = scriptPersId;
     slot->damagedBy = 0;
     G_PointsForgetAttacker(clientNum);
+    if (joining)
+        G_PointsTakeBack(clientNum);
 }
 
+/* ClientDisconnect calls this before it clears the client's name. */
 void G_PointsClientDisconnect(int clientNum)
 {
     if (clientNum < 0 || clientNum >= POINTS_MAX_CLIENTS)
         return;
+    G_PointsKeep(clientNum);
     memset(&s_pointsClients[clientNum], 0, sizeof(s_pointsClients[clientNum]));
 }
 
-/* The deathmatch panel compares the player's kills with the leader's. */
+/* The deathmatch panel compares the player's kills with the leader's; a
+ * player back in the match brings theirs to everyone's panel. */
 void G_PointsClientBegin(int clientNum)
 {
     char text[1024];
@@ -173,6 +298,8 @@ void G_PointsClientBegin(int clientNum)
         length += Com_sprintf(text + length, sizeof(text) - length, " %i %i", i, G_PointsRetailScore(i));
     }
     G_PointsSend(clientNum, text);
+    if (G_PointsRetailScore(clientNum))
+        G_PointsSend(-1, va("cod2_dmscore %i %i", clientNum, G_PointsRetailScore(clientNum)));
 }
 
 void G_PointsClientSpawn(int clientNum)
@@ -292,6 +419,7 @@ void G_PointsTeamScoresChanged(int initializing, int axisScore, int alliesScore)
         return;
     for (i = 0; i < POINTS_MAX_CLIENTS; ++i)
         G_PointsClear(&s_pointsClients[i]);
+    s_pointsKeptCount = 0;
 }
 
 /* SD logs "A;<guid>;<entnum>;<team>;<name>;bomb_plant" and "...;bomb_defuse". */

@@ -56,6 +56,31 @@ test('only the commands a browser client sends reach the engine; rcon and the re
   } finally { await h.close(); }
 });
 
+test('a browser that goes away tells the engine at once, from the port its player has', {timeout: 5000}, async () => {
+  const h = await harness();
+  try {
+    h.client.send(oob('getchallenge'));
+    await h.settle(1);
+    const { port } = h.peer();
+    h.client.close(1000);
+    await h.settle(2);
+    assert.deepEqual(h.received, [oob('getchallenge'), oob('disconnect')]);
+    assert.equal(h.peer().port, port);
+  } finally { await h.close(); }
+  const late = await harness({ udpSocketFactory() {
+    const udp = dgram.createSocket('udp4');
+    const connect = udp.connect.bind(udp);
+    udp.connect = (port, host, ready) => connect(port, host, () => setTimeout(ready, 100));
+    return udp;
+  } });
+  try {
+    late.client.send(oob('getchallenge'));
+    late.client.close(1000);
+    await new Promise(resolve => setTimeout(resolve, 250));
+    assert.deepEqual(late.received, [], 'a socket closed before it was ready had nothing to leave');
+  } finally { await late.close(); }
+});
+
 test('a datagram larger than any the client sends closes the connection', {timeout: 5000}, async () => {
   const h = await harness();
   try {

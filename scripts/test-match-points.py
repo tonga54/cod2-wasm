@@ -48,19 +48,22 @@ hooks = [
      'G_PointsTeamScoresChanged(level.initializing, level.teamScores[TEAM_AXIS], level.teamScores[TEAM_ALLIES]);',
      "va(\"%c %i\", 'G', score)", 'level.bUpdateScoresForIntermission = 1;'),
     ('src/PC/game_mp/g_scr_main_mp.c', 'GScr_LogPrint', 'G_PointsLogLine(string);', 'I_strncat(string', 'G_LogPrintf(string);'),
-    ('src/PC/game_mp/g_client_mp.c', 'ClientConnect',
-     'G_PointsClientConnect(clientNum, scriptPersId);', 'memset(client, 0, CLIENT_STRIDE);', 'Scr_PlayerConnect('),
+    # A rejoining person's name is set, and a refused connection takes nothing back.
+    ('src/PC/game_mp/g_client_mp.c', 'ClientConnect', 'G_PointsClientConnect(clientNum, scriptPersId);',
+     ('ClientUserinfoChanged(clientNum);', 'return "GAME_INVALIDPASSWORD";'), 'Scr_PlayerConnect('),
     ('src/PC/game_mp/g_client_mp.c', 'ClientBegin', 'G_PointsClientBegin(clientNum);',
      'client->sess.connected = 2;', 'Scr_Notify(ent, scr->begin, 0);'),
+    # A leaving person's name is still there, after the gametype's own disconnect.
     ('src/PC/game_mp/g_client_mp.c', 'ClientDisconnect', 'G_PointsClientDisconnect(clientNum);',
-     'client->sess.connected = 0;', 'CalculateRanks();'),
+     'Scr_PlayerDisconnect(ent);', 'memset(&client->sess.cs, 0, sizeof(clientState_t));'),
     ('src/PC/game_mp/g_client_mp.c', 'ClientSpawn', 'G_PointsClientSpawn(clientNum);',
      'clientNum = ent - (gentity_s *)imp_g_entities;', 'G_EntUnlink(ent);'),
 ]
 for path, name, call, before, after in hooks:
     text = definition((root / path).read_text(), name)
     assert text.count(call) == 1, (path, call)
-    assert text.index(before) < text.index(call) < text.index(after, text.index(call)), (path, call)
+    for anchor in before if isinstance(before, tuple) else (before,):
+        assert text.index(anchor) < text.index(call) < text.index(after, text.index(call)), (path, call, anchor)
 main_source = (root / 'src/PC/game_mp/g_main_mp.c').read_text()
 init_call = '    G_LogPrintf("gametype: %s\\n", g_gametype->current.string);\n    G_PointsInitGame(restart, g_gametype->current.string);\n'
 assert main_source.count(init_call) == 2, 'both G_InitGame builds reset the points'
@@ -76,8 +79,8 @@ enum { TEAM_FREE = 0, TEAM_AXIS = 1, TEAM_ALLIES = 2, TEAM_SPECTATOR = 3 };
 enum { CON_DISCONNECTED = 0, CON_CONNECTING = 1, CON_CONNECTED = 2 };
 enum { SV_CMD_CAN_IGNORE = 0, SV_CMD_RELIABLE = 1 };
 enum { GCMDS_MAX_CLIENTS = 64, GCMDS_SCORES_LIMIT = ''' + scores_limit + r''' };
-typedef struct { int team; } clientState_t;
-typedef struct { int score; int deaths; int status_icon; int connected; clientState_t cs; } clientSession_t;
+typedef struct { int team; char name[32]; } clientState_t;
+typedef struct { int score; int deaths; int status_icon; int connected; int localClient; clientState_t cs; } clientSession_t;
 typedef struct gclient_s { clientSession_t sess; } gclient_t;
 typedef struct {
     gclient_t *clients; int maxclients; int initializing; int numConnectedClients;
@@ -138,6 +141,9 @@ static void setup(const char *gametype, const int *teams, int count) {
     level.clients = clients; level.maxclients = 16; level.initializing = 0;
     for (int i = 0; i < 1024; ++i) { g_entities[i].s.number = i; g_entities[i].client = i < 64 ? &clients[i] : 0; }
     world.s.number = 1022; world.client = 0;
+    /* A fresh server: every slot free. */
+    for (int i = 0; i < 64; ++i)
+        G_PointsClientDisconnect(i);
     G_PointsInitGame(0, gametype);
     for (int i = 0; i < count; ++i) {
         G_PointsClientConnect(i, 100 + i);
@@ -151,6 +157,38 @@ static void kill(int victim, int attacker, int mod, int hitLoc) {
     G_PointsPlayerKilled(ent(victim), attacker < 0 ? &world : ent(attacker), mod, hitLoc);
 }
 enum { RIFLE = 2, MELEE = 7, TORSO = 4, HEAD = 2, HELMET = 1 };
+static void name(int n, const char *text) {
+    snprintf(clients[n].sess.cs.name, sizeof(clients[n].sess.cs.name), "%s", text);
+}
+/* As ClientDisconnect: the module, then the session's name is cleared. */
+static void leave(int n) {
+    G_PointsClientDisconnect(n);
+    clients[n].sess.connected = CON_DISCONNECTED;
+    memset(&clients[n].sess.cs, 0, sizeof(clients[n].sess.cs));
+}
+/* As ClientConnect: a cleared client with its name and whether it is a bot,
+ * then the module. */
+static void join(int n, const char *text, int persId, int local) {
+    memset(&clients[n], 0, sizeof(clients[n]));
+    name(n, text);
+    clients[n].sess.localClient = local;
+    G_PointsClientConnect(n, persId);
+    clients[n].sess.connected = CON_CONNECTED;
+}
+static void give(int n, int points, int kills, int assists, int headshots, int score, int deaths) {
+    s_pointsClients[n].points = points; s_pointsClients[n].kills = kills;
+    s_pointsClients[n].assists = assists; s_pointsClients[n].headshots = headshots;
+    clients[n].sess.score = score; clients[n].sess.deaths = deaths;
+}
+static void tally(int n, int points, int kills, int assists, int headshots, int score, int deaths) {
+    if (G_PointsGet(n) != points || G_PointsKills(n) != kills || G_PointsAssists(n) != assists ||
+        G_PointsHeadshots(n) != headshots || clients[n].sess.score != score || clients[n].sess.deaths != deaths) {
+        fprintf(stderr, "client %d has %d %d %d %d %d %d, expected %d %d %d %d %d %d\n", n, G_PointsGet(n),
+                G_PointsKills(n), G_PointsAssists(n), G_PointsHeadshots(n), clients[n].sess.score,
+                clients[n].sess.deaths, points, kills, assists, headshots, score, deaths);
+        assert(0);
+    }
+}
 
 int main(void) {
     const int teams[] = { TEAM_AXIS, TEAM_ALLIES, TEAM_ALLIES, TEAM_AXIS, TEAM_SPECTATOR };
@@ -443,6 +481,173 @@ int main(void) {
     kill(0, 1, RIFLE, TORSO);
     assert(lists == 6 && listTo == 0 && !strcmp(list, "1"));
     sentCount = sentIndex = 0;
+
+    /* A person who leaves keeps it all under their gametag and takes it back
+     * joining the match again, in any slot: color codes, case and the spaces
+     * around it aside. */
+    const int rejoin[] = { TEAM_AXIS, TEAM_ALLIES, TEAM_ALLIES, TEAM_AXIS };
+    setup("tdm", rejoin, 4);
+    name(1, "^1Ace^7 ");
+    name(2, "Bob");
+    damage(0, 1, 10);
+    kill(0, 1, RIFLE, HEAD);
+    expect(1, "cod2_points 2 150");
+    damage(3, 2, 30);
+    kill(3, 1, RIFLE, TORSO);
+    expect(2, "cod2_points 3 25");
+    expect(1, "cod2_points 1 75");
+    damage(0, 1, 30);
+    kill(0, 2, RIFLE, TORSO);
+    expect(1, "cod2_points 3 25");
+    expect(2, "cod2_points 1 75");
+    quiet();
+    clients[1].sess.score = 2; clients[1].sess.deaths = 3;
+    clients[2].sess.score = 1; clients[2].sess.deaths = 1;
+    tally(1, 250, 2, 1, 1, 2, 3);
+    leave(1);
+    assert(G_PointsGet(1) == 0 && G_PointsKills(1) == 0);
+    join(5, "  ace", 900, 0);
+    tally(5, 250, 2, 1, 1, 2, 3);
+    /* Once: another Ace joining now finds nothing. */
+    join(6, "ACE", 901, 0);
+    tally(6, 0, 0, 0, 0, 0, 0);
+    /* Another gametag takes nothing; Bob's own comes back. */
+    leave(2);
+    join(7, "Bobby", 902, 0);
+    tally(7, 0, 0, 0, 0, 0, 0);
+    join(8, "bob", 903, 0);
+    tally(8, 100, 1, 1, 0, 1, 1);
+    quiet();
+
+    /* Bots keep nothing, and take nothing a person left. */
+    join(9, "[BOT] Recruit3", 904, 1);
+    give(9, 100, 1, 0, 0, 1, 2);
+    leave(9);
+    join(9, "[BOT] Recruit3", 905, 0);
+    tally(9, 0, 0, 0, 0, 0, 0);
+    join(10, "Dan", 906, 0);
+    give(10, 0, 0, 0, 0, 0, 5);
+    leave(10);
+    join(11, "Dan", 907, 1);
+    tally(11, 0, 0, 0, 0, 0, 0);
+    join(12, "dan", 908, 0);
+    tally(12, 0, 0, 0, 0, 0, 5);
+    /* Only a score, below zero after a team kill, is kept too. */
+    join(13, "Eve", 909, 0);
+    give(13, 0, 0, 0, 0, -2, 0);
+    leave(13);
+    join(13, "EVE", 910, 0);
+    tally(13, 0, 0, 0, 0, -2, 0);
+
+    /* The name every new browser has, the engine's for a blank one, and names
+     * of nothing but color codes or spaces are nobody's. */
+    const char *const nobody[] = { "Player", "pLaYeR", " Unknown Soldier ", "UnnamedPlayer", "^1", "  ", "^7^0" };
+    for (int i = 0; i < 7; ++i) {
+        join(14, nobody[i], 911 + i, 0);
+        give(14, 100, 1, 0, 0, 1, 1);
+        leave(14);
+        join(14, nobody[i], 950 + i, 0);
+        tally(14, 0, 0, 0, 0, 0, 0);
+        leave(14);
+    }
+
+    /* Two sessions under one gametag add up. */
+    join(1, "Cat", 960, 0);
+    give(1, 100, 1, 2, 3, 4, 5);
+    join(2, "^3cat", 961, 0);
+    give(2, 10, 20, 30, 40, 50, 60);
+    leave(1);
+    leave(2);
+    join(1, "CAT", 962, 0);
+    tally(1, 110, 21, 32, 43, 54, 65);
+
+    /* A slot connecting again for a round or a level keeps its own; what its
+     * gametag left stays for a person joining. */
+    join(4, "Gus", 970, 0);
+    join(2, "gus", 971, 0);
+    give(2, 75, 1, 0, 0, 1, 0);
+    leave(2);
+    G_PointsClientConnect(4, 970);
+    tally(4, 0, 0, 0, 0, 0, 0);
+    G_PointsClientConnect(4, 972);
+    tally(4, 0, 0, 0, 0, 0, 0);
+    join(2, "GUS", 973, 0);
+    tally(2, 75, 1, 0, 0, 1, 0);
+    quiet();
+
+    /* Until the match starts over: a restart or a new level, but not S&D's
+     * next round, until S&D starts its match over. */
+    join(15, "Hal", 980, 0);
+    give(15, 25, 0, 1, 0, 0, 1);
+    leave(15);
+    G_PointsInitGame(1, "tdm");
+    join(15, "Hal", 981, 0);
+    tally(15, 0, 0, 0, 0, 0, 0);
+    give(15, 25, 0, 1, 0, 0, 1);
+    leave(15);
+    G_PointsInitGame(0, "tdm");
+    join(15, "Hal", 982, 0);
+    tally(15, 0, 0, 0, 0, 0, 0);
+    G_PointsInitGame(0, "sd");
+    give(15, 25, 0, 1, 0, 0, 1);
+    leave(15);
+    G_PointsInitGame(1, "sd");
+    join(15, "Hal", 983, 0);
+    tally(15, 25, 0, 1, 0, 0, 1);
+    leave(15);
+    level.initializing = 1;
+    G_PointsTeamScoresChanged(level.initializing, 0, 0);
+    level.initializing = 0;
+    G_PointsTeamScoresChanged(level.initializing, 0, 2);
+    join(15, "Hal", 984, 0);
+    tally(15, 25, 0, 1, 0, 0, 1);
+    leave(15);
+    G_PointsTeamScoresChanged(level.initializing, 0, 0);
+    join(15, "Hal", 985, 0);
+    tally(15, 0, 0, 0, 0, 0, 0);
+    quiet();
+
+    /* 64 gametags fill the list and the oldest gives way to the next; a
+     * person leaving with nothing takes no place. */
+    G_PointsInitGame(0, "tdm");
+    char tag[16];
+    for (int i = 0; i < 64; ++i) {
+        snprintf(tag, sizeof(tag), "P%d", i);
+        join(2, tag, 1000 + i, 0);
+        give(2, 0, 0, 0, 0, 0, i + 1);
+        leave(2);
+    }
+    join(2, "Zed", 1100, 0);
+    leave(2);
+    join(2, "P64", 1101, 0);
+    give(2, 0, 0, 0, 0, 0, 65);
+    leave(2);
+    join(2, "P0", 1102, 0);
+    tally(2, 0, 0, 0, 0, 0, 0);
+    leave(2);
+    join(2, "P1", 1103, 0);
+    tally(2, 0, 0, 0, 0, 0, 2);
+    join(10, "P63", 1104, 0);
+    tally(10, 0, 0, 0, 0, 0, 64);
+    join(14, "P64", 1105, 0);
+    tally(14, 0, 0, 0, 0, 0, 65);
+    quiet();
+
+    /* Deathmatch: everyone's panel learns the kills a player brings back. */
+    const int ffa[] = { TEAM_FREE, TEAM_FREE, TEAM_FREE };
+    setup("dm", ffa, 3);
+    name(1, "Ivy");
+    clients[1].sess.score = 6;
+    leave(1);
+    join(1, "Ivy", 1200, 0);
+    G_PointsClientBegin(1);
+    expect(1, "cod2_dmscores 0 0 1 6 2 0");
+    expect(-1, "cod2_dmscore 1 6");
+    join(3, "Jay", 1201, 0);
+    G_PointsClientBegin(3);
+    expect(3, "cod2_dmscores 0 0 1 6 2 0 3 0");
+    quiet();
+    sentCount = sentIndex = 0;
     return 0;
 }
 '''
@@ -475,9 +680,9 @@ module_mutants = [
     ('if (attackerNum == victimNum || !G_PointsValidClient(attackerNum) || !G_PointsEnemies(attackerNum, victimNum))',
      'if (!G_PointsValidClient(attackerNum) || !G_PointsEnemies(attackerNum, victimNum))'),
     ('    if (s_pointsGametype != POINTS_GT_DM) {\n        for', '    if (1) {\n        for'),
-    ('if (!restart || s_pointsGametype != POINTS_GT_SD)', 'if (!restart)'),
-    ('if (!restart || s_pointsGametype != POINTS_GT_SD)', 'if (s_pointsGametype != POINTS_GT_SD)'),
-    ('if (!slot->inUse || slot->persId != scriptPersId)', 'if (!slot->inUse)'),
+    ('newMatch = !restart || s_pointsGametype != POINTS_GT_SD;', 'newMatch = !restart;'),
+    ('newMatch = !restart || s_pointsGametype != POINTS_GT_SD;', 'newMatch = s_pointsGametype != POINTS_GT_SD;'),
+    ('if (joining || slot->persId != scriptPersId)', 'if (joining)'),
     ('    memset(&s_pointsClients[clientNum], 0, sizeof(s_pointsClients[clientNum]));\n', ''),
     ('if (initializing || axisScore != 0 || alliesScore != 0)', 'if (axisScore != 0 || alliesScore != 0)'),
     ('if (initializing || axisScore != 0 || alliesScore != 0)', 'if (initializing || axisScore != 0 && alliesScore != 0)'),
@@ -501,8 +706,8 @@ module_mutants = [
     ('    slot->assists = 0;\n', ''),
     ('    slot->headshots = 0;\n', ''),
     ('            G_PointsClear(&s_pointsClients[i]);\n', '            s_pointsClients[i].points = 0;\n'),
-    ('    for (i = 0; i < POINTS_MAX_CLIENTS; ++i)\n        G_PointsClear(&s_pointsClients[i]);\n}',
-     '    for (i = 0; i < POINTS_MAX_CLIENTS; ++i)\n        s_pointsClients[i].points = 0;\n}'),
+    ('    for (i = 0; i < POINTS_MAX_CLIENTS; ++i)\n        G_PointsClear(&s_pointsClients[i]);\n    s_pointsKeptCount',
+     '    for (i = 0; i < POINTS_MAX_CLIENTS; ++i)\n        s_pointsClients[i].points = 0;\n    s_pointsKeptCount'),
     ('        G_PointsClear(slot);\n', '        slot->points = 0;\n'),
     ('return s_pointsClients[clientNum].kills;', 'return s_pointsClients[clientNum].points;'),
     ('return s_pointsClients[clientNum].assists;', 'return s_pointsClients[clientNum].kills;'),
@@ -519,6 +724,55 @@ module_mutants = [
     ('    if (attackerNum != victimNum && G_PointsValidClient(attackerNum))\n        G_PointsSendAttackers',
      '    if (attackerNum != victimNum && G_PointsValidClient(attackerNum) && G_PointsEnemies(attackerNum, victimNum))\n'
      '        G_PointsSendAttackers'),
+    # A gametag's key: color codes, the spaces around it and case aside; the
+    # names nobody owns.
+    ("        if (name[0] == '^' && name[1] >= '0' && name[1] <= '9')\n            ++name;\n        else if",
+     "        if (0)\n            ++name;\n        else if"),
+    ("(length || *name != ' ')", '1'),
+    ("    while (length && key[length - 1] == ' ')\n        --length;\n", ''),
+    ('        if (!I_stricmp(s_pointsKept[i].key, key))', '        if (!strcmp(s_pointsKept[i].key, key))'),
+    ('{ "Player", "Unknown Soldier", "UnnamedPlayer" }', '{ "Unknown Soldier", "UnnamedPlayer" }'),
+    ('{ "Player", "Unknown Soldier", "UnnamedPlayer" }', '{ "Player", "UnnamedPlayer" }'),
+    ('{ "Player", "Unknown Soldier", "UnnamedPlayer" }', '{ "Player", "Unknown Soldier" }'),
+    ('        if (!I_stricmp(key, shared[i]))', '        if (!strcmp(key, shared[i]))'),
+    ('    return length > 0;', '    return 1;'),
+    # Keeping a person's tallies when they leave.
+    ('    G_PointsKeep(clientNum);\n', ''),
+    ('    if (client->sess.localClient || !G_PointsNameKey(client->sess.cs.name, key))\n        return;\n    if (!slot',
+     '    if (!G_PointsNameKey(client->sess.cs.name, key))\n        return;\n    if (!slot'),
+    ('    if (!slot->points && !slot->kills && !slot->assists && !slot->headshots && !client->sess.score &&\n'
+     '        !client->sess.deaths)\n        return;\n', ''),
+    ('!client->sess.score &&\n', '1 &&\n'),
+    ('        !client->sess.deaths)\n', '        1)\n'),
+    ('    kept->points += slot->points;', '    kept->points = slot->points;'),
+    ('    kept->kills += slot->kills;', '    kept->kills = slot->kills;'),
+    ('    kept->assists += slot->assists;', '    kept->assists = slot->assists;'),
+    ('    kept->headshots += slot->headshots;', '    kept->headshots = slot->headshots;'),
+    ('    kept->score += client->sess.score;', '    kept->score = client->sess.score;'),
+    ('    kept->deaths += client->sess.deaths;', '    kept->deaths = client->sess.deaths;'),
+    ('            G_PointsForgetKept(&s_pointsKept[0]);', '            return;'),
+    ('            G_PointsForgetKept(&s_pointsKept[0]);', '            G_PointsForgetKept(&s_pointsKept[POINTS_MAX_KEPT - 1]);'),
+    ('        if (s_pointsKeptCount == POINTS_MAX_KEPT)\n            G_PointsForgetKept(&s_pointsKept[0]);\n', ''),
+    # Taking them back joining.
+    ('    if (joining)\n        G_PointsTakeBack(clientNum);\n', ''),
+    ('    if (joining)\n        G_PointsTakeBack(clientNum);\n', '    G_PointsTakeBack(clientNum);\n'),
+    ('    if (client->sess.localClient || !G_PointsNameKey(client->sess.cs.name, key))\n        return;\n    kept',
+     '    if (!G_PointsNameKey(client->sess.cs.name, key))\n        return;\n    kept'),
+    ('    slot->points = kept->points;\n', ''),
+    ('    slot->kills = kept->kills;\n', ''),
+    ('    slot->assists = kept->assists;\n', ''),
+    ('    slot->headshots = kept->headshots;\n', ''),
+    ('    client->sess.score = kept->score;\n', ''),
+    ('    client->sess.deaths = kept->deaths;\n', ''),
+    ('    client->sess.deaths = kept->deaths;\n    G_PointsForgetKept(kept);\n', '    client->sess.deaths = kept->deaths;\n'),
+    # Until the match starts over.
+    ('    if (newMatch)\n        s_pointsKeptCount = 0;\n', ''),
+    ('    if (newMatch)\n        s_pointsKeptCount = 0;\n', '    s_pointsKeptCount = 0;\n'),
+    ('        G_PointsClear(&s_pointsClients[i]);\n    s_pointsKeptCount = 0;\n', '        G_PointsClear(&s_pointsClients[i]);\n'),
+    # A deathmatch player back with kills tells everyone.
+    ('    if (G_PointsRetailScore(clientNum))\n        G_PointsSend(-1, va("cod2_dmscore %i %i", clientNum, '
+     'G_PointsRetailScore(clientNum)));\n', ''),
+    ('    if (G_PointsRetailScore(clientNum))\n        G_PointsSend(-1', '    if (1)\n        G_PointsSend(-1'),
 ]
 scoreboard_mutants = [
     ('order[i] = lvl->sortedClients[i];\n    G_PointsSortClients(order, numSorted);', 'order[i] = lvl->sortedClients[i];'),
@@ -551,4 +805,6 @@ print('PASS: kills earn 100, assisted kills 75, headshots 150 and assists 25 in 
       f'sends points ranked players first, then their kills of enemies (kept with the points) and the receiver\'s '
       f'own assists and headshots, and fits a full server in one reliable command; a victim learns their killer and '
       f'the other enemies that hurt them, by first '
-      f'hit; {len(hooks) + 1} hooks wired; {len(variants) - 1} failing regression mutants')
+      f'hit; a person who leaves gets points, kills, assists, headshots, score and deaths back joining the same match '
+      f'under their gametag, bots and shared names excepted, until the match starts over; '
+      f'{len(hooks) + 1} hooks wired; {len(variants) - 1} failing regression mutants')

@@ -15,3 +15,4 @@
 !downstream/server/browser_bots.gsc
 !downstream/server/browser_classes.gsc
 !downstream/server/browser_prematch.gsc
+!downstream/server/browser_rejoin.gsc

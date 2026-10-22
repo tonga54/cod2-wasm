@@ -6,7 +6,9 @@
  * restore it between SD rounds. Event codes are sent to the scoring client as
  * "cod2_points <event> <points>". Kills of enemies are counted beside the
  * points, for the scoreboard's Kills column, and assists and headshots for
- * each player's own battle stats. */
+ * each player's own battle stats. A person who leaves and joins the same
+ * match again under their gametag gets all of it back, with their retail
+ * score and deaths. */
 enum pointsEvent_t {
     POINTS_KILL = 0,
     POINTS_ASSISTED_KILL = 1,

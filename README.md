@@ -300,8 +300,11 @@ Once a host is running:
 Downloads show byte progress and are checked against archive sizes and SHA-256
 hashes. Assets stay in IndexedDB between visits; the profile keeps controls,
 name, audio and graphics settings. Clearing browser storage removes that profile.
-Classes are stored by the gateway in SQLite under the gametag. **Gametags are
-not authenticated accounts**: anyone using the same name shares its classes.
+Classes are stored by the gateway in SQLite under the gametag. Leave a match
+and join it again under the same gametag, even after closing or reloading the
+tab, and your score, kills, assists, headshots and deaths come back, until the
+next map or a new match. **Gametags are not authenticated accounts**: anyone
+using the same name shares its classes and those stats.
 Room ownership is tied to a private token saved in the creator's browser.
 
 ### Install as an app

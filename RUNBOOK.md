@@ -6039,3 +6039,69 @@ Validation:
   `test-server-load.py` and `test-smoke-effect-server.py` pass, and so does
   the full `test-static.sh`. The native server builds without warnings, and
   `sv_init_mp.c` compiles with Emscripten 3.1.64.
+
+## Rejoining keeps a player's stats — 2026-10-22
+
+The owner asked that a player who leaves a match and joins the same one again
+under the same name keep their stats. They were lost: `ClientDisconnect`
+cleared the slot's match points, kills, assists and headshots, and
+`ClientConnect` zeroes the session's retail score and deaths for whoever takes
+a slot. A closed or reloaded tab also stayed in the match until `sv_timeout`
+(30 s), so a player back sooner joined beside their own ghost, with nothing.
+
+- `g_points_mp.c` keeps a leaving person's match points, kills, assists,
+  headshots, retail score and deaths under their gametag, and gives them back
+  to a person joining under it into a free slot. The gametag matches as
+  `classes.mjs`'s `playerKey` does: color codes, case and the spaces around it
+  aside. "Player", "Unknown Soldier" and the engine's "UnnamedPlayer" are
+  nobody's, and local clients (bots) keep and take nothing. Two sessions under
+  one gametag add up; 64 gametags are kept, the oldest giving way. They are
+  forgotten whenever points reset: a new level, a restart other than S&D's
+  next round, and S&D starting its match over. A deathmatch player brought
+  back sends everyone's score panel their kills.
+- `ClientConnect` calls the module after the client's name is set and after
+  the password check, so a refused connection takes nothing back;
+  `ClientDisconnect` calls it before the name is cleared.
+- S&D keeps score and deaths in `pers` between rounds and sets them from there
+  on every spawn. `browser_rejoin.gsc` (new, copied into every room) gives a
+  new connection's `pers` what the server gave back and, each later round,
+  shows `pers` on players the round does not spawn as well, so a spectator
+  leaving still has them.
+- When a browser's WebSocket closes, the gateway sends `disconnect` from the UDP
+  port it gave that browser; `SV_ConnectionlessPacket`, which ignored it, now
+  drops the client at that exact address. Browsers cannot send it themselves.
+
+Validation:
+
+- `test-match-points.py` also runs leaving and joining again: all six tallies
+  back in another slot under another case, color and spacing, once; other
+  gametags, bots, shared and blank names; two sessions adding up; a slot
+  connecting again for a round or level taking nothing; a restart, a new level,
+  S&D's next round and S&D's match reset; 64 gametags and the oldest giving
+  way; and deathmatch's broadcast. 100 mutants fail, 38 of them new.
+- `test-closed-browser-disconnect.py` (new, in `test-static.sh`) compiles
+  `SV_ConnectionlessPacket`, `SV_DisconnectPacket` and `NET_CompareAdr` under the
+  sanitizers: only a connecting or playing client at the exact address drops,
+  once; another browser behind the gateway, a bot, free and zombie slots, a slot
+  past `sv_maxclients` and other commands drop nobody. 6 mutants fail.
+- Gateway `npm test` (25) passes; its new check fails on the previous
+  `server.mjs`. `test-room-maps.py`, `test-bot-foundation.js` and the full
+  `test-static.sh` pass. The native server builds; the four changed engine
+  files compile with Emscripten 3.1.64, and `g_points_mp.c` without warnings
+  under `-Wall -Wextra`. The server image carries `browser_rejoin.gsc`.
+- An isolated stack (the new server image and gateway, Chrome through
+  Playwright, a QA script in the bot slot scoring for the person through the
+  gametype's damage callback): on Toujane TDM a player with 275 points, 2
+  kills, 1 assist, 1 headshot, 1 death and score 2 left with `disconnect`, as
+  Leave Game does, and joined again with all of it, on the scoreboard and in
+  the pause menu's overview. With one more kill they reloaded the page: the
+  server dropped the old session 87 ms later, and joining again gave 375, 3,
+  1, 1, 1 and score 3. The previous server and gateway gave 0 everywhere after
+  the same leave and join, and after a reload kept the old session beside the
+  new one for 30.2 s, until `EXE_TIMEDOUT`. In S&D a player's 150 points, kill,
+  headshot, death and score 1 came back on joining and held through the next
+  round; without `browser_rejoin.gsc` that round showed 0 deaths and score 0.
+  Captures and logs are in `out/rejoin-qa`.
+- Not run in a browser: CTF, HQ and DM, which keep score and deaths as TDM
+  does. A network that drops without closing the WebSocket still waits for
+  the gateway's heartbeat or `sv_timeout`, up to 30 s.

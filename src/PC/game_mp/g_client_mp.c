@@ -156,9 +156,9 @@ void ClientDisconnect(int clientNum)
 
     G_FreeEntity(ent);
 
+    G_PointsClientDisconnect(clientNum);
     client->sess.connected = 0;
     memset(&client->sess.cs, 0, sizeof(clientState_t));
-    G_PointsClientDisconnect(clientNum);
 
     CalculateRanks();
 }
@@ -856,7 +856,6 @@ char *ClientConnect(int clientNum, int scriptPersId)
     client = G_ClientForNum(clientNum);
 
     memset(client, 0, CLIENT_STRIDE);
-    G_PointsClientConnect(clientNum, scriptPersId);
 
     ci = &level_bgs.clientinfo[clientNum];
 
@@ -900,6 +899,7 @@ char *ClientConnect(int clientNum, int scriptPersId)
         }
     }
 
+    G_PointsClientConnect(clientNum, scriptPersId);
     Scr_PlayerConnect((gentity_t *)ent);
     CalculateRanks();
 

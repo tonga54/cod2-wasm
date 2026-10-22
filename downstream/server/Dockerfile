@@ -35,6 +35,7 @@ COPY server.cfg /config/server.cfg
 COPY downstream/server/browser_bots.gsc /config/browser_bots.gsc
 COPY downstream/server/browser_classes.gsc /config/browser_classes.gsc
 COPY downstream/server/browser_prematch.gsc /config/browser_prematch.gsc
+COPY downstream/server/browser_rejoin.gsc /config/browser_rejoin.gsc
 # Include only the public hashes, never the private archives. A changed asset
 # set then changes the image, so compose recreates the server's cached IWD list.
 COPY site/wasm-game-data.json /config/browser-assets.json

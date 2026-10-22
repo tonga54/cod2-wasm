@@ -18,6 +18,10 @@ export const SCORE_LIMITS = { dm: [0, 10, 20, 30, 50, 75, 100, 150], tdm: [0, 25
 // (cl_main_mp.c, cl_main_pc_mp.c). rcon, voice, authorization and anything
 // else reaching SV_ConnectionlessPacket is dropped here.
 export const CLIENT_OOB_COMMANDS = new Set(['getchallenge', 'connect', 'getinfo', 'getstatus']);
+// Sent from a browser's UDP port when its WebSocket closes, so the engine
+// drops that player at once instead of after sv_timeout. A browser cannot
+// send it itself: it is not one of the commands above.
+export const DISCONNECT_DATAGRAM = Buffer.from('\xff\xff\xff\xffdisconnect', 'latin1');
 // The client netchan sends at most 1400 bytes; connect carries ~1 KiB.
 export const MAX_CLIENT_DATAGRAM = 2048;
 // A client sends ~60 commands a second. Budgets well above that drop a flood
@@ -359,7 +363,9 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
       closed = true;
       pending.length = 0;
       pendingBytes = 0;
-      try { udp.close(); } catch {}
+      const close = () => { try { udp.close(); } catch {} };
+      if (!udpReady) { close(); return; }
+      try { udp.send(DISCONNECT_DATAGRAM, close); } catch { close(); }
     };
     ws.on('error', closeUdp);
     ws.on('close', closeUdp);

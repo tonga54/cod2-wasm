@@ -119,6 +119,7 @@ extern int MSG_ReadByte(msg_t *msg);
 extern qboolean Netchan_Process(netchan_t *chan, msg_t *msg);
 extern void SV_Netchan_Decode(client_t *cl, byte *data, int remaining);
 extern void SV_ExecuteClientMessage(client_t *cl, msg_t *msg);
+extern qboolean NET_CompareAdr(netadr_t a, netadr_t b);
 extern qboolean NET_CompareBaseAdr(netadr_t a, netadr_t b);
 extern void SV_PreGameUserVoice(client_t *cl, msg_t *msg);
 extern void SV_UserVoice(client_t *cl, msg_t *msg);
@@ -679,6 +680,22 @@ void SVC_Info(netadr_t from)
     NET_OutOfBandPrint(1, from, response);
 }
 
+/* The gateway sends this from the UDP port of a browser whose WebSocket
+ * closed, and browsers cannot send it themselves: the player at that exact
+ * address leaves now rather than after sv_timeout. */
+static void SV_DisconnectPacket(netadr_t from)
+{
+    client_t *cl = svs.clients;
+    int i;
+
+    for (i = 0; i < sv_maxclients->current.integer; ++i, ++cl) {
+        if (cl->state >= 2 && NET_CompareAdr(from, cl->netchan.remoteAddress)) {
+            SV_DropClient(cl, "EXE_DISCONNECTED");
+            return;
+        }
+    }
+}
+
 void SV_ConnectionlessPacket(netadr_t from, msg_t *msg)
 {
     const char *c;
@@ -737,7 +754,8 @@ void SV_ConnectionlessPacket(netadr_t from, msg_t *msg)
         return;
     }
 
-    I_stricmp(c, "disconnect");
+    if (I_stricmp(c, "disconnect") == 0)
+        SV_DisconnectPacket(from);
 }
 
 void SV_PacketEvent(netadr_t from, msg_t *msg)
