@@ -2,192 +2,267 @@
 
 # COD2 · REIMAGINED FOR THE BROWSER
 
-**The battlefields of Call of Duty 2. A multiplayer experience inspired by Call of Duty: WWII.**
+**Call of Duty 2's battlefields with the multiplayer of Call of Duty: WWII, running in a browser tab.**
 
-Custom classes · Functional attachments · Weapon camouflage · Objective bots · Modern HUD
+Create a Class · attachments · camouflage · S-Mine 44 and C4 · up to 32 bots · WWII combat HUD · real-time shadows
 
-**WebAssembly + WebGL 2** &nbsp; / &nbsp; **6 maps · 5 modes** &nbsp; / &nbsp; **Self-hosted multiplayer**
+[![WebAssembly and WebGL 2](https://img.shields.io/badge/WebAssembly-WebGL_2-ccb777?style=for-the-badge&logo=webassembly&logoColor=white&labelColor=0d0d0d)](#how-it-runs)
+[![0 to 32 bots](https://img.shields.io/badge/bots-0%E2%80%9332-ccb777?style=for-the-badge&labelColor=0d0d0d)](#bots)
+[![6 maps and 5 modes](https://img.shields.io/badge/maps-6_%C2%B7_5_modes-ccb777?style=for-the-badge&labelColor=0d0d0d)](#maps-and-modes)
+[![Host with Docker or a Raspberry Pi 5](https://img.shields.io/badge/host-Docker_%C2%B7_Raspberry_Pi_5-ccb777?style=for-the-badge&logo=raspberrypi&logoColor=white&labelColor=0d0d0d)](#host-a-game)
 
-[Explore the features](#a-new-multiplayer-experience) · [Screenshots](#in-game) · [Host a game](#host-a-game) · [Documentation](#documentation)
+![Team Deathmatch on Stalingrad: an MP44 in Ember camouflage with a Reflex Sight, a soldier by a burning tank, and the minimap, kill feed, score panel and ammo counter](docs/images/hero-stalingrad.jpg)
+
+[See it in motion](#see-it-in-motion) · [What's new](#what-the-original-game-didnt-have) · [Play](#play) · [Host a game](#host-a-game) · [Documentation](#documentation)
 
 </div>
 
-![Carentan gameplay with a camouflaged MP44, circular minimap and redesigned match HUD](docs/images/gameplay-carentan.jpg)
+**cod2-wasm** turns the reconstructed engine of Call of Duty 2 (2005) into a
+browser multiplayer game with the loadouts, HUD and match flow of Call of Duty:
+WWII (2017). Players open the host's address; the game downloads once and stays
+cached. Every match runs on a native dedicated server on the host, a desktop
+computer or a Raspberry Pi 5, and any player can create a room, fill it with
+bots and play.
 
-**cod2-wasm** builds on the reconstructed CoD2 IW 2.0 engine and expands it into
-a browser multiplayer game with its own loadouts, combat tuning, presentation
-and hosting tools. Familiar maps, weapons and movement sit alongside a WWII-inspired
-Create a Class system, working attachments, camouflage, server-controlled bots,
-redesigned menus, sniper optics and a modern combat HUD.
+| 5 | 21 + 4 | 13 | 10 | 2 | 0–32 | 6 · 5 |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| custom classes | primaries + pistols | attachments | camouflages | placed explosives | bots per room | maps · modes |
 
-Each player runs the game locally in their browser. A native dedicated server
-runs the authoritative simulation, and a WebSocket-to-UDP gateway connects the
-two. The host can be a desktop machine or a Raspberry Pi 5.
-
-> **Actively developed, unofficial community project.** Hosting requires the
+> **Unofficial community project, in active development.** Hosting requires the
 > owner's original CoD2 1.3 English game files. This repository contains the
 > code and tools; game archives are supplied privately by the host.
 
-## A new multiplayer experience
+## See it in motion
 
-| Area | What you get |
-| --- | --- |
-| **Build your loadout** | Five named custom classes, 21 primary weapons, four pistols, lethal equipment and smoke; weapons from any faction on either team. |
-| **Tune your weapons** | Up to three primary attachments and one pistol attachment, with weapon-specific choices, visible benefits and tradeoffs. |
-| **Make it yours** | Ten camouflage patterns plus each gun's original finish, visible in first person, on other players' weapons and in class previews. |
-| **Fight with bots** | Up to 32 bots per room, three difficulties, navigation, cover and objectives across all five game modes. |
-| **Read the battlefield** | Circular minimap, shot indicators, hit markers, score popups, kill feed, team score panel, ammo display and redesigned scoreboard. |
-| **Feel the combat** | Sprint, cover penetration, S-Mine 44, remote C4, mounted MG42 heat, custom weapon balance and safer respawns. |
-| **See the difference** | WWII-style scopes, Reflex and Lens Sights, material lighting, real-time sun shadows, ambient occlusion, distance haze, antialiased foliage, soft fire and smoke, aim depth of field, motion blur and improved effects. |
-| **Play your way** | Keyboard and mouse or a remappable controller with vibration, stick settings and optional aim assist. |
-| **Run your own matches** | In-game room creation, map rotation, custom rules, browser server list, persistent settings and Docker/Pi hosting. |
+| MP44 · Ember · Reflex Sight | Scoped Kar98k | S-Mine 44 |
+| :---: | :---: | :---: |
+| ![An MP44 burst on Carentan with muzzle flashes and ejected brass](docs/images/clip-mp44-burst.webp) | ![Raising the Kar98k's scope and firing a shot](docs/images/clip-kar98k-scope.webp) | ![Pulling the pin, setting the S-Mine 44 down and its pulsing squad star](docs/images/clip-smine-plant.webp) |
+| Lit muzzle flash and brass on every round. | WWII's reticle, the world blurred around the glass, the kick of the shot. | Pin out, mine down, and a star only your squad can see. |
 
-### Classes, attachments and camouflage
+## Day one to today
 
-**Create a Class** gives each gametag five saved loadouts. Pick a primary from
-any faction, a secondary pistol, a lethal item and smoke. Rename a class,
-compare weapon ratings, fit attachments and choose a finish for each gun.
-Choose **Custom** or **Standard Issue** when joining; edit your classes again
-from the pause menu. A class change while alive applies on the next spawn.
+![Carentan on October 9 with CoD2's original HUD, and on October 21 with the minimap, kill feed, score panel, ammo counter, swap prompt and camouflage](docs/images/then-and-now.jpg)
 
-Attachments change actual gameplay on both the server and the predicting client:
-magazine capacity, fire rate, aim speed, recoil, spread, sway, range, penetration
-and headshot damage. They also have costs, shown alongside their benefits.
+When this fork began, the upstream port compiled CoD2's reconstructed client to
+WebAssembly, but the game did not link or launch yet. The first playable LAN
+build arrived on October 9, 2026. Everything on the right came in the 199
+commits that followed.
 
-| Role | Attachment options, depending on the weapon |
-| --- | --- |
-| Optics | Reflex Sight, Lens Sight, 4x Optic |
-| Handling | Quickdraw, Grip, Steady Aim, Ballistic Calibration |
-| Firepower | Extended Mag, Rapid Fire, Advanced Rifling, FMJ, High Caliber |
-| Stealth | Suppressor: quieter shots, no muzzle flash and no enemy minimap shot indicator |
+## What the original game didn't have
 
-One optic can be fitted at a time. Reflex and Lens Sights have modeled frames
-in the gun's own metal finish and illuminated reticles; their openings show
-the world clearly while aiming. Sniper scopes and the 4x Optic keep the eyepiece
-on screen with a magnified view through its glass, framed by a round ring of
-worn metal with the blurred world around it. Their reticles are WWII's: a thin
-line over a pointed post in the 4x Optic, and the scoped Kar98k's thin cross
-with thick bars in every sniper scope. Holding your breath isolates the scope
-view.
+| | Call of Duty 2 multiplayer (2005) | cod2-wasm |
+| --- | --- | --- |
+| **Platform** | An installed PC game | A browser tab, or a web app installed from it |
+| **Loadout** | A weapon from your side's list; pistol and grenades set by nationality | [Five named custom classes](#create-a-class), any faction's weapons on either team |
+| **Gunsmith** | None | [13 attachments](#attachments-with-real-tradeoffs) with real gains and costs; [10 camouflages](#ten-camouflages) |
+| **Sights** | Iron sights and sniper scopes | Plus [Reflex Sight, Lens Sight and 4x Optic](#sights-and-scopes), WWII reticles, scope glint |
+| **Lethal equipment** | Frag grenades | Frags, plus the [S-Mine 44 and remote C4](#s-mine-44-and-c4) |
+| **Opponents** | Human players only | [Up to 32 bots](#bots) at three difficulties, in all five modes |
+| **HUD** | Compass, score text, ammo box | [Minimap, kill feed with weapon silhouettes, score panel](#a-combat-hud-from-call-of-duty-wwii), match points |
+| **Movement** | Lean, crouch, prone, mantle | All of it, plus sprint |
+| **Gun feel** | Retail recoil and damage | [Recoil from each gun's real free recoil, damage by cartridge](#combat-with-its-own-rules), penetration by material |
+| **Match flow** | Killcam and scoreboard | [Prematch countdown, WWII killcam, victory screen, striped scoreboard](#from-the-countdown-to-the-final-score) |
+| **Menus** | CoD2's own menus | [WWII's menus and settings](#menus-rebuilt-in-wwiis-style), a pause menu over the live match |
+| **Hosting** | Listen and dedicated servers | One host serves the game and up to three rooms, on [Docker](#host-locally) or a [Raspberry Pi 5](#raspberry-pi-5) |
 
-Camouflage paints the gun in play, including the weapon other players see.
-Each primary and pistol can keep its own pattern.
+## A combat HUD from Call of Duty: WWII
 
-[Class editor, weapon lists and attachment statistics →](docs/CLASSES.md)
+![Annotated Carentan match: 1 minimap, 2 kill feed, 3 teammate names, 4 score panel, 5 ammo counter, 6 camouflage and attachments](docs/images/hud-anatomy.jpg)
 
-### WWII-inspired presentation, from menu to final score
+Every element of CoD2's HUD was redrawn in WWII's style and Barlow lettering,
+on a 1080-line canvas composed apart from the 3D view so it stays sharp. Beyond
+the six marked above:
 
-The redesigned interface runs inside the game:
+- **WWII's hit markers:** a white X for a hit and a longer red one for a kill,
+  with the host's hit sound when supplied.
+- **A crosshair** that turns red over an enemy and teal over a teammate, and
+  stays up while sprinting.
+- **Match points** for kills, assists and objectives as you earn them.
+- **WWII's grenade warning ring** and prompts to climb, swap weapons, hold your
+  breath and reload.
 
-- **Main menu and settings:** military typography, a subdued background,
-  consistent navigation and pages for controls, graphics, audio and game settings.
-- **Match creation:** choose a mode and map, inspect the map artwork, set time
-  and score limits, configure bots and start the room.
-- **Select Class and pause menu:** Custom / Standard Issue loadouts, class editing,
-  team selection and a match overview with statistics and the full tactical map.
-- **Prematch countdown:** a default 15-second introduction with desaturated
-  gameplay, team and objective information, and a return to color as play begins.
-- **Combat HUD:** minimap, enemy shot indicators, hit feedback, points,
-  weapon icons, teammate labels, grenade warnings and contextual prompts.
-- **Killcam and results:** redesigned replay presentation, scoreboard and
-  end-of-match results before the next map loads.
+## Create a Class
 
-Optional host-owned audio adds menu, countdown, final-minute and end-of-match
-music, a hit sound and replacement weapon sounds. Optional weapon pictures add
-colored loadout previews. [Private media setup →](docs/UPDATES.md#owner-sound-pack)
+![Create a Class: five named classes, the loadout editor with three attachments, weapons listed by kind, and Select Class with Custom and Standard Issue tabs](docs/images/create-a-class.jpg)
 
-### Bots that play the mode
+Every gametag gets **five named classes**. Each sets a primary with up to three
+attachments, a pistol with one, a lethal item (a frag, the S-Mine 44 or C4) and
+a smoke grenade. Any team can carry any country's weapons: a British player can
+spawn with a Kar98k, a German one with an M1 Garand.
 
-Bots are native server players. They move through map collision, see enemies
-through visibility checks, fire and reload with ordinary weapon rules, and
-respawn under the selected mode's rules. Walls, players and smoke block their
-sight. Normal and Hard bots seek cover when wounded or reloading; snipers favor
+- **21 primaries** from all four factions, under tabs for Submachine Guns,
+  Rifles, Automatic Rifles, Sniper Rifles and Shotguns; **4 pistols**: the
+  Colt .45, Webley, TT-30 and Luger.
+- **Rating bars** for damage, range, accuracy, fire rate and mobility change
+  with every attachment.
+- **Select Class** opens as you join, with your Custom classes and the
+  Standard Issue set; in a match, Escape brings it back in the pause menu. A
+  change while alive applies on your next spawn.
+
+[Weapon lists, default classes and storage →](docs/CLASSES.md)
+
+## Attachments with real tradeoffs
+
+![Attachment screens for the Suppressor, Reflex Sight, 4x Optic and Lens Sight, each listing its gains in green and its costs in red](docs/images/attachments.jpg)
+
+Attachments follow WWII's rules: three on the primary, one on the pistol, one
+optic at a time, and each gun takes its WWII class's list. They change the
+weapon for real, on the server and in the client's prediction, and every one
+costs something, shown in red beside what it gives.
+
+<details>
+<summary><b>All 13 attachments, their gains and their costs</b></summary>
+
+| Attachment | Gain | Cost |
+| --- | --- | --- |
+| Suppressor | Quiet, no muzzle flash, off the enemy minimap | Damage ranges −30% on SMGs, −15% on pistols |
+| Reflex Sight | A red dot, more zoom, aimed spread −20% | Aim-in +10% |
+| Lens Sight | An amber ring, more zoom, aimed spread −15% | Aim-in +15% |
+| 4x Optic | A scope view at four times the zoom | Aim-in +25% |
+| Extended Mag | Magazine and reserve +50% | Aim-in +10% |
+| Rapid Fire | About 6% faster fire | Aimed kick +15% |
+| Quickdraw | Aim-in −16% to −35% | Aimed kick +15% |
+| Grip | Aimed view and gun kick −15% | Aim-in +10% |
+| Steady Aim | Hip-fire spread −25% to −40% | Aim-in +10% |
+| Advanced Rifling | Damage ranges up to ×1.25 | Aim-in +10% |
+| FMJ | 25% deeper penetration through cover | Damage ranges −10% |
+| High Caliber | Head and helmet damage ×1.5 | Aimed kick +15% |
+| Ballistic Calibration | Aimed sway −40% | Aim-in +10% |
+
+Costs multiply like the gains, and a suppressed shot also sounds suppressed: the
+browser runs it through a suppressor's filters.
+
+</details>
+
+## Ten camouflages
+
+![All eleven finishes on the MP44: None, Frogskin, Brownspot, Splinter, Oak Leaf, Pea Pattern, Plane Tree, Desert, Winter, Ambush and Ember, plus Ember in first person](docs/images/camouflage.jpg)
+
+Each primary and pistol keeps its own pattern. Camouflage paints the gun in your
+hands, the weapon other players see and the class previews, and a gun dropped
+on the ground keeps its paint, attachments and rounds for whoever picks it up.
+
+## Sights and scopes
+
+![Aiming through a Reflex Sight, a Lens Sight, the 4x Optic and the scoped Kar98k, and the glint of a rival's raised scope](docs/images/optics.jpg)
+
+- **Reflex and Lens Sights** are modeled in the gun's own metal, with a lit
+  red dot or amber ring and a clear view through the opening.
+- **The 4x Optic and sniper scopes** raise WWII's scope: magnified glass in a
+  round eyepiece of worn metal, the world blurred around it, and WWII's
+  reticles, a post and line in the 4x Optic and the scoped Kar98k's thin cross
+  with thick bars in every sniper scope. Shift holds your breath.
+- **Scope glint:** a rival's raised sniper scope gives a faint glint, weaker
+  at range.
+
+## S-Mine 44 and C4
+
+![S-Mine 44: plant it, an enemy walks in, it springs to chest height. C4: throw and stick a charge, wait, and detonate with the aim input](docs/images/explosives.jpg)
+
+Two placed explosives join the frag as lethal choices. Both carry a pulsing star
+or iron cross that your squad sees through walls and the enemy never sees.
+
+- **S-Mine 44:** set it at your feet. An enemy a step beside it clicks it, and it
+  springs to chest height and bursts. Enemies can shoot it to set it off, and
+  you can take yours back by holding F.
+- **C4:** throw a charge and it sticks where it lands; aim detonates every
+  charge you placed, wherever you are.
+
+## Bots
+
+![Room setup with 12 Hard bots, and a Carentan match where every other soldier is a bot](docs/images/bots.jpg)
+
+Fill a room with **up to 32 bots** at **Easy, Normal or Hard**, with reaction
+delays of 700, 650 and 200 ms. Bots are native server players, not browser
+instances: they move through map collision, see through visibility checks that
+walls, players and smoke block, and fire and reload under ordinary weapon
+rules. Normal and Hard bots seek cover when wounded or reloading; snipers favor
 sheltered firing lanes and relocate when compromised.
 
-| Mode | Bot behavior |
+| Mode | What bots do |
 | --- | --- |
 | Deathmatch | Patrol, find opponents and fight independently. |
 | Team Deathmatch | Spread out, share recent visible contacts, flank and engage at suitable ranges. |
 | Capture the Flag | Attack, return and recover flags; intercept carriers, escort teammates and defend bases. |
 | Headquarters | Reach the radio, capture or neutralize it, then defend it. |
-| Search and Destroy | Split between sites, assign planting/defusing roles and cover the player interacting. |
+| Search and Destroy | Split between sites, assign planting and defusing roles and cover the player interacting. |
 
-Choose **Easy, Normal or Hard**, with reaction delays of 700, 400 and 200 ms
-respectively. A room supports 0–32 bots, retains its bot settings across map
-rotation, and waits for a human to spawn or spectate before its opening
-countdown starts. Bots use ordinary player slots and need no browser instance.
+Bot count and difficulty belong to the room and carry across its map rotation.
+A room waits for a human to spawn or spectate before its opening countdown, and
+sheds bots while its host cannot keep up. Difficult navigation and tactical
+coordination remain areas of active development.
+[Behavior, navigation and validation →](docs/BOT_AI.md)
 
-This is custom multiplayer AI. Difficult navigation and tactical coordination
-remain areas of active development. [Behavior, navigation and validation →](docs/BOT_AI.md)
+## From the countdown to the final score
 
-### Combat with its own rules
+![Prematch countdown on Brecourt, a killcam naming the MP44, the Axis Victory announcement with team emblems, and the striped scoreboard](docs/images/match-flow.jpg)
 
-- **Sprint:** run forward with Shift or L3, with lowered weapon and running
-  animation. Sprint also stands up from crouch or prone when there is room.
-- **Cover penetration:** material, thickness and weapon power determine how much
-  damage a bullet retains through cover; FMJ increases penetration depth.
-- **S-Mine 44:** place a bouncing mine, reclaim your own with Use, or shoot an
-  enemy mine to detonate it. Friendly placed explosives carry team indicators.
-- **C4:** throw a sticky charge and detonate it remotely with the aim input.
-- **105 health:** players and bots have 105 health, with regeneration to full.
-  Bolt-action rifles retain lethal body shots; two melee strikes kill a
-  full-health player.
-- **Real recoil and cartridge damage:** each gun's aimed kick follows its real
-  free recoil, the cartridge's impulse against the gun's loaded weight: a BAR
-  climbs harder than an MP40, a Garand kicks harder than a carbine. Damage
-  follows the cartridge, from four body shots for a 7.62×25mm round to three
-  for intermediate and full-power automatic rounds.
+- **Prematch countdown:** 15 seconds of desaturated play with the mode, map,
+  objective and your team, until color returns at the start.
+- **Killcam** in WWII's style, naming the weapon that killed you.
+- **Victory or defeat** announced with team emblems and the final score, then a
+  **striped scoreboard** with ping bars before the next map loads.
+- **Owner music:** optional host-supplied tracks for the menu, the countdown,
+  the last minute and the end of a match. [Private media setup →](docs/UPDATES.md#owner-sound-pack)
+
+## Menus rebuilt in WWII's style
+
+![Main menu, Start New Server, map select, game rules, pause menu, match overview, settings, graphics and controller pages](docs/images/menus.jpg)
+
+Every screen runs inside the game. Create a server with its mode, map, rules and
+bots; pause over the blurred match to change class or team, read the match
+overview with its tactical map, or open the settings, where every graphics
+option explains itself.
+
+## Rendering beyond the first browser port
+
+![Before and after: sun shadows from moving models, feathered fire and smoke, antialiased leaves and deeper surface relief](docs/images/rendering-before-after.jpg)
+
+![Camera and weapon motion blur, short bent tracers, ejected brass and a lit MP44 muzzle flash](docs/images/combat-effects.jpg)
+
+- **Light:** the original normal, specular and detail maps at the DX9
+  renderer's full strength give surfaces relief, sunlight response and
+  reflections. Players, bodies and other moving models cast real-time sun
+  shadows, and ambient occlusion darkens corners and contact points.
+- **Atmosphere:** softer baked shadow edges, map fog that thickens toward the
+  ground and glows toward the sun, and model detail at twice its original
+  distance.
+- **Foliage and particles:** leaves, grass and hedges are antialiased and stay
+  full in the distance; fire, smoke and dust fade where they meet the world, as
+  CoD2's DX9 renderer drew them.
+- **Combat:** aim depth of field, camera and weapon motion blur, ejected
+  casings, short tracers bent differently every round, larger muzzle and
+  grenade effects, and nearby muzzle lighting.
+
+The default output is **1920 × 1080**, with the 3D view at **720 lines**,
+full-resolution textures and 16× anisotropic filtering where supported.
+Performance depends on the player's hardware, browser and match load.
+[Graphics implementation and visual validation →](docs/GRAPHICS_2026-10-16.md)
+
+## Combat with its own rules
+
+- **Sprint** with Shift or L3, weapon lowered; it also stands you up from crouch
+  or prone when there is room.
+- **105 health** for players and bots, regenerating to full. Bolt-action rifles
+  keep their lethal body shots, and two melee strikes kill.
+- **Real recoil:** each gun kicks by its real free recoil, the cartridge's
+  impulse against the gun's loaded weight. A BAR climbs harder than an MP40, a
+  Garand kicks harder than a carbine.
+- **Damage by cartridge:** up close, four body shots for a 7.62×25 mm round and
+  three for 9 mm, .45, intermediate and full-power automatic rounds.
+- **Cover penetration:** material, thickness and weapon power decide how much
+  damage a bullet keeps through cover; FMJ goes deeper.
 - **Mounted MG42:** sustained fire builds heat, forces cooling and increases recoil.
-- **Respawns:** occupied and nearby exposed enemy positions are avoided when safer
-  alternatives exist. TDM adds a three-second respawn countdown.
+- **Safer respawns:** occupied spawns and those exposed to nearby enemies are
+  avoided when safer ones exist. TDM adds a three-second respawn countdown.
 - **Movement and feedback:** crouch toggle, prone crawling, obstacle-checked
-  mantling, cooked/returned frags, directional damage and blood feedback.
+  mantling, cooked and returned frags, directional damage and blood feedback.
 
 [Weapon balance](downstream/weapon-balance.json) · [Ballistics and controllers](docs/BALLISTICS_AND_GAMEPAD.md) · [Respawn rules](docs/RESPAWN_SAFETY.md)
 
-### Rendering beyond the original browser port
-
-The WebGL 2 renderer uses the original normal, specular and detail maps, at
-the DX9 renderer's full strength, for surface relief, sunlight response,
-highlights and reflections on weapons and glossy surfaces; grooves between
-stones and bricks darken in the shade. Players, bodies and other moving models
-cast real-time sun shadows, ambient occlusion darkens corners and contact
-points, and blended ground layers take the light of the surface under them.
-Softer baked shadow edges, map fog that thickens toward the ground and glows
-toward the sun, and model detail at twice its original distance improve the
-environments. Leaves, grass and hedges resolve their edges into the
-multisampled image and stay full in the distance, and fire, smoke and dust
-fade where they meet the world, as CoD2's DX9 renderer drew them, with fire
-burning hotter.
-
-Aim depth of field, world and weapon motion blur, visible ejected casings,
-reworked tracers, larger muzzle/grenade effects and nearby muzzle lighting add
-to combat presentation. The HUD is composed separately from the 3D scene to
-keep interface elements sharp.
-
-The default output is **1920 × 1080**, with the 3D scene rendered at **720 lines**,
-full-resolution base textures sampled at the output's detail and 16× anisotropic
-filtering where supported.
-Performance depends on the player's hardware, browser and match load.
-
-[Graphics implementation and visual validation →](docs/GRAPHICS_2026-10-16.md)
-
-## In game
-
-These are actual project development captures. Individual screens may predate
-later UI refinements; class artwork can depend on the host's optional media.
-
-| Main menu | Create your match |
-| :---: | :---: |
-| ![WWII-inspired main menu](docs/images/main-menu.jpg) | ![Match setup with mode, map, game rules and bot settings](docs/images/match-setup.jpg) |
-| **Camouflage selection** | **Select Class** |
-| ![Primary camouflage swatches and weapon preview](docs/images/camouflage.jpg) | ![Custom class selection before spawning](docs/images/select-class.jpg) |
-| **Bots and difficulty** | **Tactical overview** |
-| ![Room bot setup with Hard difficulty selected](docs/images/bot-setup.jpg) | ![Pause menu with match statistics and the full map](docs/images/overview.jpg) |
-
-![WWII-inspired prematch countdown with objective and team information](docs/images/prematch-countdown.jpg)
-
 ## Maps and modes
+
+![Carentan, Toujane, Burgundy, Stalingrad, Dawnville and Brecourt in play](docs/images/maps.jpg)
 
 Six original multiplayer maps, with all five modes available on each:
 
@@ -218,7 +293,7 @@ Once a host is running:
 
 1. Open its address in a browser with WebAssembly and WebGL 2 support.
 2. Let the game download and cache the host's prepared assets.
-3. Set your gametag in **Options → Game Options** and build your classes.
+3. Set your gametag in **Options → Game** and build your classes.
 4. Create a room with **Start New Server**, or select one in **Join Game**.
 5. Choose a class and play. Use Escape for classes, match overview and settings.
 
@@ -287,7 +362,7 @@ its movement while the player moves a stick. Vibration support varies by browser
 - A sibling checkout of **wasm-game-framework**. The build pins **0.9.2** at
   `53bc7e6eeef1ae35dcf3b25dea4e3ec0ab46726f`.
 
-### Build and start
+### Host locally
 
 ```sh
 git clone https://github.com/tonga54/cod2-wasm.git
@@ -322,9 +397,9 @@ are excluded from Git; private game assets are mounted read-only at runtime.
 ```text
 Player's browser                   Docker host
 ┌──────────────────────┐          ┌─────────────────────────────────────┐
-│ WASM game + WebGL 2  │◄────────►│ Gateway :8088                      │
-│ Local rendering     │ HTTP / WS│ ├─ Web shell + private asset delivery│
-│ Input + prediction  │          │ ├─ Class storage (SQLite)            │
+│ WASM game + WebGL 2  │◄────────►│ Gateway :8088                       │
+│ Local rendering      │ HTTP / WS│ ├─ Web shell + private asset delivery│
+│ Input + prediction   │          │ ├─ Class storage (SQLite)           │
 └──────────────────────┘          │ └─ Room supervisor → native servers │
                                   │                       UDP, internal │
                                   └─────────────────────────────────────┘
@@ -419,6 +494,7 @@ choose when to reload. [Update operations and cache behavior →](docs/UPDATES.m
 | [Memory, server load and security](docs/STABILITY_AND_SECURITY_2026-10-20.md) | On-demand archives, bounded network queues, the bot governor, gateway limits and container hardening |
 | [Runbook](RUNBOOK.md) | Development history, runtime evidence and troubleshooting |
 | [Source audit](SOURCE_BASE_AUDIT.md) | Reconstructed source base and provenance |
+| [README images](docs/images/README.md) | Where each screenshot and clip on this page comes from |
 
 ## Credits and original assets
 
@@ -430,5 +506,6 @@ WWII**, adapted to this engine and its multiplayer rules.
 Call of Duty names, maps, models, textures, sounds and original executables belong
 to their respective rights holders. This is an unofficial project and supplies
 neither a copy nor a license of the original games. Hosts must supply their own
-original files privately. Screenshots illustrate the running project; original
-game archives and standalone asset packs are not distributed in this repository.
+original files privately. Screenshots and clips are real captures of the running
+project; original game archives and standalone asset packs are not distributed
+in this repository.
