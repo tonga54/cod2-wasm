@@ -6004,3 +6004,38 @@ Validation:
   passes.
 - Neither the full `test-static.sh` nor an in-game check was run; no engine
   code changes.
+
+## Bots carry on through the map rotation — 2026-10-22
+
+Captures for the README found a room set to 16 bots holding 63 after a few
+maps, the earlier maps' bots listed as spectators on the scoreboard. A map
+change connects every client to the new level again (`SV_SpawnServer`). A
+person's client then answers the new gamestate and begins; a test client has
+no connection to answer it, and nothing began it, so it stayed connecting
+through the level, holding its slot, never a "player" entity. One second into
+the map, `populate()` in `browser_bots.gsc` counted no bots and added the
+room's count again, on every map until the room was full.
+
+`SV_ReconnectClients` (new, the loop `SV_SpawnServer` ran) now enters a test
+client into the world as soon as it connects, with the steps `SV_AddTestClient`
+takes for a new bot: its command state is reset, it is primed, and it begins
+with an empty command. The retail connect callback then spawns it,
+`populate()` counts it, and `joinGame()` puts it back on a team with a weapon
+of the new map's faction. People's clients reconnect as before.
+
+Validation:
+
+- `test-bot-map-reconnect.py` (new, in `test-static.sh`) compiles
+  `SV_ReconnectClients` under the sanitizers over free, zombie, connecting,
+  primed and active slots, people and bots, refused clients and a bot past
+  `sv_maxclients`; 6 mutants fail, the old loop among them.
+- `test-bot-rotation-runtime.py` (new) through the dedicated server: a TDM
+  room with four bots rotates from Toujane to Carentan and Stalingrad, under
+  British, American and Soviet Allies. The server built before this change
+  connected 12 clients and held 4, 8 and 12 bots on the three maps, 4 of them
+  on a team; the new one connects 4, and the same 4 play on every map.
+- `test-bot-governor.cjs`, `test-bot-foundation.js`, `test-bot-scheduler.cjs`,
+  `test-bot-ai.py`, `test-bot-player-roster.py`, `test-room-maps.py`,
+  `test-server-load.py` and `test-smoke-effect-server.py` pass, and so does
+  the full `test-static.sh`. The native server builds without warnings, and
+  `sv_init_mp.c` compiles with Emscripten 3.1.64.

@@ -3,7 +3,8 @@
 Configure 0–32 bots and Easy, Normal or Hard difficulty when creating a room.
 The menu offers None, 1–16 and 20/24/28/32 presets; the room API accepts every integer in the range.
 The default remains no bots. Bot population and difficulty belong to the room
-and persist across its map rotation. All UI and bot labels are in English.
+and persist across its map rotation: the same bots carry on into each map and
+rejoin a team there. All UI and bot labels are in English.
 
 The [mode table in the README](../README.md#bots) describes their objectives.
 The first-party policy in `downstream/server/browser_bots.gsc` assigns roles;
@@ -385,6 +386,9 @@ python3 scripts/test-bot-ai.py --benchmark --sanitize
 # Build the current native server, then run an isolated 16-bot match
 bash scripts/build-server.sh
 python3 scripts/test-bot-runtime.py --map mp_carentan --mode tdm --bots 16 --seconds 120
+
+# The same four bots through two map rotations, with no client left connecting
+python3 scripts/test-bot-rotation-runtime.py
 ```
 
 The runtime check creates and removes its own network-isolated Docker container.

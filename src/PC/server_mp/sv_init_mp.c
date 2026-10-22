@@ -149,6 +149,9 @@ extern void NET_Sleep(int msec);
 extern Bool NET_OutOfBandPrint(int sock, netadr_t adr, const char *data);
 extern int *G_GetSavePersist(void);
 extern const char *ClientConnect(int clientNum, unsigned short scriptId);
+extern void SV_BotResetClient(int clientNum);
+extern void SV_SendClientGameState(client_t *client);
+extern void SV_ClientEnterWorld(client_t *client, const dvar_t *(*cmd)[4]);
 
 
 #define SV_STATE_OFF 0x0
@@ -193,6 +196,7 @@ static void SV_TouchMemory(void);
 static void SV_DropAllClients(void);
 static void SV_InitMaxClients(void);
 static void SV_SendMapChange(void);
+static void SV_ReconnectClients(void);
 
 Bool SV_Loaded(void)
 {
@@ -758,6 +762,40 @@ void SV_ChangeMaxClients(void)
     }
 }
 
+/* A person's client begins on the new level once it answers the gamestate. A
+ * test client has no connection to answer it, so it begins here, as
+ * SV_AddTestClient brings in a new one; otherwise it would stay connecting,
+ * holding its slot, through the level. */
+static void SV_ReconnectClients(void)
+{
+    serverStatic_t *svsPtr = (serverStatic_t *)imp_svs;
+    int maxclients = (*(dvar_t **)imp_sv_maxclients)->current.integer;
+    usercmd_t nullcmd;
+    const char *denied;
+    client_t *cl;
+    int i;
+
+    for (i = 0; i < maxclients; i++) {
+        cl = &svsPtr->clients[i];
+        if (cl->state <= 1)
+            continue;
+
+        denied = ClientConnect(i, cl->scriptId);
+        if (denied) {
+            SV_DropClient(cl, denied);
+            continue;
+        }
+        cl->state = 2;
+
+        if (cl->bIsTestClient && cl->netchan.remoteAddress.type == NA_BOT) {
+            SV_BotResetClient(i);
+            SV_SendClientGameState(cl);
+            memset(&nullcmd, 0, sizeof(nullcmd));
+            SV_ClientEnterWorld(cl, (const dvar_t *(*)[4])&nullcmd);
+        }
+    }
+}
+
 void SV_SpawnServer(const char *server)
 {
     serverStatic_t *svsg = (serverStatic_t *)imp_svs;
@@ -1013,21 +1051,7 @@ void SV_SpawnServer(const char *server)
     }
 
     Com_Printf("[ckpt] baseline done\n");
-    {
-        serverStatic_t *svsPtr = (serverStatic_t *)imp_svs;
-        maxclients = (*(dvar_t **)imp_sv_maxclients)->current.integer;
-        for (i = 0; i < maxclients; i++) {
-            if (svsPtr->clients[i].state <= 1)
-                continue;
-
-            s = ClientConnect(i, svsPtr->clients[i].scriptId);
-            if (s) {
-                SV_DropClient(&svsPtr->clients[i], s);
-            } else {
-                svsPtr->clients[i].state = 2;
-            }
-        }
-    }
+    SV_ReconnectClients();
 
     if ((*(dvar_t **)imp_sv_pure)->current.enabled) {
         s = FS_LoadedIwdChecksums();
