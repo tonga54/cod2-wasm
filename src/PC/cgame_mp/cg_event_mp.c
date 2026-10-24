@@ -119,8 +119,6 @@ extern const char *va(const char *fmt, ...);
 #define CGS_SND_BULLET_FLESH 0xbcec
 #define CGS_SND_GRENADE_BOUNCE 0xbd48
 #define CGS_FXLOOKUP 0xc200
-#define CGS_FX_CUSTOM 0x5f80
-#define CGS_FX_DEATHFX 0x67c0
 
 static const float f_0_01 = 0.009999999776482582f;
 static const float f_4_0 = 4.0f;
@@ -234,7 +232,6 @@ void CG_EntityEvent(centity_t *cent, int event)
     clientInfo_t *victimCI;
     clientInfo_t *attackerCI;
     unsigned short tagName;
-    int boneIndex;
 
     if (event == 0) {
 
@@ -1543,18 +1540,15 @@ void CG_EntityEvent(centity_t *cent, int event)
             float *angles = (float *)es->apos.trBase;
 
             int fxIndex = cent->nextState.eventParm;
-            int fxIdx = fxIndex - 1;
-            if ((unsigned int)fxIdx > 62) {
+            if ((unsigned int)(fxIndex - 1) > 62) {
 
                 Com_Printf((const char *)"ERROR: CG_PlayFx called with invalid effect id %i\n", fxIndex);
                 return;
             }
 
-            int fxId = *(int *)((char *)cgs + CGS_FX_DEATHFX + fxIdx * 4);
-
             AngleVectors(angles, forward, (void *)0, up);
 
-            FX_PlayEffect(fxId, position, forward);
+            FX_PlayEffect((int)(intptr_t)cgs->fxs[fxIndex], position, forward);
             return;
         }
 
@@ -1564,24 +1558,26 @@ void CG_EntityEvent(centity_t *cent, int event)
             const char *csStr2 = CL_GetConfigString(csIndex2);
 
             {
-                signed char c0 = csStr2[0];
-                signed char c1 = csStr2[1];
-                int fxIdx2 = c1 + c0 * 10;
-                int fxId2 = *(int *)((char *)cgs + CGS_FX_CUSTOM + fxIdx2 * 4);
+                /* playFxOnTag's "%02d<tag>": the effect's loadFx id, then the tag. */
+                int fxIdx2 = csStr2[0] >= '0' && csStr2[0] <= '9' && csStr2[1] >= '0' && csStr2[1] <= '9' ?
+                             (csStr2[0] - '0') * 10 + (csStr2[1] - '0') : 0;
+                int bolt[2];
 
-                int entNum2 = cent->nextState.number;
-                int entityInfo = entNum2;
+                if ((unsigned int)(fxIdx2 - 1) > 62)
+                    return;
+
+                bolt[0] = cent->nextState.number;
 
                 tagName = SL_GetString(csStr2 + 2, 0);
 
-                boneIndex = FX_GetBoneIndex(entityInfo, (int)tagName);
+                bolt[1] = FX_GetBoneIndex(bolt[0], (int)tagName);
 
                 Scr_SetString(&tagName, 0);
 
-                if (boneIndex < 0)
+                if (bolt[1] < 0)
                     return;
 
-                FX_PlayEntityEffect(fxId2, position, 0, &entityInfo);
+                FX_PlayEntityEffect((int)(intptr_t)cgs->fxs[fxIdx2], position, 0, bolt);
             }
             return;
         }

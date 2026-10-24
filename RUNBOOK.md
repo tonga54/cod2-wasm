@@ -6132,3 +6132,36 @@ Validation:
   of eight render settings turned off, only `r_aaAlpha 0` cleared the old
   client's glass. The scoped Kar98k at both trench spawns matched the stock
   overlay.
+
+## Script effects instead of Missing FX — 2026-10-24
+
+The owner found that a red sign like an FX error showed around mines and
+grenades. It was the engine's Missing FX placeholder. `EV_PLAY_FX`, every
+script `playFx`, read its effect at the CoD2 1.0 offset of `cgs.fxs`; in the
+1.3 `cgs` the browser builds the table is 0x1c180 further on, and that offset
+falls inside the game state's text. It also read the entry before its id's.
+The null effect played the placeholder in place of the retail minefields'
+blasts (32 ring Brecourt, and with the owner's sound pack they click as the
+S-Mine does), the S&D bomb and what it destroys at the sites, and the HQ
+radio. Both `playFx` and `playFxOnTag` now read `cgs->fxs[id]`;
+`playFxOnTag` also bolts its effect to the tag's bone, which it left out, and
+plays nothing for a config string without two digits. Details in
+`docs/GRAPHICS_2026-10-16.md`, "Script effects instead of Missing FX".
+
+Validation:
+
+- `test-play-fx-events.py` (new, in `test-static.sh`) compiles both events'
+  cases under the sanitizers against a 1.3-shaped `cgs`; 11 mutants fail, the
+  1.0 offsets and the early entry among them. `test-pickup-sounds.py`,
+  `test-rumble.py`, `test-killcam.py`, both kill feed tests,
+  `test-reliable-obituaries.py`, `test-remote-sound-events.py`,
+  `test-fx-flags.py`, `test-smoke-grenade-size.py`,
+  `test-placed-explosives.py`, `test-grenade-lifecycle.py` and the full
+  `test-static.sh` pass. The web client and the native server build.
+- On the isolated Brecourt TDM stack (`out/fxscope-qa`), stepping into a
+  minefield, the old client logged "Effect file load failed: fx/error.efx" and
+  showed the Missing FX card; the new one showed the dirt explosion and logged
+  nothing. Planting the S-Mine, a frag on grass and a smoke grenade showed
+  their own effects in both.
+- Not played in the browser: the S&D bomb, the HQ radio and the exploders,
+  which take the same path as the minefields.

@@ -426,6 +426,12 @@ retail CoD2:
   holds the rounds its player left in the clip and in reserve, and whoever
   picks it up gets those; the reconstructed pickup read the clip from a field
   nothing wrote, so it was lost and a full clip taken from the reserve.
+- Effects that map and mode scripts play with `playFx` and `playFxOnTag` show
+  their own effect: the retail minefields' blasts, the S&D bomb and the guns
+  and vehicles it destroys at the sites, the HQ radio's explosion. The client
+  looked them up where CoD2 1.0 keeps its effect table, inside 1.3's larger
+  game state, and `playFx` one entry early besides, so each showed the red
+  Missing FX placeholder.
 - Original audio, tracers, wall impacts, bullet marks, map props, ladders and
   killcam are available. Smoke effects and sustained mounted-MG firing have
   dedicated crash regressions. Collision fixes cover angled walls and finite
