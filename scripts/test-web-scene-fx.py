@@ -165,6 +165,15 @@ assert stencil.index('gl.drawArrays(gl.TRIANGLE_FAN, 0, 66);\n'
     stencil.index('gl.uniform2f(L.u_center, HEAPF32[b], HEAPF32[b + 1]);') < \
     stencil.index('gl.uniformMatrix2fv(L.u_axes, false, HEAPF32.subarray(b + 2, b + 6));') < \
     stencil.index('gl.stencilMask(0);')
+# Its fan writes no alpha, so it marks the multisampled glass only with alpha
+# to coverage off, which a foliage draw just before the rifle's leaves on
+# (web_effects.c); the effects' state cache expects it back as it was.
+stencil_caps = re.search(r'var caps = \[([^\]]*)\];', stencil)
+assert stencil_caps and 'gl.SAMPLE_ALPHA_TO_COVERAGE' in stencil_caps[1], 'the stencil draws without alpha to coverage'
+assert stencil.index('enabled.push(gl.isEnabled(caps[c]));\n        gl.disable(caps[c]);') < \
+    stencil.index('gl.drawArrays(gl.TRIANGLE_FAN, 0, 66);') < \
+    stencil.index('if (enabled[r]) gl.enable(caps[r]);')
+assert 'if (cover) GLctx.enable(GLctx.SAMPLE_ALPHA_TO_COVERAGE);' in (root / 'downstream/wasm/web_effects.c').read_text()
 # The eyepiece is laid over the glass's reflection, under the glow, the grade
 # and a held breath's blackout.
 assert compose_shader.index('col = mix(col, glass, lensIn * (1.0 - u_lens.w));') < \

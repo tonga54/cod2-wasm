@@ -342,9 +342,13 @@ try {
     gl.attachShader(annulus, shader(gl.FRAGMENT_SHADER, '#version 300 es\nprecision highp float;out vec4 o;void main(){o=vec4(1.0);}'));
     gl.linkProgram(annulus);
     check(gl.getProgramParameter(annulus, gl.LINK_STATUS), 'eyepiece fixture program linked');
-    // A sight's window, drawn with the view's projection, is the same but for that projection.
-    function scopeFrame({open = 1, sight = false, dark = 0, world = [0.5, 0.5, 0.5]} = {}) {
-      bind(gl, Module, HEAPF32, W, H, 1);
+    // A sight's window, drawn with the view's projection, is the same but for that projection. With lens the
+    // rifle's eyepiece covers the glass too, as its own dark lens does; with coverage the draw before the
+    // rifle's, foliage, left alpha to coverage on.
+    let coverageAfterStencil = false;
+    function scopeFrame({open = 1, sight = false, dark = 0, world = [0.5, 0.5, 0.5], samples = 1, coverage = false,
+                         lens = false, mark = stencil} = {}) {
+      bind(gl, Module, HEAPF32, W, H, samples);
       // The D3D9 device clears the stencil with every bit writable.
       gl.stencilMask(0xff);
       drawScene(() => rect(-1, -1, 1, 1, worldDepth(2000), world, 0));
@@ -352,10 +356,13 @@ try {
       const scope = [0, 0, glassR * H / W, 0, 0, glassR, 1, open, open, dark, sight ? 0 : 1.7, sight ? 0 : 3.0, 0.8];
       HEAPF32.set(scope, SCOPE);
       HEAPF32.set([0, 0, outline * H / W, 0, 0, outline], BELL);
-      stencil(Module, HEAPF32, SCOPE * 4, BELL * 4);
+      if (coverage) gl.enable(gl.SAMPLE_ALPHA_TO_COVERAGE);
+      mark(Module, HEAPF32, SCOPE * 4, BELL * 4);
+      coverageAfterStencil = gl.isEnabled(gl.SAMPLE_ALPHA_TO_COVERAGE);
+      gl.disable(gl.SAMPLE_ALPHA_TO_COVERAGE);
       mask(Module, 1);
       gl.useProgram(annulus);
-      gl.uniform3f(gl.getUniformLocation(annulus, 'u_r'), 0.95 * glassR, 1.6 * glassR, vmDepth(2));
+      gl.uniform3f(gl.getUniformLocation(annulus, 'u_r'), lens ? 0 : 0.95 * glassR, 1.6 * glassR, vmDepth(2));
       gl.uniform1f(gl.getUniformLocation(annulus, 'u_aspect'), W / H);
       gl.drawArrays(gl.TRIANGLES, 0, 16 * 6);
       mask(Module, 0);
@@ -396,6 +403,21 @@ try {
     // The rifle kept off the same outline, to see that no ring is drawn.
     const bare = scopeFrame({sight: true});
     check(around(bare, 1.08 * R).every(v => Math.abs(v - world) <= 2), 'a sight\'s window draws no eyepiece round its glass');
+    // In the multisampled scene, after a foliage draw left alpha to coverage on, the glass is still marked: the
+    // world shows through it and the rifle's own lens stays off it. Marked with that coverage on, as the stencil
+    // was before, the fan's zero alpha covers no sample and the lens covers the glass.
+    const glassValues = px => [0, 0.3, 0.6].flatMap(k => around(px, k * R));
+    const throughGlass = px => glassValues(px).every(v => Math.abs(v - world) <= 2);
+    const foliage = scopeFrame({samples: 4, coverage: true, lens: true});
+    check(throughGlass(foliage), 'after foliage left alpha to coverage on, the multisampled glass shows the world, ' +
+      `not the rifle's lens (${Math.min(...glassValues(foliage))} to ${Math.max(...glassValues(foliage))} against ${world})`);
+    check(coverageAfterStencil, 'the stencil leaves alpha to coverage as the effects\' state cache expects it');
+    const coveredStencil = Function('Module', 'HEAPF32', 'scope', 'bell',
+      stencilBody.replace(/,\s*gl\.SAMPLE_ALPHA_TO_COVERAGE\]/, ']'));
+    const covered = scopeFrame({samples: 4, coverage: true, lens: true, mark: coveredStencil});
+    check(pixel(covered, W / 2, H / 2) > 200 && !throughGlass(covered),
+      'marked with alpha to coverage on, the rifle\'s lens covers the glass');
+    check(throughGlass(scopeFrame({samples: 4, lens: true})), 'without it the multisampled glass shows the world');
     HEAPF32.fill(0, 16 + 42, 16 + 55);
     gl.stencilMask(0xff);
 

@@ -1202,14 +1202,17 @@ EM_JS(void, WebSceneFx_Compose, (const float *params, const float *mesh), {
  * rifle's first draw, and the outline about it when it has one, which opens
  * to the rifle's own eyepiece's bell. The D3D9 device never uses the
  * stencil; it sets both write masks again for every draw, and the depth mask
- * too. */
+ * too. The draw before the rifle's, often foliage, may leave alpha to
+ * coverage on (web_effects.c), and the fan's zero alpha would then cover no
+ * sample of the multisampled scene. */
 EM_JS(void, WebSceneFx_ScopeStencil, (const float *scope, const float *bell), {
     var fx = Module.cod2SceneFx;
     if (!fx || !fx.t || !fx.programs || !fx.programs.lens) return;
     var gl = fx.gl, o = scope >>> 2, b = bell >>> 2, L = fx.programs.lens;
     var program = gl.getParameter(gl.CURRENT_PROGRAM);
     var vao = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
-    var caps = [gl.SCISSOR_TEST, gl.BLEND, gl.DEPTH_TEST, gl.CULL_FACE, gl.POLYGON_OFFSET_FILL];
+    var caps = [gl.SCISSOR_TEST, gl.BLEND, gl.DEPTH_TEST, gl.CULL_FACE, gl.POLYGON_OFFSET_FILL,
+        gl.SAMPLE_ALPHA_TO_COVERAGE];
     var enabled = [];
     for (var c = 0; c < caps.length; ++c) {
         enabled.push(gl.isEnabled(caps[c]));

@@ -6105,3 +6105,30 @@ Validation:
 - Not run in a browser: CTF, HQ and DM, which keep score and deaths as TDM
   does. A network that drops without closing the WebSocket still waits for
   the gateway's heartbeat or `sv_timeout`, up to 30 s.
+
+## Clear scopes beside foliage — 2026-10-24
+
+The owner found that on Brecourt the sniper scopes and the 4x Optic looked
+covered when aimed. The scope's stencil fan, which marks the glass the rifle
+is kept off, writes no alpha. Since the foliage coverage of October 21, an
+alpha-tested draw just before the rifle's left `SAMPLE_ALPHA_TO_COVERAGE` on,
+the fan covered no sample of the multisampled scene, and the rifle's own dark
+lens was drawn over the window. `WebSceneFx_ScopeStencil` now sets alpha to
+coverage aside with its other capabilities and puts it back as it was.
+Details in `docs/GRAPHICS_2026-10-16.md`, "Clear scopes beside foliage".
+
+Validation:
+
+- `test-web-scene-fx.py` checks that the stencil sets alpha to coverage aside,
+  which the old stencil fails; `test-web-scene-fx.mjs` (138 checks, from 134)
+  shows on the M4 that a 4× multisampled glass stays the world's with alpha to
+  coverage left on, where the old stencil left the rifle's lens over it.
+  `test-wwii-scope.py`, `test-web-effects.py` and the full `test-static.sh`
+  pass.
+- On an isolated Brecourt TDM stack (`out/fxscope-qa`), the client built from
+  `2f2784c` against this change: aiming the 4x Optic at all 32 TDM spawns, the
+  old client showed the rifle's lens over the glass in the trenches at
+  (1432, −988) and (1117, −816), the new one the magnified world at all 32;
+  of eight render settings turned off, only `r_aaAlpha 0` cleared the old
+  client's glass. The scoped Kar98k at both trench spawns matched the stock
+  overlay.
