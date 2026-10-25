@@ -8,7 +8,7 @@ Create a Class · attachments · camouflage · S-Mine 44 and C4 · up to 32 bots
 
 [![WebAssembly and WebGL 2](https://img.shields.io/badge/WebAssembly-WebGL_2-ccb777?style=for-the-badge&logo=webassembly&logoColor=white&labelColor=0d0d0d)](#how-it-runs)
 [![0 to 32 bots](https://img.shields.io/badge/bots-0%E2%80%9332-ccb777?style=for-the-badge&labelColor=0d0d0d)](#bots)
-[![6 maps and 5 modes](https://img.shields.io/badge/maps-6_%C2%B7_5_modes-ccb777?style=for-the-badge&labelColor=0d0d0d)](#maps-and-modes)
+[![8 maps and 5 modes](https://img.shields.io/badge/maps-8_%C2%B7_5_modes-ccb777?style=for-the-badge&labelColor=0d0d0d)](#maps-and-modes)
 [![Host with Docker or a Raspberry Pi 5](https://img.shields.io/badge/host-Docker_%C2%B7_Raspberry_Pi_5-ccb777?style=for-the-badge&logo=raspberrypi&logoColor=white&labelColor=0d0d0d)](#host-a-game)
 
 ![Team Deathmatch on Stalingrad: an MP44 in Ember camouflage with a Reflex Sight, a soldier by a burning tank, and the minimap, kill feed, score panel and ammo counter](docs/images/hero-stalingrad.jpg)
@@ -24,7 +24,7 @@ cached. Every match runs on a native dedicated server on the host, a desktop
 computer or a Raspberry Pi 5, and any player can create a room, fill it with
 bots and play.
 
-| 5 | 21 + 4 | 13 | 10 | 2 | 0–32 | 6 · 5 |
+| 5 | 21 + 4 | 13 | 10 | 2 | 0–32 | 8 · 5 |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | custom classes | primaries + pistols | attachments | camouflages | placed explosives | bots per room | maps · modes |
 
@@ -264,7 +264,7 @@ Performance depends on the player's hardware, browser and match load.
 
 ![Carentan, Toujane, Burgundy, Stalingrad, Dawnville and Brecourt in play](docs/images/maps.jpg)
 
-Six original multiplayer maps, with all five modes available on each:
+Eight original multiplayer maps, with all five modes available on each:
 
 | Map | Setting | Allied force | Axis force |
 | --- | --- | --- | --- |
@@ -272,6 +272,8 @@ Six original multiplayer maps, with all five modes available on each:
 | **Burgundy** · `mp_burgundy` | France | American | German Normandy |
 | **Carentan** · `mp_carentan` | France | American | German Normandy |
 | **Dawnville** · `mp_dawnville` | France | American | German Normandy |
+| **Leningrad** · `mp_leningrad` | Russia | Soviet | German Winter |
+| **Matmata** · `mp_matmata` | Tunisia | British | Afrika Korps |
 | **Stalingrad** · `mp_railyard` | Russia | Soviet | German Winter |
 | **Toujane** · `mp_toujane` | Tunisia | British | Afrika Korps |
 
@@ -279,7 +281,7 @@ Six original multiplayer maps, with all five modes available on each:
 
 Time and score limits are configurable per mode. TDM defaults to **15 minutes /
 100 team points**. Rooms rotate through Toujane, Carentan, Dawnville, Burgundy,
-Stalingrad and Brecourt while retaining their mode and rules.
+Stalingrad, Brecourt, Matmata and Leningrad while retaining their mode and rules.
 
 The host starts with no rooms: players create them from **Start New Server**.
 The browser list refreshes every five seconds. Up to **three rooms** can coexist,

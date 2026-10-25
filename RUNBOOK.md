@@ -1,6 +1,6 @@
 # Call of Duty 2 browser runbook
 
-Status: **Toujane/Carentan/Dawnville/Burgundy/Stalingrad/Brecourt browser port with five multiplayer modes under active development. Chrome and
+Status: **Toujane/Carentan/Dawnville/Burgundy/Stalingrad/Brecourt/Matmata/Leningrad browser port with five multiplayer modes under active development. Chrome and
 the internal browser have verified movement, aiming, damage, death, respawn and
 synchronized scores, including the normal room. This is two-client coverage,
 not a 64-player load or long-duration stability result.**
@@ -6165,6 +6165,70 @@ Validation:
   their own effects in both.
 - Not played in the browser: the S&D bomb, the HQ radio and the exploders,
   which take the same path as the minefields.
+
+## Matmata and Leningrad enabled — 2026-10-24
+
+The owner asked for one or two more maps that are good for multiplayer, with
+houses to climb and not too large, checked for bugs like the grenades' FX
+error and the covered scopes. Matmata, Tunisia (`mp_matmata`) is a village of
+domed houses, courtyards, market stalls and rooftops, fought over by British
+and Afrika Korps troops; Leningrad, Russia (`mp_leningrad`) ruined brick
+houses and factory floors around snowy courtyards, fought over by Soviet
+troops in padded coats and Germans in dark winter uniforms. Their spawn
+points span 3650 × 3819 and 3283 × 3462 units, as Toujane's (3472 × 3392) and
+Burgundy's (3160 × 3734) do; Brecourt's span 7715 × 5182. Start New Server's
+Map Select lists both with their retail loading-screen pictures and notes of
+their own. The gateway, room supervisor, discovery probe and the Pi's
+post-update check accept them, and rooms rotate through all eight maps,
+Matmata and Leningrad after Brecourt.
+
+The private renderer archive gains 922 files, 82 MB (400.4 to 482.7 MB; all
+archives 473.4 to 555.7 MB): the BSPs, map and FX scripts, sun files and
+arenas, 165 materials, 390 textures, 97 models, the windblown dust and city
+snow effects, and Leningrad's impact table, which adds large snow hits.
+Leningrad brings the padded Soviet and dark German winter uniforms; their
+hands are Stalingrad's. The materials add no technique and the textures no
+format. Matmata's well is drawn from the archive's first wavelet textures in
+a map, which came out blue until "Wavelet textures in their colors —
+2026-10-24". Every effect the maps' scripts, exploders and impact table name
+is packaged, and their ambient, fire and flak sounds are Toujane's and
+Stalingrad's, so the audio archive is unchanged. `site/wasm-game-data.json` is
+regenerated with this commit; on the Pi both BSPs come from `iw_04.iwd`. The
+maps have 685 and 649 static models, against Brecourt's 8,558, and the
+minimap builds at 8.6 and 6.2 units a texel in 339 and 432 ms. Most of
+Leningrad's spawns are indoors, so its minimap's ground walk starts from the
+46 of 133 that stand under open sky; its streets and buildings still show.
+
+Validation:
+
+- `check-private-assets.py` passes with all eight BSPs.
+- `test-map-rotation.py --rounds 16`: a real dedicated server rotated twice
+  through the eight maps without an error, holding 223 MiB. Dedicated
+  servers on Matmata and Leningrad started in all five modes without an
+  error, `serverinfo` reporting each mode, and held 176 to 224 MiB.
+- `test-room-maps.py`, `test-ui-map-selection.py`, `test-match-menu.py` (both
+  notes in two lines), `test-web-room-create.cjs`, the gateway's `npm test`
+  and the full `test-static.sh` pass.
+- On an isolated QA stack (`out/maps-qa`), a TDM room with six bots on each
+  map, and S&D rooms:
+  - the console showed no error but the post-process techniques every map
+    lacks, and no effect failed to load;
+  - the scoped Kar98k and the MP44's 4x Optic aimed at every TDM spawn of
+    both maps, 32 and 35, showed the magnified world at each, beside bushes,
+    palms and in dark interiors;
+  - the S-Mine planted, and smoke, a frag on sand and on Leningrad's snow
+    and shots into the snow showed their own effects, the snow ones from
+    Leningrad's table, with no Missing FX;
+  - a QA-only script outside Git ran the retail `exploder` of Matmata's flak
+    guns as the S&D bomb does: the flak explosion played and the guns turned
+    to their wrecks. The retail `exploder` logs "undefined is not a field
+    object" on the server, on Toujane too; nothing visible changes;
+  - the meter in the captures read 114 to 120 FPS, frame p95 about 9 to
+    10 ms.
+
+Not covered: nobody played a full match on the new maps, the S&D bomb was
+not planted, and CTF, HQ and DM ran on the dedicated servers but not in the
+browser.
 
 ## Wavelet textures in their colors — 2026-10-24
 

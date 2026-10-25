@@ -38,7 +38,8 @@ async function check(map, reply, expected, gametype = 'tdm', botCount = 0, diffi
 }
 (async () => {
   for (const gametype of ['dm', 'tdm', 'ctf', 'hq', 'sd'])
-    for (const map of ['mp_toujane', 'mp_carentan', 'mp_dawnville', 'mp_burgundy', 'mp_railyard', 'mp_brecourt'])
+    for (const map of ['mp_toujane', 'mp_carentan', 'mp_dawnville', 'mp_burgundy', 'mp_railyard', 'mp_brecourt',
+                       'mp_matmata', 'mp_leningrad'])
       await check(map, {ok: true, value: {id: 0}}, [0, 0], gametype);
   for (const difficulty of [0,1,2])
     await check('mp_carentan', {ok: true, value: {id: 1}}, [1, 0], 'tdm', 8, difficulty);

@@ -12,17 +12,19 @@ start with the [README](../README.md).
 | Burgundy, France (`mp_burgundy`) | American | German Normandy |
 | Carentan, France (`mp_carentan`) | American | German Normandy |
 | Dawnville, France (`mp_dawnville`) | American | German Normandy |
+| Leningrad, Russia (`mp_leningrad`) | Soviet | German Winter |
+| Matmata, Tunisia (`mp_matmata`) | British | Afrika Korps |
 | Stalingrad, Russia (`mp_railyard`) | Soviet | German Winter |
 | Toujane, Tunisia (`mp_toujane`) | British | Afrika Korps |
 
-All six maps support the original **Deathmatch, Team Deathmatch, Capture the Flag,
+All eight maps support the original **Deathmatch, Team Deathmatch, Capture the Flag,
 Headquarters, and Search and Destroy** modes. **Start New Server** is laid out
 as CoD WWII's MATCH screen: **Mode** and **Map** open lists of the modes and
 maps, each described at the right (a map with its loading-screen art),
 **Game Rules** sets the time and score limits, **Bots** opens the bot setup,
 and **Start Match** creates the room and joins it. Rooms rotate through
-Toujane, Carentan, Dawnville, Burgundy, Stalingrad and Brecourt while keeping their selected mode and
-rules.
+Toujane, Carentan, Dawnville, Burgundy, Stalingrad, Brecourt, Matmata and Leningrad while keeping their
+selected mode and rules.
 Unless the creator changes them, TDM uses 100 team points or 15 minutes; the
 other modes use their original scripts and settings.
 

@@ -929,7 +929,7 @@ int main(void) {
         assert(!(drawn[i].kind == PIC && near(drawn[i].x, 284.2f)));
     assert(wrapped("Hillside town in southern Tunisia, fought over by British and Afrika Korps troops across its flat "
                    "rooftops and narrow alleys.", 283.8f, 309.2f, 289.2f) == 2);
-    /* Burgundy's, Stalingrad's and Brecourt's notes fit the panel in two lines too. */
+    /* Burgundy's, Stalingrad's, Brecourt's, Matmata's and Leningrad's notes fit the panel in two lines too. */
     sharedUiInfo.mapList[2].mapLoadName = "mp_burgundy";
     paint();
     assert(wrapped("Farming village in eastern France, fought over by American and German troops among its "
@@ -942,6 +942,14 @@ int main(void) {
     paint();
     assert(wrapped("Hedgerow fields near Utah Beach, fought over by American and German troops around their flak "
                    "guns, trenches and farm buildings.", 283.8f, 309.2f, 289.2f) == 2);
+    sharedUiInfo.mapList[2].mapLoadName = "mp_matmata";
+    paint();
+    assert(wrapped("Desert village in southern Tunisia, fought over by British and Afrika Korps troops among its domed "
+                   "houses, market stalls and rooftops.", 283.8f, 309.2f, 289.2f) == 2);
+    sharedUiInfo.mapList[2].mapLoadName = "mp_leningrad";
+    paint();
+    assert(wrapped("Besieged city in winter, fought over by Soviet and German troops through its ruined houses, "
+                   "courtyards and snowy streets.", 283.8f, 309.2f, 289.2f) == 2);
     sharedUiInfo.mapList[2].mapLoadName = maps[2][0];
     sharedUiInfo.mapList[2].levelShot = &shots[2];
     assert(key(0x0d) && s_match.page == 0 && s_match.focus[0] == 1 && DVAR("ui_currentNetMap") == 2);

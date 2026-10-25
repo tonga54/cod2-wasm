@@ -73,7 +73,7 @@ owner's original IWDs, and the optional [hit sound](#owner-hit-sound),
 `~/cod2-original/main` (private, outside Git). It
 validates package checksums, ARM64 image identities and the clean source/build
 revision, regenerates private assets in staging, and checks their exact public
-manifest hashes. A separate Docker project then exercises six maps, two bots
+manifest hashes. A separate Docker project then exercises eight maps, two bots
 per map, browser metadata and WebSocket-to-native challenges.
 
 The updater waits while players or pending joins are present, and checks again
@@ -160,11 +160,13 @@ Prepare the owner's files on the build machine:
 python3 scripts/prepare-browser-bootstrap.py
 ```
 
-The current Toujane/Carentan/Dawnville/Burgundy/Stalingrad/Brecourt subset is
-approximately **473 MB** with the owner's [sound pack](#owner-sound-pack),
+The current Toujane/Carentan/Dawnville/Burgundy/Stalingrad/Brecourt/Matmata/Leningrad
+subset is approximately **556 MB** with the owner's [sound pack](#owner-sound-pack),
 music and class pictures; Burgundy accounts for 21 MB of it, Stalingrad, with
-the Soviet and German winter uniforms, for 83 MB and Brecourt for 15 MB. Each
-browser downloads it from the host over HTTP/HTTPS and stores it in IndexedDB;
+the Soviet and German winter uniforms, for 83 MB, Brecourt for 15 MB, Matmata
+for 37 MB and Leningrad, with the padded Soviet and dark German winter
+uniforms, for 45 MB. Each browser downloads it from the host over HTTP/HTTPS
+and stores it in IndexedDB;
 a Pi that publishes the archives to Cloudflare sends browsers there instead
 (see [Downloads from Cloudflare](RASPBERRY_PI.md#downloads-from-cloudflare)). The
 manifest verifies archive sizes and SHA-256 hashes; a new asset version
@@ -322,7 +324,7 @@ numbered 1, 2, 3 in `sequence`, because the engine drops rows of an alias that
 share a sequence number; it then picks among them at random without repeating
 the last. The files go to `sound/browser/owner/` in `cod2_browser_audio.iwd`,
 each once, and original files that only the replaced rows played are left out.
-The generator refuses an alias the six maps never play, a column the alias
+The generator refuses an alias the eight maps never play, a column the alias
 table lacks, a missing or malformed file, and an alias the hit sound or menu
 music already replaces. `check-private-assets.py` verifies the rows and that
 the packaged files are the owner's bytes. Without the folder the archive keeps

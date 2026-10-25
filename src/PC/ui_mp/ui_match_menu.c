@@ -226,6 +226,10 @@ static const struct {
                      "through its streets and ruins." },
     { "mp_dawnville", "Normandy village around a church and its walled churchyard, fought over by American and German "
                       "troops." },
+    { "mp_leningrad", "Besieged city in winter, fought over by Soviet and German troops through its ruined houses, "
+                      "courtyards and snowy streets." },
+    { "mp_matmata", "Desert village in southern Tunisia, fought over by British and Afrika Korps troops among its domed "
+                    "houses, market stalls and rooftops." },
     { "mp_railyard", "Snowbound railyard in the ruined city, fought over by Soviet and German troops among its train "
                      "cars and burning buildings." },
     { "mp_toujane", "Hillside town in southern Tunisia, fought over by British and Afrika Korps troops across its flat "

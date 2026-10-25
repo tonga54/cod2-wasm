@@ -47,7 +47,7 @@ with tempfile.TemporaryDirectory(prefix='cod2-room-maps-') as directory:
             expected = f'gametype {gametype} ' + ' '.join('map ' + item for item in remaining) if remaining else ''
             assert f'set g_gametype "{gametype}"' in config
             assert (f'set sv_mapRotation "gametype {gametype} map mp_toujane map mp_carentan map mp_dawnville '
-                    'map mp_burgundy map mp_railyard map mp_brecourt"') in config
+                    'map mp_burgundy map mp_railyard map mp_brecourt map mp_matmata map mp_leningrad"') in config
             assert f'set sv_mapRotationCurrent "{expected}"' in config
         created = rooms.start_room(0, 'Bots', 'mp_carentan', 'tdm', 8, 'hard')
         assert created['botCount'] == 8 and created['botDifficulty'] == 'hard'
@@ -185,7 +185,9 @@ try:
                                ({'name': 'Dawnville', 'map': 'mp_dawnville'}, 'mp_dawnville'),
                                ({'name': 'Burgundy', 'map': 'mp_burgundy'}, 'mp_burgundy'),
                                ({'name': 'Stalingrad', 'map': 'mp_railyard'}, 'mp_railyard'),
-                               ({'name': 'Brecourt', 'map': 'mp_brecourt'}, 'mp_brecourt')):
+                               ({'name': 'Brecourt', 'map': 'mp_brecourt'}, 'mp_brecourt'),
+                               ({'name': 'Matmata', 'map': 'mp_matmata'}, 'mp_matmata'),
+                               ({'name': 'Leningrad', 'map': 'mp_leningrad'}, 'mp_leningrad')):
             assert post(body) == 201
             assert start.call_args.args == (0, body['name'], expected, 'tdm', 0, 'normal')
         for gametype in rooms.SUPPORTED_GAMETYPES:
@@ -288,4 +290,4 @@ with patch.object(rooms.stopping, 'wait', side_effect=[False, True]), \
     assert sorted(call.args[0]['id'] for call in stop.call_args_list) == [0, 2]
     assert set(rooms.rooms) == {1}
 rooms.rooms.clear()
-print('PASS: empty startup, three user slots, idle cleanup, six maps/five modes, rotation, discovery and HTTP allowlist')
+print('PASS: empty startup, three user slots, idle cleanup, eight maps/five modes, rotation, discovery and HTTP allowlist')
