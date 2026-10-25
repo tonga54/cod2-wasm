@@ -400,6 +400,15 @@ retail CoD2:
   direction and Q/E as a lateral lean. Controllers rotate in model axes after
   skeletal composition, preserving movement animations. The respawn/teleport
   toggle no longer suppresses a living player's aim or lean.
+- **Exact hit registration:** a shot meets the players near its aim in the
+  pose its shooter's screen drew them in: origin, facing, view angles, lean
+  and move direction, rebuilt bit for bit from the same snapshot samples, at
+  any ping (see the anti-lag paragraph under performance). With the sight
+  picture up, from 80% of the raise where the WWII scope's glass is whole, a
+  shot leaves exactly along the sights, as in CoD WWII: CoD2 kept up to the
+  hip spread through them after a run, a jump or the last shot, up to 6
+  degrees for a scoped rifle (`g_exactAim`, archived, default 1; 0 keeps
+  CoD2's spread). Hip fire and shotgun pellets keep their spread.
 - **Pi server collision performance:** immutable map brushes use cached bounds
   for consecutive groups, preserving collision order, capsule dimensions and
   contact tolerances. A Pi 5 sample with eight protocol clients and 16 Hard bots
@@ -738,10 +747,24 @@ rendered frames; the existing snapshot format carries these coordinates.
 A shot leaves along the view of the command that fired it. That command also
 carries the camera's kick and a raised scope's idle sway, whose phase only the
 client keeps, so the server aims where the scope was drawn; a bot's sway is the
-server's. Anti-lag moves the other playing clients to their archived positions
-at the shooter's command time whenever that time trails the server, even by
-less than a frame. At full aim a WWII scope's rifle holds its resting pose, so
-the reticle on its glass stays on the line the shot leaves along.
+server's. A command with attack held, or released within 300 ms, also
+carries its view (`bg_shot_view.h`): for the four players nearest its aim in
+the frame on screen, the two snapshot samples their playback drew them
+between and how far along, or the newest and how far past it, quantized the
+way the drawing itself used them. The view follows the packet's commands in
+an op that older servers stop reading before. The server keeps every
+player's snapshot samples for two seconds, angles as the snapshots carry
+them, and traces those players in the pose the view names, their skeletons
+rebuilt for the shot and restored after; a view may only name samples of the
+player's current life, at most a second old. Anti-lag moves the other
+playing clients, and every client when no view arrives, to their archived
+positions at the shooter's command time whenever that time trails the
+server, even by less than a frame. Before, that archive differed from the
+drawn player by up to 12 units on a LAN and about 37 over a 300 ms or
+stalling link (`test-shot-views.py`). `COD2_SHOTTRACE` set in the server's environment logs
+each posed target and hit with that difference. At full aim a WWII scope's
+rifle holds its resting pose, so the reticle on its glass stays on the line
+the shot leaves along.
 Command time stays monotonic after
 stalls. Local shot effects are predicted once, avoiding duplicate sound/recoil. Local
 prediction finds the first unacknowledged command in at most eight lookups

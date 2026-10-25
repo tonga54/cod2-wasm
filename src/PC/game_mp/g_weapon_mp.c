@@ -3,6 +3,7 @@
 #include "bytematch.h"
 #include "headers/PC/bgame/bg_attachments.h"
 #include "headers/PC/bgame/bg_player_health.h"
+#include "headers/PC/bgame/bg_shot_view.h"
 
 extern int rand(void);
 extern double tan(double x);
@@ -29,6 +30,8 @@ extern float floorf(float x);
 extern float ceilf(float x);
 
 extern char *va(const char *format, ...);
+extern char *getenv(const char *name);
+extern void Com_Printf(const char *fmt, ...);
 extern void Com_DPrintf(const char *fmt, ...);
 extern void Com_Error(int code, const char *fmt, ...);
 extern void SV_GameSendServerCommand(int clientNum, int svscmd_type, const char *text);
@@ -44,6 +47,12 @@ extern int Dvar_GetInt(const char *dvarName);
 extern void SV_SetWeaponInfoMemory(void);
 extern int BG_WeaponAmmo(const playerState_t *ps, int weapon);
 extern Bool SV_GetClientPositionAtTime(int clientNum, int gametime, vec_t *pos);
+extern const bgShotView_t *SV_GetShotView(int clientNum, int serverTime);
+extern void SV_ResetSkeletonCache(void);
+extern float BG_GetShotSpread(const playerState_t *ps, const WeaponDef *weapDef, float minSpread, float maxSpread,
+                              float aimSpreadScale, qboolean exactAim);
+extern bgs_t level_bgs;
+extern const dvar_t *g_exactAim;
 extern void SV_LinkEntity(gentity_t *ent);
 extern void SV_UnlinkEntity(gentity_t *ent);
 extern void AngleVectors(vec_t *angles, vec_t *forward, vec_t *right, vec_t *up);
@@ -72,6 +81,7 @@ Bool Melee_Trace(gentity_t *ent, weaponParms *wp, int damage, float range, float
 void Weapon_Melee(gentity_s (*ent)[16], weaponParms *wp, float range, float width, float height);
 void FireWeaponMelee(gentity_s (*ent)[16]);
 static void Bullet_Fire_Extended(const gentity_t *source, gentity_s (*attacker)[16], vec_t *start, vec_t *end, float damageMultiplier, int recursion, const weaponParms *wp, const gentity_t *weaponEnt, const int gametime);
+static qboolean G_ShotTrace(void);
 void G_SetupWeaponDef(void);
 void Bullet_Endpos(float spread, vec_t *end, const weaponParms *wp, float maxRange);
 void Bullet_Fire(gentity_s (*attacker)[16], float spread, weaponParms *wp, gentity_s (*weaponEnt)[16], int gametime);
@@ -543,6 +553,10 @@ static void Bullet_Fire_Extended(const gentity_t *source, gentity_s (*attacker)[
         damage = weapDef->minDamage;
     }
 
+    if (traceEnt->client && G_ShotTrace())
+        Com_Printf("[shot-view] time=%d shooter=%d hit=%d part=%d at %.2f %.2f %.2f damage=%d\n", level.time,
+                   attackerEnt->s.number, traceEnt->s.number, tr.partGroup, endpos[0], endpos[1], endpos[2],
+                   (int)((float)damage * damageMultiplier));
     G_Damage(traceEnt, attackerEnt, attackerEnt, (void *)wp, endpos,
              (int)((float)damage * damageMultiplier), dflags, iMOD,
              tr.partGroup, level.time - gametime);
@@ -623,6 +637,162 @@ void Bullet_Endpos(float spread, vec_t *end, const weaponParms *wp, float maxRan
     }
 }
 
+/* Each player's snapshot samples over the last two seconds, as the clients
+ * receive them, to meet a shot's targets where its shooter drew them. */
+#define G_SHOT_SAMPLES 64
+#define G_SHOT_MAX_REWIND 1000
+
+typedef struct {
+    bgPlayerSample_t samples[G_SHOT_SAMPLES];
+    int newest;
+    int count;
+    int teleport;
+} gShotHistory_t;
+
+static gShotHistory_t g_shotHistory[64];
+
+/* An angle as the snapshots carry it, in 65536ths of a turn (msg_mp.c's
+ * angle fields). */
+static float G_ShotSampleAngle(float angle)
+{
+    if (angle == 0.0f)
+        return 0.0f;
+    return (float)(short)(int)(angle * 182.04444885253906f) * 0.0054931640625f;
+}
+
+/* After each frame, the sample ClientEndFrame exported for the snapshots.
+ * A life starts over where the clients' playback does: at a teleport, and
+ * whenever the player is not drawn from samples. */
+void G_RecordShotSamples(void)
+{
+    int clientNum;
+
+    for (clientNum = 0; clientNum < level.maxclients && clientNum < 64; clientNum++) {
+        gShotHistory_t *history = &g_shotHistory[clientNum];
+        gclient_t *client = &level.clients[clientNum];
+        const entityState_t *es = &((gentity_t *)imp_g_entities)[clientNum].s;
+        bgPlayerSample_t *sample;
+        int i;
+
+        if (client->sess.connected != CON_CONNECTED || client->sess.sessionState != SESS_STATE_PLAYING ||
+            es->eType != 1 || es->pos.trType != TR_LINEAR_STOP || (es->eFlags & 0x20300)) {
+            history->count = 0;
+            continue;
+        }
+        if (history->count) {
+            int newest = history->samples[history->newest].time;
+
+            if ((es->eFlags & 2) != history->teleport || es->pos.trTime < newest)
+                history->count = 0;
+            else if (es->pos.trTime == newest)
+                continue;
+        }
+        history->newest = (history->newest + 1) % G_SHOT_SAMPLES;
+        if (history->count < G_SHOT_SAMPLES)
+            ++history->count;
+        sample = &history->samples[history->newest];
+        sample->time = es->pos.trTime;
+        for (i = 0; i < 3; i++) {
+            sample->origin[i] = es->pos.trBase[i];
+            sample->velocity[i] = es->pos.trDelta[i];
+            sample->angles[i] = G_ShotSampleAngle(es->apos.trBase[i]);
+        }
+        sample->moveDir = es->angles2[1];
+        sample->lean = es->leanf;
+        history->teleport = es->eFlags & 2;
+    }
+}
+
+static const bgPlayerSample_t *G_ShotSample(const gShotHistory_t *history, int time)
+{
+    int i;
+
+    for (i = 0; i < history->count; i++) {
+        const bgPlayerSample_t *sample = &history->samples[(history->newest - i + G_SHOT_SAMPLES) % G_SHOT_SAMPLES];
+
+        if (sample->time == time)
+            return sample;
+        if (sample->time < time)
+            break;
+    }
+    return NULL;
+}
+
+/* Where a shooter drew a player, from the samples its view names; none for
+ * samples the player's current life lacks, older than the rewind allows, or
+ * a reach the playback never takes. */
+static qboolean G_ShotViewPose(int clientNum, const bgShotViewEntry_t *entry, bgPlayerPose_t *pose)
+{
+    const gShotHistory_t *history;
+    const bgPlayerSample_t *first;
+    const bgPlayerSample_t *second;
+
+    if ((unsigned)clientNum >= 64)
+        return 0;
+    history = &g_shotHistory[clientNum];
+    if (!history->count || level.time - entry->time > G_SHOT_MAX_REWIND)
+        return 0;
+    switch (entry->mode) {
+    case BG_SHOT_VIEW_BLEND:
+        if (entry->span < 1 || entry->span > BG_SHOT_VIEW_MAX_SPAN || entry->frac < 0 ||
+            entry->frac > BG_SHOT_VIEW_FRAC_ONE)
+            return 0;
+        first = G_ShotSample(history, entry->time);
+        second = G_ShotSample(history, entry->time + entry->span);
+        break;
+    case BG_SHOT_VIEW_BRIDGE:
+        if (entry->frac < 0 || entry->frac > BG_SHOT_VIEW_BRIDGE_MAX * BG_SHOT_VIEW_BRIDGE_STEPS)
+            return 0;
+        first = second = G_ShotSample(history, entry->time);
+        break;
+    case BG_SHOT_VIEW_SAMPLE:
+        first = second = G_ShotSample(history, entry->time);
+        break;
+    default:
+        return 0;
+    }
+    if (!first || !second)
+        return 0;
+    BG_ShotViewPose(entry, first, second, pose);
+    return 1;
+}
+
+typedef struct {
+    int clientNum;
+    vec3_t angles;
+    clientInfo_t ci;
+} gShotPosed_t;
+
+/* With COD2_SHOTTRACE set, each posed target and each hit on a player is
+ * logged, beside where CoD2's rewind would have put the target. */
+static qboolean G_ShotTrace(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0)
+        enabled = getenv("COD2_SHOTTRACE") != NULL;
+    return enabled;
+}
+
+static void G_TraceShotPose(int shooter, int target, const bgShotViewEntry_t *entry, const bgPlayerPose_t *pose,
+                            int gametime)
+{
+    vec3_t legacy;
+    float dx, dy, dz;
+
+    if (!SV_GetClientPositionAtTime(target, gametime, legacy)) {
+        Com_Printf("[shot-view] time=%d shooter=%d target=%d mode=%d at %.2f %.2f %.2f, no archive\n", level.time,
+                   shooter, target, entry->mode, pose->origin[0], pose->origin[1], pose->origin[2]);
+        return;
+    }
+    dx = legacy[0] - pose->origin[0];
+    dy = legacy[1] - pose->origin[1];
+    dz = legacy[2] - pose->origin[2];
+    Com_Printf("[shot-view] time=%d shooter=%d target=%d mode=%d lag=%d at %.2f %.2f %.2f rewind %.2f units off\n",
+               level.time, shooter, target, entry->mode, level.time - gametime, pose->origin[0], pose->origin[1],
+               pose->origin[2], sqrtf(dx * dx + dy * dy + dz * dz));
+}
+
 void Bullet_Fire(gentity_s (*attacker)[16], float spread, weaponParms *wp, gentity_s (*weaponEnt)[16], int gametime)
 {
     vec3_t end;
@@ -630,43 +800,90 @@ void Bullet_Fire(gentity_s (*attacker)[16], float spread, weaponParms *wp, genti
     vec3_t clientPosition;
     vec3_t savedClientPositions[64];
     byte movedClients[64];
+    gShotPosed_t posed[BG_SHOT_VIEW_ENTRIES];
+    const bgShotView_t *view;
     const dvar_t *antilag;
+    int posedCount;
     int clientNum;
+    int i;
 
     antilag = *(const dvar_t **)imp_g_antilag;
     memset(savedClientPositions, 0, sizeof(savedClientPositions));
     memset(movedClients, 0, sizeof(movedClients));
+    posedCount = 0;
 
     if (antilag && antilag->current.enabled) {
-        /* Other players are drawn at the shooter's command time, so even a
-         * lag shorter than a server frame has moved them since. */
-        if (level.time - gametime > 0) {
-            for (clientNum = 0; clientNum < level.maxclients; clientNum++) {
-                gclient_t *client;
-                gentity_t *clientEnt;
+        /* Players are met where the shooter drew them when its command says
+         * how, in their pose; otherwise at its command time, which even a lag
+         * shorter than a server frame has moved them from. */
+        view = SV_GetShotView(((gentity_t *)attacker)->s.number, gametime);
+        for (clientNum = 0; clientNum < level.maxclients; clientNum++) {
+            gclient_t *client;
+            gentity_t *clientEnt;
+            const bgShotViewEntry_t *entry;
+            bgPlayerPose_t pose;
 
-                client = &level.clients[clientNum];
-                if (client->sess.connected != CON_CONNECTED)
-                    continue;
-                if (client->sess.sessionState != SESS_STATE_PLAYING)
-                    continue;
-                if (!SV_GetClientPositionAtTime(clientNum, gametime, clientPosition))
-                    continue;
+            client = &level.clients[clientNum];
+            if (client->sess.connected != CON_CONNECTED)
+                continue;
+            if (client->sess.sessionState != SESS_STATE_PLAYING)
+                continue;
 
-                clientEnt = &((gentity_t *)imp_g_entities)[clientNum];
-                savedClientPositions[clientNum][0] = clientEnt->r.currentOrigin[0];
-                savedClientPositions[clientNum][1] = clientEnt->r.currentOrigin[1];
-                savedClientPositions[clientNum][2] = clientEnt->r.currentOrigin[2];
+            clientEnt = &((gentity_t *)imp_g_entities)[clientNum];
+            entry = NULL;
+            for (i = 0; view && i < view->count; i++) {
+                if (view->entries[i].clientNum == clientNum)
+                    entry = &view->entries[i];
+            }
+            if (entry && posedCount < BG_SHOT_VIEW_ENTRIES && G_ShotViewPose(clientNum, entry, &pose)) {
+                gShotPosed_t *saved = &posed[posedCount++];
+                clientInfo_t *ci = &level_bgs.clientinfo[clientEnt->s.clientNum];
+
+                if (G_ShotTrace())
+                    G_TraceShotPose(((gentity_t *)attacker)->s.number, clientNum, entry, &pose, gametime);
+
+                saved->clientNum = clientNum;
+                for (i = 0; i < 3; i++) {
+                    saved->angles[i] = clientEnt->r.currentAngles[i];
+                    savedClientPositions[clientNum][i] = clientEnt->r.currentOrigin[i];
+                }
+                saved->ci = *ci;
 
                 SV_UnlinkEntity(clientEnt);
-                clientEnt->r.currentOrigin[0] = clientPosition[0];
-                clientEnt->r.currentOrigin[1] = clientPosition[1];
-                clientEnt->r.currentOrigin[2] = clientPosition[2];
+                for (i = 0; i < 3; i++)
+                    clientEnt->r.currentOrigin[i] = pose.origin[i];
+                clientEnt->r.currentAngles[0] = 0.0f;
+                clientEnt->r.currentAngles[1] = pose.angles[1];
+                clientEnt->r.currentAngles[2] = 0.0f;
                 SV_LinkEntity(clientEnt);
+                for (i = 0; i < 3; i++)
+                    ci->playerAngles[i] = pose.angles[i];
+                ci->lerpLean = pose.lean;
+                ci->lerpMoveDir = pose.moveDir;
 
                 movedClients[clientNum] = 1;
+                continue;
             }
+            if (level.time - gametime <= 0)
+                continue;
+            if (!SV_GetClientPositionAtTime(clientNum, gametime, clientPosition))
+                continue;
+
+            savedClientPositions[clientNum][0] = clientEnt->r.currentOrigin[0];
+            savedClientPositions[clientNum][1] = clientEnt->r.currentOrigin[1];
+            savedClientPositions[clientNum][2] = clientEnt->r.currentOrigin[2];
+
+            SV_UnlinkEntity(clientEnt);
+            clientEnt->r.currentOrigin[0] = clientPosition[0];
+            clientEnt->r.currentOrigin[1] = clientPosition[1];
+            clientEnt->r.currentOrigin[2] = clientPosition[2];
+            SV_LinkEntity(clientEnt);
+
+            movedClients[clientNum] = 1;
         }
+        /* The traces build the posed players' skeletons from their pose. */
+        if (posedCount)
+            SV_ResetSkeletonCache();
     }
 
     if (wp->weapDef->weapClass == WEAPCLASS_SPREAD) {
@@ -701,8 +918,18 @@ void Bullet_Fire(gentity_s (*attacker)[16], float spread, weaponParms *wp, genti
             clientEnt->r.currentOrigin[0] = savedClientPositions[clientNum][0];
             clientEnt->r.currentOrigin[1] = savedClientPositions[clientNum][1];
             clientEnt->r.currentOrigin[2] = savedClientPositions[clientNum][2];
+            for (i = 0; i < posedCount; i++) {
+                if (posed[i].clientNum == clientNum) {
+                    clientEnt->r.currentAngles[0] = posed[i].angles[0];
+                    clientEnt->r.currentAngles[1] = posed[i].angles[1];
+                    clientEnt->r.currentAngles[2] = posed[i].angles[2];
+                    level_bgs.clientinfo[clientEnt->s.clientNum] = posed[i].ci;
+                }
+            }
             SV_LinkEntity(clientEnt);
         }
+        if (posedCount)
+            SV_ResetSkeletonCache();
     }
 }
 
@@ -739,11 +966,8 @@ void FireWeaponAntiLag(gentity_s (*ent)[16], int gametime)
 
     aimSpreadScale = entity->client->currentAimSpreadScale;
     BG_GetSpreadForWeapon(&entity->client->ps, entity->s.weapon, &minSpread, &maxSpread);
-
-    if (entity->client->ps.fWeaponPosFrac == 1.0f)
-        spread = weapDef->fAdsSpread + (maxSpread - weapDef->fAdsSpread) * aimSpreadScale;
-    else
-        spread = minSpread + (maxSpread - minSpread) * aimSpreadScale;
+    spread = BG_GetShotSpread(&entity->client->ps, weapDef, minSpread, maxSpread, aimSpreadScale,
+                              g_exactAim && g_exactAim->current.enabled);
 
     switch (weapDef->weapType) {
     case WEAPTYPE_BULLET:

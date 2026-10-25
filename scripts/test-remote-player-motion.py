@@ -330,15 +330,15 @@ int main(int argc,char **argv) {
     for(int va=-1000;va<=1000;va+=100) for(int vb=-1000;vb<=1000;vb+=100)
     for(int dir=-1;dir<=1;dir+=2) for(int f=0;f<=100;f++) {
         float a=10,b=a+dir*12;
-        float p=CG_PlayerMotionBlend(a,b,va,vb,.065f,f*.01f);
+        float p=BG_PlayerMotionBlend(a,b,va,vb,.065f,f*.01f);
         assert(p>=fminf(a,b)-.001f && p<=fmaxf(a,b)+.001f);
         if(f) {
-            float prev=CG_PlayerMotionBlend(a,b,va,vb,.065f,(f-1)*.01f);
+            float prev=BG_PlayerMotionBlend(a,b,va,vb,.065f,(f-1)*.01f);
             assert((p-prev)*dir>=-.001f);
         }
     }
-    float da=(CG_PlayerMotionBlend(0,9.5f,190,190,.05f,.001f)-0)/.00005f;
-    float db=(9.5f-CG_PlayerMotionBlend(0,9.5f,190,190,.05f,.999f))/.00005f;
+    float da=(BG_PlayerMotionBlend(0,9.5f,190,190,.05f,.001f)-0)/.00005f;
+    float db=(9.5f-BG_PlayerMotionBlend(0,9.5f,190,190,.05f,.999f))/.00005f;
     assert(fabsf(da-190)<1 && fabsf(db-190)<1);
 
     /* A stop is reached exactly, without passing it. */
@@ -443,16 +443,18 @@ int main(int argc,char **argv) {
 }
 '''
 
-code = support + function(trajectory, 'BG_EvaluateTrajectory')
+code = support + (root / 'src/headers/PC/bgame/bg_shot_view.h').read_text()
+for name in ('BG_EvaluateTrajectory', 'BG_PlayerMotionBlend', 'BG_ShotViewPose'):
+    code += function(trajectory, name)
 code += function(clock, 'CL_AdjustTimeDelta')
 a = clock.index('            int timeDelta = cl->serverTimeDelta;')
 b = clock.index('\n        } else {', a)
 code += 'static void StepClock(void){clientActive_t *cl=CL_LOCAL;clientStatic_t *cls=CLS;' + clock[a:b] + '\nif(cl->newSnapshots)CL_AdjustTimeDelta();}\n'
 start = source.index('#define CG_REMOTE_SAMPLES')
-end = source.index('static cgRemotePlayback_t cg_remotePlayback[64];')
-code += source[start:end] + 'static cgRemotePlayback_t cg_remotePlayback[64];\n'
-for name in ('CG_PlayerMotionBlend', 'CG_RemoteSampleJumped', 'CG_RemoteTargetDelay',
-             'CG_RecordRemotePlayerSample', 'CG_PlayRemotePlayer', 'CG_InterpolateEntityPosition'):
+end = source.index('static cgShotViewDrawn_t cg_shotViewDrawn[64][2];')
+code += source[start:end] + 'static cgShotViewDrawn_t cg_shotViewDrawn[64][2];\n'
+for name in ('CG_RemoteSampleJumped', 'CG_RemoteTargetDelay', 'CG_RecordRemotePlayerSample',
+             'CG_DrawRemotePlayer', 'CG_PlayRemotePlayer', 'CG_InterpolateEntityPosition'):
     code += function(source, name)
 # The actual trajectory assignments and snap block, without unrelated
 # event/stance exports.
@@ -469,7 +471,8 @@ mutants = {
     'absolute float times': code.replace('ahead = (float)(cg->time - newest->time) - pb->delay;',
                                          'ahead = ((float)cg->time - pb->delay) - (float)newest->time;'),
     'every late sample sets the delay': code.replace('pb->leadCount >= CG_REMOTE_LEADS / 2 ? second : lowest', 'lowest'),
-    'unbounded bridging': code.replace('(ahead < (float)CG_REMOTE_BRIDGE ? ahead : (float)CG_REMOTE_BRIDGE)', 'ahead'),
+    'unbounded bridging': code.replace('float reach = ahead < (float)CG_REMOTE_BRIDGE ? ahead : (float)CG_REMOTE_BRIDGE;',
+                                       'float reach = ahead;'),
     'blended teleports': code.replace('if ((es->eFlags & 2) != pb->teleport || gap < 0', 'if (gap < 0'),
     'no stall slowdown': code.replace('pb->delay += 0.25f * (float)elapsed;', 'pb->delay += 0.0f;'),
     'clock corrections drawn': code.replace('if (real > 0 && abs(elapsed - real) <= 50) {', 'if (0) {'),

@@ -85,7 +85,13 @@ static dvar_t limit;static const dvar_t *limitPtr=&limit;
 static const void *imp_r_dlightLimit=&limitPtr;
 '''
 weapon = 'src/PC/cgame_mp/cg_weapons.c'
-code = ''.join(function(weapon, name) for name in (
+# The spread the first-person tracer leaves with is the server's own rule.
+spread_source = (ROOT / 'src/PC/bgame/bg_weapons.c').read_text()
+spread_rule = ('#define WEAPCLASS_SPREAD 3\n' +
+               spread_source[spread_source.index('#define BG_SIGHTS_UP_START'):
+                             spread_source.index('/* The spread a shot leaves with.')] +
+               function('src/PC/bgame/bg_weapons.c', 'BG_GetShotSpread'))
+code = spread_rule + ''.join(function(weapon, name) for name in (
     'CG_BulletHitClientEvent', 'CG_BulletHitEvent', 'CG_SpawnTracerImmediate', 'CG_WebAdsNearEnd',
     'CG_WebAdsDofApproach', 'CG_WebAdsNearestPlayer', 'CG_UpdateWebWeaponPresentation'))
 code += function('src/PC/gfx_d3d/r_scene.c', 'R_AddLightToScene')

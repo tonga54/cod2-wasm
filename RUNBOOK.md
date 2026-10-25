@@ -6550,3 +6550,67 @@ Validation:
 
 Not covered: no new texture data; surfaces meeting with different mappings
 vary apart along their seam; only the M4 in Chrome was measured.
+
+## Exact hit registration and aimed shots — 2026-10-25
+
+The owner reported scoped shots that sat on a player on screen and did no
+damage, and asked for shots that never miss what is under the sights, with any
+weapon, and players that look as if they played side by side.
+
+- Two causes. CoD2 kept the hip spread through the sights until the raise was
+  complete and then the aim's unsettled share, which a run, a jump or the last
+  shot set to full: a scoped rifle could leave up to 6 degrees off a reticle
+  drawn on its target (83 units at 20 m), an MP40 held down 5. The WWII scope's
+  glass is whole from 80% of the raise. And anti-lag rewound players to the
+  server's archived frames at the shooter's command time, while the browser
+  draws them from their own command-time samples behind an adaptive delay: the
+  two differed by up to 12 units on a LAN and about 37 over a 300 ms or
+  stalling link, for a target that strafes, reverses, hops and leans, and the
+  archive kept the target's current facing and lean.
+- `bg_weapons.c`'s `BG_GetShotSpread`: with the sight picture up a shot leaves
+  along the sights, the hip spread fading in between half and 80% of the
+  raise; pellets and hip fire unchanged (`g_exactAim`, archived, default 1).
+  The server and the first-person tracer share it.
+- Shot views (`bg_shot_view.h`): the client notes how its playback drew each
+  remote player (two samples and a quantized fraction, or the newest and a
+  bridge), and each command with attack held or released within 300 ms carries
+  the four nearest its aim in the frame on screen, after the packet's commands
+  in client op 4, which older servers never read. The server keeps every
+  player's samples for two seconds from `ClientEndFrame`'s export, angles
+  quantized as the snapshots carry them, and `Bullet_Fire` traces the named
+  players in that pose (origin, facing, view angles, lean, move direction),
+  resetting the skeleton cache before and after; everyone else, and clients
+  without views, keep the archive rewind. Only samples of the current life, at
+  most a second old, are accepted. The playback blend moved to
+  `BG_PlayerMotionBlend`/`BG_ShotViewPose`, shared by both sides.
+- `COD2_SHOTTRACE` in the server's environment logs each posed target, where
+  the archive rewind would have put it, and each hit.
+
+Validation:
+
+- `test-shot-views.py` (new, in `test-static.sh`): 23,927 shots through the
+  production playback, network clock, client message, server parser and
+  history over LAN, internet, loaded-Pi, stalled and respawning links, each
+  rebuilt bit for bit; the wire at its bounds, malformed and forged views,
+  the ring, the commands and players a view names; 15 mutants fail.
+  `test-exact-aim.py` (new): 63,063 raises of a sniper, an MP40 and a shotgun;
+  5 mutants fail. `test-antilag-rewind.py` now covers posed targets (11
+  mutants); `test-remote-player-motion.py`, `test-combat-presentation.py`,
+  `test-browser-packet-pacing.py`, `test-web-background-frame.py` and
+  `test-bullet-penetration.py` follow the moved code. Full static suite.
+- Isolated QA stack, native i386 server and two Chrome clients in Toujane's
+  courtyard, the target strafing across the aimed shooter's line: on the
+  local link 116 shots met the drawn target, 11 hits, where the archive would
+  have been a median 2.9 units off (p90 4.8, max 11.1); with 40 ms ±15 ms
+  injected each way, 148 shots, 17 hits, the archive a median 4.0 units off
+  (p90 11.9, max 23.6; over 5 units for 38%). A room with six bots: 25 posed
+  shots, 20 hits, no errors. Logs: `out/hitreg-qa/`.
+- The Pi could not be inspected: SSH asks for a password and the site for its
+  credentials. Its LAN round trip from the build machine: 6.3 ms average,
+  8.0 ms worst, 0.5 ms deviation.
+
+Not covered: the target's animation (stance, legs) stays the server's current
+one; a view names at most four players; a modified client can pick any of the
+target's samples of the last second, as it could pick its command time
+before; the shooter's favour means a target can be hit just after reaching
+cover on its own screen; snapshots stay at 30 Hz.

@@ -1432,6 +1432,8 @@ static int sprintViewTime;
 extern void AngleVectors(const vec_t *angles, vec_t *forward, vec_t *right, vec_t *up);
 extern void CG_TraceCapsule(trace_t *result, const vec_t *start, const vec_t *mins, const vec_t *maxs, const vec_t *end, int skipNumber, int mask);
 extern void BG_GetSpreadForWeapon(const playerState_t *ps, int weaponIndex, float *minSpread, float *maxSpread);
+extern float BG_GetShotSpread(const playerState_t *ps, const WeaponDef *weapDef, float minSpread, float maxSpread,
+                              float aimSpreadScale, qboolean exactAim);
 extern float randomf(void);
 float g_webAdsDofFrac = 0.0f;
 /* How far the sights are raised, scopes included. */
@@ -1604,13 +1606,7 @@ static void CG_UpdateWebWeaponPresentation(playerState_t *ps, int weaponIndex, q
             shotAngles[2] = 0.0f;
             AngleVectors(shotAngles, forward, right, up);
             BG_GetSpreadForWeapon(ps, fireWeapon, &minSpread, &maxSpread);
-            {
-                float aimScale = ps->aimSpreadScale * (1.0f / 255.0f);
-                if (ps->fWeaponPosFrac == 1.0f)
-                    spread = weapDef->fAdsSpread + (maxSpread - weapDef->fAdsSpread) * aimScale;
-                else
-                    spread = minSpread + (maxSpread - minSpread) * aimScale;
-            }
+            spread = BG_GetShotSpread(ps, weapDef, minSpread, maxSpread, ps->aimSpreadScale * (1.0f / 255.0f), 1);
             if (weapDef->weapClass == 3) {
                 shots = weapDef->shotCount > 3 ? 3 : (weapDef->shotCount > 0 ? weapDef->shotCount : 1);
                 if (weapDef->fMinDamageRange > 256.0f)

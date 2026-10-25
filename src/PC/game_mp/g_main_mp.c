@@ -99,6 +99,8 @@ extern const dvar_t *player_meleeRange;
 extern const dvar_t *player_meleeWidth;
 extern const dvar_t *player_meleeHeight;
 extern const dvar_t *g_antilag;
+const dvar_t *g_exactAim;
+extern void G_RecordShotSamples(void);
 extern const dvar_t *g_oldVoting;
 extern const dvar_t *g_playerCollisionEjectSpeed;
 extern const dvar_t *g_mantleBlockTimeBuffer;
@@ -796,6 +798,9 @@ static void G_RegisterDvars_impl(void)
     g_TeamColor_Axis = Dvar_RegisterColor("g_TeamColor_Axis", 1.0f, 0.5f, 0.5f, 1.0f, 0x1100);
     g_smoothClients = Dvar_RegisterBool_mac("g_smoothClients", 1, 0x1000);
     g_antilag = Dvar_RegisterBool_mac("g_antilag", 1, 0x1005);
+    /* Shots fired with the sight picture up leave along the sights; 0 keeps
+     * CoD2's spread through them (bg_weapons.c's BG_GetShotSpread). */
+    g_exactAim = Dvar_RegisterBool_mac("g_exactAim", 1, 0x1005);
     g_oldVoting = Dvar_RegisterBool_mac("g_oldVoting", 1, 0x1001);
     g_voteAbstainWeight = Dvar_RegisterFloat("g_voteAbstainWeight", 0.5f, 0.0f, 1.0f, 0x1001);
     g_NoScriptSpam = Dvar_RegisterBool_mac("g_no_script_spam", 0, 0x1000);
@@ -1399,6 +1404,7 @@ int G_RunFrame(int levelTime)
             }
         }
     }
+    G_RecordShotSamples();
 
     CheckTeamStatus();
 

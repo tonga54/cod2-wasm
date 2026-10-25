@@ -3,6 +3,7 @@
 #include "cod2_feature_config.h"
 #include "pb_public.h"
 #include "PC/qcommon/net_hardening.h"
+#include "headers/PC/bgame/bg_shot_view.h"
 #include <stddef.h>
 #include <string.h>
 
@@ -1475,6 +1476,92 @@ void SV_BeginDownload_f(client_t *cl)
     I_strncpyz(cl->downloadName, SV_Cmd_Argv(1), sizeof(cl->downloadName));
 }
 
+/* The views each client's latest commands were drawn with, by command time. */
+#define SV_SHOT_VIEWS (BG_SHOT_VIEW_RECORDS * 2)
+static bgShotView_t sv_shotViews[64][SV_SHOT_VIEWS];
+static int sv_shotViewNext[64];
+
+/* A packet's views follow its commands; a client that sends none ends the
+ * packet there. Nothing of a malformed block is kept. */
+void SV_ReadShotViews(int clientNum, msg_t *msg)
+{
+    bgShotView_t views[BG_SHOT_VIEW_RECORDS];
+    int records;
+    int i, j, k;
+
+    if ((unsigned)clientNum >= 64 || MSG_ReadBits(msg, 3) != BG_SHOT_VIEW_OP)
+        return;
+    records = MSG_ReadByte(msg);
+    if (records < 1 || records > BG_SHOT_VIEW_RECORDS)
+        return;
+    for (i = 0; i < records; i++) {
+        bgShotView_t *view = &views[i];
+
+        view->serverTime = MSG_ReadLong(msg);
+        view->count = MSG_ReadByte(msg);
+        if (view->count < 1 || view->count > BG_SHOT_VIEW_ENTRIES)
+            return;
+        for (j = 0; j < view->count; j++) {
+            bgShotViewEntry_t *entry = &view->entries[j];
+            int head = MSG_ReadByte(msg);
+
+            if (head < 0)
+                return;
+            entry->clientNum = head & 63;
+            entry->mode = head >> 6;
+            entry->time = MSG_ReadLong(msg);
+            entry->span = 0;
+            entry->frac = 0;
+            if (entry->mode == BG_SHOT_VIEW_BLEND) {
+                entry->span = MSG_ReadShort(msg) & 0xffff;
+                entry->frac = MSG_ReadShort(msg) & 0xffff;
+            } else if (entry->mode == BG_SHOT_VIEW_BRIDGE) {
+                entry->frac = MSG_ReadShort(msg) & 0xffff;
+            } else if (entry->mode != BG_SHOT_VIEW_SAMPLE) {
+                return;
+            }
+        }
+    }
+    if (msg->overflowed)
+        return;
+    for (i = 0; i < records; i++) {
+        bgShotView_t *slot = NULL;
+
+        for (k = 0; k < SV_SHOT_VIEWS; k++) {
+            if (sv_shotViews[clientNum][k].count && sv_shotViews[clientNum][k].serverTime == views[i].serverTime)
+                slot = &sv_shotViews[clientNum][k];
+        }
+        if (!slot) {
+            slot = &sv_shotViews[clientNum][sv_shotViewNext[clientNum]];
+            sv_shotViewNext[clientNum] = (sv_shotViewNext[clientNum] + 1) % SV_SHOT_VIEWS;
+        }
+        *slot = views[i];
+    }
+}
+
+const bgShotView_t *SV_GetShotView(int clientNum, int serverTime)
+{
+    int k;
+
+    if ((unsigned)clientNum >= 64)
+        return NULL;
+    for (k = 0; k < SV_SHOT_VIEWS; k++) {
+        const bgShotView_t *view = &sv_shotViews[clientNum][k];
+
+        if (view->count && view->serverTime == serverTime)
+            return view;
+    }
+    return NULL;
+}
+
+void SV_ClearShotViews(int clientNum)
+{
+    if ((unsigned)clientNum < 64) {
+        memset(sv_shotViews[clientNum], 0, sizeof(sv_shotViews[clientNum]));
+        sv_shotViewNext[clientNum] = 0;
+    }
+}
+
 void SV_UserMove(client_t *cl, msg_t *msg, qboolean delta)
 {
     serverStatic_t *svs = (serverStatic_t *)imp_svs;
@@ -1530,6 +1617,9 @@ void SV_UserMove(client_t *cl, msg_t *msg, qboolean delta)
 
         oldcmd = cmd;
     }
+    if (cl->state == 3)
+        SV_ClearShotViews(clientNum);
+    SV_ReadShotViews(clientNum, msg);
 
     cl->frames[cl->messageAcknowledge & 31].messageAcked = svs->time;
 

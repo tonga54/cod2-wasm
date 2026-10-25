@@ -480,6 +480,35 @@ void BG_GetSpreadForWeapon(const playerState_t *ps, int weaponIndex, float *minS
     }
 }
 
+/* Where a raise draws the sight picture whole: the WWII scope's glass is
+ * there from 80% (cg_wwiiscope_mp.c's presence), coming in from half. */
+#define BG_SIGHTS_UP_START 0.5f
+#define BG_SIGHTS_UP_END 0.8f
+
+/* The spread a shot leaves with. CoD2 kept the hip spread until the sights
+ * were all the way up and added the aim's unsettled share after, so a shot
+ * could leave degrees off a reticle drawn on its target. With exactAim a
+ * shot leaves along the sights once the sight picture is up; pellets keep
+ * their spread. */
+float BG_GetShotSpread(const playerState_t *ps, const WeaponDef *weapDef, float minSpread, float maxSpread,
+                       float aimSpreadScale, qboolean exactAim)
+{
+    float hip = minSpread + (maxSpread - minSpread) * aimSpreadScale;
+    float t;
+
+    if (!exactAim || weapDef->weapClass == WEAPCLASS_SPREAD) {
+        if (ps->fWeaponPosFrac == 1.0f)
+            return weapDef->fAdsSpread + (maxSpread - weapDef->fAdsSpread) * aimSpreadScale;
+        return hip;
+    }
+    t = (ps->fWeaponPosFrac - BG_SIGHTS_UP_START) / (BG_SIGHTS_UP_END - BG_SIGHTS_UP_START);
+    if (!(t > 0.0f))
+        return hip;
+    if (t >= 1.0f)
+        return 0.0f;
+    return hip * (1.0f - t * t * (3.0f - 2.0f * t));
+}
+
 int BG_ClipForWeapon(int weapon)
 {
     return bg_weaponDefs[weapon]->iClipIndex;

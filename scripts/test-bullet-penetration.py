@@ -47,6 +47,8 @@ static int traces,damageCalls,receivedDamage,events,brushCount,hitPlayer=1,team=
 static float targetX=200;
 static cbrush_t brushes[8];
 static void Com_DPrintf(const char *s,...) {assert(0);}
+static qboolean G_ShotTrace(void) {return 0;}
+static void Com_Printf(const char *s,...) {assert(0);}
 static float Vec3Normalize(float *v){float n=sqrtf(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);if(n)for(int i=0;i<3;i++)v[i]/=n;return n;}
 static void G_CheckHitTriggerDamage(gentity_t *a,vec_t *s,vec_t *e,int d,int mod) {}
 /* Each stretch the bullet flies, for the mines along it. */

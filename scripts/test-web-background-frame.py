@@ -27,7 +27,7 @@ struct Connection {int state;} clientConnections[1];
 typedef struct Connection clientConnection_t;
 struct Connection *connection=&clientConnections[0];
 void *imp_clc=&connection;
-int hidden,sends,renders,syncs,clocks;
+int hidden,sends,renders,syncs,clocks,cl_sampleShotViews;
 void CL_SendCmdInternal(void){sends++;}
 void CL_SyncGpu(void){syncs++;}
 void CL_SetCGameTime(void){clocks++;}

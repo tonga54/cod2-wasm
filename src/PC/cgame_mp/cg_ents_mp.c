@@ -3,6 +3,7 @@
 #include "bytematch.h"
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_weaponcamo.h"
+#include "headers/PC/bgame/bg_shot_view.h"
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
@@ -343,14 +344,7 @@ void CG_AddCEntityToScene(const GfxEntity *ent, const struct DObj_s *obj, const 
 #define CG_REMOTE_BRIDGE 50
 #define CG_REMOTE_FORGET 5000
 
-typedef struct {
-    int time;
-    vec3_t origin;
-    vec3_t velocity;
-    vec3_t angles;
-    float moveDir;
-    float lean;
-} cgRemoteSample_t;
+typedef bgPlayerSample_t cgRemoteSample_t;
 
 typedef struct {
     cgRemoteSample_t samples[CG_REMOTE_SAMPLES];
@@ -372,27 +366,15 @@ typedef struct {
 
 static cgRemotePlayback_t cg_remotePlayback[64];
 
-static float CG_PlayerMotionBlend(float a, float b, float va, float vb, float seconds, float f)
-{
-    float distance = b - a;
-    float ta = va * seconds;
-    float tb = vb * seconds;
-    float f2 = f * f;
-    float f3 = f2 * f;
+/* What each remote player was drawn from in the latest frame drawn with it,
+ * [0], and the frame before, [1], for the views commands carry. */
+typedef struct {
+    int frame;
+    bgShotViewEntry_t entry;
+    vec3_t origin;
+} cgShotViewDrawn_t;
 
-    /* Monotone Hermite tangents retain velocity at ordinary sample boundaries
-     * without overshooting a wall, stop or direction change between samples. */
-    if (distance == 0.0f)
-        return a;
-    if (ta * distance <= 0.0f) ta = 0.0f;
-    if (tb * distance <= 0.0f) tb = 0.0f;
-    if (fabsf(ta) > fabsf(distance) * 3.0f) ta = distance * 3.0f;
-    if (fabsf(tb) > fabsf(distance) * 3.0f) tb = distance * 3.0f;
-    return (2.0f * f3 - 3.0f * f2 + 1.0f) * a
-         + (f3 - 2.0f * f2 + f) * ta
-         + (-2.0f * f3 + 3.0f * f2) * b
-         + (f3 - f2) * tb;
-}
+static cgShotViewDrawn_t cg_shotViewDrawn[64][2];
 
 static qboolean CG_RemoteSampleJumped(const cgRemoteSample_t *newest, const entityState_t *es, int gap)
 {
@@ -493,6 +475,27 @@ void CG_RecordRemotePlayerSample(const centity_t *cent, int serverTime, int view
     pb->serverTime = serverTime;
 }
 
+/* Draws a remote player from its samples and notes how, for the view the
+ * next command carries. */
+static void CG_DrawRemotePlayer(centity_t *cent, bgShotViewEntry_t *entry, const cgRemoteSample_t *first,
+                                const cgRemoteSample_t *second, vec3_t angles, float *moveDir, float *lean)
+{
+    cgShotViewDrawn_t *drawn = cg_shotViewDrawn[cent->nextState.number];
+    bgPlayerPose_t pose;
+
+    entry->clientNum = cent->nextState.number;
+    BG_ShotViewPose(entry, first, second, &pose);
+    memcpy(cent->lerpOrigin, pose.origin, sizeof(vec3_t));
+    memcpy(angles, pose.angles, sizeof(vec3_t));
+    *moveDir = pose.moveDir;
+    *lean = pose.lean;
+    if (drawn[0].frame != cg->time)
+        drawn[1] = drawn[0];
+    drawn[0].frame = cg->time;
+    drawn[0].entry = *entry;
+    memcpy(drawn[0].origin, pose.origin, sizeof(vec3_t));
+}
+
 static qboolean CG_PlayRemotePlayer(centity_t *cent, vec3_t angles, float *moveDir, float *lean)
 {
     const entityState_t *es = &cent->nextState;
@@ -500,8 +503,9 @@ static qboolean CG_PlayRemotePlayer(centity_t *cent, vec3_t angles, float *moveD
     const cgRemoteSample_t *newest;
     const cgRemoteSample_t *newer;
     const cgRemoteSample_t *older;
+    bgShotViewEntry_t entry;
     float ahead;
-    int i, j;
+    int i;
 
     if (es->eType != 1 || (unsigned)es->number >= 64 || es->number == cg->nextSnap->ps.clientNum ||
         es->pos.trType != TR_LINEAR_STOP || (es->eFlags & 0x20300))
@@ -552,43 +556,95 @@ static qboolean CG_PlayRemotePlayer(centity_t *cent, vec3_t angles, float *moveD
     /* Times stay integer until differenced: float milliseconds since a long
      * running server started would round to whole frames. */
     ahead = (float)(cg->time - newest->time) - pb->delay;
+    entry.span = 0;
     if (ahead >= 0.0f) {
         /* Bridge at most one server interval past the newest sample; never
          * coast indefinitely on stale velocity. */
-        float seconds = (ahead < (float)CG_REMOTE_BRIDGE ? ahead : (float)CG_REMOTE_BRIDGE) * 0.001f;
+        float reach = ahead < (float)CG_REMOTE_BRIDGE ? ahead : (float)CG_REMOTE_BRIDGE;
 
-        for (i = 0; i < 3; ++i) {
-            cent->lerpOrigin[i] = newest->origin[i] + newest->velocity[i] * seconds;
-            angles[i] = newest->angles[i];
-        }
-        *moveDir = newest->moveDir;
-        *lean = newest->lean;
+        entry.mode = BG_SHOT_VIEW_BRIDGE;
+        entry.time = newest->time;
+        entry.frac = (int)(reach * (float)BG_SHOT_VIEW_BRIDGE_STEPS + 0.5f);
+        CG_DrawRemotePlayer(cent, &entry, newest, newest, angles, moveDir, lean);
         return 1;
     }
     newer = newest;
     for (i = 1; i < pb->count; ++i) {
         older = &pb->samples[(pb->newest - i + CG_REMOTE_SAMPLES) % CG_REMOTE_SAMPLES];
         if ((float)(older->time - newest->time) <= ahead) {
-            float span = (float)(newer->time - older->time);
-            float f = (ahead - (float)(older->time - newest->time)) / span;
+            float f = (ahead - (float)(older->time - newest->time)) / (float)(newer->time - older->time);
 
-            for (j = 0; j < 3; ++j) {
-                cent->lerpOrigin[j] = CG_PlayerMotionBlend(older->origin[j], newer->origin[j],
-                    older->velocity[j], newer->velocity[j], span * 0.001f, f);
-                angles[j] = LerpAngle(older->angles[j], newer->angles[j], f);
-            }
-            *moveDir = LerpAngle(older->moveDir, newer->moveDir, f);
-            *lean = LerpAngle(older->lean, newer->lean, f);
+            entry.mode = BG_SHOT_VIEW_BLEND;
+            entry.time = older->time;
+            entry.span = newer->time - older->time;
+            entry.frac = (int)(f * (float)BG_SHOT_VIEW_FRAC_ONE + 0.5f);
+            if (entry.frac > BG_SHOT_VIEW_FRAC_ONE)
+                entry.frac = BG_SHOT_VIEW_FRAC_ONE;
+            CG_DrawRemotePlayer(cent, &entry, older, newer, angles, moveDir, lean);
             return 1;
         }
         newer = older;
     }
     /* Before the first sample since the player appeared or teleported. */
-    memcpy(cent->lerpOrigin, newer->origin, sizeof(vec3_t));
-    memcpy(angles, newer->angles, sizeof(vec3_t));
-    *moveDir = newer->moveDir;
-    *lean = newer->lean;
+    entry.mode = BG_SHOT_VIEW_SAMPLE;
+    entry.time = newer->time;
+    entry.frac = 0;
+    CG_DrawRemotePlayer(cent, &entry, newer, newer, angles, moveDir, lean);
     return 1;
+}
+
+/* A command's view: how the players nearest its aim were drawn in the frame
+ * on screen as it was sampled, the one before the frame sampling it. */
+#define CG_SHOT_VIEW_CHEST 40.0f
+#define CG_SHOT_VIEW_RADIUS 40.0f
+#define CG_SHOT_VIEW_CONE 0.1745329f
+
+int CG_GetShotView(bgShotView_t *view)
+{
+    float misses[BG_SHOT_VIEW_ENTRIES];
+    const float *eye = cg->refdef.vieworg;
+    const float *forward = cg->refdef.viewaxis[0];
+    int number;
+
+    view->count = 0;
+    if (!cg->nextSnap)
+        return 0;
+    for (number = 0; number < 64; ++number) {
+        const cgShotViewDrawn_t *drawn = cg_shotViewDrawn[number];
+        const cgShotViewDrawn_t *shown;
+        float dir[3], distance, along, miss;
+        int k;
+
+        shown = drawn[0].frame == cg->oldTime ? &drawn[0] : drawn[1].frame == cg->oldTime ? &drawn[1] : NULL;
+        if (!shown || !cg->oldTime || number == cg->nextSnap->ps.clientNum)
+            continue;
+        dir[0] = shown->origin[0] - eye[0];
+        dir[1] = shown->origin[1] - eye[1];
+        dir[2] = shown->origin[2] + CG_SHOT_VIEW_CHEST - eye[2];
+        distance = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+        if (distance > CG_SHOT_VIEW_RADIUS) {
+            along = (dir[0] * forward[0] + dir[1] * forward[1] + dir[2] * forward[2]) / distance;
+            miss = acosf(along > 1.0f ? 1.0f : along < -1.0f ? -1.0f : along) -
+                   atanf(CG_SHOT_VIEW_RADIUS / distance);
+            if (!(miss <= CG_SHOT_VIEW_CONE))
+                continue;
+        } else {
+            miss = -1.0f;
+        }
+        for (k = view->count; k > 0 && misses[k - 1] > miss; --k) {
+            if (k < BG_SHOT_VIEW_ENTRIES) {
+                misses[k] = misses[k - 1];
+                view->entries[k] = view->entries[k - 1];
+            }
+        }
+        if (k < BG_SHOT_VIEW_ENTRIES) {
+            misses[k] = miss;
+            view->entries[k] = shown->entry;
+            if (view->count < BG_SHOT_VIEW_ENTRIES)
+                ++view->count;
+        }
+    }
+    return view->count;
 }
 
 static void CG_TraceRemoteMotion(const centity_t *cent)

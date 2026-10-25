@@ -1,5 +1,9 @@
 #include "common_types.h"
 #include "imports.h"
+#include "headers/PC/bgame/bg_shot_view.h"
+#include <math.h>
+
+extern float LerpAngle(float from, float to, float frac);
 
 extern const dvar_t *player_view_pitch_up;
 extern const dvar_t *player_view_pitch_down;
@@ -1121,6 +1125,60 @@ void BG_EvaluateTrajectory(const trajectory_t *tr, int atTime, vec_t *result)
         return;
     }
     }
+}
+
+float BG_PlayerMotionBlend(float a, float b, float va, float vb, float seconds, float f)
+{
+    float distance = b - a;
+    float ta = va * seconds;
+    float tb = vb * seconds;
+    float f2 = f * f;
+    float f3 = f2 * f;
+
+    /* Monotone Hermite tangents retain velocity at ordinary sample boundaries
+     * without overshooting a wall, stop or direction change between samples. */
+    if (distance == 0.0f)
+        return a;
+    if (ta * distance <= 0.0f) ta = 0.0f;
+    if (tb * distance <= 0.0f) tb = 0.0f;
+    if (fabsf(ta) > fabsf(distance) * 3.0f) ta = distance * 3.0f;
+    if (fabsf(tb) > fabsf(distance) * 3.0f) tb = distance * 3.0f;
+    return (2.0f * f3 - 3.0f * f2 + 1.0f) * a
+         + (f3 - 2.0f * f2 + f) * ta
+         + (-2.0f * f3 + 3.0f * f2) * b
+         + (f3 - f2) * tb;
+}
+
+/* Where a remote player's playback draws it: between two samples, past the
+ * newest along its velocity, or on its first. The client draws with it and
+ * the server meets a shot's targets with it, from the same samples. */
+void BG_ShotViewPose(const bgShotViewEntry_t *entry, const bgPlayerSample_t *first, const bgPlayerSample_t *second,
+                     bgPlayerPose_t *pose)
+{
+    float seconds;
+    int i;
+
+    if (entry->mode == BG_SHOT_VIEW_BLEND) {
+        float f = (float)entry->frac * (1.0f / (float)BG_SHOT_VIEW_FRAC_ONE);
+
+        seconds = (float)entry->span * 0.001f;
+        for (i = 0; i < 3; ++i) {
+            pose->origin[i] = BG_PlayerMotionBlend(first->origin[i], second->origin[i], first->velocity[i],
+                                                   second->velocity[i], seconds, f);
+            pose->angles[i] = LerpAngle(first->angles[i], second->angles[i], f);
+        }
+        pose->moveDir = LerpAngle(first->moveDir, second->moveDir, f);
+        pose->lean = LerpAngle(first->lean, second->lean, f);
+        return;
+    }
+    seconds = entry->mode == BG_SHOT_VIEW_BRIDGE ?
+        (float)entry->frac * (0.001f / (float)BG_SHOT_VIEW_BRIDGE_STEPS) : 0.0f;
+    for (i = 0; i < 3; ++i) {
+        pose->origin[i] = first->origin[i] + first->velocity[i] * seconds;
+        pose->angles[i] = first->angles[i];
+    }
+    pose->moveDir = first->moveDir;
+    pose->lean = first->lean;
 }
 
 qboolean BG_PlayerTouchesItem(playerState_t *ps, entityState_t *item, int atTime)

@@ -3,6 +3,7 @@
 #include "bytematch.h"
 #include "cod2_feature_config.h"
 #include "cod2_sprint.h"
+#include "headers/PC/bgame/bg_shot_view.h"
 #include <math.h>
 
 #if COD2_FEATURE_GAMEPAD
@@ -61,6 +62,15 @@ extern qboolean Sys_IsLANAddress(netadr_t adr);
 extern struct clientStatic_t cls;
 extern int com_frameTime;
 extern unsigned int frame_msec;
+extern int CG_GetShotView(bgShotView_t *view);
+
+/* The view each command was sampled against, by command number. Only a
+ * command that may fire carries one: attack held, or released just before,
+ * for a shot its weapon delays. */
+#define CL_SHOT_VIEW_AFTER_ATTACK 300
+static bgShotView_t cl_shotViews[128];
+static qboolean cl_sampleShotViews;
+static int cl_lastAttackTime = -100000;
 
 void CL_WritePacketDbg(const char *fmt, int serverId)
 {
@@ -896,6 +906,57 @@ void CL_WriteVoicePacket(void)
     NET_OutOfBandVoiceData(clc->netchan.sock, clc->serverAddress, msg.data, msg.cursize);
 }
 
+/* The newest commands' views follow the packet's commands, where a server
+ * that knows nothing of them stops reading. */
+static void CL_WriteShotViews(msg_t *buf, const clientActive_t *cl, int count)
+{
+    int first = count > BG_SHOT_VIEW_RECORDS ? count - BG_SHOT_VIEW_RECORDS : 0;
+    int records = 0;
+    int i, j;
+
+    for (i = first; i < count; i++)
+        records += cl_shotViews[(cl->cmdNumber - count + 1 + i) & 127].count > 0;
+    if (!records)
+        return;
+    MSG_WriteBits(buf, BG_SHOT_VIEW_OP, 3);
+    MSG_WriteByte(buf, records);
+    for (i = first; i < count; i++) {
+        const bgShotView_t *view = &cl_shotViews[(cl->cmdNumber - count + 1 + i) & 127];
+
+        if (!view->count)
+            continue;
+        MSG_WriteLong(buf, view->serverTime);
+        MSG_WriteByte(buf, view->count);
+        for (j = 0; j < view->count; j++) {
+            const bgShotViewEntry_t *entry = &view->entries[j];
+
+            MSG_WriteByte(buf, entry->clientNum | entry->mode << 6);
+            MSG_WriteLong(buf, entry->time);
+            if (entry->mode == BG_SHOT_VIEW_BLEND) {
+                MSG_WriteShort(buf, entry->span);
+                MSG_WriteShort(buf, entry->frac);
+            } else if (entry->mode == BG_SHOT_VIEW_BRIDGE) {
+                MSG_WriteShort(buf, entry->frac);
+            }
+        }
+    }
+}
+
+static void CL_SampleShotView(const clientActive_t *cl)
+{
+    const usercmd_t *cmd = &cl->cmds[cl->cmdNumber & 127];
+    bgShotView_t *view = &cl_shotViews[cl->cmdNumber & 127];
+
+    view->serverTime = cmd->serverTime;
+    view->count = 0;
+    if (cmd->buttons & 1)
+        cl_lastAttackTime = cls.realtime;
+    else if (cls.realtime - cl_lastAttackTime > CL_SHOT_VIEW_AFTER_ATTACK)
+        return;
+    if (cl_sampleShotViews)
+        CG_GetShotView(view);
+}
+
 void CL_WritePacket(void)
 {
     clientConnection_t *clc_ptr;
@@ -1012,6 +1073,7 @@ write_cmdcount:
             prevCmd = curCmd;
         }
         lastCmd = prevCmd;
+        CL_WriteShotViews(&buf, cl4, compressedSize);
     } else {
         lastCmd = &nullcmd;
     }
@@ -1552,6 +1614,7 @@ void CL_SendCmdInternal(void)
         cl = *(clientActive_t **)imp_cl;
         ++cl->cmdNumber;
         cl->cmds[cl->cmdNumber & 127] = CL_CreateCmd();
+        CL_SampleShotView(cl);
     }
 
     if (clc->demoplaying || clc->state == CA_CINEMATIC || clc->state == CA_LOGO) {
@@ -1624,7 +1687,10 @@ void CL_Input(void)
     if ((*(clientConnection_t **)imp_clc)->state != 8)
         return;
     CL_SyncGpu();
+    /* Only the cgame's frame has drawn the players a command's view names. */
+    cl_sampleShotViews = 1;
     CL_SendCmdInternal();
+    cl_sampleShotViews = 0;
 }
 
 void CL_SendCmd(void)
