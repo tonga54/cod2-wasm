@@ -85,7 +85,7 @@ test = r'''
 #include <string.h>
 #include "SOURCE"
 static dvar_t glow, radius0, radius1, intensity0, intensity1, cutoff, desaturation, fullbright, samples, dof, film,
-    motion, scene, ssao, atmosphere, sunShafts, shockwave;
+    motion, scene, ssao, atmosphere, sunShafts, shockwave, clarity;
 const dvar_t *r_glow = &glow;
 const dvar_t *r_glowRadius[2] = {&radius0, &radius1};
 const dvar_t *r_glowBloomIntensity[2] = {&intensity0, &intensity1};
@@ -101,6 +101,7 @@ const dvar_t *r_ssao = &ssao;
 const dvar_t *r_atmosphere = &atmosphere;
 const dvar_t *r_sunShafts = &sunShafts;
 const dvar_t *r_shockwave = &shockwave;
+const dvar_t *r_clarity = &clarity;
 void WebSunShadows_Render(void)
 {
 }
@@ -230,7 +231,7 @@ int main(void)
 {
     assert(SCENE_FX_VM_MOTION == 35 && SCENE_FX_VM_TRIANGLES == 36 && SCENE_FX_VM_INDEX_ROW == 37 &&
            SCENE_FX_VM_TILE_ROW == 38 && SCENE_FX_VM_ROWS == 39 && SCENE_FX_VM_TILE == 40 &&
-           SCENE_FX_VM_TILES_X == 41 && SCENE_FX_SCOPE == 42 && SCENE_FX_SCOPE_END == 55 && SCENE_FX_AO == 55 && SCENE_FX_HAZE == 59 && SCENE_FX_SHAFTS == 73 && SCENE_FX_PARAM_COUNT == 100);
+           SCENE_FX_VM_TILES_X == 41 && SCENE_FX_SCOPE == 42 && SCENE_FX_SCOPE_END == 55 && SCENE_FX_AO == 55 && SCENE_FX_HAZE == 59 && SCENE_FX_SHAFTS == 73 && SCENE_FX_CLARITY == 100 && SCENE_FX_PARAM_COUNT == 101);
     /* The mesh texture holds the most vertices, indices and tiles at once. */
     assert(SCENE_FX_VM_MESH_WIDTH == 1024 && SCENE_FX_VM_MESH_ROWS == 64);
     assert(SCENE_FX_VM_MAX_VERTICES * 2 / 1024 + SCENE_FX_VM_MAX_TRIANGLES * 3 / 4096 +

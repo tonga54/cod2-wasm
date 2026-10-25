@@ -44,7 +44,7 @@ EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShado
                                   int normalMap, int specularMap, int detailMap, float detailX, float detailY,
                                   int lightmapped, float specularScale, float sunShading, float sunVisibility,
                                   int camoMap, int camoMask, float camoTiles, float camoReference, float lodBias,
-                                  float reflection), {
+                                  float reflection, float cavity), {
     Module.cod2VertexColorOrder = colorOrder;
     // The material's original maps, for the generated shaders' per-pixel pass,
     // and a camouflaged gun's pattern and paint mask.
@@ -54,6 +54,8 @@ EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShado
             surface: new Float32Array(4), detail: new Float32Array(4),
             sunEye: new Float32Array(3), skyEye: new Float32Array(4), sunColor: new Float32Array(4),
             model: new Float32Array(4), camo: new Float32Array(4), view: new Float32Array(16),
+            // How much the folds of a lightmapped surface's normal map shade it (r_cavity).
+            relief: new Float32Array(4),
             sunShadowEye: new Float32Array(16), sunShadow: new Float32Array(4), sunShadowRect: new Float32Array(4),
             // Coverage, feather, heat and near clip: web_effects.c sets them after these.
             effect: new Float32Array(4),
@@ -117,6 +119,7 @@ EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShado
     // Whether surfaces with a specular map mirror the sky and ground (r_reflections).
     material.skyEye[3] = reflection;
     material.model[0] = sunVisibility;
+    material.relief[0] = cavity > 0 ? Math.min(cavity, 2) : 0;
     var camo = material.camo, painted = present[3] && present[4] ? 1 : 0;
     camo[0] = painted; camo[1] = painted ? camoTiles : 0; camo[2] = painted ? camoReference : 0;
     var viewChanged = false;

@@ -42,6 +42,8 @@ const dvar_t *r_fxHeat;
 const dvar_t *r_atmosphere;
 const dvar_t *r_sunShafts;
 const dvar_t *r_shockwave;
+const dvar_t *r_cavity;
+const dvar_t *r_clarity;
 #endif
 extern const dvar_t *r_znear;
 extern const dvar_t *r_znear_depthhack;
@@ -557,6 +559,12 @@ void R_RegisterDvars(void)
     /* An explosion's shockwave bends the view about it as it spreads
      * (downstream/wasm/web_scene_fx.c). */
     r_shockwave = ri.Dvar_RegisterBool("r_shockwave", 1, 0x2001);
+    /* How much the joints and grooves a lightmapped surface's normal map
+     * folds into darken, and its edges lighten, 0 for none. */
+    r_cavity = ri.Dvar_RegisterFloat("r_cavity", 1.0f, 0.0f, 2.0f, 0x2001);
+    /* How far each pixel's light moves from its surroundings', 0 for none
+     * (downstream/wasm/web_scene_fx.c). */
+    r_clarity = ri.Dvar_RegisterFloat("r_clarity", 1.0f, 0.0f, 2.0f, 0x2001);
 #endif
 
     r_outdoorAwayBias = ri.Dvar_RegisterFloat("r_outdoorAwayBias", 32.0f, -3.4028235e+38f, 3.4028235e+38f, 0x2000);

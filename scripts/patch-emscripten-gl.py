@@ -263,6 +263,8 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
             // fades the color), the heat and the near clip the depth needs.
             pointDefs += "uniform sampler2D u_cod2DetailMap; uniform sampler2D u_cod2NormalMap; uniform sampler2D u_cod2SpecMap;\n" +
               "uniform vec4 u_cod2Surface; uniform vec4 u_cod2Detail; uniform vec4 u_cod2Model; uniform highp vec4 u_cod2Effect;\n" +
+              // x: how much a lightmapped surface's folds shade it (r_cavity).
+              "uniform vec4 u_cod2Relief;\n" +
               // The sky's direction in eye space; w is 1 while surfaces with a
               // specular map mirror their surroundings (r_reflections).
               "uniform highp vec3 u_cod2SunEye; uniform highp vec4 u_cod2SkyEye; uniform vec4 u_cod2SunColor;\n" +
@@ -298,6 +300,25 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
               // models relief where it shines, so only the shade takes it.
               "float cod2Cavity(highp vec3 b, highp vec3 n, float sunlit) {\n" +
               "  return 1.0 - 0.5 * (1.0 - max(dot(b, n), 0.0)) * (1.0 - clamp(sunlit, 0.0, 1.0));\n}\n" +
+              // COD2_RELIEF_CREASE: the map's slopes a pixel's footprint further
+              // along +u and +v. Where they converge the surface folds in, a joint
+              // between stones or a groove between planks; where they part it
+              // folds out, an edge. The fold is per world unit, so a map at half
+              // resolution folds as one at full does, and it fades out as pixels
+              // grow past a unit and a half of the world, 0.75 to 2.25.
+              "float cod2Crease(highp vec2 uv) {\n" +
+              "  highp vec2 du1 = dFdx(uv), du2 = dFdy(uv);\n" +
+              "  highp vec2 size = vec2(textureSize(u_cod2NormalMap, 0));\n" +
+              "  highp vec2 t1 = du1 * size, t2 = du2 * size;\n" +
+              "  highp float span = max(sqrt(max(dot(t1, t1), dot(t2, t2))), 1.0);\n" +
+              "  highp vec3 dp1 = dFdx(v_cod2Eye), dp2 = dFdy(v_cod2Eye);\n" +
+              "  highp float units = 0.5 * span * (sqrt(dot(dp1, dp1) / max(dot(t1, t1), 1e-12)) +\n" +
+              "    sqrt(dot(dp2, dp2) / max(dot(t2, t2), 1e-12)));\n" +
+              "  vec2 m = texture2D(u_cod2NormalMap, uv).ag;\n" +
+              "  vec2 mu = texture2D(u_cod2NormalMap, uv + vec2(span / size.x, 0.0)).ag;\n" +
+              "  vec2 mv = texture2D(u_cod2NormalMap, uv + vec2(0.0, span / size.y)).ag;\n" +
+              "  return 2.0 * (mu.x - m.x + mv.y - m.y) / max(units, 1e-6) *\n" +
+              "    (1.0 - smoothstep(0.75, 2.25, 0.5 * (length(dp1) + length(dp2))));\n}\n" +
               "float cod2Phong(highp vec3 n, highp vec3 l, highp float power) {\n" +
               "  highp vec3 v = -v_cod2Eye * inversesqrt(max(dot(v_cod2Eye, v_cod2Eye), 1e-30));\n" +
               "  highp float h = max(dot(n, normalize(l + v)), 0.0);\n" +
@@ -411,6 +432,13 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "cod2SunPart *= cod2SunShadow(cod2L.a);\n" +
                 "vec3 cod2Lit = cod2Indirect * (cod2Sky(cod2B) / cod2Sky(cod2N) * cod2Cavity(cod2B, cod2N, cod2L.a)) +\n" +
                 "  cod2SunPart * cod2Incidence;\n" +
+                // COD2_RELIEF_CREASE: a joint or groove takes less of every light,
+                // the sun's too, and an edge a little more; slight folds, the
+                // stone's own grain, take none.
+                "if (u_cod2Surface.x > 0.5 && u_cod2Relief.x > 0.0) {\n" +
+                "float cod2Fold = cod2Crease(" + pointUV + ");\n" +
+                "cod2Lit *= (1.0 - 0.45 * u_cod2Relief.x * smoothstep(0.2, 1.0, -cod2Fold)) *\n" +
+                "  (1.0 + 0.12 * u_cod2Relief.x * smoothstep(0.2, 1.0, cod2Fold));\n}\n" +
                 "gl_FragColor.rgb *= max(cod2Lit, vec3(0.0)) / max(cod2L.rgb, vec3(0.004));\n" +
                 "gl_FragColor.rgb += cod2S.rgb * cod2SunPart * (2.0 * u_cod2Surface.w * cod2Phong(cod2B, u_cod2SunEye, cod2P));\n" +
                 // COD2_WORLD_REFLECTION: the light around the surface, the
@@ -516,6 +544,7 @@ POINT_UNIFORMS_REPLACEMENT = r'''        this.normalMatrixLocation = GLctx.getUn
         this.cod2SunShadowRectLocation = GLctx.getUniformLocation(this.program, "u_cod2SunShadowRect");
         this.cod2SunShadowMapLocation = GLctx.getUniformLocation(this.program, "u_cod2SunShadowMap");
         this.cod2EffectLocation = GLctx.getUniformLocation(this.program, "u_cod2Effect");
+        this.cod2ReliefLocation = GLctx.getUniformLocation(this.program, "u_cod2Relief");
         this.cod2FeatherDepthLocation = GLctx.getUniformLocation(this.program, "u_cod2FeatherDepth");
         this.cod2MaterialUniforms = null;
         this.cod2LightCount = -1;
@@ -584,11 +613,11 @@ POINT_UPLOAD_REPLACEMENT = r'''        // COD2_POINT_LIGHT_UNIFORMS: cache per p
             // alternate, but each program mostly sees the same ones.
             materialUniforms = this.cod2MaterialUniforms = [];
             var materialNames = ["surface", "detail", "sunEye", "sunColor", "skyEye", "model", "camo",
-              "sunShadowEye", "sunShadow", "sunShadowRect", "effect"];
+              "sunShadowEye", "sunShadow", "sunShadowRect", "effect", "relief"];
             var materialLocations = [this.cod2SurfaceLocation, this.cod2DetailLocation, this.cod2SunEyeLocation,
               this.cod2SunColorLocation, this.cod2SkyEyeLocation, this.cod2ModelLocation, this.cod2CamoLocation,
               this.cod2SunShadowEyeLocation, this.cod2SunShadowLocation, this.cod2SunShadowRectLocation,
-              this.cod2EffectLocation];
+              this.cod2EffectLocation, this.cod2ReliefLocation];
             for (var materialIndex = 0; materialIndex < materialNames.length; ++materialIndex) {
               if (!materialLocations[materialIndex]) continue;
               materialUniforms.push({name: materialNames[materialIndex], location: materialLocations[materialIndex],

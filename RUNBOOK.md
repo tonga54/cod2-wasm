@@ -6413,3 +6413,46 @@ Validation:
 Not covered: the textures are procedural; the mounted guns and seven other
 weapons were not fired; the Pi's rebuild was not run; only the M4 in Chrome
 was measured.
+
+## Textures and depth after CoD WWII — 2026-10-25
+
+The owner asked for better textures and depth on every map, as close as
+possible to his Call of Duty: WWII captures. Details and measurements are in
+`docs/GRAPHICS_2026-10-16.md` ("Textures and depth after CoD WWII").
+
+- CoD WWII's walls read stone by stone over dark joints. CoD2's maps have the
+  normal maps for it, but the browser shaded relief only by how far a map
+  leans, so a joint read no darker than its stones.
+- `scripts/patch-emscripten-gl.py` adds folds (`r_cavity`, 0 to 2, archived,
+  1): on lightmapped surfaces with a normal map, where the map's slopes
+  converge into a joint or a groove the surface loses up to 45% of its light
+  and over an edge gains up to 12%, measured per world unit so maps at half
+  and full resolution fold alike, and fading out as pixels grow from 0.75 to
+  2.25 units. The device passes the dvar in `u_cod2Relief`.
+- `downstream/wasm/web_scene_fx.c` adds local contrast (`r_clarity`, 0 to 2,
+  archived, 1): each pixel's light moves from its surroundings', a quarter-
+  resolution blur of the scene's light, by at most 14%, less in the
+  highlights. Ambient occlusion (`r_ssao`) gains a second ring three times as
+  wide, 66 units.
+- Full-resolution normal maps were tried and stay off: the relief fades a mip
+  level earlier with them, flattening a Carentan facade about 10 m away.
+
+Validation:
+
+- `test-web-point-lights.cjs`, `test-web-scene-fx.py` (118 mutants, from
+  114), `test-viewmodel-motion.py` and `test-web-materials.py` in
+  `test-static.sh`; the GPU scripts `test-web-material-lighting.mjs` (109
+  checks, from 87, and 11 shader mutants) and `test-web-scene-fx.mjs` (186,
+  from 171) on the M4.
+- On the isolated QA stack, 32 views at four TDM spawns of each of the eight
+  maps against the client built from `b88b4d2`: stone, brick and plank walls
+  read with dark joints, cobbles stand out, trees and far houses separate from
+  what lies behind them; no halo about tree crowns against the sky.
+- Uncapped, in the one view the GPU nearly limits (Toujane, 280 fps), the
+  folds, local contrast and both occlusion rings cost about 0.06, 0.06 and
+  0.14 ms a frame; elsewhere the main thread sets the frame rate. Interleaved
+  with every new feature off, the previous client and this one ran alike.
+
+Not covered: only the M4 in Chrome was measured; models keep their relief as
+before; the local contrast ignores depth, so the sky beside a dark silhouette
+can lighten by up to 14%.

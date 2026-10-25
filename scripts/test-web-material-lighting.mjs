@@ -43,10 +43,12 @@ try {
     };
     // A plane facing the camera, or tilted for models; UVs grow with x and y.
     // A slope turns the world's plane away from the camera about its y axis.
+    // eyeScale widens the plane, and each pixel, by its factor.
     const vs = compile(gl.VERTEX_SHADER, '#version 300 es\nprecision highp float;uniform vec3 normal;uniform float uvScale;uniform float slope;' +
+      'uniform float eyeScale;' +
       'out highp vec3 v_cod2Eye;out mediump vec3 v_cod2Normal;out highp vec4 v_texCoord0;out highp vec4 v_texCoord1;out mediump vec4 v_color;' +
       'void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.-1.,0,1);v_texCoord0=vec4(p*uvScale,0,1);' +
-      'v_texCoord1=vec4(p,0,1);v_cod2Eye=vec3((p-.5)*16.,-40.+slope*(p.x-.5)*16.);v_cod2Normal=normal;v_color=vec4(.5,.5,.5,1);}');
+      'v_texCoord1=vec4(p,0,1);v_cod2Eye=vec3((p-.5)*16.*eyeScale,-40.+slope*(p.x-.5)*16.*eyeScale);v_cod2Normal=normal;v_color=vec4(.5,.5,.5,1);}');
     const programs = {};
     for (const [name, list] of Object.entries(shaders)) programs[name] = list.map(shader => {
       const p = gl.createProgram(); gl.attachShader(p, vs); gl.attachShader(p, compile(gl.FRAGMENT_SHADER, shader.source));
@@ -80,9 +82,10 @@ try {
       // map bound the sun's shadow stays off (u_cod2SunShadow is zero).
       gl.uniform1i(u('u_cod2SunShadowMap'), 18);
       gl.uniform3fv(u('normal'), set.normal || [0, 0, 1]); gl.uniform1f(u('uvScale'), set.uvScale || 1);
-      gl.uniform1f(u('slope'), set.slope || 0);
+      gl.uniform1f(u('slope'), set.slope || 0); gl.uniform1f(u('eyeScale'), set.eyeScale || 1);
       gl.uniform4fv(u('u_cod2Surface'), set.surface || [0, 0, 0, 1]); gl.uniform4fv(u('u_cod2Detail'), set.detail || [0, 0, 0, 0]);
       gl.uniform4fv(u('u_cod2Model'), [set.sunVisibility || 0, 0, 0, 0]);
+      gl.uniform4fv(u('u_cod2Relief'), [set.cavity || 0, 0, 0, 0]);
       gl.uniform3fv(u('u_cod2SunEye'), set.sun || [0, 0, 1]);
       if (uniformType(p, 'u_cod2SkyEye') === gl.FLOAT_VEC4)
         gl.uniform4fv(u('u_cod2SkyEye'), [...(set.sky || [0, 1, 0]), set.reflection === undefined ? 1 : set.reflection]);
@@ -148,6 +151,57 @@ try {
         lightmap(255);
         close(center(draw(after, cavityLit)), L.map((l, c) => base * 2 * (l - S[c] + S[c] * Math.SQRT1_2)), 2,
           `${kind}: in sunlight only the sun's incidence shades it`);
+        // COD2_RELIEF_CREASE: where the map's x slope turns from leaning +u to
+        // leaning -u the surface folds into a groove and darkens, where it turns
+        // back an edge lightens; the flat map does not change. The plane spans
+        // 16 units over 64 pixels, so a 32-texel map's texel is half a unit and
+        // a 64-texel map's a quarter: the same groove at twice the resolution
+        // turns over two texels and folds as much.
+        {
+          const groove = (size, at) => texture(6, size, x =>
+            [128, 128, 255, x < at ? 147 : (size === 64 && x === at ? 128 : 109)]);
+          const creaseLit = {surface: [1, 0, 1, 1], shading: 0, sun: [0, 0, 1]};
+          const px = (pixels, x, y = 32) => pixels[(y * 64 + x) * 4];
+          lightmap(0);
+          groove(32, 16);
+          const off32 = draw(after, creaseLit), on32 = draw(after, {...creaseLit, cavity: 1});
+          check(same(draw(after, {...creaseLit, cavity: 0}), off32), `${kind}: r_cavity 0 folds nothing`);
+          const dark32 = px(off32, 31) - px(on32, 31);
+          check(dark32 > 15 && Math.abs(px(on32, 10) - px(off32, 10)) <= 1,
+            `${kind}: a groove darkens (${px(off32, 31)} to ${px(on32, 31)}), the flat map keeps its light`);
+          check(px(on32, 63) > px(off32, 63) + 2, `${kind}: an edge lightens (${px(off32, 63)} to ${px(on32, 63)})`);
+          check(px(off32, 31) - px(draw(after, {...creaseLit, cavity: 2}), 31) > dark32 * 1.5, `${kind}: r_cavity 2 folds deeper`);
+          groove(64, 32);
+          const off64 = draw(after, creaseLit), on64 = draw(after, {...creaseLit, cavity: 1});
+          const dark64 = px(off64, 31) - px(on64, 31);
+          check(Math.abs(dark64 - dark32) <= 2, `${kind}: the groove at twice the resolution folds as much (${dark32} and ${dark64})`);
+          // A slight fold, the stone's own grain, takes none.
+          texture(6, 32, x => [128, 128, 255, x < 16 ? 133 : 123]);
+          check(same(draw(after, creaseLit), draw(after, {...creaseLit, cavity: 1}), 1), `${kind}: a slight fold takes no shade`);
+          // The same groove along v, in the map's y (green).
+          texture(6, 32, (x, y) => [128, y < 16 ? 147 : 109, 255, 128]);
+          const offV = draw(after, creaseLit), onV = draw(after, {...creaseLit, cavity: 1});
+          const darkV = px(offV, 32, 31) - px(onV, 32, 31);
+          check(Math.abs(darkV - dark32) <= 2, `${kind}: a groove along v folds as much (${darkV})`);
+          // A minified map folds over a pixel's footprint: at two texels a pixel,
+          // sampled a mip down, a gentler groove darkens 22% too.
+          texture(6, 32, x => [128, 128, 255, x < 16 ? 147 : 128]);
+          const offMin = draw(after, {...creaseLit, uvScale: 4}), onMin = draw(after, {...creaseLit, uvScale: 4, cavity: 1});
+          const minified = (px(offMin, 7) - px(onMin, 7)) / px(offMin, 7);
+          check(minified > 0.15 && minified < 0.3, `${kind}: a minified map folds over a pixel's footprint (${(minified * 100).toFixed(0)}%)`);
+          texture(6, 32, (x, y) => [128, y < 16 ? 147 : 128, 255, 128]);
+          const offMinV = draw(after, {...creaseLit, uvScale: 4}), onMinV = draw(after, {...creaseLit, uvScale: 4, cavity: 1});
+          const minifiedV = (px(offMinV, 32, 7) - px(onMinV, 32, 7)) / px(offMinV, 32, 7);
+          check(minifiedV > 0.15 && minifiedV < 0.3, `${kind}: along v too (${(minifiedV * 100).toFixed(0)}%)`);
+          // Pixels of a unit and a half fold half as much: a sharp groove there
+          // darkens 28% instead of 45%.
+          texture(6, 64, x => [128, 128, 255, x < 32 ? 255 : 0]);
+          const offFar = draw(after, {...creaseLit, eyeScale: 6}), onFar = draw(after, {...creaseLit, eyeScale: 6, cavity: 1});
+          const far = (px(offFar, 31) - px(onFar, 31)) / px(offFar, 31);
+          check(far > 0.15 && far < 0.35, `${kind}: pixels of 1.5 units fold less (${(far * 100).toFixed(0)}%)`);
+          check(same(draw(before, creaseLit), draw(before, {...creaseLit, cavity: 1})), `${kind}: the baseline has no folds`);
+          lightmap(255);
+        }
         texture(6, 16, solid([128, 128, 255, 128]));
         // Highlights: the sun's, in sunlight only, scaled by the map.
         const spec = center(draw(after, {surface: [0, 1, 1, 1], shading: 1, reflection: 0}));

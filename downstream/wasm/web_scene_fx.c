@@ -11,7 +11,7 @@
  * depth of field on the viewmodel and the near world while aiming, shafts of
  * sunlight through what stands against the sky (r_sunShafts), the shockwave
  * of an explosion bending the view about it (r_shockwave), contrast adaptive
- * sharpening and a light film grade.
+ * sharpening, local contrast (r_clarity) and a light film grade.
  * A raised WWII scope (cg_wwiiscope_mp.c) turns its glass into a window: the
  * rifle is drawn with its own projection and near clip and kept off the glass
  * by the stencil, so the magnified world shows through, and the world around
@@ -38,6 +38,7 @@ extern const dvar_t *r_ssao;
 extern const dvar_t *r_atmosphere;
 extern const dvar_t *r_sunShafts;
 extern const dvar_t *r_shockwave;
+extern const dvar_t *r_clarity;
 
 /* Draws the sun's shadow map of the frame's moving models (web_sun_shadows.c). */
 void WebSunShadows_Render(void);
@@ -132,7 +133,10 @@ enum {
      * each one is, 0 for none. */
     SCENE_FX_BLAST = SCENE_FX_SHAFTS_COLOR + 3,
     SCENE_FX_BLAST_DEPTH = SCENE_FX_BLAST + 4 * SCENE_FX_BLASTS,
-    SCENE_FX_PARAM_COUNT = SCENE_FX_BLAST_DEPTH + SCENE_FX_BLASTS
+    /* Local contrast (r_clarity): how far each pixel's light moves from its
+     * surroundings', 0 for none. */
+    SCENE_FX_CLARITY = SCENE_FX_BLAST_DEPTH + SCENE_FX_BLASTS,
+    SCENE_FX_PARAM_COUNT
 };
 
 #define SCENE_FX_SCOPE_FLOATS (SCENE_FX_SCOPE_END - SCENE_FX_SCOPE)
@@ -176,6 +180,10 @@ enum {
 #define SCENE_FX_BLAST_BEND 0.03f
 #define SCENE_FX_BLAST_NEAR 1.5f
 #define SCENE_FX_BLAST_MAX_RADIUS 2048.0f
+
+/* At r_clarity 1 a pixel's light moves this share of its difference from its
+ * surroundings' further from them. */
+#define SCENE_FX_CLARITY_GAIN 0.4f
 
 /* InfinitePerspectiveMatrix's depth scale times the default r_znear of 4. */
 #define SCENE_FX_DEFAULT_WORLD_NEAR_CLIP (0.9995002746582031f * 4.0f)
@@ -404,6 +412,13 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "      sum += texture(u_src, v_uv + vec2(d[x], d[y]) * u_step) * (k[x] * k[y]);\n" +
                 "  o = sum;\n}\n",
                 ["u_src"], ["u_step"]);
+            /* Local contrast (r_clarity): the scene's light at a quarter of its
+             * size, which the aim blur's kernel spreads into each pixel's
+             * surroundings. */
+            link("clarity", "uniform sampler2D u_src;\nuniform highp vec2 u_texel;\n" +
+                "void main() {\n" + quarter +
+                "  o = vec4(vec3(0.25 * dot(c + d + e + f, vec3(0.2126, 0.7152, 0.0722))), 1.0);\n}\n",
+                ["u_src"], ["u_texel"]);
             /* Blur radius as a fraction of the largest. CoD4's r_dof_bias of 0.5
              * squares the viewmodel's circle of confusion, so the hand ahead of
              * the receiver stays crisper than the receiver. The viewmodel draws
@@ -526,6 +541,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "  o = vec4(1.0, floor(zn) / 255.0, fract(zn), 1.0);\n" +
                 "  highp float r = u_aoParams.x * u_aoView.w / z * 0.5 * u_aoParams.w;\n" +
                 "  if (d < 0.2 || d >= 0.9999 || r < 1.5) return;\n" +
+                "  highp float rw = min(3.0 * r, 0.2 * u_aoParams.w);\n" +
                 "  r = min(r, 0.1 * u_aoParams.w);\n" +
                 "  highp vec3 p = aoPos(c, z);\n" +
                 "  ivec2 cl = max(c - ivec2(2, 0), ivec2(0)), cr = min(c + ivec2(2, 0), m);\n" +
@@ -549,6 +565,19 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "    highp float vv = dot(v, v);\n" +
                 "    occlusion += max(dot(v, n) * inversesqrt(max(vv, 1e-6)) - 0.1, 0.0) * max(1.0 - vv / r2, 0.0);\n" +
                 "  }\n" +
+                /* A second ring three times as wide, at 0.6 of the first's weight:
+                 * the shade of a doorway, under an eave, at the foot of a wall. */
+                "  float wide = 0.0;\n" +
+                "  for (int i = 0; i < 8; ++i) {\n" +
+                "    float a = a0 + 1.2 + float(i) * 2.3999632;\n" +
+                "    ivec2 q = clamp(c + ivec2(vec2(cos(a), sin(a)) * (rw * (float(i) + 0.5) * 0.125)), ivec2(0), m);\n" +
+                "    highp float dq = texelFetch(u_depth, q, 0).r;\n" +
+                "    if (dq < 0.2) continue;\n" +
+                "    highp vec3 v = aoPos(q, aoZ(dq)) - p;\n" +
+                "    highp float vv = dot(v, v);\n" +
+                "    wide += max(dot(v, n) * inversesqrt(max(vv, 1e-6)) - 0.15, 0.0) * max(1.0 - vv / (9.0 * r2), 0.0);\n" +
+                "  }\n" +
+                "  occlusion += 0.6 * wide;\n" +
                 /* Far surfaces fade out, where fog and texels blur. */
                 "  float fade = 1.0 - smoothstep(1400.0, 2600.0, z);\n" +
                 "  o.r = clamp(1.0 - u_aoParams.y * fade * occlusion * 0.25, 0.0, 1.0);\n}\n",
@@ -632,6 +661,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "uniform vec3 u_hazeSunColor;\nuniform highp vec3 u_hazeProj;\n" +
                 "uniform sampler2D u_shafts;\nuniform vec4 u_shaft;\n" +
                 "uniform highp vec4 u_blast[4];\nuniform highp vec4 u_blastDepth;\n" +
+                "uniform sampler2D u_clarityMap;\nuniform vec4 u_clarity;\n" +
                 coc + nearWorld + viewmodelMotion +
                 drawnEyepiece + "void main() {\n" +
                 /* An explosion's shockwave bends the view about its front as a
@@ -757,6 +787,15 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "    vec3 wt = -u_film.x * sqrt(clamp(min(lo, 1.0 - hi) / max(hi, vec3(0.0001)), 0.0, 1.0));\n" +
                 "    col = clamp((c + (n + s + e + w) * wt) / (1.0 + 4.0 * wt), 0.0, 1.0);\n" +
                 "  }\n" +
+                /* Each pixel's light moves further from its surroundings', as a
+                 * share of theirs bounded to 35%, so no edge rings, and least in
+                 * the highlights: stones, bricks and planks stand out of their
+                 * walls, and near things out of far ones. */
+                "  if (u_clarity.x > 0.0 && !smeared) {\n" +
+                "    float cl = dot(col, vec3(0.2126, 0.7152, 0.0722));\n" +
+                "    float cb = texture(u_clarityMap, uv).r;\n" +
+                "    col *= 1.0 + u_clarity.x * clamp((cl - cb) / max(cb, 0.05), -0.35, 0.35) * (1.0 - smoothstep(0.75, 1.0, cl));\n" +
+                "  }\n" +
                 /* The blurred occlusion, half a texel back where its 4 x 4
                  * box centres; the viewmodel keeps its own light. */
                 "  if (u_aoMix.x > 0.0 && texelFetch(u_depth, ivec2(gl_FragCoord.xy), 0).r >= 0.2)\n" +
@@ -855,10 +894,12 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "  if (u_lens.z > 0.0)\n" +
                 "    col *= 1.0 - u_lensFx.y * (1.0 - lensIn);\n" +
                 "  o = vec4(col, 1.0);\n}\n",
-                ["u_scene", "u_bloom", "u_depth", "u_dofMed", "u_dofLarge", "u_vmVelocity", "u_vmMesh", "u_ao", "u_shafts"],
+                ["u_scene", "u_bloom", "u_depth", "u_dofMed", "u_dofLarge", "u_vmVelocity", "u_vmMesh", "u_ao", "u_shafts",
+                 "u_clarityMap"],
                 ["u_px", "u_glow", "u_dof", "u_dof2", "u_film", "u_near", "u_tier",
                  "u_motion", "u_motionRotation", "u_motionMove", "u_vm", "u_lens", "u_lensInv", "u_lensFx", "u_aoMix",
-                 "u_haze", "u_hazeUp", "u_hazeSun", "u_hazeSunColor", "u_hazeProj", "u_shaft", "u_blast", "u_blastDepth"]);
+                 "u_haze", "u_hazeUp", "u_hazeSun", "u_hazeSunColor", "u_hazeProj", "u_shaft", "u_blast", "u_blastDepth",
+                 "u_clarity"]);
             /* A scene smaller than the canvas, filtered up to it with Catmull-Rom
              * in five bilinear taps (the corner taps weigh under 0.5%), as the
              * page scales the canvas again with its own bilinear filter. */
@@ -955,7 +996,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 ew: Math.max(1, Math.ceil(w / 8)), eh: Math.max(1, Math.ceil(h / 8)),
                 hw: Math.max(1, Math.ceil(w / 2)), hh: Math.max(1, Math.ceil(h / 2)),
                 textures: [], framebuffers: [], renderbuffers: [], ms: null, q: [], qFbo: [], e: [], eFbo: [],
-                ao: [], aoFbo: [], sh: [], shFbo: []
+                ao: [], aoFbo: [], sh: [], shFbo: [], cl: [], clFbo: []
             };
             var ok = true;
             var previousUnit = gl.getParameter(gl.ACTIVE_TEXTURE);
@@ -1010,6 +1051,9 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 /* The sky the sun lights, then its shafts. */
                 t.sh.push(texture(gl.RGBA8, t.qw, t.qh, gl.LINEAR));
                 t.shFbo.push(framebuffer(t.sh[i], null, null, null));
+                /* The scene's light, then its surroundings', for local contrast. */
+                t.cl.push(texture(gl.RGBA8, t.qw, t.qh, gl.LINEAR));
+                t.clFbo.push(framebuffer(t.cl[i], null, null, null));
             }
             gl.bindTexture(gl.TEXTURE_2D, null);
             gl.activeTexture(previousUnit);
@@ -1142,6 +1186,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             var glow = glow0 > 0 || glow1 > 0, blurBehind = backdrop > 0.004, dof = ads > 0.004 || blurBehind || lens;
             var ao = H[o + 55] > 0, haze = H[o + 62] > 0, shafts = H[o + 73] > 0;
             var blast = H[o + 96] > 0 || H[o + 97] > 0 || H[o + 98] > 0 || H[o + 99] > 0;
+            var clarity = H[o + 100] > 0;
             var lines = h / 480;
             var program = gl.getParameter(gl.CURRENT_PROGRAM);
             var vao = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
@@ -1197,6 +1242,19 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 gl.useProgram(P.aoBlur.program);
                 fx.texture(0, t.ao[0]);
                 fx.pass(P.aoBlur, t.aoFbo[1], t.hw, t.hh);
+            }
+            if (clarity) {
+                /* The surroundings deviate 5.3 pixels at 480 lines: the aim
+                 * blur's folded binomial deviates 1.414 steps of a quarter texel. */
+                gl.useProgram(P.clarity.program);
+                gl.uniform2f(P.clarity.u_texel, 1 / w, 1 / h);
+                fx.texture(0, t.color);
+                fx.pass(P.clarity, t.clFbo[0], qw, qh);
+                var spread = 5.3 * lines / 4 / 1.4142;
+                gl.useProgram(P.dofBlur.program);
+                gl.uniform2f(P.dofBlur.u_step, spread / qw, spread / qh);
+                fx.texture(0, t.cl[0]);
+                fx.pass(P.dofBlur, t.clFbo[1], qw, qh);
             }
             if (glow) {
                 var cutoff = H[o + 2], knee = Math.max(cutoff - 0.3, 0);
@@ -1313,8 +1371,9 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             gl.uniform4f(C.u_shaft, shafts ? H[o + 73] : 0, H[o + 77], H[o + 78], H[o + 79]);
             gl.uniform4f(C.u_blastDepth, H[o + 96], H[o + 97], H[o + 98], H[o + 99]);
             if (blast) gl.uniform4fv(C.u_blast, H.subarray(o + 80, o + 96));
+            gl.uniform4f(C.u_clarity, clarity ? H[o + 100] : 0, 0, 0, 0);
             var sources = [t.color, t.e[1], t.depth, t.q[0], t.q[1], vm ? vm.smear : null, vm ? vm.mesh : null, ao ? t.ao[1] : null,
-                shafts ? t.sh[1] : null];
+                shafts ? t.sh[1] : null, clarity ? t.cl[1] : null];
             for (var s = 0; s < sources.length; ++s) fx.texture(s, sources[s]);
             if (scaled) {
                 fx.pass(C, t.outFbo, w, h);
@@ -1444,6 +1503,14 @@ static int WebSceneFx_AoEnabled(void)
 static int WebSceneFx_HazeEnabled(void)
 {
     return WebSceneFx_Enabled(r_atmosphere) && !WebSceneFx_Enabled(r_fullbright) && s_hazeDensity > 0.0f;
+}
+
+/* How far r_clarity moves each pixel's light from its surroundings'. */
+static float WebSceneFx_Clarity(void)
+{
+    if (!r_clarity || WebSceneFx_Enabled(r_fullbright))
+        return 0.0f;
+    return WebSceneFx_Clamp(r_clarity->current.value, 0.0f, 2.0f) * SCENE_FX_CLARITY_GAIN;
 }
 
 /* The scene has a sun, and r_sunShafts asks for its shafts. */
@@ -2163,6 +2230,7 @@ static void WebSceneFx_FillParams(float *params)
     memcpy(params + SCENE_FX_SHAFTS_COLOR, s_hazeSunColor, sizeof(s_hazeSunColor));
     memcpy(params + SCENE_FX_BLAST, s_blastView, sizeof(s_blastView));
     memcpy(params + SCENE_FX_BLAST_DEPTH, s_blastDepth, sizeof(s_blastDepth));
+    params[SCENE_FX_CLARITY] = WebSceneFx_Clarity();
 }
 
 /* The mip bias the 3D draws of the composed view give their color maps. */
@@ -2228,7 +2296,7 @@ void WebSceneFx_BeginView(int x, int y, int width, int height, int screenWidth, 
     if (!scaled && s_grayFrac <= 0.0f && s_vmMotion <= 0.0f && !WebSceneFx_GlowEnabled() && !WebSceneFx_Enabled(r_filmTweakEnable) && samples <= 1 &&
         !(WebSceneFx_Enabled(r_dof_enable) && s_adsFrac > 0.0f) && s_motionScale <= 0.0f && s_backdropFrac <= 0.0f &&
         s_backdropGray <= 0.0f && !WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled() && !WebSceneFx_HazeEnabled() &&
-        !WebSceneFx_ShaftsEnabled() && !WebSceneFx_BlastsActive())
+        !WebSceneFx_ShaftsEnabled() && !WebSceneFx_BlastsActive() && WebSceneFx_Clarity() <= 0.0f)
         return;
     s_nearClip = nearClip;
     s_worldNearClip = isfinite(worldNearClip) && worldNearClip > 0.0f ? worldNearClip : SCENE_FX_DEFAULT_WORLD_NEAR_CLIP;

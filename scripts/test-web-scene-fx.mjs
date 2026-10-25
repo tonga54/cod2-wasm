@@ -592,6 +592,62 @@ try {
       gl.deleteVertexArray(callerVao); gl.deleteBuffer(arrayBuffer); gl.deleteBuffer(indexBuffer);
     }
 
+    // r_ssao's wide ring: a wall 370 units out with two windows onto another
+    // 30 units behind it, further than the first ring's 22 units reach. At 400
+    // units a pixel spans 0.625 units. The middle of the small window, 50 units
+    // (80 pixels) square, lies 25 units from every edge, within the wide ring's
+    // 66, and takes shade, more by its edge; the middle of the large one, more
+    // than 66 units from any edge, takes none, nor does the nearer wall in
+    // front. Parameters 55-58.
+    {
+      const aoAt = strength => HEAPF32.set([strength, 22, 1, 16 / 9], 16 + 55);
+      const aoLayout = () => {
+        rect(-1, -1, 1, 1, worldDepth(370), [0.5, 0.5, 0.5], 0);
+        gl.depthFunc(gl.ALWAYS);
+        rect(0.1875, -0.1111, 0.3125, 0.1111, worldDepth(400), [0.5, 0.5, 0.5], 0);
+        rect(-0.9, -0.8, -0.2, 0.8, worldDepth(400), [0.5, 0.5, 0.5], 0);
+        gl.depthFunc(gl.LESS);
+      };
+      aoAt(0);
+      const open = render(1, 0, {glow: 0, film: 0, layout: aoLayout});
+      aoAt(0.85);
+      const shaded = render(1, 0, {glow: 0, film: 0, layout: aoLayout}); snapshot('ao-wide');
+      aoAt(0);
+      const shade = r => region(open, ...r).mean - region(shaded, ...r).mean;
+      const small = [0.24, -0.04, 0.26, 0.04], large = [-0.56, -0.1, -0.54, 0.1], rim = [0.19, -0.04, 0.2, 0.04];
+      check(shade(small) > 2, `the wide ring shades the middle of a small window: -${shade(small).toFixed(1)}`);
+      check(Math.abs(shade(large)) < 1, `the middle of a large window stays open: ${shade(large).toFixed(1)}`);
+      check(shade(rim) > shade(small) + 2, `by the window's edge it shades more: -${shade(rim).toFixed(1)}`);
+      check(same(shaded, open, [0.5, -0.9, 0.9, 0.9]), 'the nearer wall, in front, takes no shade');
+    }
+
+    // r_clarity: each pixel's light moves from its surroundings' (100). A small
+    // bright patch on a mid-grey wall brightens and a dark one darkens, by at
+    // most 14% of their light; a highlight gains far less and the open wall
+    // keeps its light.
+    {
+      const clarityLayout = () => {
+        rect(-1, -1, 1, 1, worldDepth(1000), [0.4, 0.4, 0.4], 0);
+        rect(-0.505, -0.008, -0.495, 0.008, worldDepth(999), [0.6, 0.6, 0.6], 0);
+        rect(-0.005, -0.008, 0.005, 0.008, worldDepth(999), [0.25, 0.25, 0.25], 0);
+        rect(0.495, -0.008, 0.505, 0.008, worldDepth(999), [0.9, 0.9, 0.9], 0);
+      };
+      const flat = render(1, 0, {glow: 0, film: 0, layout: clarityLayout});
+      HEAPF32[16 + 100] = 0.4;
+      const crisp = render(1, 0, {glow: 0, film: 0, layout: clarityLayout}); snapshot('clarity');
+      HEAPF32[16 + 100] = 0;
+      check(same(render(1, 0, {glow: 0, film: 0, layout: clarityLayout}), flat, [-1, -1, 1, 1]), 'no strength, no local contrast');
+      const bright = [-0.502, -0.004, -0.498, 0.004], dark = [-0.002, -0.004, 0.002, 0.004], white = [0.498, -0.004, 0.502, 0.004];
+      const lift = r => region(crisp, ...r).mean - region(flat, ...r).mean;
+      check(lift(bright) > 10 && region(crisp, ...bright).mean <= region(flat, ...bright).mean * 1.145 + 1,
+        `a small bright patch brightens, within 14%: +${lift(bright).toFixed(1)}`);
+      check(lift(dark) < -4 && region(crisp, ...dark).mean >= region(flat, ...dark).mean * 0.855 - 1,
+        `a small dark patch darkens, within 14%: ${lift(dark).toFixed(1)}`);
+      check(lift(white) >= 0 && region(crisp, ...white).mean <= region(flat, ...white).mean * 1.06 + 1,
+        `a highlight gains at most 6%: +${lift(white).toFixed(1)}`);
+      check(same(crisp, flat, [-0.9, 0.4, 0.9, 0.9]) && same(crisp, flat, [-0.9, -0.9, 0.9, -0.4]), 'the open wall keeps its light');
+    }
+
     // Production state is restored exactly, including the cached WebGL entry points.
     check(bind(gl, Module, HEAPF32, W, H, 4) === 1, 'rebind without reallocating');
     drawScene();
@@ -612,7 +668,9 @@ try {
     check(bind(gl, Module, HEAPF32, W, H, 4) === 1, 'steady-state bind');
     gl.useProgram(scene);
     shaftsAt(2.5);
+    HEAPF32[16 + 100] = 0.4;
     compose(gl, Module, HEAPF32, params(1));
+    HEAPF32[16 + 100] = 0;
     shaftsAt(0, [0, 0], 0);
     gl.getParameter = getParameter; gl.checkFramebufferStatus = checkStatus;
     check(queried.length && queried.every(pname => cached.has(pname)), 'a composed frame makes no synchronous GL queries');
@@ -624,7 +682,7 @@ try {
       'composite writes every channel and leaves depth writes alone');
     check(caps.every(cap => gl.isEnabled(cap)), 'capabilities restored');
     check(gl.getParameter(gl.FRAMEBUFFER_BINDING) === null, 'later 2D draws reach the canvas');
-    for (const unit of [8, 9, 10, 11, 12, 13, 14, 15, 20]) {
+    for (const unit of [8, 9, 10, 11, 12, 13, 14, 15, 20, 21]) {
       gl.activeTexture(gl.TEXTURE0 + unit);
       check(gl.getParameter(gl.TEXTURE_BINDING_2D) === null, 'post texture unit ' + unit + ' released');
     }

@@ -291,8 +291,16 @@ retail CoD2:
   lights with the sun, so they never fall indoors or into baked shade; static
   props keep their baked shadows. See [graphics validation and limits](GRAPHICS_2026-10-16.md).
 - **Ambient occlusion:** corners, crevices and the ground under objects darken
-  from the scene's depth, computed at half resolution (`r_ssao`, archived, on).
-  The weapon and the sky stay unaffected, and it fades out past 1,400 units.
+  from the scene's depth, computed at half resolution over two rings, 22 and
+  66 units wide (`r_ssao`, archived, on). The weapon and the sky stay
+  unaffected, and it fades out past 1,400 units.
+- **Relief folds and local contrast:** where a lightmapped surface's normal
+  map folds into a joint or a groove the surface darkens, and over an edge it
+  lightens, measured per world unit (`r_cavity`, 0 to 2, archived, 1). Each
+  pixel's light moves from its surroundings' by up to 14%, less in the
+  highlights, so stones, bricks and planks stand out and near things separate
+  from far ones (`r_clarity`, 0 to 2, archived, 1). See
+  [graphics validation and limits](GRAPHICS_2026-10-16.md).
 - **Sun shafts and shockwaves:** the sky about the sun throws shafts of light
   past whatever stands against it, wider and longer when the sun is low, from
   two quarter-resolution passes (`r_sunShafts`, 0 to 2, archived, 1). Grenade,

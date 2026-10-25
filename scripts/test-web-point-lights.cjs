@@ -37,7 +37,7 @@ const set = emjs('WebPointLights_Set', ['packed', 'count']);
 // The device hands each draw's material maps over with its lights and shadows.
 const drawParams = ['view', 'enabled', 'worldShadowEnabled', 'colorOrder', 'normalMap', 'specularMap', 'detailMap',
   'detailX', 'detailY', 'lightmapped', 'specularScale', 'sunShading', 'sunVisibility', 'camoMap', 'camoMask', 'camoTiles',
-  'camoReference', 'lodBias', 'reflection'];
+  'camoReference', 'lodBias', 'reflection', 'cavity'];
 const drawHead = 'EM_JS(void, WebPointLights_Draw, (';
 const drawSignature = bridge.slice(bridge.indexOf(drawHead) + drawHead.length, bridge.indexOf('), {', bridge.indexOf(drawHead)));
 assert.deepEqual(drawSignature.split(',').map(param => param.trim().split(/[\s*]+/).pop()), drawParams);
@@ -46,7 +46,7 @@ const externHead = 'extern void WebPointLights_Draw(';
 const externSignature = device.slice(device.indexOf(externHead) + externHead.length, device.indexOf(');', device.indexOf(externHead)));
 assert.equal(externSignature.replace(/\s+/g, ' '), drawSignature.replace(/\s+/g, ' '), 'the device declares the bridge it calls');
 const drawFloats = drawSignature.split(',').map(param => /^\s*float\s+\w+\s*$/.test(param));
-assert.equal(drawFloats.filter(Boolean).length, 9);
+assert.equal(drawFloats.filter(Boolean).length, 10);
 const drawJs = emjs('WebPointLights_Draw', drawParams);
 // The engine passes C floats, and passes every argument: the ones a check
 // leaves out are zero.
@@ -301,7 +301,7 @@ assert(material.sunShadowDefault);
   const sources = sceneFx.match(/var sources = \[([\s\S]*?)\];/);
   assert(sources, 'the compositor names its sources');
   const fxUnits = sources[1].split(',').map((_, i) => 8 + fxUnit(i));
-  assert.deepEqual(fxUnits, [8, 9, 10, 11, 12, 13, 14, 15, 20]);
+  assert.deepEqual(fxUnits, [8, 9, 10, 11, 12, 13, 14, 15, 20, 21]);
   assert.deepEqual(material.units, [5, 6, 7, 16, 17]);
   for (const unit of [...material.units, 18, 19]) assert(!fxUnits.includes(unit) && unit < 32, `unit ${unit}`);
   assert(!material.units.includes(19), 'the effects\' depth shares no unit with the material maps or the sun\'s');
@@ -339,6 +339,18 @@ drawScene(0, 0, 0, 0, ...full, 0, 0, 0, 0, 0, 1);
 assert.equal(material.skyEye[3], 1);
 drawScene(256, 1, 1, 0, ...full);
 assert.equal(material.skyEye[3], 0);
+// r_cavity rides in the relief's x for every draw, at most 2; a broken value is none.
+drawScene(256, 1, 1, 0, ...full, 0, 0, 0, 0, 0, 0, 1);
+assert.equal(material.relief.length, 4);
+assert.equal(material.relief[0], 1);
+drawScene(256, 1, 1, 0, ...full, 0, 0, 0, 0, 0, 0, 3);
+assert.equal(material.relief[0], 2);
+drawScene(0, 0, 0, 0, ...full, 0, 0, 0, 0, 0, 0, 0.5);
+assert.equal(material.relief[0], 0.5);
+drawScene(256, 1, 1, 0, ...full, 0, 0, 0, 0, 0, 0, NaN);
+assert.equal(material.relief[0], 0);
+drawScene(256, 1, 1, 0, ...full);
+assert.equal(material.relief[0], 0);
 for (let i = 0; i < 1000; ++i) drawScene(256, 1, 1, 0, ...full);
 assert.deepEqual(glCalls, [], '1000 draws of one material bind nothing more');
 // A material without maps leaves the units alone; its flags turn them off.
@@ -456,6 +468,19 @@ upload.call(worldProgram, Module, materialGL);
 assert.deepEqual(materialUploads, [], 'world programs have no model uniform');
 upload.call(modelProgram, Module, materialGL);
 assert.deepEqual(materialUploads.splice(0), all(['surface', 'detail', 'model']));
+// r_cavity reaches the programs that take the relief, once per value.
+const reliefProgram = materialProgram({cod2ReliefLocation: 'relief'});
+drawScene(256, 1, 1, 0, 22, 23, 21, 8, 6, 1, 1.5, 0.65, 0.25, 0, 0, 0, 0, 0, 0, 1);
+upload.call(reliefProgram, Module, materialGL);
+assert.deepEqual(materialUploads.splice(0), [...samplers, ...all(['surface', 'detail', 'sunEye', 'sunColor', 'skyEye', 'relief'])]);
+assert.equal(all(['relief'])[0][2][0], 1);
+for (let i = 0; i < 1000; ++i) upload.call(reliefProgram, Module, materialGL);
+assert.deepEqual(materialUploads, []);
+drawScene(256, 1, 1, 0, 22, 23, 21, 8, 6, 1, 1.5, 0.65, 0.25, 0, 0, 0, 0, 0, 0, 0.5);
+upload.call(reliefProgram, Module, materialGL);
+assert.deepEqual(materialUploads.splice(0), all(['relief']));
+upload.call(worldProgram, Module, materialGL);
+assert(!materialUploads.splice(0).some(([, location]) => location === 'relief'), 'programs without the relief ignore it');
 // Programs that only apply the detail map still receive it.
 upload.call(detailProgram, Module, materialGL);
 assert.deepEqual(materialUploads.splice(0), [...samplers, ...all(['detail'])]);
@@ -473,7 +498,7 @@ assert.deepEqual(materialUploads, []);
 drawScene(256, 1, 1, 0, 22, 23, 21, 8, 6, 1, 1.5, 0.65, 0.25);
 upload.call(camoProgram, Module, materialGL);
 assert.deepEqual(materialUploads.splice(0), all(['camo']), 'an unpainted gun turns the paint off');
-console.log('PASS: material uniforms upload once per program and value across 2000 alternating world/model draws; detail-only programs; camouflage on lit model programs only; r_reflections in the sky\'s w for both');
+console.log('PASS: material uniforms upload once per program and value across 2000 alternating world/model draws; detail-only programs; camouflage on lit model programs only; r_reflections in the sky\'s w for both; r_cavity in the relief\'s x');
 
 // The generated passes: a lightmapped world variant and a lit model with
 // three of the eight fixed-function lights.
@@ -501,6 +526,24 @@ for (const matrix of [false, true]) {
   assert(world.pointDefs.includes('float cod2Cavity(highp vec3 b, highp vec3 n, float sunlit) {\n' +
     '  return 1.0 - 0.5 * (1.0 - max(dot(b, n), 0.0)) * (1.0 - clamp(sunlit, 0.0, 1.0));\n}\n'));
   assert(world.pointDefs.includes('float cod2Sky(highp vec3 n) { return 1.0 + 0.5 * dot(n, u_cod2SkyEye.xyz); }\n'));
+  // COD2_RELIEF_CREASE: the normal map's folds per world unit shade all the
+  // light of a mapped surface, sun included, after its relief and before the
+  // bake divides out, only with r_cavity in the relief's x.
+  assert(world.pointDefs.includes('uniform vec4 u_cod2Relief;\n'));
+  assert(world.pointDefs.includes('float cod2Crease(highp vec2 uv) {\n'));
+  assert(world.pointDefs.includes('  highp float units = 0.5 * span * (sqrt(dot(dp1, dp1) / max(dot(t1, t1), 1e-12)) +\n' +
+    '    sqrt(dot(dp2, dp2) / max(dot(t2, t2), 1e-12)));\n'), 'folds are per world unit, whatever the map\'s resolution');
+  assert(world.pointDefs.includes('  vec2 mu = texture2D(u_cod2NormalMap, uv + vec2(span / size.x, 0.0)).ag;\n' +
+    '  vec2 mv = texture2D(u_cod2NormalMap, uv + vec2(0.0, span / size.y)).ag;\n'), 'one footprint along +u and +v');
+  assert(world.pointDefs.includes('  return 2.0 * (mu.x - m.x + mv.y - m.y) / max(units, 1e-6) *\n' +
+    '    (1.0 - smoothstep(0.75, 2.25, 0.5 * (length(dp1) + length(dp2))));\n'), 'folds fade out as pixels grow');
+  const crease = world.pointPass.indexOf('if (u_cod2Surface.x > 0.5 && u_cod2Relief.x > 0.0) {\n' +
+    `float cod2Fold = cod2Crease(${uv(0)});\n` +
+    'cod2Lit *= (1.0 - 0.45 * u_cod2Relief.x * smoothstep(0.2, 1.0, -cod2Fold)) *\n' +
+    '  (1.0 + 0.12 * u_cod2Relief.x * smoothstep(0.2, 1.0, cod2Fold));\n}\n');
+  assert(crease > world.pointPass.indexOf('  cod2SunPart * cod2Incidence;\n') &&
+    crease < world.pointPass.indexOf('gl_FragColor.rgb *= max(cod2Lit, vec3(0.0)) / max(cod2L.rgb, vec3(0.004));'),
+    'folds shade the relit light before the bake divides out');
   assert(!world.pointPass.includes('gl_FragColor.a'), 'materials keep their alpha');
   // COD2_WORLD_REFLECTION: a specular map mirrors the lightmap's indirect
   // light after the sun's highlight, behind r_reflections in the sky's w.
@@ -527,6 +570,7 @@ for (const matrix of [false, true]) {
   assert(model.pointPass.includes('cod2Bumped += (cod2Ambient - cod2Sun) * (cod2Sky(cod2B) / cod2Sky(cod2N) * cod2Cavity(cod2B, cod2N, u_cod2Model.x)) +\n' +
     '  cod2Sun * cod2Incidence;\n'));
   assert(!model.pointPass.includes('cod2LightmapTexel') && !world.pointPass.includes('u_cod2Model'));
+  assert(!model.pointPass.includes('cod2Crease('), 'models keep their relief as it was');
   assert(model.pointPass.includes('if (u_cod2Surface.y > 0.5 && u_cod2SkyEye.w > 0.0) {'), 'r_reflections turns the models\' reflection off too');
   assert.equal(model.pointPass.match(/texture2D\(u_cod2SpecMap/g).length, 1);
   assert(!model.pointPass.includes('gl_FragColor.a'));
@@ -535,7 +579,7 @@ for (const matrix of [false, true]) {
     `gl_FragColor = texture2D(u_texUnit0, ${uv(0)}) * v_color;`);
   assert.deepEqual(single.pointPass.match(/cod2Spec \+= u_lightDiffuse\d/g), ['cod2Spec += u_lightDiffuse5']);
 }
-console.log('PASS: lightmapped world and lit model material passes, with and without texture matrices: one lightmap lookup, enabled lights only, highlights from the grid\'s first and last lights, the world\'s and models\' reflections behind r_reflections');
+console.log('PASS: lightmapped world and lit model material passes, with and without texture matrices: one lightmap lookup, enabled lights only, highlights from the grid\'s first and last lights, the world\'s and models\' reflections behind r_reflections, the world\'s folds per unit behind r_cavity');
 
 // COD2_SUN_SHADOW: lightmapped world draws take the sun's depth map
 // (web_sun_shadows.c) in their own eye space, its parameters and the casters'

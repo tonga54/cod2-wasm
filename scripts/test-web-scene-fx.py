@@ -117,11 +117,45 @@ assert 'gl.uniform4f(A.u_aoParams, H[o + 56], H[o + 55], w, h);' in compositor
 assert 'fx.pass(A, t.aoFbo[0], t.hw, t.hh);' in compositor and 'fx.pass(P.aoBlur, t.aoFbo[1], t.hw, t.hh);' in compositor
 assert 'hw: Math.max(1, Math.ceil(w / 2)), hh: Math.max(1, Math.ceil(h / 2)),' in compositor
 assert 'gl.uniform4f(C.u_aoMix, ao ? 1 : 0, 0.5 / t.hw, 0.5 / t.hh, 0);' in compositor
-assert 'vm ? vm.smear : null, vm ? vm.mesh : null, ao ? t.ao[1] : null,\n                shafts ? t.sh[1] : null];' in compositor
-assert '["u_scene", "u_bloom", "u_depth", "u_dofMed", "u_dofLarge", "u_vmVelocity", "u_vmMesh", "u_ao", "u_shafts"]' in compositor
+assert 'vm ? vm.smear : null, vm ? vm.mesh : null, ao ? t.ao[1] : null,\n                shafts ? t.sh[1] : null, clarity ? t.cl[1] : null];' in compositor
+assert ('["u_scene", "u_bloom", "u_depth", "u_dofMed", "u_dofLarge", "u_vmVelocity", "u_vmMesh", "u_ao", "u_shafts",\n'
+        '                 "u_clarityMap"]') in compositor
 ao_shader = compositor[compositor.index('link("ao"'):compositor.index('link("aoBlur"')]
 assert '"  if (d < 0.2 || d >= 0.9999 || r < 1.5) return;\\n"' in ao_shader, 'the viewmodel and the sky stay open'
-assert '"    if (dq < 0.2) continue;\\n"' in ao_shader, 'the viewmodel hides nothing behind it'
+assert ao_shader.count('"    if (dq < 0.2) continue;\\n"') == 2, 'the viewmodel hides nothing behind it, near or wide'
+# A second ring three times as wide, its samples within a fifth of the scene's
+# height, weighs 0.6 of the first.
+assert '"  highp float rw = min(3.0 * r, 0.2 * u_aoParams.w);\\n"' in ao_shader
+assert ao_shader.index('"  highp float rw = min(3.0 * r, 0.2 * u_aoParams.w);\\n"') < \
+    ao_shader.index('"  r = min(r, 0.1 * u_aoParams.w);\\n"'), 'the wide ring scales the unclamped radius'
+assert '"    ivec2 q = clamp(c + ivec2(vec2(cos(a), sin(a)) * (rw * (float(i) + 0.5) * 0.125)), ivec2(0), m);\\n"' in ao_shader
+assert ('"    wide += max(dot(v, n) * inversesqrt(max(vv, 1e-6)) - 0.15, 0.0) * '
+        'max(1.0 - vv / (9.0 * r2), 0.0);\\n"') in ao_shader
+assert ao_shader.index('"  occlusion += 0.6 * wide;\\n"') < ao_shader.index('"  float fade = 1.0 - smoothstep(1400.0, 2600.0, z);\\n"')
+# Local contrast (r_clarity) reads its strength where the C side writes it
+# (100): the scene's light at a quarter of its size, spread by the aim blur's
+# kernel to a deviation of 5.3 pixels at 480 lines, is the tenth source, on
+# unit 21. The compose pass moves each pixel's light from it after the
+# sharpening and before the occlusion, never over a smear.
+assert 'r_clarity = ri.Dvar_RegisterFloat("r_clarity", 1.0f, 0.0f, 2.0f, 0x2001);' in dvars
+assert 'var clarity = H[o + 100] > 0;' in compositor
+assert 'gl.uniform4f(C.u_clarity, clarity ? H[o + 100] : 0, 0, 0, 0);' in compositor
+assert '"u_haze", "u_hazeUp", "u_hazeSun", "u_hazeSunColor", "u_hazeProj", "u_shaft", "u_blast", "u_blastDepth",\n                 "u_clarity"]' in compositor
+clarity_js = compositor[compositor.index('            if (clarity) {\n'):compositor.index('            if (glow) {\n')]
+assert clarity_js.index('gl.uniform2f(P.clarity.u_texel, 1 / w, 1 / h);\n                fx.texture(0, t.color);\n'
+                        '                fx.pass(P.clarity, t.clFbo[0], qw, qh);') < \
+    clarity_js.index('fx.texture(0, t.cl[0]);\n                fx.pass(P.dofBlur, t.clFbo[1], qw, qh);')
+assert 'var spread = 5.3 * lines / 4 / 1.4142;' in clarity_js
+assert 'gl.uniform2f(P.dofBlur.u_step, spread / qw, spread / qh);' in clarity_js
+assert compositor.count('t.cl.push(texture(gl.RGBA8, t.qw, t.qh, gl.LINEAR));') == 1
+clarity_shader = compositor[compositor.index('link("clarity"'):compositor.index('link("compose"')]
+assert '"  o = vec4(vec3(0.25 * dot(c + d + e + f, vec3(0.2126, 0.7152, 0.0722))), 1.0);\\n}\\n"' in clarity_shader
+clarity_at = compose_shader.index('if (u_clarity.x > 0.0 && !smeared) {')
+assert compose_shader.index('if (u_film.x > 0.0 && !smeared) {') < clarity_at < \
+    compose_shader.index('if (u_aoMix.x > 0.0 && texelFetch(u_depth, ivec2(gl_FragCoord.xy), 0).r >= 0.2)')
+assert '"    float cb = texture(u_clarityMap, uv).r;\\n"' in compose_shader
+assert ('"    col *= 1.0 + u_clarity.x * clamp((cl - cb) / max(cb, 0.05), -0.35, 0.35) * '
+        '(1.0 - smoothstep(0.75, 1.0, cl));\\n"') in compose_shader
 assert compose_shader.index('col *= texture(u_ao, v_uv + u_aoMix.yz).r;') < \
     compose_shader.index('if (u_dof2.x > 0.0 || u_dof2.w > 0.0 || u_lens.z > 0.0) {')
 assert 'if (u_aoMix.x > 0.0 && texelFetch(u_depth, ivec2(gl_FragCoord.xy), 0).r >= 0.2)' in compose_shader
@@ -135,7 +169,7 @@ assert 'gl.uniform3f(C.u_hazeUp, H[o + 63], H[o + 64], H[o + 65]);' in composito
 assert 'gl.uniform3f(C.u_hazeSun, H[o + 66], H[o + 67], H[o + 68]);' in compositor
 assert 'gl.uniform3f(C.u_hazeSunColor, H[o + 69], H[o + 70], H[o + 71]);' in compositor
 assert 'gl.uniform3f(C.u_hazeProj, H[o + 57], H[o + 58], H[o + 72]);' in compositor
-assert '"u_haze", "u_hazeUp", "u_hazeSun", "u_hazeSunColor", "u_hazeProj", "u_shaft", "u_blast", "u_blastDepth"]' in compositor
+assert '"u_haze", "u_hazeUp", "u_hazeSun", "u_hazeSunColor", "u_hazeProj", "u_shaft", "u_blast", "u_blastDepth",' in compositor
 haze_at = compose_shader.index('if (u_haze.a > 0.0) {')
 assert compose_shader.index('if (u_dof2.x > 0.0 || u_dof2.w > 0.0 || u_lens.z > 0.0) {') < haze_at < \
     compose_shader.index('if (lensIn > 0.0 && u_lens.w < 1.0) {') < compose_shader.index('if (u_glow.x > 0.0)')
@@ -285,7 +319,7 @@ test = r'''
 #include <string.h>
 #include "SOURCE"
 static dvar_t glow, radius0, radius1, intensity0, intensity1, cutoff, desaturation, fullbright, samples, dof, film,
-    motion, scene, ssao, atmosphere, sunShafts, shockwave;
+    motion, scene, ssao, atmosphere, sunShafts, shockwave, clarity;
 const dvar_t *r_glow = &glow;
 const dvar_t *r_glowRadius[2] = {&radius0, &radius1};
 const dvar_t *r_glowBloomIntensity[2] = {&intensity0, &intensity1};
@@ -301,6 +335,8 @@ const dvar_t *r_ssao = &ssao;
 const dvar_t *r_atmosphere = &atmosphere;
 const dvar_t *r_sunShafts = &sunShafts;
 const dvar_t *r_shockwave = &shockwave;
+/* Off unless a check turns it on, so the checks of every other effect alone hold. */
+const dvar_t *r_clarity = &clarity;
 static int shadowRenders, bindsAtShadowRender;
 static double clockMs = 1000.0;
 double emscripten_get_now(void)
@@ -610,7 +646,7 @@ int main(void)
 
     /* A menu's blurred backdrop composes on its own, whatever the other
      * effects, and stays between none and all of it. */
-    assert(SCENE_FX_BACKDROP == 33 && SCENE_FX_BACKDROP_GRAY == 34 && SCENE_FX_PARAM_COUNT == 100);
+    assert(SCENE_FX_BACKDROP == 33 && SCENE_FX_BACKDROP_GRAY == 34 && SCENE_FX_PARAM_COUNT == 101);
     defaults();
     glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
     motion.current.enabled = 0; ssao.current.enabled = 0;
@@ -1267,7 +1303,7 @@ int main(void)
      * how far ahead it is. One behind the eye has none; four travel at once,
      * a fifth taking the oldest's place; a broken one takes no place. */
     {
-        assert(SCENE_FX_BLAST == 80 && SCENE_FX_BLAST_DEPTH == 96 && SCENE_FX_PARAM_COUNT == 100);
+        assert(SCENE_FX_BLAST == 80 && SCENE_FX_BLAST_DEPTH == 96 && SCENE_FX_PARAM_COUNT == 101);
         defaults();
         glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
         motion.current.enabled = 0; ssao.current.enabled = 0; atmosphere.current.enabled = 0; sunShafts.current.value = 0;
@@ -1406,7 +1442,43 @@ int main(void)
         }
         defaults();
     }
-    puts("PASS: 600 composed frames, single compose per frame before Present, partial/fullbright/disabled views drawn directly, bounded glow, viewmodel and near world focus parameters, camera motion reprojected over a 16 ms exposure with aim fade, cuts and still cameras, a bounded menu backdrop and its gray, scenes rendered at r_sceneHeight lines and the screen's aspect on taller screens, a scope window composed with its rifle projection and near clip and a stencil drawn once per view and lifted on every exit, bounded window floats, the outline a scope's rifle is kept off handed to the stencil and none for a sight's window, the stock overlay without a composed target, the sun's shadow map drawn once at the first full-screen view before its target binds, ambient occlusion composed on its own from the composed view's projection, the color maps' mip bias of a scaled scene, the composed view's near clip for effects, the map's haze with the view's up and sun taken when it begins, the sun's shafts from where it lies on the screen and how low it stands, and explosions' shockwaves from where they went off, how long ago and how far away");
+    /* Local contrast (r_clarity) composes on its own, at 0.4 of the dvar,
+     * which holds between 0 and 2; r_fullbright and a broken value take none. */
+    {
+        assert(SCENE_FX_CLARITY == 100 && SCENE_FX_PARAM_COUNT == 101);
+        defaults();
+        glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
+        motion.current.enabled = 0; ssao.current.enabled = 0; atmosphere.current.enabled = 0; sunShafts.current.value = 0;
+        binds = composes = 0;
+        frame(0, 1280, 0.1f);
+        assert(!binds && !composes);
+        const float values[][2] = {{1, 0.4f}, {2, 0.8f}, {0.5f, 0.2f}, {5, 0.8f}};
+        for (int i = 0; i < 4; ++i) {
+            clarity.current.value = values[i][0];
+            binds = composes = 0;
+            frame(0, 1280, 0.1f);
+            assert(binds == 1 && composes == 1 && fabsf(composed[SCENE_FX_CLARITY] - values[i][1]) < 1e-6f);
+        }
+        const float off[] = {0, -1, NAN};
+        for (int i = 0; i < 3; ++i) {
+            clarity.current.value = off[i];
+            binds = composes = 0;
+            frame(0, 1280, 0.1f);
+            assert(!binds && !composes);
+        }
+        film.current.enabled = 1;
+        frame(0, 1280, 0.1f);
+        assert(composes == 1 && composed[SCENE_FX_CLARITY] == 0);
+        clarity.current.value = 1;
+        fullbright.current.enabled = 1;
+        binds = composes = 0;
+        frame(0, 1280, 0.1f);
+        assert(!binds && !composes);
+        fullbright.current.enabled = 0;
+        clarity.current.value = 0;
+        defaults();
+    }
+    puts("PASS: 600 composed frames, single compose per frame before Present, partial/fullbright/disabled views drawn directly, bounded glow, viewmodel and near world focus parameters, camera motion reprojected over a 16 ms exposure with aim fade, cuts and still cameras, a bounded menu backdrop and its gray, scenes rendered at r_sceneHeight lines and the screen's aspect on taller screens, a scope window composed with its rifle projection and near clip and a stencil drawn once per view and lifted on every exit, bounded window floats, the outline a scope's rifle is kept off handed to the stencil and none for a sight's window, the stock overlay without a composed target, the sun's shadow map drawn once at the first full-screen view before its target binds, ambient occlusion composed on its own from the composed view's projection, the color maps' mip bias of a scaled scene, the composed view's near clip for effects, the map's haze with the view's up and sun taken when it begins, the sun's shafts from where it lies on the screen and how low it stands, explosions' shockwaves from where they went off, how long ago and how far away, and bounded local contrast composed on its own");
     return 0;
 }
 '''
@@ -1438,7 +1510,7 @@ mutants = [
      '!WebSceneFx_ScopeRequested() && !WebSceneFx_HazeEnabled() &&'),
     (' && !WebSceneFx_HazeEnabled() &&\n', ' &&\n'),
     # The sun's shafts.
-    (' &&\n        !WebSceneFx_ShaftsEnabled() && !WebSceneFx_BlastsActive())', ' &&\n        !WebSceneFx_BlastsActive())'),
+    (' &&\n        !WebSceneFx_ShaftsEnabled() && !WebSceneFx_BlastsActive() &&', ' &&\n        !WebSceneFx_BlastsActive() &&'),
     ('           s_hazeSunColor[0] + s_hazeSunColor[1] + s_hazeSunColor[2] > 0.0f;', '           1;'),
     ('    if (!WebSceneFx_ShaftsEnabled() || !(s_viewProjection[0] > 0.0f) || !(s_viewProjection[1] > 0.0f))',
      '    if (!WebSceneFx_ShaftsEnabled())'),
@@ -1461,7 +1533,7 @@ mutants = [
      '    return r_sunShafts->current.value * facing *'),
     ('    memcpy(params + SCENE_FX_SHAFTS_COLOR, s_hazeSunColor, sizeof(s_hazeSunColor));\n', ''),
     # Explosions' shockwaves.
-    (' && !WebSceneFx_BlastsActive())', ')'),
+    (' && !WebSceneFx_BlastsActive() &&', ' &&'),
     ('    return WebSceneFx_Enabled(r_shockwave) && !WebSceneFx_Enabled(r_fullbright);', '    return !WebSceneFx_Enabled(r_fullbright);'),
     ('        !(radius > 0.0f))\n        return;', '        0)\n        return;'),
     ('    if (!origin || !isfinite(origin[0]) || !isfinite(origin[1]) || !isfinite(origin[2]) || !isfinite(radius) ||',
@@ -1570,6 +1642,13 @@ mutants = [
     ('    scaled = sceneWidth != width || sceneHeight != height;', '    scaled = 0;'),
     ('WebSceneFx_Bind(sceneWidth, sceneHeight, samples, width, height);',
      'WebSceneFx_Bind(width, height, samples, width, height);'),
+    # Local contrast.
+    ('    return WebSceneFx_Clamp(r_clarity->current.value, 0.0f, 2.0f) * SCENE_FX_CLARITY_GAIN;',
+     '    return WebSceneFx_Clamp(r_clarity->current.value, 0.0f, 2.0f);'),
+    ('    return WebSceneFx_Clamp(r_clarity->current.value, 0.0f, 2.0f) * SCENE_FX_CLARITY_GAIN;',
+     '    return r_clarity->current.value * SCENE_FX_CLARITY_GAIN;'),
+    (' && WebSceneFx_Clarity() <= 0.0f)\n        return;', ')\n        return;'),
+    ('    params[SCENE_FX_CLARITY] = WebSceneFx_Clarity();\n', ''),
 ]
 
 with tempfile.TemporaryDirectory(prefix='cod2-scene-fx-') as tmp:
@@ -1591,4 +1670,4 @@ with tempfile.TemporaryDirectory(prefix='cod2-scene-fx-') as tmp:
                         '-lm', '-o', str(path / f'mutant{index}')], check=True)
         result = subprocess.run([str(path / f'mutant{index}')], capture_output=True)
         assert result.returncode != 0, f'mutant survived: {after!r}'
-    print(f'PASS: {len(mutants)} motion blur, backdrop, scene size, scope window, haze, sun shaft and shockwave mutants fail')
+    print(f'PASS: {len(mutants)} motion blur, backdrop, scene size, scope window, haze, sun shaft, shockwave and local contrast mutants fail')
