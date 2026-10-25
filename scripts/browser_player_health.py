@@ -5,7 +5,7 @@ SCRIPTS = {f'maps/mp/gametypes/{gametype}.gsc' for gametype in GAMETYPES}
 RETAIL_HEALTH = b'maxhealth = 100;'
 # Every mode sets it as a player spawns; HQ also as it heals the players when a radio is taken or lost.
 RETAIL_COUNTS = {'maps/mp/gametypes/hq.gsc': 3}
-# At most 135, the 135 a bolt-action rifle's shot to the body and a semi-automatic's to the head deal, so they
+# At most 135, the 135 a bolt-action rifle's shot to the chest and a semi-automatic's to the head deal, so they
 # still kill alone. bg_player_health.h's BG_PLAYER_HEALTH.
 PLAYER_HEALTH = 105
 

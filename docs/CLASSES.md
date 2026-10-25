@@ -106,8 +106,10 @@ gun the list of its WWII class:
 | Webley | Revolver | The pistol list without the Extended Mag |
 
 WWII's Iron Sight is not offered: CoD2 already has each bolt-action rifle with
-and without its scope. The Bayonet, Rifle Grenade, Incendiary Rounds, Rifle
-Bullet and Tactical Knife need models or mechanics CoD2 lacks.
+and without its scope, and the rifle without one kills with one shot only to
+the head, neck or chest, as the Iron Sight's Kar98k does, with the 4x Optic
+too. The Bayonet, Rifle Grenade, Incendiary Rounds, Rifle Bullet and Tactical
+Knife need models or mechanics CoD2 lacks.
 
 Each attachment changes the weapon file's values for its player only, and each
 one costs something for what it gives: most add to the aim-in time, the others

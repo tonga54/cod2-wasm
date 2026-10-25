@@ -13,17 +13,19 @@ from browser_player_health import PLAYER_HEALTH
 
 root = Path(__file__).resolve().parent.parent
 profile = load_profile()
-# Up close, at the players' health: the shots that kill to the upper torso and to the head. A 7.62x25mm round
-# takes five to the body, 9x19mm, .45 ACP and .455 Webley four, the intermediate and full-power automatic rounds
-# three; the bolt-action rifles kill with one to the body, the semi-automatic rifles, Colt and Webley with one to
-# the head, the automatic weapons, Luger and TT-30 with two.
+# Up close, at the players' health: the shots that kill to the upper torso, the head, the lower torso and an upper
+# arm. A 7.62x25mm round takes four to the body, 9x19mm, .45 ACP, .455 Webley and the intermediate and full-power
+# automatic rounds three. The bolt-action rifles without a scope kill with one to the head or chest and two to the
+# stomach or an arm, as WWII's Kar98k with its Iron Sight does, the scoped rifles with one to the body; the
+# semi-automatic rifles, Colt, Webley and Luger with one to the head, the automatic weapons and TT-30 with two.
 KILL_SHOTS = {
-    'thompson_mp': (4, 2), 'greasegun_mp': (4, 2), 'mp40_mp': (4, 2), 'sten_mp': (4, 2),
-    'ppsh_mp': (5, 2), 'pps42_mp': (5, 2), 'mp44_mp': (3, 2), 'bar_mp': (3, 2), 'bren_mp': (3, 2),
-    'colt_mp': (4, 1), 'webley_mp': (4, 1), 'luger_mp': (4, 2), 'tt30_mp': (5, 2),
-    'm1garand_mp': (2, 1), 'svt40_mp': (2, 1), 'g43_mp': (2, 1), 'm1carbine_mp': (3, 1),
-    'kar98k_mp': (1, 1), 'enfield_mp': (1, 1), 'mosin_nagant_mp': (1, 1), 'springfield_mp': (1, 1),
-    'kar98k_sniper_mp': (1, 1), 'enfield_scope_mp': (1, 1), 'mosin_nagant_sniper_mp': (1, 1),
+    'thompson_mp': (3, 2, 3, 3), 'greasegun_mp': (3, 2, 3, 3), 'mp40_mp': (3, 2, 3, 3), 'sten_mp': (3, 2, 3, 3),
+    'ppsh_mp': (4, 2, 4, 4), 'pps42_mp': (4, 2, 4, 4), 'mp44_mp': (3, 2, 3, 3), 'bar_mp': (3, 2, 3, 3),
+    'bren_mp': (3, 2, 3, 3), 'colt_mp': (3, 1, 3, 3), 'webley_mp': (3, 1, 3, 3), 'luger_mp': (3, 1, 3, 3),
+    'tt30_mp': (4, 2, 4, 4), 'm1garand_mp': (2, 1, 3, 2), 'svt40_mp': (2, 1, 3, 2), 'g43_mp': (2, 1, 3, 2),
+    'm1carbine_mp': (3, 1, 3, 3), 'kar98k_mp': (1, 1, 2, 2), 'enfield_mp': (1, 1, 2, 2),
+    'mosin_nagant_mp': (1, 1, 2, 2), 'springfield_mp': (1, 1, 1, 1), 'kar98k_sniper_mp': (1, 1, 1, 1),
+    'enfield_scope_mp': (1, 1, 1, 1), 'mosin_nagant_sniper_mp': (1, 1, 1, 1),
 }
 # Up close, the damage of each cartridge; full-power rifle rounds by the action that fires them.
 CARTRIDGE_DAMAGE = {'7.62x25mm': '30', '9x19mm': '35', '.45 ACP': '40', '.455 Webley': '40',
@@ -97,8 +99,9 @@ for name, data in sorted(current.items()):
     far = int(after['minDamage']) if automatic and after['weaponClass'] == 'rifle' else 0
     metrics.append('{' + initializer(before) + ',' + initializer(after) + ',' +
                    str(int(bool(differences))) + ',' + str(far) + ',' +
-                   str(int('damage' in differences)) + ',' + str(int(automatic)) + ',' + str(reviewed) + ',' +
-                   ','.join(map(str, KILL_SHOTS.get(name.removeprefix('weapons/mp/'), (0, 0)))) + '}')
+                   str(int('damage' in differences)) + ',' + str(int(automatic)) + ',' +
+                   str(int(after['weaponClass'] == 'pistol')) + ',' + str(reviewed) + ',' +
+                   ','.join(map(str, KILL_SHOTS.get(name.removeprefix('weapons/mp/'), (0, 0, 0, 0)))) + '}')
 assert sorted(changed) == sorted(profile['weapons'])
 assert set(KILL_SHOTS) == set(balanced) - UNRATED, sorted(set(KILL_SHOTS) ^ (set(balanced) - UNRATED))
 
@@ -210,7 +213,7 @@ static int Dvar_GetInt(const char *name) {return 0;}
 static int OnSameTeam(gentity_t *a,gentity_t *b) {return 1;}
 '''
 checks = r'''
-typedef struct {WeaponDef retail,balanced;int changed,farDamage,damageChanged,automatic,reviewed,bodyShots,headShots;} Metric;
+typedef struct {WeaponDef retail,balanced;int changed,farDamage,damageChanged,automatic,pistol,reviewed,bodyShots,headShots,stomachShots,armShots;} Metric;
 static int shot(WeaponDef *weapon,float distance,int loc) {
  activeWeapon=weapon;hitLocation=loc;receivedDamage=damageCalls=0;
  vec3_t start={0,0,0},end={distance*2,0,0};weaponParms wp={weapon};
@@ -218,6 +221,7 @@ static int shot(WeaponDef *weapon,float distance,int loc) {
  assert(damageCalls==(loc!=18));return receivedDamage;
 }
 static int shotsToKill(int damage) {assert(damage>0);return (HEALTH+damage-1)/damage;}
+static int retailShotsToKill(int damage) {assert(damage>0);return (100+damage-1)/damage;}
 int main(void) {
  entities[0].s.weapon=1;entities[1].takedamage=1;entities[1].client=&client;
  int cases=0;
@@ -225,9 +229,12 @@ int main(void) {
   Metric *m=metrics+w;int previous[19];for(int i=0;i<19;i++)previous[i]=10000;
   for(int distance=1;distance<=8192;distance+=31) for(int loc=0;loc<19;loc++) {
    int old=shot(&m->retail,distance,loc),now=shot(&m->balanced,distance,loc);
-   /* No hit takes more of the players' health than retail's of its 100,
-    * and none more further away. */
-   assert(now*100<=old*HEALTH && now<=previous[loc]);previous[loc]=now;
+   /* No hit kills in fewer shots than retail's did against its 100
+    * health, but a pistol's to the head, which keeps its submachine gun's
+    * damage further than retail's pistols did; and none deals more further
+    * away. */
+   if(!(m->pistol && (loc==1 || loc==2))) assert(!now || (old && shotsToKill(now)>=retailShotsToKill(old)));
+   assert(now<=previous[loc]);previous[loc]=now;
    if(!m->changed)assert(now==old);
    if(m->changed && distance<100) {
     /* A reviewed hit location deals what it did not. */
@@ -244,12 +251,16 @@ int main(void) {
    shot(&m->balanced,m->balanced.fMaxDamageRange+side,loc);
    shot(&m->balanced,m->balanced.fMinDamageRange+side,loc);
   }
-  /* The shots that kill up close, to the upper torso and to the head. */
+  /* The shots that kill up close, to the upper torso, the head, the lower
+   * torso and either upper arm. */
   if(m->bodyShots) assert(shotsToKill(shot(&m->balanced,10,4))==m->bodyShots &&
-                          shotsToKill(shot(&m->balanced,10,2))==m->headShots);
+                          shotsToKill(shot(&m->balanced,10,2))==m->headShots &&
+                          shotsToKill(shot(&m->balanced,10,5))==m->stomachShots &&
+                          shotsToKill(shot(&m->balanced,10,6))==m->armShots &&
+                          shotsToKill(shot(&m->balanced,10,7))==m->armShots);
   if(m->farDamage) {assert(shot(&m->balanced,3000,4)==m->farDamage);assert(shot(&m->balanced,3000,2)==2*m->farDamage);}
  }
- printf("PASS: %d original/balanced server bullet/player-damage cases, 19 hit locations, range boundaries, no hit more of the players' %d health than of retail's 100, the shots that kill up close, no automatic one-headshot kill\n",cases,HEALTH);
+ printf("PASS: %d original/balanced server bullet/player-damage cases, 19 hit locations, range boundaries, no hit killing the players' %d health in fewer shots than retail's 100, the shots that kill up close to the chest, head, stomach and arms, no automatic one-headshot kill\n",cases,HEALTH);
  return 0;
 }
 '''

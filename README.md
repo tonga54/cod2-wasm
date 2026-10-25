@@ -244,7 +244,9 @@ Performance depends on the player's hardware, browser and match load.
 - **Sprint** with Shift or L3, weapon lowered; it also stands you up from crouch
   or prone when there is room.
 - **105 health** for players and bots, regenerating to full. Bolt-action rifles
-  keep their lethal body shots, and two melee strikes kill.
+  without a scope kill with one shot to the head or chest, as WWII's Kar98k
+  with its Iron Sight does, and need two elsewhere; scoped rifles keep their
+  lethal body shots, and two melee strikes kill.
 - **Real recoil:** each gun kicks by its real free recoil, the cartridge's
   impulse against the gun's loaded weight. A BAR climbs harder than an MP40, a
   Garand kicks harder than a carbine.

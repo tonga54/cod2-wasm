@@ -6256,3 +6256,42 @@ Validation:
   engine's `Image_LoadWavelet` come out in their colors.
 - In the QA stack the well shows white plaster and brown posts, and the menu
   logo silver with gold stars.
+
+## Bolt-action rifles kill with one shot only to the chest and above — 2026-10-24
+
+The owner found that a rifle like the Kar98k, without a scope, killed with one
+shot, and asked for it to work as in Call of Duty: WWII. It is the Lee-Enfield
+or the Mosin-Nagant, which one in four British and Soviet bots carry. With the
+Kar98k, the German bots' rifle, they shared retail's 90 damage at ×1.5 to the
+neck, chest, stomach and upper arms: 135 of the players' 105 health. In WWII
+the Kar98k with its Iron Sight kills with one shot only to the head and upper
+chest, and with its scope to most of the body. The three rifles without a
+scope now deal 90 to the stomach and upper arms, two shots; the head (270),
+neck and chest (135) still kill with one, and the forearms, hands and legs
+take two as before. The scoped rifles keep their one shot to the body and
+upper legs. Attachments change only the head's multiplier, so the 4x Optic
+leaves a rifle's zone as it is.
+
+`test-weapon-balance.py`, which needs the owner's IWDs and is not in
+`test-static.sh`, had not followed the players' health from 125 to 105. Its
+shots to kill were 125's, and its bound, that no hit takes more of the health
+than retail's took of its 100, failed on the BAR's 45 against retail's 40,
+three shots either way. It now checks the shots that kill up close to the
+chest, head, stomach and upper arms of every class weapon at 105, and bounds
+each hit by shots: none kills in fewer than retail's did against 100, but a
+pistol's headshot. The Colt and Webley kill with one to the head to about 466
+units, where retail took two, and the Luger with two to about 683, where
+retail took three. Up close the Luger's headshot (109) kills, which the
+profile's note had as two; the note now says so, and its damage is unchanged.
+
+Validation:
+
+- `test-weapon-balance.py` passes: 130,910 bullet hits through the real
+  `Bullet_Fire_Extended` and `G_Damage` on the retail and balanced files.
+  Expecting one shot to the Kar98k's stomach, two to the scoped Kar98k's or
+  one to the Lee-Enfield's arm fails it.
+- `check-private-assets.py`, `test-weapon-fire-modes.py`, `test-attachments.py`
+  and `test-player-health.py` pass. The archives are regenerated; only the
+  renderer archive, which holds the weapon files, changes.
+
+Not covered: nobody played with the new rifles in the browser.

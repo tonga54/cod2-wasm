@@ -216,9 +216,11 @@ retail CoD2:
   headroom permits. Sprint currently has no stamina limit.
   Melee moves to V; scoped Hold Breath continues to use Shift.
 - **More health:** players and bots have 105 health instead of retail's 100 in
-  every mode. Bolt-action rifles still kill with one shot to the body, and
-  semi-automatic rifles and pistols with one to the head up close. Health still
-  regenerates to full, and falls hurt in proportion to it.
+  every mode. Bolt-action rifles without a scope kill with one shot to the
+  head, neck or chest and need two to the stomach or a limb, as WWII's Kar98k
+  with its Iron Sight does; scoped rifles kill with one shot to the body, and
+  semi-automatic rifles and pistols but the TT-30 with one to the head up
+  close. Health still regenerates to full, and falls hurt in proportion to it.
 - **Melee damage:** butt strikes deal at most 50 of retail's 100 health, scaled
   to the players' 105 (53), without random bonuses or bullet hit-location
   multipliers. Two hits kill a player at full health; an injured player can
@@ -239,9 +241,11 @@ retail CoD2:
   units and slower ones to 700, all falling to 10; the automatic rifles (MP44,
   Bren, BAR) fall from 40 to 28 between 1,200 and 2,500 units, with wider hip
   fire and 0.2° of aimed spread. The PPSh deals 30 instead of 35 up close (four
-  body shots) and kicks higher and wider when aimed. Bolt-action and scoped
-  rifles, the shotgun, grenades and the mounted MG42 keep their original
-  definitions; the mounted heat/recoil rules are implemented separately.
+  body shots) and kicks higher and wider when aimed. Bolt-action rifles
+  without a scope deal 90 to the stomach and upper arms instead of retail's
+  135; scoped rifles, the shotgun, grenades and the mounted MG42 keep their
+  original definitions; the mounted heat/recoil rules are implemented
+  separately.
 - **Larger visual effects:** brief muzzle sprites are 40% larger with stronger
   color/alpha; frag fire, smoke and dust are 35% larger. Original effect textures,
   particle counts, lifetimes and grenade damage remain unchanged.
