@@ -15,6 +15,7 @@ from browser_class_menus import CLASS_MENU_LINE, class_menus
 from browser_class_pictures import OWNER_PICTURES_DIR, PICTURE_FOLDER, load_owner_pictures, verify_owner_pictures
 from browser_attachment_models import attachment_model_assets
 from browser_muzzle_flashes import muzzle_flash_assets
+from browser_grenade_explosions import grenade_explosion_assets
 from browser_explosives import (ALIAS_TABLE as EXPLOSIVE_ALIAS_TABLE, ALIASES as EXPLOSIVE_ALIASES,
                                 WEAPONS as EXPLOSIVE_WEAPONS, explosive_assets)
 from browser_settings_menu import apply_settings_menu
@@ -52,6 +53,7 @@ try:
     explosives = explosive_assets(lambda name: index[name][0].read(index[name][1]))
     attachment_models = attachment_model_assets(lambda name: index[name.lower()][0].read(index[name.lower()][1]))
     muzzle_flashes = muzzle_flash_assets(lambda name: index[name][0].read(index[name][1]))
+    grenade_explosions = grenade_explosion_assets(lambda name: index[name][0].read(index[name][1]))
     retail_alias_rows = {}
     for name, (source, original_name) in index.items():
         if name.startswith("soundaliases/") and name.endswith(".csv"):
@@ -87,6 +89,9 @@ try:
                     continue
                 if name in muzzle_flashes:
                     assert data == muzzle_flashes[name], name
+                    continue
+                if name in grenade_explosions:
+                    assert data == grenade_explosions[name], name
                     continue
                 if name == EXPLOSIVE_ALIAS_TABLE:
                     selected_rows = list(csv.reader(io.StringIO(data.decode("utf-8"))))
@@ -187,6 +192,15 @@ try:
                 assert "materials/" + material.decode().lower() in entries, "Missing muzzle flash material: " + material.decode()
         elif name.startswith("materials/"):
             assert "images/" + name[len("materials/"):] + ".iwi" in entries, "Missing muzzle flash image: " + name
+    for name, data in grenade_explosions.items():
+        assert name in entries, "Missing grenade explosion resource: " + name
+        if name.endswith(".efx"):
+            for material in re.findall(rb'\tshaders\s*\[\s*(\S+)', data):
+                assert "materials/" + material.decode().lower() in entries, "Missing explosion material: " + material.decode()
+            for effect in re.findall(rb'\tplayfx\s*\[\s*/(\S+)', data):
+                assert effect.decode().lower() + ".efx" in grenade_explosions, "Missing explosion effect: " + effect.decode()
+        elif name.startswith("materials/"):
+            assert "images/" + name[len("materials/"):] + ".iwi" in entries, "Missing explosion image: " + name
     for name, data in entries.items():
         if name.startswith("weapons/mp/"):
             fields = data.decode("latin-1").split("\\")

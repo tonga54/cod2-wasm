@@ -20,6 +20,7 @@ typedef unsigned char byte;typedef int Bool;typedef float vec_t;typedef float ve
 typedef struct {float mMin,mMax;} FxRange;
 typedef struct {int mAttributeFlags,mSpawnFlags;FxRange mOrigin1X,mOrigin1Y,mOrigin1Z,mRadius,mHeight;} PrimitiveTemplate;
 typedef struct {const char *flag;unsigned masks[2];} FxFlagEntry;
+static const FxFlagEntry fxAttributeFlags[2]={{"usePhysics",{32,0}},{"useAlpha",{128,0}}},fxSpawnFlags[1]={{"frustumCull",{0,1024}}};
 typedef struct {void *fx;PrimitiveTemplate *primTemp;struct {void *value;} boltFrame;} EffectPrimitive;
 #define stricmp strcasecmp
 static void *Hunk_AllocateTempMemoryInternal(int n){return malloc(n);}
@@ -41,7 +42,7 @@ static localEntity_t *CG_AllocLocalEntity(void){allocations++;return &entity;}
 static struct {int time,frametime;} state,*cg=&state;
 static struct {struct{float value;}current;} speedDvar,*cg_tracerSpeed=&speedDvar;
 '''
-body=function(Path('src/PC/EffectsCore/FxTemplate.c'),'PrimitiveTemplate_ParseFlags')+function(Path('src/PC/EffectsCore/FxUtil.c'),'FX_CalcOriginAndAxis_impl')+function(Path('src/PC/cgame_mp/cg_weapons.c'),'CG_SpawnTracer')
+body=function(Path('src/PC/EffectsCore/FxTemplate.c'),'PrimitiveTemplate_FindFlag')+function(Path('src/PC/EffectsCore/FxTemplate.c'),'PrimitiveTemplate_ParseFlags')+function(Path('src/PC/EffectsCore/FxUtil.c'),'FX_CalcOriginAndAxis_impl')+function(Path('src/PC/cgame_mp/cg_weapons.c'),'CG_SpawnTracer')
 checks=r'''
 int main(void){
  FxFlagEntry flags[]={{"usePhysics",{32,0}},{"useAlpha",{128,0}},{"frustumCull",{0,1024}}};

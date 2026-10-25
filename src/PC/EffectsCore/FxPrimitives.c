@@ -42,6 +42,16 @@ COD2_ASSERT_FIELD(Particle, velocity2WeightX, 0x138);
 COD2_ASSERT_FIELD(Particle, velocity2WeightY, 0x13c);
 COD2_ASSERT_FIELD(Particle, velocity2WeightZ, 0x140);
 COD2_ASSERT_FIELD(struct Effect, mBolt,       0xc0);
+COD2_ASSERT_FIELD(struct Effect, mRefEnt.customMaterial,        0x40);
+COD2_ASSERT_FIELD(struct Effect, mRefEnt.rotation,              0x44);
+COD2_ASSERT_FIELD(struct Effect, mRefEnt.materialSubimageIndex, 0x94);
+COD2_ASSERT_FIELD(Particle, startFrame,                       0x108);
+COD2_ASSERT_FIELD(Particle, frameRate,                        0x10c);
+COD2_ASSERT_FIELD(Particle, sequenceLoopMode,                 0x110);
+COD2_ASSERT_FIELD(Particle, sequenceLoopTimes,                0x114);
+COD2_ASSERT_FIELD(Particle, blendWeight,                      0x118);
+COD2_ASSERT_FIELD(Particle, rotationDeltaChannelInstance,     0x1a4);
+COD2_ASSERT_FIELD(Particle, rotationDeltaRandChannelInstance, 0x1b0);
 
 extern FxBoltFrame *FxBoltFrame_g_mFrameList;
 extern void *Hunk_AllocInternal(int size);
@@ -2059,6 +2069,63 @@ void Particle_UpdateAlpha(const Particle *_this)
     }
 }
 
+/* Retail 0x495ed0, which sprites and oriented particles run after their
+ * alpha: the rotationDelta channel turns the sprite by that many degrees
+ * every hundred milliseconds of the frame. */
+static void Particle_UpdateRotation(const Particle *_this)
+{
+    byte *self = (byte *)_this;
+    float normTime = ((Effect *)self)->normTime;
+    float delta = EvalCurve1(((char *)self + offsetof(Particle, rotationDeltaChannelInstance.curveIterator.master)), normTime);
+
+    if (((Effect *)self)->mFlags & 0x40000) {
+        float alternate = EvalCurve1(((char *)self + offsetof(Particle, rotationDeltaRandChannelInstance.curveIterator.master)), normTime);
+        delta += (alternate - delta) * ((Particle *)self)->blendWeight[4];
+    }
+    delta *= ((Particle *)self)->rotationDeltaChannelInstance.scale;
+    ((Effect *)self)->mRefEnt.rotation += delta * (float)(*(FxHelper **)imp_theFxHelper)->mFrameTime * 0.01f;
+}
+
+extern int FxHelper_GetMaterialSubimageCount(void *helper, void *material);
+
+/* Retail 0x495f70, which sprites, oriented particles and tails run last: the
+ * atlas frame is the sequence's start frame advanced by its rate over the time
+ * lived. A looping sequence wraps; one with loops left wraps until they run
+ * out, then holds its last frame, as one without loops does at its end. */
+static void Particle_UpdateSubimage(const Particle *_this)
+{
+    byte *self = (byte *)_this;
+    Particle *particle = (Particle *)self;
+    MaterialHandle material = ((Effect *)self)->mRefEnt.customMaterial;
+    int count, frame;
+
+    count = material ? FxHelper_GetMaterialSubimageCount(*(FxHelper **)imp_theFxHelper, material) : 1;
+    if (count <= 1) {
+        ((Effect *)self)->mRefEnt.materialSubimageIndex = 0;
+        return;
+    }
+    frame = particle->startFrame +
+            (int)((float)(FXH_TIME(*(FxHelper **)imp_theFxHelper) - ((Effect *)self)->mTimeStart) * particle->frameRate);
+    ((Effect *)self)->mRefEnt.materialSubimageIndex = frame;
+    if (particle->sequenceLoopMode == 0) {
+        if (frame >= count)
+            ((Effect *)self)->mRefEnt.materialSubimageIndex = frame % count;
+    } else if (particle->sequenceLoopMode == 1) {
+        if (particle->sequenceLoopTimes > 0) {
+            if (frame >= count) {
+                if (frame < (particle->sequenceLoopTimes + 1) * count) {
+                    ((Effect *)self)->mRefEnt.materialSubimageIndex = frame % count;
+                } else {
+                    ((Effect *)self)->mRefEnt.materialSubimageIndex = count - 1;
+                    particle->sequenceLoopTimes = 0;
+                }
+            }
+        } else if (frame >= count) {
+            ((Effect *)self)->mRefEnt.materialSubimageIndex = count - 1;
+        }
+    }
+}
+
 Bool Cylinder_Update(const Cylinder *_this)
 {
 
@@ -2235,6 +2302,7 @@ Bool Tail_Update(const Tail *_this)
 
     Particle_UpdateRGB((const Particle *)_this);
     Particle_UpdateAlpha((const Particle *)_this);
+    Particle_UpdateSubimage((const Particle *)_this);
     return 1;
 }
 
@@ -2481,6 +2549,8 @@ Bool OrientedParticle_Update(const OrientedParticle *_this)
 
     Particle_UpdateRGB((const Particle *)_this);
     Particle_UpdateAlpha((const Particle *)_this);
+    Particle_UpdateRotation((const Particle *)_this);
+    Particle_UpdateSubimage((const Particle *)_this);
     return 1;
 }
 
@@ -2569,6 +2639,8 @@ Bool Particle_Update(const Particle *_this, const Particle *_this_1, const Cloud
 
     Particle_UpdateRGB(_this);
     Particle_UpdateAlpha(_this);
+    Particle_UpdateRotation(_this);
+    Particle_UpdateSubimage(_this);
 
     return 1;
 }
