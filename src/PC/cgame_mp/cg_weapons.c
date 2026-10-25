@@ -67,39 +67,6 @@ static EffectTemplate *CG_MuzzleLightsOnly(const EffectTemplate *original)
     }
     return effect->mPrimitiveCount ? effect : NULL;
 }
-
-static EffectTemplate *CG_EnhanceMuzzleFlash(const EffectTemplate *original)
-{
-    if (!original)
-        return NULL;
-    EffectTemplate *effect = Hunk_AllocAlignInternal(sizeof(*effect), 4);
-    memcpy(effect, original, sizeof(*effect));
-    for (int i = 0; i < effect->mPrimitiveCount; ++i) {
-        const PrimitiveTemplate *source = original->mPrimitives[i];
-        if (!source || (source->mType != PT_PARTICLE &&
-                       source->mType != PT_ORIENTEDPARTICLE && source->mType != PT_TAIL) ||
-            source->mLife.mMax > 200)
-            continue;
-        /* Make the brief authored flash clearer; leave smoke, light radius,
-         * duration and particle counts intact. Variants share immutable media
-         * and curves and are reclaimed with the map's hunk. */
-        PrimitiveTemplate *flash = Hunk_AllocAlignInternal(sizeof(*flash), 4);
-        memcpy(flash, source, sizeof(*flash));
-        flash->mFxChannels[FXCHAN_SIZE].scaleRange.mMin *= 1.4f;
-        flash->mFxChannels[FXCHAN_SIZE].scaleRange.mMax *= 1.4f;
-        if (source->mNonUniformScale) {
-            flash->mFxChannels[FXCHAN_SIZE2].scaleRange.mMin *= 1.4f;
-            flash->mFxChannels[FXCHAN_SIZE2].scaleRange.mMax *= 1.4f;
-        }
-        flash->mFxChannels[FXCHAN_COLOR].scaleRange.mMin *= 1.35f;
-        flash->mFxChannels[FXCHAN_COLOR].scaleRange.mMax *= 1.35f;
-        flash->mFxChannels[FXCHAN_ALPHA].scaleRange.mMin *= 1.5f;
-        flash->mFxChannels[FXCHAN_ALPHA].scaleRange.mMax *= 1.5f;
-        flash->spawnFrustumCullRadius *= 1.4f;
-        effect->mPrimitives[i] = flash;
-    }
-    return effect;
-}
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_wwiiscope.h"
 #include "headers/PC/cgame_mp/cg_attachmodels.h"
@@ -953,13 +920,15 @@ void CG_RegisterWeapon(int weaponNum)
     if (weapDef->szOverlayMaterial[0])
         weapInfo->hADSOverlay = (MaterialHandle)CL_RegisterMaterialNoMip(weapDef->szOverlayMaterial, 7);
 
+    /* The browser's muzzle flash effects (scripts/browser_muzzle_flashes.py)
+     * are drawn as authored. */
     if (weapDef->szViewFlashEffect[0])
-        weapInfo->viewFlashEffect = CG_EnhanceMuzzleFlash(FX_RegisterEffect(weapDef->szViewFlashEffect));
+        weapInfo->viewFlashEffect = (EffectTemplate *)FX_RegisterEffect(weapDef->szViewFlashEffect);
     if ((unsigned int)weaponNum < 128)
         muzzleLightEffects[weaponNum] = CG_MuzzleLightsOnly(weapInfo->viewFlashEffect);
 
     if (weapDef->szWorldFlashEffect[0])
-        weapInfo->worldFlashEffect = CG_EnhanceMuzzleFlash(FX_RegisterEffect(weapDef->szWorldFlashEffect));
+        weapInfo->worldFlashEffect = (EffectTemplate *)FX_RegisterEffect(weapDef->szWorldFlashEffect);
 
     weapInfo->missileSound = (snd_alias_list_t *)Com_FindSoundAlias(weapDef->szProjectileSound);
     weapInfo->pullbackSound = (snd_alias_list_t *)Com_FindSoundAlias(weapDef->szPullbackSound);

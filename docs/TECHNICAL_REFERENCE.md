@@ -246,9 +246,16 @@ retail CoD2:
   135; scoped rifles, the shotgun, grenades and the mounted MG42 keep their
   original definitions; the mounted heat/recoil rules are implemented
   separately.
-- **Larger visual effects:** brief muzzle sprites are 40% larger with stronger
-  color/alpha; frag fire, smoke and dust are 35% larger. Original effect textures,
-  particle counts, lifetimes and grenade damage remain unchanged.
+- **Muzzle flashes:** every gun's view and world flash is rewritten in the
+  renderer archive (`scripts/browser_muzzle_flashes.py`): the original's
+  lights and smoke, then a burst of rays at the muzzle, a hot core, a tongue
+  of flame streaking forward and a few sparks, gone within 55 ms (the
+  sparks 140), sized by weapon family, in place of CoD2's grenade-fireball
+  puffs that swelled beside the gun for 100 ms. See
+  [graphics validation and limits](GRAPHICS_2026-10-16.md#muzzle-flashes-october-25-2026).
+- **Larger visual effects:** frag fire, smoke and dust are 35% larger.
+  Original effect textures, particle counts, lifetimes and grenade damage
+  remain unchanged.
 - **Smaller smoke screens:** a smoke grenade's cloud spreads 60% as far as
   CoD2's, about 15 m across at its fullest instead of 25. Each particle's spawn
   ring and offset, drift, gravity and size shrink alike when the effect loads

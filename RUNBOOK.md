@@ -6332,3 +6332,44 @@ Validation:
 
 Not covered: only the M4 in Chrome was measured; scripted explosions start no
 shockwave.
+
+## Muzzle flashes — 2026-10-25
+
+The owner found the guns' flashes fake: fire came out of the sides of the
+gun. Details and measurements are in `docs/GRAPHICS_2026-10-16.md` ("Muzzle
+flashes").
+
+- The MP44, BAR, Bren, Sten, pistol and trench gun flashes drew grenade
+  fireball frames (`gfx_exp_fireball_atlas`) that grew for 100 ms beside the
+  muzzle, twelve frames at 120 fps, enlarged by the browser since October 10.
+- `scripts/browser_muzzle_flashes.py` rewrites the twelve muzzle flash
+  effects the weapons name (view and world) in the renderer archive: each
+  keeps its original's lights and smoke verbatim, then draws a burst of rays
+  at the muzzle (`gfx_explosion_flash`, 40–55 ms, full strength at once), a
+  white-hot core (25–35 ms), a tongue of flame streaking forward out of the
+  barrel (30–45 ms) and up to four sparks (70–140 ms), sized by weapon
+  family. `prepare-browser-bootstrap.py` packages them and
+  `check-private-assets.py` checks them; `site/wasm-game-data.json` is
+  regenerated with this commit (the renderer archive grows by 2,042 bytes).
+- `cg_weapons.c` registers the flashes as authored: the 1.4× size, 1.35×
+  color and 1.5× alpha variant (`CG_EnhanceMuzzleFlash`) is gone. The scoped
+  light-only variant is unchanged.
+
+Validation:
+
+- `test-browser-muzzle-flashes.py` (new, in `test-static.sh`): 72 flag lines
+  and 1,152 curves of the rewritten effects through the production EFX
+  parser, lights and smoke verbatim, no puff material, every new element at
+  its strongest at once and gone within its life; 20 mutants fail.
+  `test-muzzle-flash-appearance.py` follows the registration;
+  `check-private-assets.py`, `test-fx-curves.py` (8,457 curves) and
+  `test-fx-flags.py` pass on the regenerated archives.
+- On the isolated QA stack at Carentan: the MP44's puffs (40 to 130 ms after
+  the click) became a burst at the muzzle 35 to 55 ms after it, gone by
+  70 ms; aimed, a glow beside the sight. The Colt, Garand, Thompson, Kar98k,
+  trench gun and BAR alike; bots on Toujane show a small burst at their
+  muzzles. Uncapped, firing MP44 bursts: 143–147 fps against 145–146 with the
+  original files and previous client, the GPU half a millisecond lighter.
+
+Not covered: the mounted .30 cal and MG42 were not fired; only the M4 in
+Chrome was measured.

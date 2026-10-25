@@ -14,6 +14,7 @@ from browser_bot_menu import apply_bot_menu
 from browser_class_menus import CLASS_MENU_LINE, class_menus
 from browser_class_pictures import OWNER_PICTURES_DIR, PICTURE_FOLDER, load_owner_pictures, verify_owner_pictures
 from browser_attachment_models import attachment_model_assets
+from browser_muzzle_flashes import muzzle_flash_assets
 from browser_explosives import (ALIAS_TABLE as EXPLOSIVE_ALIAS_TABLE, ALIASES as EXPLOSIVE_ALIASES,
                                 WEAPONS as EXPLOSIVE_WEAPONS, explosive_assets)
 from browser_settings_menu import apply_settings_menu
@@ -50,6 +51,7 @@ try:
     index = {n.lower(): (z, n) for z in originals for n in z.namelist() if not n.endswith("/")}
     explosives = explosive_assets(lambda name: index[name][0].read(index[name][1]))
     attachment_models = attachment_model_assets(lambda name: index[name.lower()][0].read(index[name.lower()][1]))
+    muzzle_flashes = muzzle_flash_assets(lambda name: index[name][0].read(index[name][1]))
     retail_alias_rows = {}
     for name, (source, original_name) in index.items():
         if name.startswith("soundaliases/") and name.endswith(".csv"):
@@ -82,6 +84,9 @@ try:
                     continue
                 if name in attachment_models:
                     assert data == attachment_models[name], name
+                    continue
+                if name in muzzle_flashes:
+                    assert data == muzzle_flashes[name], name
                     continue
                 if name == EXPLOSIVE_ALIAS_TABLE:
                     selected_rows = list(csv.reader(io.StringIO(data.decode("utf-8"))))
@@ -175,6 +180,17 @@ try:
         assert name in entries, "Missing explosive resource: " + name
     for name in attachment_models:
         assert name in entries, "Missing attachment model: " + name
+    for name, data in muzzle_flashes.items():
+        assert name in entries, "Missing muzzle flash: " + name
+        for material in re.findall(rb'\tshaders\s*\[\s*(\S+)', data):
+            assert "materials/" + material.decode().lower() in entries, "Missing muzzle flash material: " + material.decode()
+    for name, data in entries.items():
+        if name.startswith("weapons/mp/"):
+            fields = data.decode("latin-1").split("\\")
+            settings = dict(zip(fields[1::2], fields[2::2]))
+            for key in ("viewFlashEffect", "worldFlashEffect"):
+                effect = settings.get(key, "").lower().removeprefix("fx/").removesuffix(".efx")
+                assert not effect or "fx/" + effect + ".efx" in muzzle_flashes, f"{name} {key} not rewritten: {effect}"
     aliases = {}
     for name, data in entries.items():
         if name.startswith("soundaliases/") and name.endswith(".csv"):

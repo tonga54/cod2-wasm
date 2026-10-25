@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Exercise the real muzzle variant without modifying shared FX templates."""
+"""Exercise the scoped light-only muzzle variant and the muzzle draw without modifying shared FX templates; the
+weapon's flashes are registered as authored (scripts/browser_muzzle_flashes.py), with no enlarged variant."""
 from pathlib import Path
 import re
 import subprocess
@@ -7,10 +8,10 @@ import tempfile
 
 root=Path(__file__).resolve().parent.parent
 source=(root/'src/PC/cgame_mp/cg_weapons.c').read_text()
-match=re.search(r'static EffectTemplate \*CG_EnhanceMuzzleFlash\([^;]*?\)\n\{',source)
-end=match.end();depth=1
-while depth:
-    depth+=(source[end]=='{')-(source[end]=='}');end+=1
+assert 'CG_EnhanceMuzzleFlash' not in source
+assert source.count('weapInfo->viewFlashEffect = (EffectTemplate *)FX_RegisterEffect(weapDef->szViewFlashEffect);')==1
+assert source.count('weapInfo->worldFlashEffect = (EffectTemplate *)FX_RegisterEffect(weapDef->szWorldFlashEffect);')==1
+assert source.count('muzzleLightEffects[weaponNum] = CG_MuzzleLightsOnly(weapInfo->viewFlashEffect);')==1
 light_match=re.search(r'static EffectTemplate \*CG_MuzzleLightsOnly\([^;]*?\)\n\{',source)
 light_end=light_match.end();depth=1
 while depth:
@@ -51,36 +52,6 @@ static void ClearHunk(void){for(int i=0;i<allocations;i++)free(allocated[i]);all
 '''
 checks+=r'''
 int main(void){
- assert(!CG_EnhanceMuzzleFlash(NULL));
- int lifetimes[]={0,100,200,201,1500};
- for(int type=0;type<6;type++)for(int age=0;age<5;age++)for(int nonuniform=0;nonuniform<2;nonuniform++) {
-  PrimitiveTemplate originals[24]={0},before[24];EffectTemplate effect={.mPrimitiveCount=24},saved;
-  for(int i=0;i<24;i++) {
-   originals[i].mType=type;originals[i].mNonUniformScale=nonuniform;
-   originals[i].mLife.mMax=lifetimes[age];originals[i].mSpawnCount=(FxRange){1,1};
-   originals[i].spawnFrustumCullRadius=30;
-   for(int j=0;j<24;j++){originals[i].mFxChannels[j].curve=&originals[i];originals[i].mFxChannels[j].scaleRange=(FxRange){2,3};}
-   effect.mPrimitives[i]=&originals[i];
-  }
-  memcpy(before,originals,sizeof(before));saved=effect;
-  EffectTemplate *copy=CG_EnhanceMuzzleFlash(&effect);assert(copy!=&effect);
-  assert(!memcmp(&effect,&saved,sizeof(effect))&&!memcmp(originals,before,sizeof(before)));
-  int enhanced=type<=PT_TAIL&&lifetimes[age]<=200;
-  assert(allocations==(enhanced?25:1));
-  for(int i=0;i<24;i++) {
-   PrimitiveTemplate *p=copy->mPrimitives[i];
-   if(!enhanced){assert(p==&originals[i]);continue;}
-   assert(p!=&originals[i]);assert(!memcmp(&p->mLife,&originals[i].mLife,sizeof(FxRange)));
-   assert(!memcmp(&p->mSpawnCount,&originals[i].mSpawnCount,sizeof(FxRange)));
-   for(int j=0;j<24;j++) {
-    assert(p->mFxChannels[j].curve==originals[i].mFxChannels[j].curve);
-    float factor=j==FXCHAN_SIZE||(nonuniform&&j==FXCHAN_SIZE2)?1.4f:j==FXCHAN_COLOR?1.35f:j==FXCHAN_ALPHA?1.5f:1;
-    assert(fabsf(p->mFxChannels[j].scaleRange.mMin-2*factor)<.00001);
-    assert(fabsf(p->mFxChannels[j].scaleRange.mMax-3*factor)<.00001);
-   }
-  }
-  ClearHunk();
- }
  PrimitiveTemplate primitives[24]={0},saved[24];EffectTemplate fx={.mPrimitiveCount=24};
  for(int i=0;i<24;i++){primitives[i].mType=i%6;primitives[i].mParentPrimIndex=i-1;primitives[i].mLife=(FxRange){100,100};fx.mPrimitives[i]=&primitives[i];}
  memcpy(saved,primitives,sizeof(saved));
@@ -106,7 +77,7 @@ int main(void){
 }
 '''
 with tempfile.TemporaryDirectory(prefix='cod2-muzzle-appearance-') as tmp:
-    p=Path(tmp);(p/'test.c').write_text(support+source[match.start():end]+source[light_match.start():light_end]+draw+checks)
+    p=Path(tmp);(p/'test.c').write_text(support+source[light_match.start():light_end]+draw+checks)
     subprocess.run(['cc','-O1','-g','-fsanitize=address,undefined','-fno-sanitize-recover=all',str(p/'test.c'),'-lm','-o',str(p/'test')],check=True)
     subprocess.run([str(p/'test')],check=True)
-print('PASS: 60 full 24-primitive variants, scoped light-only FX and all 32 view/local/model/cubemap/WWII-scope combinations under ASan/UBSan')
+print('PASS: flashes registered as authored, scoped light-only FX and all 32 view/local/model/cubemap/WWII-scope combinations under ASan/UBSan')
