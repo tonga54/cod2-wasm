@@ -67,6 +67,12 @@ static void CG_AddPlayerWeapon(GfxEntity *hand,playerState_t *ps,centity_t *cent
 static const void *CG_WwiiScopeGlassForWeapon(int weapon) {return NULL;}
 static void CG_WwiiScopeAdjustViewWeapon(playerState_t *ps,int weapon,vec_t *angles) {}
 static void CG_WwiiScopePlaceViewWeapon(playerState_t *ps,int weapon,vec_t *origin) {}
+/* The view's own projection, and the hip pose the checks set (none at first). */
+#define CG_GUNFOV_HIP_POSE 6
+static float hipPose[CG_GUNFOV_HIP_POSE];
+static const WeaponDef *BG_GetPlayerWeaponDef(playerState_t *ps,int weapon) {return BG_GetWeaponDef(weapon);}
+static void CG_GunFovHipPose(playerState_t *ps,const WeaponDef *weapDef,float *pose) {memcpy(pose,hipPose,sizeof(hipPose));}
+static void CG_GunFovUpdate(playerState_t *ps,int drawGun) {}
 '''
 recoil = function('src/PC/bgame/bg_weapons.c', 'BG_CalculateWeaponPosition_GunRecoil_SingleAngle')
 viewstub = r'''
@@ -121,6 +127,29 @@ int main(void) {
         float expected=cg->refdef.vieworg[a]+cg->refdef.viewaxis[0][a]-3.5f*cg->refdef.viewaxis[1][a]-
             8.5f*cg->refdef.viewaxis[2][a];
         assert(fabsf(lastHand.origin[a]-expected)<1e-3f);
+    }
+    /* The hip pose turns the weapon's axes and moves it along them; while
+     * sprinting the carry pose takes the turn's place. */
+    {
+        const float pose[CG_GUNFOV_HIP_POSE]={1.0f,2.0f,3.0f,4.0f,-6.0f,-12.0f};
+        vec3_t angles={4.0f,-6.0f,-12.0f},axis[3],expectedAxis[3];
+        memcpy(hipPose,pose,sizeof(pose));
+        ps.weapon=1;ps.fWeaponPosFrac=0;ps.pm_flags=0;
+        cg->vGunOffset[0]=cg->vGunOffset[1]=cg->vGunSpeed[0]=cg->vGunSpeed[1]=0;
+        cg->time+=16;CG_AddViewWeapon(&ps);
+        AnglesToAxis(angles,axis);MatrixMultiply(axis,cg->refdef.viewaxis,expectedAxis);
+        for(int k=0;k<3;k++) for(int a=0;a<3;a++) assert(fabsf(lastHand.axis[k][a]-expectedAxis[k][a])<1e-4f);
+        for(int a=0;a<3;a++) {
+            float expected=cg->refdef.vieworg[a]+expectedAxis[0][a]+2.0f*expectedAxis[1][a]+3.0f*expectedAxis[2][a];
+            assert(fabsf(lastHand.origin[a]-expected)<1e-3f);
+        }
+        ps.pm_flags=PMF_SPRINT;
+        for(int frame=0;frame<30;frame++) {cg->time+=16;CG_AddViewWeapon(&ps);}
+        float cycle=(float)cg->time*0.012f;
+        vec3_t carry={10.0f+2.0f*sinf(cycle),-10.0f+2.0f*cosf(cycle),12.0f+3.0f*sinf(cycle)};
+        AnglesToAxis(carry,axis);MatrixMultiply(axis,cg->refdef.viewaxis,expectedAxis);
+        for(int k=0;k<3;k++) for(int a=0;a<3;a++) assert(fabsf(lastHand.axis[k][a]-expectedAxis[k][a])<1e-4f);
+        ps.pm_flags=0;memset(hipPose,0,sizeof(hipPose));
     }
     return 0;
 }
@@ -184,7 +213,10 @@ with tempfile.TemporaryDirectory(prefix='cod2-weapon-regression-') as directory:
         viewbody.replace('ws.time = cg->time;','ws.time = cg->time - playerState->commandTime;'),
         viewbody.replace('    weaponIndex = BG_GetViewmodelWeaponIndex(playerState);',
                          '    if (cg->shellshock.hasSavedScreen) return;\n    weaponIndex = BG_GetViewmodelWeaponIndex(playerState);'),
-        viewbody.replace('finalAxis[1], -viewDef->vGunOfs[1]', 'finalAxis[1], viewDef->vGunOfs[1]')]),
+        viewbody.replace('finalAxis[1], -viewDef->vGunOfs[1]', 'finalAxis[1], viewDef->vGunOfs[1]'),
+        viewbody.replace('weaponAngles[i] += hip[3 + i] * (1.0f - sprintBlend);', 'weaponAngles[i] += hip[3 + i];'),
+        viewbody.replace('weaponAngles[i] += hip[3 + i] * (1.0f - sprintBlend);', 'weaponAngles[i] += hip[i];'),
+        viewbody.replace('-viewDef->vGunOfs[1] + hip[1]', '-viewDef->vGunOfs[1] - hip[1]')]),
         ('ground',mathbody+itemtypes,itembody,itemchecks,[
         itembody.replace('ent->r.inuse && tr.fraction','ent->active && tr.fraction')])]
     for name,support,body,checks,mutants in suites:
@@ -193,4 +225,4 @@ with tempfile.TemporaryDirectory(prefix='cod2-weapon-regression-') as directory:
             subprocess.run(['cc', '-I', str(root / 'src/headers'),'-std=c99','-O1','-g','-fsanitize=address,undefined',str(path),'-lm','-o',str(tmp/name)],check=True)
             result=subprocess.run([str(tmp/name)],capture_output=True,text=True)
             assert (result.returncode==0)==(index==0),(name,index,result.stderr)
-print('PASS: 333 world-space scope directions, 11,000 recoil frames, shellshock weapon visibility, a weapon file\'s own view offset, 168 slope/yaw landings, freed entities and 6 failing regression mutants')
+print('PASS: 333 world-space scope directions, 11,000 recoil frames, shellshock weapon visibility, a weapon file\'s own view offset, the hip pose\'s offset and turn giving way to the sprint\'s carry pose, 168 slope/yaw landings, freed entities and 9 failing regression mutants')

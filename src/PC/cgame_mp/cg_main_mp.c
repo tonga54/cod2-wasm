@@ -17,6 +17,7 @@
 #include "headers/PC/cgame_mp/cg_explosives.h"
 #include "headers/PC/cgame_mp/cg_scoretable.h"
 #include "headers/PC/cgame_mp/cg_wwiiscope.h"
+#include "headers/PC/cgame_mp/cg_gunfov.h"
 #include "headers/PC/cgame_mp/cg_scopeglint.h"
 #include <float.h>
 
@@ -1239,6 +1240,7 @@ void CG_Init(int serverMessageNum, int serverCommandSequence, int clientNum)
     CG_HitMarkerInit();
     CG_WwiiScopeInit();
     CG_ScopeGlintInit();
+    CG_GunFovInit();
     CG_ExplosivesInit();
     CG_LoadingString("sounds");
     CG_RegisterSounds();

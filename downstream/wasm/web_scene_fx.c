@@ -39,6 +39,7 @@ extern const dvar_t *r_atmosphere;
 extern const dvar_t *r_sunShafts;
 extern const dvar_t *r_shockwave;
 extern const dvar_t *r_clarity;
+extern const dvar_t *r_taa;
 
 /* Draws the sun's shadow map of the frame's moving models (web_sun_shadows.c). */
 void WebSunShadows_Render(void);
@@ -136,13 +137,25 @@ enum {
     /* Local contrast (r_clarity): how far each pixel's light moves from its
      * surroundings', 0 for none. */
     SCENE_FX_CLARITY = SCENE_FX_BLAST_DEPTH + SCENE_FX_BLASTS,
-    SCENE_FX_PARAM_COUNT
+    /* How much the film grade lifts the shade, 0 for none. */
+    SCENE_FX_TONE,
+    /* Temporal antialiasing (r_taa): how much of each pixel this frame gives,
+     * 1 when there is nothing to keep and 0 for none; the rotation, then
+     * offset, taking a point from this view's space into the last frame's;
+     * the last view's projection x and y scales; and this frame's jitter in
+     * normalized device coordinates. */
+    SCENE_FX_TAA,
+    SCENE_FX_TAA_ROTATION,
+    SCENE_FX_TAA_MOVE = SCENE_FX_TAA_ROTATION + 9,
+    SCENE_FX_TAA_PROJECTION = SCENE_FX_TAA_MOVE + 3,
+    SCENE_FX_TAA_JITTER = SCENE_FX_TAA_PROJECTION + 2,
+    SCENE_FX_PARAM_COUNT = SCENE_FX_TAA_JITTER + 2
 };
 
 #define SCENE_FX_SCOPE_FLOATS (SCENE_FX_SCOPE_END - SCENE_FX_SCOPE)
 
 /* r_ssao's darkening of an enclosed point, and the radius it measures. */
-#define SCENE_FX_AO_STRENGTH 0.85f
+#define SCENE_FX_AO_STRENGTH 0.55f
 #define SCENE_FX_AO_WORLD_RADIUS 22.0f
 
 /* r_atmosphere adds this share of the map's own fog density, at most the
@@ -183,7 +196,17 @@ enum {
 
 /* At r_clarity 1 a pixel's light moves this share of its difference from its
  * surroundings' further from them. */
-#define SCENE_FX_CLARITY_GAIN 0.4f
+#define SCENE_FX_CLARITY_GAIN 0.16f
+
+/* The film grade lifts the shade, as WWII's filmic toe does, by this much of
+ * x (1 - x)^2 for a channel x: 0.05 to 0.07, 0.2 to 0.26, 0.6 to 0.64. */
+#define SCENE_FX_SHADE_LIFT 0.45f
+
+/* Temporal antialiasing keeps this share of each pixel from the frames
+ * before; the view moves within its pixels through this many points of the
+ * Halton (2, 3) sequence. */
+#define SCENE_FX_TAA_HISTORY 0.9f
+#define SCENE_FX_TAA_PHASES 8
 
 /* InfinitePerspectiveMatrix's depth scale times the default r_znear of 4. */
 #define SCENE_FX_DEFAULT_WORLD_NEAR_CLIP (0.9995002746582031f * 4.0f)
@@ -249,6 +272,16 @@ static float s_motionScale;
 static float s_motionRotation[9];
 static float s_motionMove[3];
 static float s_motionProjection[2];
+/* Temporal antialiasing: this frame's jitter in normalized device
+ * coordinates and its place in the sequence; from this view into the last
+ * continuous one, and that view's projection scales. */
+static float s_jitter[2];
+static unsigned s_jitterPhase;
+static int s_taaView;
+static float s_taaRotation[9];
+static float s_taaMove[3];
+static float s_taaLastProjection[2];
+static float s_lastProjection[2];
 static float s_backdropFrac;
 static float s_backdropGray;
 static float s_grayFrac;
@@ -309,6 +342,9 @@ static int s_vmTilesX;
 #define SCENE_FX_SCOPE_LENS_FLOATS (SCENE_FX_SCOPE_FLOATS + SCENE_FX_SCOPE_BELL_FLOATS)
 static float s_scope[SCENE_FX_SCOPE_FLOATS];
 static float s_scopeBell[SCENE_FX_SCOPE_BELL_FLOATS];
+/* The arms and weapon's own projection scales at the hip (cg_gunfov_mp.c),
+ * 0 for the view's. */
+static float s_gunProjection[2];
 /* The window's stencil is drawn once per view, before the rifle's first draw. */
 static int s_scopeStencil;
 static int s_scopeMasking;
@@ -649,6 +685,66 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "    max(max(cocAt(b + ivec2(0, 3), m), cocAt(b + ivec2(3, 3), m)), cocAt(b + ivec2(2, 2), m)));\n" +
                 "  o = vec4(0.25 * (c + d + e + f), k);\n}\n",
                 ["u_src", "u_depth"], ["u_texel", "u_dof"]);
+            /* Temporal antialiasing. Each world pixel goes back by its depth to
+             * where the last frame's camera saw it, without this frame's
+             * jitter, and the running average there, filtered with Catmull-Rom,
+             * is kept within the spread of colours about the pixel this frame
+             * (YCoCg variance clipping), so a player crossing it leaves no
+             * trail. The viewmodel moves with the camera: it stays where it
+             * is, and keeps less of its past. */
+            link("taa", "uniform sampler2D u_src;\nuniform sampler2D u_history;\nuniform highp sampler2D u_depth;\n" +
+                "uniform highp vec4 u_taa;\nuniform highp mat3 u_taaRotation;\nuniform highp vec3 u_taaMove;\n" +
+                "uniform highp vec4 u_taaLens;\n" +
+                "vec3 toYCoCg(vec3 c) { return vec3(0.25 * c.r + 0.5 * c.g + 0.25 * c.b, 0.5 * (c.r - c.b), 0.5 * c.g - 0.25 * (c.r + c.b)); }\n" +
+                "vec3 fromYCoCg(vec3 c) { return vec3(c.x + c.y - c.z, c.x + c.z, c.x - c.y - c.z); }\n" +
+                "vec3 history(highp vec2 uv) {\n" +
+                "  highp vec2 size = vec2(textureSize(u_history, 0));\n" +
+                "  highp vec2 p = uv * size;\n" +
+                "  highp vec2 c1 = floor(p - 0.5) + 0.5;\n" +
+                "  highp vec2 f = p - c1;\n" +
+                "  highp vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));\n" +
+                "  highp vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);\n" +
+                "  highp vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));\n" +
+                "  highp vec2 w3 = f * f * (-0.5 + 0.5 * f);\n" +
+                "  highp vec2 w12 = w1 + w2;\n" +
+                "  highp vec2 t0 = (c1 - 1.0) / size, t3 = (c1 + 2.0) / size, t12 = (c1 + w2 / w12) / size;\n" +
+                "  vec3 c = texture(u_history, vec2(t12.x, t0.y)).rgb * (w12.x * w0.y) +\n" +
+                "    texture(u_history, vec2(t0.x, t12.y)).rgb * (w0.x * w12.y) +\n" +
+                "    texture(u_history, t12).rgb * (w12.x * w12.y) +\n" +
+                "    texture(u_history, vec2(t3.x, t12.y)).rgb * (w3.x * w12.y) +\n" +
+                "    texture(u_history, vec2(t12.x, t3.y)).rgb * (w12.x * w3.y);\n" +
+                "  return max(c / (w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y), 0.0);\n}\n" +
+                "void main() {\n" +
+                "  ivec2 px = ivec2(gl_FragCoord.xy), last = textureSize(u_src, 0) - 1;\n" +
+                "  vec3 c = texelFetch(u_src, px, 0).rgb;\n" +
+                "  if (u_taa.x >= 1.0) { o = vec4(c, 1.0); return; }\n" +
+                "  vec3 m1 = vec3(0.0), m2 = vec3(0.0);\n" +
+                "  for (int y = -1; y <= 1; ++y)\n" +
+                "    for (int x = -1; x <= 1; ++x) {\n" +
+                "      vec3 s = toYCoCg(texelFetch(u_src, clamp(px + ivec2(x, y), ivec2(0), last), 0).rgb);\n" +
+                "      m1 += s;\n" +
+                "      m2 += s * s;\n" +
+                "    }\n" +
+                "  m1 *= 1.0 / 9.0;\n" +
+                "  vec3 spread = max(sqrt(max(m2 * (1.0 / 9.0) - m1 * m1, 0.0)) * 1.25, vec3(0.004));\n" +
+                "  highp float d = texelFetch(u_depth, px, 0).r;\n" +
+                "  highp vec2 uv = v_uv;\n" +
+                "  float weight = u_taa.x;\n" +
+                "  if (d >= 0.2) {\n" +
+                "    highp float z = min(u_taa.w / max(0.9995002746582031 - d, 0.000001), 1000000.0);\n" +
+                "    highp vec3 p = u_taaRotation * vec3((v_uv * 2.0 - 1.0 - u_taaLens.zw) * z / u_taa.yz, z) + u_taaMove;\n" +
+                "    uv = p.xy * u_taaLens.xy / max(p.z, 0.001) * 0.5 + 0.5;\n" +
+                "    if (p.z <= 0.001) weight = 1.0;\n" +
+                "  } else {\n" +
+                "    weight = max(weight, 0.25);\n" +
+                "  }\n" +
+                "  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) weight = 1.0;\n" +
+                "  vec3 h = toYCoCg(history(uv)) - m1;\n" +
+                "  vec3 a = abs(h) / spread;\n" +
+                "  float k = max(a.x, max(a.y, a.z));\n" +
+                "  h = m1 + (k > 1.0 ? h / k : h);\n" +
+                "  o = vec4(clamp(mix(fromYCoCg(h), c, weight), 0.0, 1.0), 1.0);\n}\n",
+                ["u_src", "u_history", "u_depth"], ["u_taa", "u_taaRotation", "u_taaMove", "u_taaLens"]);
             link("compose", "uniform sampler2D u_scene;\nuniform sampler2D u_bloom;\n" +
                 "uniform highp sampler2D u_depth;\nuniform sampler2D u_dofMed;\nuniform sampler2D u_dofLarge;\n" +
                 "uniform highp vec4 u_px;\nuniform vec4 u_glow;\nuniform highp vec4 u_dof;\nuniform vec4 u_dof2;\nuniform vec4 u_film;\n" +
@@ -661,7 +757,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "uniform vec3 u_hazeSunColor;\nuniform highp vec3 u_hazeProj;\n" +
                 "uniform sampler2D u_shafts;\nuniform vec4 u_shaft;\n" +
                 "uniform highp vec4 u_blast[4];\nuniform highp vec4 u_blastDepth;\n" +
-                "uniform sampler2D u_clarityMap;\nuniform vec4 u_clarity;\n" +
+                "uniform sampler2D u_clarityMap;\nuniform vec4 u_clarity;\nuniform vec4 u_tone;\n" +
                 coc + nearWorld + viewmodelMotion +
                 drawnEyepiece + "void main() {\n" +
                 /* An explosion's shockwave bends the view about its front as a
@@ -885,6 +981,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "    float l = dot(col, vec3(0.2126, 0.7152, 0.0722));\n" +
                 "    col = mix(vec3(l), col, u_film.y);\n" +
                 "    col = clamp(col * mix(vec3(0.975, 0.99, 1.03), vec3(1.025, 1.005, 0.965), smoothstep(0.05, 0.75, l)), 0.0, 1.0);\n" +
+                "    col += u_tone.x * col * (1.0 - col) * (1.0 - col);\n" +
                 "    col += u_film.z * col * (1.0 - col) * (col - 0.35) * 1.5384615;\n" +
                 "  }\n" +
                 "  if (u_px.w > 0.0)\n" +
@@ -899,7 +996,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 ["u_px", "u_glow", "u_dof", "u_dof2", "u_film", "u_near", "u_tier",
                  "u_motion", "u_motionRotation", "u_motionMove", "u_vm", "u_lens", "u_lensInv", "u_lensFx", "u_aoMix",
                  "u_haze", "u_hazeUp", "u_hazeSun", "u_hazeSunColor", "u_hazeProj", "u_shaft", "u_blast", "u_blastDepth",
-                 "u_clarity"]);
+                 "u_clarity", "u_tone"]);
             /* A scene smaller than the canvas, filtered up to it with Catmull-Rom
              * in five bilinear taps (the corner taps weigh under 0.5%), as the
              * page scales the canvas again with its own bilinear filter. */
@@ -996,7 +1093,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 ew: Math.max(1, Math.ceil(w / 8)), eh: Math.max(1, Math.ceil(h / 8)),
                 hw: Math.max(1, Math.ceil(w / 2)), hh: Math.max(1, Math.ceil(h / 2)),
                 textures: [], framebuffers: [], renderbuffers: [], ms: null, q: [], qFbo: [], e: [], eFbo: [],
-                ao: [], aoFbo: [], sh: [], shFbo: [], cl: [], clFbo: []
+                ao: [], aoFbo: [], sh: [], shFbo: [], cl: [], clFbo: [], taa: [], taaFbo: [], taaCur: 0, taaValid: false
             };
             var ok = true;
             var previousUnit = gl.getParameter(gl.ACTIVE_TEXTURE);
@@ -1054,6 +1151,9 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 /* The scene's light, then its surroundings', for local contrast. */
                 t.cl.push(texture(gl.RGBA8, t.qw, t.qh, gl.LINEAR));
                 t.clFbo.push(framebuffer(t.cl[i], null, null, null));
+                /* Temporal antialiasing's running average, last frame's and this one's. */
+                t.taa.push(texture(gl.RGBA8, w, h, gl.LINEAR));
+                t.taaFbo.push(framebuffer(t.taa[i], null, null, null));
             }
             gl.bindTexture(gl.TEXTURE_2D, null);
             gl.activeTexture(previousUnit);
@@ -1186,7 +1286,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             var glow = glow0 > 0 || glow1 > 0, blurBehind = backdrop > 0.004, dof = ads > 0.004 || blurBehind || lens;
             var ao = H[o + 55] > 0, haze = H[o + 62] > 0, shafts = H[o + 73] > 0;
             var blast = H[o + 96] > 0 || H[o + 97] > 0 || H[o + 98] > 0 || H[o + 99] > 0;
-            var clarity = H[o + 100] > 0;
+            var clarity = H[o + 100] > 0, taa = H[o + 102] > 0;
             var lines = h / 480;
             var program = gl.getParameter(gl.CURRENT_PROGRAM);
             var vao = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
@@ -1204,8 +1304,8 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 gl.bindFramebuffer(gl.READ_FRAMEBUFFER, t.ms);
                 gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, t.scene);
                 gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h,
-                    dof || motion > 0 || vm || ao || haze || shafts || blast ? (gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT) :
-                    gl.COLOR_BUFFER_BIT, gl.NEAREST);
+                    dof || motion > 0 || vm || ao || haze || shafts || blast || taa ?
+                    (gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT) : gl.COLOR_BUFFER_BIT, gl.NEAREST);
                 gl.invalidateFramebuffer(gl.READ_FRAMEBUFFER, fx.discard);
             }
             /* Reading the write masks back would stall on the GPU process. Every
@@ -1231,6 +1331,26 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 gl.depthFunc(gl.LESS);
                 gl.drawArrays(gl.TRIANGLES, 0, 3 * H[o + 36]);
                 gl.disable(gl.DEPTH_TEST);
+            }
+            var scene = t.color;
+            if (taa) {
+                var T = P.taa, cur = t.taaCur ^ 1;
+                gl.useProgram(T.program);
+                /* A history just made, or one a frame without antialiasing
+                 * left behind, has nothing to keep. */
+                gl.uniform4f(T.u_taa, t.taaValid ? H[o + 102] : 1, H[o + 57], H[o + 58], H[o + 15]);
+                gl.uniformMatrix3fv(T.u_taaRotation, false, H, o + 103, 9);
+                gl.uniform3f(T.u_taaMove, H[o + 112], H[o + 113], H[o + 114]);
+                gl.uniform4f(T.u_taaLens, H[o + 115], H[o + 116], H[o + 117], H[o + 118]);
+                fx.texture(0, t.color);
+                fx.texture(1, t.taa[t.taaCur]);
+                fx.texture(2, t.depth);
+                fx.pass(T, t.taaFbo[cur], w, h);
+                t.taaCur = cur;
+                t.taaValid = true;
+                scene = t.taa[cur];
+            } else {
+                t.taaValid = false;
             }
             if (ao) {
                 var A = P.ao;
@@ -1372,7 +1492,8 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             gl.uniform4f(C.u_blastDepth, H[o + 96], H[o + 97], H[o + 98], H[o + 99]);
             if (blast) gl.uniform4fv(C.u_blast, H.subarray(o + 80, o + 96));
             gl.uniform4f(C.u_clarity, clarity ? H[o + 100] : 0, 0, 0, 0);
-            var sources = [t.color, t.e[1], t.depth, t.q[0], t.q[1], vm ? vm.smear : null, vm ? vm.mesh : null, ao ? t.ao[1] : null,
+            gl.uniform4f(C.u_tone, H[o + 101], 0, 0, 0);
+            var sources = [scene, t.e[1], t.depth, t.q[0], t.q[1], vm ? vm.smear : null, vm ? vm.mesh : null, ao ? t.ao[1] : null,
                 shafts ? t.sh[1] : null, clarity ? t.cl[1] : null];
             for (var s = 0; s < sources.length; ++s) fx.texture(s, sources[s]);
             if (scaled) {
@@ -1503,6 +1624,38 @@ static int WebSceneFx_AoEnabled(void)
 static int WebSceneFx_HazeEnabled(void)
 {
     return WebSceneFx_Enabled(r_atmosphere) && !WebSceneFx_Enabled(r_fullbright) && s_hazeDensity > 0.0f;
+}
+
+static int WebSceneFx_TaaEnabled(void)
+{
+    return WebSceneFx_Enabled(r_taa) && !WebSceneFx_Enabled(r_fullbright);
+}
+
+/* The radical inverse of index in base: a point of the Halton sequence. */
+static float WebSceneFx_Halton(unsigned index, unsigned base)
+{
+    float fraction = 1.0f, result = 0.0f;
+
+    while (index) {
+        fraction /= (float)base;
+        result += fraction * (float)(index % base);
+        index /= base;
+    }
+    return result;
+}
+
+/* A draw's GL projection in the composed view, column-major, moved by this
+ * frame's jitter: clip x and y gain the jitter times w. */
+void WebSceneFx_JitterProjection(float *projection)
+{
+    int column;
+
+    if (!s_active || !projection || (s_jitter[0] == 0.0f && s_jitter[1] == 0.0f))
+        return;
+    for (column = 0; column < 4; ++column) {
+        projection[column * 4] += s_jitter[0] * projection[column * 4 + 3];
+        projection[column * 4 + 1] += s_jitter[1] * projection[column * 4 + 3];
+    }
 }
 
 /* How far r_clarity moves each pixel's light from its surroundings'. */
@@ -1755,13 +1908,35 @@ static int WebSceneFx_ScopeRequested(void)
            s_scope[SCENE_FX_SCOPE_PROJECTION - SCENE_FX_SCOPE] > 0.0f;
 }
 
-/* The rifle's projection scales while the composed view draws it, or NULL
- * for the view's own. */
-const float *WebSceneFx_ViewmodelProjection(void)
+/* The cgame's projection scales for the arms and weapon, which compose the
+ * view as a scope's do; NULL, or a non-positive or broken scale, draws them
+ * with the view's. */
+void WebSceneFx_SetGunProjection(const float *projection)
+{
+    s_gunProjection[0] = s_gunProjection[1] = 0.0f;
+    if (projection && isfinite(projection[0]) && isfinite(projection[1]) && projection[0] > 0.0f &&
+        projection[1] > 0.0f) {
+        s_gunProjection[0] = projection[0];
+        s_gunProjection[1] = projection[1];
+    }
+}
+
+/* The viewmodel's projection scales, a raised scope's before the weapon's
+ * own, or NULL for the view's. */
+static const float *WebSceneFx_ViewmodelScales(void)
 {
     const float *projection = s_scope + (SCENE_FX_SCOPE_PROJECTION - SCENE_FX_SCOPE);
 
-    return s_active && projection[0] > 0.0f ? projection : NULL;
+    if (projection[0] > 0.0f)
+        return projection;
+    return s_gunProjection[0] > 0.0f ? s_gunProjection : NULL;
+}
+
+/* The viewmodel's projection scales while the composed view draws it, or
+ * NULL for the view's own. */
+const float *WebSceneFx_ViewmodelProjection(void)
+{
+    return s_active ? WebSceneFx_ViewmodelScales() : NULL;
 }
 
 static float WebSceneFx_ScopeNearClip(float nearClip)
@@ -1891,6 +2066,10 @@ static void WebSceneFx_TrackCamera(void)
         if (trace > 1.0f + 2.0f * cosf(SCENE_FX_MOTION_MAX_TURN) && moved < SCENE_FX_MOTION_MAX_MOVE) {
             s_viewContinuous = 1;
             s_viewGap = gap;
+            memcpy(s_taaRotation, rotation, sizeof(s_taaRotation));
+            memcpy(s_taaMove, move, sizeof(s_taaMove));
+            s_taaLastProjection[0] = s_lastProjection[0];
+            s_taaLastProjection[1] = s_lastProjection[1];
             if (WebSceneFx_Enabled(r_motionBlur) && s_aimFrac < 1.0f &&
                 (turn > SCENE_FX_MOTION_MIN_TURN || moved > SCENE_FX_MOTION_MIN_MOVE)) {
                 s_motionScale = (float)(SCENE_FX_MOTION_EXPOSURE / gap) * (1.0f - s_aimFrac);
@@ -1902,6 +2081,8 @@ static void WebSceneFx_TrackCamera(void)
         }
     }
     memcpy(s_lastView, view, sizeof(s_lastView));
+    s_lastProjection[0] = s_cameraProjection[0];
+    s_lastProjection[1] = s_cameraProjection[1];
     s_lastViewTime = now;
     s_lastViewValid = valid;
 }
@@ -2009,7 +2190,7 @@ static int WebSceneFx_MarkViewmodelTiles(const float *lo, const float *hi, const
  * longest half smear, so that covers every smear that reaches the tile. */
 static void WebSceneFx_TrackViewmodel(int width, int height, float nearClip)
 {
-    const float *view = s_cameraView;
+    const float *view = s_cameraView, *scales;
     float *screen = s_vmScreens[s_vmLastScreen ^ 1];
     const float *last = s_vmScreens[s_vmLastScreen];
     float lens[16], m[16], *index;
@@ -2023,13 +2204,14 @@ static void WebSceneFx_TrackViewmodel(int width, int height, float nearClip)
         return;
     }
     memcpy(lens, s_cameraLens, sizeof(lens));
-    /* A raised WWII scope draws the rifle with its own projection scales and
-     * near clip, so its smear has to be measured with them too. */
-    if (s_scope[SCENE_FX_SCOPE_PROJECTION - SCENE_FX_SCOPE] > 0.0f) {
-        lens[0] = s_scope[SCENE_FX_SCOPE_PROJECTION - SCENE_FX_SCOPE];
-        lens[5] = s_scope[SCENE_FX_SCOPE_PROJECTION + 1 - SCENE_FX_SCOPE];
-        nearClip = WebSceneFx_ScopeNearClip(nearClip);
+    /* The viewmodel is drawn with its own projection scales, and a raised
+     * WWII scope's near clip, so its smear has to be measured with them too. */
+    scales = WebSceneFx_ViewmodelScales();
+    if (scales) {
+        lens[0] = scales[0];
+        lens[5] = scales[1];
     }
+    nearClip = WebSceneFx_ScopeNearClip(nearClip);
     lens[14] = -nearClip;
     for (i = 0; i < 4; ++i)
         for (j = 0; j < 4; ++j) {
@@ -2185,10 +2367,13 @@ static void WebSceneFx_FillParams(float *params)
     params[SCENE_FX_VM_END] = s_vmEnd;
     params[SCENE_FX_NEAR_CLIP] = WebSceneFx_ScopeNearClip(s_nearClip);
     params[SCENE_FX_NEAR_BLUR] = 3.0f;
-    params[SCENE_FX_SHARPEN] = film ? 0.147f : 0.0f;
-    params[SCENE_FX_SATURATION] = 0.96f;
-    params[SCENE_FX_CONTRAST] = film ? 0.35f : 0.0f;
+    /* Temporal antialiasing softens what it averages: sharpen its result more. */
+    params[SCENE_FX_SHARPEN] = film ? (s_taaView ? 0.12f : 0.06f) : 0.0f;
+    /* The color the contrast curve used to give, without its darker shade. */
+    params[SCENE_FX_SATURATION] = 1.12f;
+    params[SCENE_FX_CONTRAST] = 0.0f;
     params[SCENE_FX_FILM] = film ? 1.0f : 0.0f;
+    params[SCENE_FX_TONE] = film ? SCENE_FX_SHADE_LIFT * (1.0f - s_grayFrac) : 0.0f;
     params[SCENE_FX_WORLD_NEAR_CLIP] = s_worldNearClip;
     params[SCENE_FX_NEAR_END] = s_nearEnd;
     params[SCENE_FX_WORLD_BLUR] = 1.0f;
@@ -2204,7 +2389,7 @@ static void WebSceneFx_FillParams(float *params)
     if (s_grayFrac > params[SCENE_FX_BACKDROP_GRAY])
         params[SCENE_FX_BACKDROP_GRAY] = s_grayFrac;
     if (film)
-        params[SCENE_FX_CONTRAST] += 0.85f * s_grayFrac;
+        params[SCENE_FX_CONTRAST] = 1.2f * s_grayFrac;
     params[SCENE_FX_VM_MOTION] = s_vmMotion;
     params[SCENE_FX_VM_TRIANGLES] = (float)s_vmTriangles;
     params[SCENE_FX_VM_INDEX_ROW] = (float)s_vmIndexRow;
@@ -2231,6 +2416,16 @@ static void WebSceneFx_FillParams(float *params)
     memcpy(params + SCENE_FX_BLAST, s_blastView, sizeof(s_blastView));
     memcpy(params + SCENE_FX_BLAST_DEPTH, s_blastDepth, sizeof(s_blastDepth));
     params[SCENE_FX_CLARITY] = WebSceneFx_Clarity();
+    params[SCENE_FX_TAA] = 0.0f;
+    if (s_taaView)
+        params[SCENE_FX_TAA] = s_viewContinuous && s_viewProjection[0] > 0.0f && s_taaLastProjection[0] > 0.0f ?
+            1.0f - SCENE_FX_TAA_HISTORY : 1.0f;
+    memcpy(params + SCENE_FX_TAA_ROTATION, s_taaRotation, sizeof(s_taaRotation));
+    memcpy(params + SCENE_FX_TAA_MOVE, s_taaMove, sizeof(s_taaMove));
+    params[SCENE_FX_TAA_PROJECTION] = s_taaLastProjection[0];
+    params[SCENE_FX_TAA_PROJECTION + 1] = s_taaLastProjection[1];
+    params[SCENE_FX_TAA_JITTER] = s_jitter[0];
+    params[SCENE_FX_TAA_JITTER + 1] = s_jitter[1];
 }
 
 /* The mip bias the 3D draws of the composed view give their color maps. */
@@ -2295,13 +2490,24 @@ void WebSceneFx_BeginView(int x, int y, int width, int height, int screenWidth, 
     scaled = sceneWidth != width || sceneHeight != height;
     if (!scaled && s_grayFrac <= 0.0f && s_vmMotion <= 0.0f && !WebSceneFx_GlowEnabled() && !WebSceneFx_Enabled(r_filmTweakEnable) && samples <= 1 &&
         !(WebSceneFx_Enabled(r_dof_enable) && s_adsFrac > 0.0f) && s_motionScale <= 0.0f && s_backdropFrac <= 0.0f &&
-        s_backdropGray <= 0.0f && !WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled() && !WebSceneFx_HazeEnabled() &&
-        !WebSceneFx_ShaftsEnabled() && !WebSceneFx_BlastsActive() && WebSceneFx_Clarity() <= 0.0f)
+        s_backdropGray <= 0.0f && !WebSceneFx_ScopeRequested() && s_gunProjection[0] <= 0.0f && !WebSceneFx_AoEnabled() &&
+        !WebSceneFx_HazeEnabled() && !WebSceneFx_ShaftsEnabled() && !WebSceneFx_BlastsActive() &&
+        WebSceneFx_Clarity() <= 0.0f && !WebSceneFx_TaaEnabled())
         return;
     s_nearClip = nearClip;
     s_worldNearClip = isfinite(worldNearClip) && worldNearClip > 0.0f ? worldNearClip : SCENE_FX_DEFAULT_WORLD_NEAR_CLIP;
     s_active = WebSceneFx_Bind(sceneWidth, sceneHeight, samples, width, height);
     s_scopeUnavailable = !s_active;
+    /* Each frame the view moves within its pixels to the next point of the
+     * sequence, centred on the pixel. */
+    s_taaView = s_active && WebSceneFx_TaaEnabled();
+    s_jitter[0] = s_jitter[1] = 0.0f;
+    if (s_taaView) {
+        unsigned index = s_jitterPhase++ % SCENE_FX_TAA_PHASES + 1;
+
+        s_jitter[0] = (WebSceneFx_Halton(index, 2) - 0.5f) * 2.0f / (float)sceneWidth;
+        s_jitter[1] = (WebSceneFx_Halton(index, 3) - 0.5f) * 2.0f / (float)sceneHeight;
+    }
     /* Sampling a mip finer by the scale's octaves gives the color maps the
      * detail of the canvas the scene is scaled up to, as upscalers do. */
     s_lodBias = s_active && scaled ? WebSceneFx_Clamp(log2f((float)sceneHeight / (float)height), -1.0f, 0.0f) : 0.0f;

@@ -47,6 +47,7 @@ const dvar_t *r_clarity;
 const dvar_t *r_surfaceVariation;
 const dvar_t *r_detailRelief;
 const dvar_t *r_textureSharpen;
+const dvar_t *r_taa;
 #endif
 extern const dvar_t *r_znear;
 extern const dvar_t *r_znear_depthhack;
@@ -578,6 +579,10 @@ void R_RegisterDvars(void)
     /* How much a lightmapped surface's color map is sharpened where it is
      * magnified, 0 for none. */
     r_textureSharpen = ri.Dvar_RegisterFloat("r_textureSharpen", 1.0f, 0.0f, 2.0f, 0x2001);
+    /* Temporal antialiasing: the composed view moves by a fraction of a pixel
+     * each frame and keeps a running average of what it saw where the camera
+     * looked before (downstream/wasm/web_scene_fx.c). */
+    r_taa = ri.Dvar_RegisterBool("r_taa", 1, 0x2001);
 #endif
 
     r_outdoorAwayBias = ri.Dvar_RegisterFloat("r_outdoorAwayBias", 32.0f, -3.4028235e+38f, 3.4028235e+38f, 0x2000);

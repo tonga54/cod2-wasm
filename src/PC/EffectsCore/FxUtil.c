@@ -291,6 +291,7 @@ extern void CG_DObjCalcBoneGeneric(int entityNum, int localClientNum, int boneIn
 extern void *DObjGetRotTransArray(void *dobj);
 extern void MatrixMultiply(const vec3_t *a, const vec3_t *b, vec3_t *out);
 extern void MatrixTransformVector43(const vec_t *trans, const vec3_t *axis, vec_t *out);
+extern void CG_GunFovPoint(vec_t *point);
 extern void *imp_fx_debugBolt;
 extern void *imp_colorRed;
 extern void *imp_colorGreen;
@@ -310,6 +311,8 @@ Bool FX_GetBoneOrientation(const FxBoltInfo *bolt, orientation_t *orient)
 
     if (boneIndex < 0) {
         *orient = parent;
+        if (entityNum >= 0x400)
+            CG_GunFovPoint(orient->origin);
         return 1;
     }
 
@@ -334,6 +337,10 @@ Bool FX_GetBoneOrientation(const FxBoltInfo *bolt, orientation_t *orient)
     AxisCopy((vec_t *)parent.axis, (vec_t *)parentMatrix);
     memcpy(parentMatrix[3], parent.origin, sizeof(parent.origin));
     MatrixTransformVector43(mtx->trans, parentMatrix, orient->origin);
+    /* The view weapon's effects are drawn with the view's projection, the
+     * weapon with its own (cg_gunfov_mp.c). */
+    if (entityNum >= 0x400)
+        CG_GunFovPoint(orient->origin);
 
     float debugDist = (*(dvar_t **)imp_fx_debugBolt)->current.value;
     if (debugDist != 0.0f) {

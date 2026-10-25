@@ -38,7 +38,17 @@ assert ('materialLighting && dev->lighting ? g_webEntitySunVisibility : 0.0f,\n'
         '                r_cavity ? r_cavity->current.value : 0.0f,\n'
         '                r_surfaceVariation ? r_surfaceVariation->current.value : 0.0f,\n'
         '                r_detailRelief ? r_detailRelief->current.value : 0.0f,\n'
-        '                r_textureSharpen ? r_textureSharpen->current.value : 0.0f);') in device
+        '                r_textureSharpen ? r_textureSharpen->current.value : 0.0f,\n'
+        '                /* The viewmodel draws in the depth hack\'s range (rb_backend.c). */\n'
+        '                !is2D && dev->viewportMinZ == 0.0f && dev->viewportMaxZ > 0.0f && dev->viewportMaxZ <= 0.2f);') in device
+# The arms and weapon are the only draws in that range: the back end's other
+# depth hacks reach 0.5 and the world 1.
+backend = (root / 'src/PC/gfx_d3d/rb_backend.c').read_text()
+hack = backend.index('            if (depthRange == 8) {\n')
+assert backend.index('                RB_SetDepthRange(0.0f, 0.2f);\n            } else if (depthRange == 0x10 || depthRange == 0x18) {\n'
+                     '                RB_SetDepthRange(0.0f, 0.5f);\n            } else if (depthRange == 0) {\n'
+                     '                RB_SetDepthRange(0.0f, 1.0f);\n', hack) > hack
+assert backend.count('RB_SetDepthRange(0.0f, 0.2f);') == 1
 for name in ('r_reflections', 'r_cavity', 'r_surfaceVariation', 'r_detailRelief', 'r_textureSharpen'):
     assert f'extern const dvar_t *{name};' in device, name
 draw = device.index('WebMaterials_Select(((materialCommands_t *)imp_tess)->material,')

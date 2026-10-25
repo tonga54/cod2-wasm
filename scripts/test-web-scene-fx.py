@@ -110,8 +110,8 @@ assert compose_shader.index('if (u_glow.x > 0.0)') < compose_shader.index('if (u
 # half the scene's size in two passes, and darkens only world pixels in the
 # compose pass, before the aim blur mixes in; its result is the eighth source.
 assert 'var ao = H[o + 55] > 0, haze = H[o + 62] > 0, shafts = H[o + 73] > 0;' in compositor
-assert ('dof || motion > 0 || vm || ao || haze || shafts || blast ? (gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT) :\n'
-        '                    gl.COLOR_BUFFER_BIT, gl.NEAREST);') in compositor
+assert ('dof || motion > 0 || vm || ao || haze || shafts || blast || taa ?\n'
+        '                    (gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT) : gl.COLOR_BUFFER_BIT, gl.NEAREST);') in compositor
 assert 'gl.uniform4f(A.u_aoView, H[o + 15], 0.9995002746582031, H[o + 57], H[o + 58]);' in compositor
 assert 'gl.uniform4f(A.u_aoParams, H[o + 56], H[o + 55], w, h);' in compositor
 assert 'fx.pass(A, t.aoFbo[0], t.hw, t.hh);' in compositor and 'fx.pass(P.aoBlur, t.aoFbo[1], t.hw, t.hh);' in compositor
@@ -138,9 +138,50 @@ assert ao_shader.index('"  occlusion += 0.6 * wide;\\n"') < ao_shader.index('"  
 # unit 21. The compose pass moves each pixel's light from it after the
 # sharpening and before the occlusion, never over a smear.
 assert 'r_clarity = ri.Dvar_RegisterFloat("r_clarity", 1.0f, 0.0f, 2.0f, 0x2001);' in dvars
-assert 'var clarity = H[o + 100] > 0;' in compositor
+assert 'var clarity = H[o + 100] > 0, taa = H[o + 102] > 0;' in compositor
+# The film grade lifts the shade by u_tone (101) in place of a contrast curve,
+# before the countdown's own contrast.
+assert 'gl.uniform4f(C.u_tone, H[o + 101], 0, 0, 0);' in compositor
+film_block = compose_shader[compose_shader.index('if (u_film.w > 0.0) {'):]
+assert film_block.index('"    col += u_tone.x * col * (1.0 - col) * (1.0 - col);\\n"') < \
+    film_block.index('"    col += u_film.z * col * (1.0 - col) * (col - 0.35) * 1.5384615;\\n"')
+# Temporal antialiasing (102-118): the scene, its running average and the
+# resolved depth go into the taa pass, which writes the other of two histories
+# at the scene's size; its result is the compose pass's scene. A frame without
+# it, or the first with it, keeps no history.
+assert 'gl.uniform4f(T.u_taa, t.taaValid ? H[o + 102] : 1, H[o + 57], H[o + 58], H[o + 15]);' in compositor
+assert 'gl.uniformMatrix3fv(T.u_taaRotation, false, H, o + 103, 9);' in compositor
+assert 'gl.uniform3f(T.u_taaMove, H[o + 112], H[o + 113], H[o + 114]);' in compositor
+assert 'gl.uniform4f(T.u_taaLens, H[o + 115], H[o + 116], H[o + 117], H[o + 118]);' in compositor
+taa_js = compositor[compositor.index('            if (taa) {\n'):compositor.index('            if (ao) {\n')]
+assert taa_js.index('fx.texture(0, t.color);\n                fx.texture(1, t.taa[t.taaCur]);\n'
+                    '                fx.texture(2, t.depth);\n                fx.pass(T, t.taaFbo[cur], w, h);') < \
+    taa_js.index('t.taaCur = cur;\n                t.taaValid = true;\n                scene = t.taa[cur];') < \
+    taa_js.index('            } else {\n                t.taaValid = false;\n            }')
+assert compositor.count('t.taa.push(texture(gl.RGBA8, w, h, gl.LINEAR));') == 1
+assert 'var sources = [scene, t.e[1], t.depth,' in compositor
+taa_shader = compositor[compositor.index('link("taa"'):compositor.index('link("compose"')]
+assert '["u_src", "u_history", "u_depth"], ["u_taa", "u_taaRotation", "u_taaMove", "u_taaLens"]' in taa_shader
+# World pixels go back by their depth, without this frame's jitter, to where
+# the last camera saw them; the viewmodel stays and keeps at most 0.75; a
+# point behind the last camera or off its screen keeps none; the history is
+# clipped to the spread of the 3x3 neighbourhood in YCoCg.
+assert '"  if (d >= 0.2) {\\n"' in taa_shader and '"    weight = max(weight, 0.25);\\n"' in taa_shader
+assert ('"    highp vec3 p = u_taaRotation * vec3((v_uv * 2.0 - 1.0 - u_taaLens.zw) * z / u_taa.yz, z) + '
+        'u_taaMove;\\n"') in taa_shader
+assert '"    if (p.z <= 0.001) weight = 1.0;\\n"' in taa_shader
+assert '"  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) weight = 1.0;\\n"' in taa_shader
+assert '"  vec3 spread = max(sqrt(max(m2 * (1.0 / 9.0) - m1 * m1, 0.0)) * 1.25, vec3(0.004));\\n"' in taa_shader
+assert '"  h = m1 + (k > 1.0 ? h / k : h);\\n"' in taa_shader
+assert 'r_taa = ri.Dvar_RegisterBool("r_taa", 1, 0x2001);' in dvars
+# Every 3D draw of the composed view moves by the jitter after its projection
+# is converted for GL.
+device_text = (root / 'src/Mac/DirectX_9/CDirect3DDevice.c').read_text()
+assert device_text.index('MacOpenGLUtils_ConvertD3DProjectionMatrixToOpenGL(\n                    proj,') < \
+    device_text.index('                WebSceneFx_JitterProjection(proj);\n') < \
+    device_text.index('                glLoadMatrixf(proj);\n')
 assert 'gl.uniform4f(C.u_clarity, clarity ? H[o + 100] : 0, 0, 0, 0);' in compositor
-assert '"u_haze", "u_hazeUp", "u_hazeSun", "u_hazeSunColor", "u_hazeProj", "u_shaft", "u_blast", "u_blastDepth",\n                 "u_clarity"]' in compositor
+assert '"u_haze", "u_hazeUp", "u_hazeSun", "u_hazeSunColor", "u_hazeProj", "u_shaft", "u_blast", "u_blastDepth",\n                 "u_clarity", "u_tone"]' in compositor
 clarity_js = compositor[compositor.index('            if (clarity) {\n'):compositor.index('            if (glow) {\n')]
 assert clarity_js.index('gl.uniform2f(P.clarity.u_texel, 1 / w, 1 / h);\n                fx.texture(0, t.color);\n'
                         '                fx.pass(P.clarity, t.clFbo[0], qw, qh);') < \
@@ -319,7 +360,7 @@ test = r'''
 #include <string.h>
 #include "SOURCE"
 static dvar_t glow, radius0, radius1, intensity0, intensity1, cutoff, desaturation, fullbright, samples, dof, film,
-    motion, scene, ssao, atmosphere, sunShafts, shockwave, clarity;
+    motion, scene, ssao, atmosphere, sunShafts, shockwave, clarity, taa;
 const dvar_t *r_glow = &glow;
 const dvar_t *r_glowRadius[2] = {&radius0, &radius1};
 const dvar_t *r_glowBloomIntensity[2] = {&intensity0, &intensity1};
@@ -335,8 +376,9 @@ const dvar_t *r_ssao = &ssao;
 const dvar_t *r_atmosphere = &atmosphere;
 const dvar_t *r_sunShafts = &sunShafts;
 const dvar_t *r_shockwave = &shockwave;
-/* Off unless a check turns it on, so the checks of every other effect alone hold. */
+/* Off unless a check turns them on, so the checks of every other effect alone hold. */
 const dvar_t *r_clarity = &clarity;
+const dvar_t *r_taa = &taa;
 static int shadowRenders, bindsAtShadowRender;
 static double clockMs = 1000.0;
 double emscripten_get_now(void)
@@ -646,7 +688,7 @@ int main(void)
 
     /* A menu's blurred backdrop composes on its own, whatever the other
      * effects, and stays between none and all of it. */
-    assert(SCENE_FX_BACKDROP == 33 && SCENE_FX_BACKDROP_GRAY == 34 && SCENE_FX_PARAM_COUNT == 101);
+    assert(SCENE_FX_BACKDROP == 33 && SCENE_FX_BACKDROP_GRAY == 34 && SCENE_FX_PARAM_COUNT == 119);
     defaults();
     glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
     motion.current.enabled = 0; ssao.current.enabled = 0;
@@ -683,7 +725,8 @@ int main(void)
     frame(0, 1280, 0.1f);
     assert(composes == 5 && composed[SCENE_FX_BACKDROP] == 0 && composed[SCENE_FX_BACKDROP_GRAY] == 0);
     /* The countdown before a match grays the view on its own as well, the
-     * larger gray winning, and lifts the film grade's contrast with it. */
+     * larger gray winning, and lifts the film grade's contrast with it, in
+     * place of the lift of the shade it gives a full-color view. */
     glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
     motion.current.enabled = 0; ssao.current.enabled = 0;
     binds = composes = 0;
@@ -701,6 +744,7 @@ int main(void)
     WebSceneFx_SetGray(4);
     frame(0, 1280, 0.1f);
     assert(composes == 4 && composed[SCENE_FX_BACKDROP_GRAY] == 1 && fabsf(composed[SCENE_FX_CONTRAST] - 1.2f) < 1e-6f);
+    assert(composed[SCENE_FX_TONE] == 0);
     film.current.enabled = 0;
     WebSceneFx_SetGray(NAN);
     frame(0, 1280, 0.1f);
@@ -709,7 +753,22 @@ int main(void)
     assert(composes == 4);
     defaults();
     frame(0, 1280, 0.1f);
-    assert(composes == 5 && composed[SCENE_FX_BACKDROP_GRAY] == 0 && composed[SCENE_FX_CONTRAST] == 0.35f);
+    assert(composes == 5 && composed[SCENE_FX_BACKDROP_GRAY] == 0 && composed[SCENE_FX_CONTRAST] == 0);
+    assert(composed[SCENE_FX_TONE] == SCENE_FX_SHADE_LIFT && composed[SCENE_FX_SHARPEN] == 0.06f);
+    /* Without the contrast curve the grade keeps its color by saturation. */
+    assert(composed[SCENE_FX_SATURATION] == 1.12f);
+    /* At gray 0.6 the grade lifts 0.4 of the shade and takes 0.72 contrast. */
+    WebSceneFx_SetGray(0.6f);
+    frame(0, 1280, 0.1f);
+    assert(composes == 6 && fabsf(composed[SCENE_FX_TONE] - 0.4f * SCENE_FX_SHADE_LIFT) < 1e-6f);
+    assert(fabsf(composed[SCENE_FX_CONTRAST] - 0.72f) < 1e-6f);
+    WebSceneFx_SetGray(0);
+    frame(0, 1280, 0.1f);
+    assert(composes == 7 && composed[SCENE_FX_TONE] == SCENE_FX_SHADE_LIFT && composed[SCENE_FX_CONTRAST] == 0);
+    film.current.enabled = 0;
+    frame(0, 1280, 0.1f);
+    assert(composes == 8 && composed[SCENE_FX_TONE] == 0 && composed[SCENE_FX_SHARPEN] == 0);
+    defaults();
 
     /* A screen taller than r_sceneHeight renders its scene at that many lines
      * and the screen's aspect, even with every effect off; a shorter one, or
@@ -937,6 +996,48 @@ int main(void)
         frame(0, 1280, 0.1f);
         assert(WebSceneFx_ScopeAvailable());
         WebSceneFx_SetScope(NULL);
+        binds = 0;
+        frame(0, 1280, 0.1f);
+        assert(!binds);
+    }
+
+    /* The arms and weapon's own projection at the hip (cg_gunfov_mp.c)
+     * composes the view on its own, as a scope's does, and the composed view
+     * draws them with it and the depth hack's near clip; a raised scope's
+     * comes first, and a broken or non-positive one, or none, is dropped. */
+    {
+        const float gun[2] = {1.4f, 2.48f};
+        const float scope[SCENE_FX_SCOPE_LENS_FLOATS] = {0, 0, 0.5f, 0, 0, 0.9f, 1, 1, 0, 0, 1.7f, 3.0f, 0.8f};
+        const float broken[4][2] = {{NAN, 2.48f}, {1.4f, -1.0f}, {0.0f, 2.48f}, {1.4f, INFINITY}};
+        const float *projection;
+
+        defaults();
+        glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
+        motion.current.enabled = 0; ssao.current.enabled = 0;
+        binds = composes = 0;
+        frame(0, 1280, 0.1f);
+        assert(!binds && !composes);
+        WebSceneFx_SetGunProjection(gun);
+        WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 4.0f);
+        projection = WebSceneFx_ViewmodelProjection();
+        assert(binds == 1 && projection && projection[0] == 1.4f && projection[1] == 2.48f);
+        assert(WebSceneFx_ViewmodelNearClip(0.1f) == 0.1f);
+        WebSceneFx_SetScope(scope);
+        projection = WebSceneFx_ViewmodelProjection();
+        assert(projection && projection[0] == 1.7f && projection[1] == 3.0f);
+        WebSceneFx_SetScope(NULL);
+        WebSceneFx_EndFrame();
+        assert(composes == 1 && !WebSceneFx_ViewmodelProjection());
+        for (int i = 0; i < 4; ++i) {
+            WebSceneFx_SetGunProjection(gun);
+            WebSceneFx_SetGunProjection(broken[i]);
+            binds = 0;
+            WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 4.0f);
+            assert(!binds && !WebSceneFx_ViewmodelProjection());
+            WebSceneFx_EndFrame();
+        }
+        WebSceneFx_SetGunProjection(gun);
+        WebSceneFx_SetGunProjection(NULL);
         binds = 0;
         frame(0, 1280, 0.1f);
         assert(!binds);
@@ -1303,7 +1404,7 @@ int main(void)
      * how far ahead it is. One behind the eye has none; four travel at once,
      * a fifth taking the oldest's place; a broken one takes no place. */
     {
-        assert(SCENE_FX_BLAST == 80 && SCENE_FX_BLAST_DEPTH == 96 && SCENE_FX_PARAM_COUNT == 101);
+        assert(SCENE_FX_BLAST == 80 && SCENE_FX_BLAST_DEPTH == 96 && SCENE_FX_PARAM_COUNT == 119);
         defaults();
         glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
         motion.current.enabled = 0; ssao.current.enabled = 0; atmosphere.current.enabled = 0; sunShafts.current.value = 0;
@@ -1442,17 +1543,18 @@ int main(void)
         }
         defaults();
     }
-    /* Local contrast (r_clarity) composes on its own, at 0.4 of the dvar,
+    /* Local contrast (r_clarity) composes on its own, at 0.16 of the dvar,
      * which holds between 0 and 2; r_fullbright and a broken value take none. */
     {
-        assert(SCENE_FX_CLARITY == 100 && SCENE_FX_PARAM_COUNT == 101);
+        assert(SCENE_FX_CLARITY == 100 && SCENE_FX_PARAM_COUNT == 119);
         defaults();
         glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
         motion.current.enabled = 0; ssao.current.enabled = 0; atmosphere.current.enabled = 0; sunShafts.current.value = 0;
         binds = composes = 0;
         frame(0, 1280, 0.1f);
         assert(!binds && !composes);
-        const float values[][2] = {{1, 0.4f}, {2, 0.8f}, {0.5f, 0.2f}, {5, 0.8f}};
+        assert(SCENE_FX_CLARITY_GAIN == 0.16f);
+        const float values[][2] = {{1, 0.16f}, {2, 0.32f}, {0.5f, 0.08f}, {5, 0.32f}};
         for (int i = 0; i < 4; ++i) {
             clarity.current.value = values[i][0];
             binds = composes = 0;
@@ -1478,7 +1580,131 @@ int main(void)
         clarity.current.value = 0;
         defaults();
     }
-    puts("PASS: 600 composed frames, single compose per frame before Present, partial/fullbright/disabled views drawn directly, bounded glow, viewmodel and near world focus parameters, camera motion reprojected over a 16 ms exposure with aim fade, cuts and still cameras, a bounded menu backdrop and its gray, scenes rendered at r_sceneHeight lines and the screen's aspect on taller screens, a scope window composed with its rifle projection and near clip and a stencil drawn once per view and lifted on every exit, bounded window floats, the outline a scope's rifle is kept off handed to the stencil and none for a sight's window, the stock overlay without a composed target, the sun's shadow map drawn once at the first full-screen view before its target binds, ambient occlusion composed on its own from the composed view's projection, the color maps' mip bias of a scaled scene, the composed view's near clip for effects, the map's haze with the view's up and sun taken when it begins, the sun's shafts from where it lies on the screen and how low it stands, explosions' shockwaves from where they went off, how long ago and how far away, and bounded local contrast composed on its own");
+    /* Temporal antialiasing (r_taa) composes on its own. Each composed view
+     * moves within its pixels to the next of the first 8 points of the Halton
+     * (2, 3) sequence, centred on the pixel: every 3D draw's clip x and y gain
+     * the jitter times w. It keeps 0.9 of the frames before once the camera
+     * has moved on continuously, with the rotation and offset into the last
+     * view and that view's projection; the first frame and a cut keep none.
+     * r_taa 0 and r_fullbright neither compose nor move the view. */
+    {
+        assert(SCENE_FX_TONE == 101 && SCENE_FX_TAA == 102 && SCENE_FX_TAA_ROTATION == 103 && SCENE_FX_TAA_MOVE == 112);
+        assert(SCENE_FX_TAA_PROJECTION == 115 && SCENE_FX_TAA_JITTER == 117 && SCENE_FX_PARAM_COUNT == 119);
+        static const float halton2[8] = {0.5f, 0.25f, 0.75f, 0.125f, 0.625f, 0.375f, 0.875f, 0.0625f};
+        static const float halton3[8] = {1 / 3.0f, 2 / 3.0f, 1 / 9.0f, 4 / 9.0f, 7 / 9.0f, 2 / 9.0f, 5 / 9.0f, 8 / 9.0f};
+        /* A view's projection, column-major, and a point through it. */
+        static const float projection[16] = {1.19f, 0.01f, 0.02f, 0.03f, 0.04f, 2.11f, 0.05f, 0.06f,
+                                             0.07f, 0.08f, -1.0005f, -1.0f, 0.09f, 0.1f, -8.0f, 0.2f};
+        static const float point[4] = {3.0f, -2.0f, -40.0f, 1.0f};
+        float jittered[16], clip[4], shifted[4];
+        defaults();
+        glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
+        motion.current.enabled = 0; ssao.current.enabled = 0; atmosphere.current.enabled = 0; sunShafts.current.value = 0;
+        binds = composes = 0;
+        frame(0, 1280, 0.1f);
+        assert(!binds && !composes);
+        taa.current.enabled = 1;
+        for (int i = 0; i < 16; ++i) {
+            const float jx = (halton2[i % 8] - 0.5f) * 2.0f / 1280.0f, jy = (halton3[i % 8] - 0.5f) * 2.0f / 720.0f;
+            binds = composes = 0;
+            memcpy(jittered, projection, sizeof(jittered));
+            WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 4.0f);
+            WebSceneFx_JitterProjection(jittered);
+            WebSceneFx_EndView();
+            WebSceneFx_EndFrame();
+            assert(binds == 1 && composes == 1);
+            assert(fabsf(composed[SCENE_FX_TAA_JITTER] - jx) < 1e-7f && fabsf(composed[SCENE_FX_TAA_JITTER + 1] - jy) < 1e-7f);
+            assert(fabsf(jx) < 1.0f / 1280.0f && fabsf(jy) < 1.0f / 720.0f);
+            for (int r = 0; r < 4; ++r) {
+                clip[r] = shifted[r] = 0;
+                for (int c = 0; c < 4; ++c) {
+                    clip[r] += projection[c * 4 + r] * point[c];
+                    shifted[r] += jittered[c * 4 + r] * point[c];
+                }
+            }
+            assert(fabsf(shifted[0] - (clip[0] + jx * clip[3])) < 1e-5f && fabsf(shifted[1] - (clip[1] + jy * clip[3])) < 1e-5f);
+            assert(shifted[2] == clip[2] && shifted[3] == clip[3]);
+            /* Without a camera there is nothing to keep. */
+            assert(composed[SCENE_FX_TAA] == 1 && composed[SCENE_FX_SHARPEN] == 0);
+        }
+        /* Outside a composed view nothing moves. */
+        memcpy(jittered, projection, sizeof(jittered));
+        WebSceneFx_JitterProjection(jittered);
+        assert(!memcmp(jittered, projection, sizeof(jittered)));
+        WebSceneFx_JitterProjection(NULL);
+        /* A view whose target fails to bind moves nothing and takes no point
+         * of the sequence. */
+        bindResult = 0;
+        memcpy(jittered, projection, sizeof(jittered));
+        WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 4.0f);
+        WebSceneFx_JitterProjection(jittered);
+        WebSceneFx_EndView();
+        WebSceneFx_EndFrame();
+        assert(!memcmp(jittered, projection, sizeof(jittered)));
+        bindResult = 1;
+        frame(0, 1280, 0.1f);
+        assert(composed[SCENE_FX_TAA_JITTER] == 0 &&
+               fabsf(composed[SCENE_FX_TAA_JITTER + 1] - (halton3[0] - 0.5f) * 2.0f / 720.0f) < 1e-7f);
+        /* A camera moving on keeps 0.9 of the frames before, from the last
+         * view's place and projection; the film grade sharpens the average
+         * twice as much. */
+        film.current.enabled = 1;
+        clockMs += 16;
+        camera(0.3f, 0.05f, 10, 20, 60);
+        frame(0, 1280, 0.1f);
+        assert(composed[SCENE_FX_TAA] == 1 && composed[SCENE_FX_SHARPEN] == 0.12f);
+        clockMs += 16;
+        camera(0.31f, 0.05f, 12, 20, 60);
+        frame(0, 1280, 0.1f);
+        assert(fabsf(composed[SCENE_FX_TAA] - 0.1f) < 1e-6f && composed[SCENE_FX_SHARPEN] == 0.12f);
+        assert(composed[SCENE_FX_TAA_PROJECTION] == 1.19f && composed[SCENE_FX_TAA_PROJECTION + 1] == 2.11f);
+        {
+            static const float p[][3] = {{100, 40, 70}, {-300, 900, 10}, {35, -12, 64}};
+            for (int k = 0; k < 3; ++k) {
+                float now[3], before[3];
+                viewPoint(view, p[k], now);
+                viewPoint(lastView, p[k], before);
+                for (int j = 0; j < 3; ++j) {
+                    float back = composed[SCENE_FX_TAA_MOVE + j];
+                    for (int m = 0; m < 3; ++m)
+                        back += composed[SCENE_FX_TAA_ROTATION + m * 3 + j] * now[m];
+                    assert(fabsf(back - before[j]) < 2e-3f * (1.0f + fabsf(before[j])));
+                }
+            }
+        }
+        /* A cut keeps none. */
+        clockMs += 16;
+        camera(2.5f, 0.05f, 12, 20, 60);
+        frame(0, 1280, 0.1f);
+        assert(composed[SCENE_FX_TAA] == 1);
+        film.current.enabled = 0;
+        /* r_taa 0 and r_fullbright neither compose nor move the view. */
+        const int off[][2] = {{0, 0}, {1, 1}};
+        for (int i = 0; i < 2; ++i) {
+            taa.current.enabled = off[i][0];
+            fullbright.current.enabled = off[i][1];
+            binds = composes = 0;
+            memcpy(jittered, projection, sizeof(jittered));
+            WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 4.0f);
+            WebSceneFx_JitterProjection(jittered);
+            WebSceneFx_EndView();
+            WebSceneFx_EndFrame();
+            assert(!binds && !composes && !memcmp(jittered, projection, sizeof(jittered)));
+        }
+        /* Composed for another effect, r_taa 0 keeps nothing and moves nothing. */
+        taa.current.enabled = 0;
+        fullbright.current.enabled = 0;
+        film.current.enabled = 1;
+        memcpy(jittered, projection, sizeof(jittered));
+        WebSceneFx_BeginView(0, 0, 1280, 720, 1280, 720, 0.1f, 4.0f);
+        WebSceneFx_JitterProjection(jittered);
+        WebSceneFx_EndView();
+        WebSceneFx_EndFrame();
+        assert(composed[SCENE_FX_TAA] == 0 && composed[SCENE_FX_TAA_JITTER] == 0 && composed[SCENE_FX_TAA_JITTER + 1] == 0);
+        assert(composed[SCENE_FX_SHARPEN] == 0.06f && !memcmp(jittered, projection, sizeof(jittered)));
+        defaults();
+    }
+    puts("PASS: 600 composed frames, single compose per frame before Present, partial/fullbright/disabled views drawn directly, bounded glow, viewmodel and near world focus parameters, camera motion reprojected over a 16 ms exposure with aim fade, cuts and still cameras, a bounded menu backdrop and its gray, scenes rendered at r_sceneHeight lines and the screen's aspect on taller screens, a scope window composed with its rifle projection and near clip and a stencil drawn once per view and lifted on every exit, bounded window floats, the arms and weapon's own projection at the hip composing on its own behind a raised scope's, the outline a scope's rifle is kept off handed to the stencil and none for a sight's window, the stock overlay without a composed target, the sun's shadow map drawn once at the first full-screen view before its target binds, ambient occlusion composed on its own from the composed view's projection, the color maps' mip bias of a scaled scene, the composed view's near clip for effects, the map's haze with the view's up and sun taken when it begins, the sun's shafts from where it lies on the screen and how low it stands, explosions' shockwaves from where they went off, how long ago and how far away, bounded local contrast composed on its own, the film grade's lift of the shade in place of its contrast, and temporal antialiasing's jitter on every 3D draw, its history kept only while the camera moves on, and nothing from r_taa 0, r_fullbright or a failed bind");
     return 0;
 }
 '''
@@ -1502,15 +1728,12 @@ mutants = [
     ('WebSceneFx_Enabled(r_motionBlur) && ', ''),
     (' && s_motionScale <= 0.0f && ', ' && '),
     (' && s_backdropFrac <= 0.0f &&\n', ' &&\n'),
-    ('        s_backdropGray <= 0.0f && !WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled() && !WebSceneFx_HazeEnabled() &&',
-     '        !WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled() && !WebSceneFx_HazeEnabled() &&'),
-    ('s_backdropGray <= 0.0f && !WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled()',
-     's_backdropGray <= 0.0f && !WebSceneFx_AoEnabled()'),
-    ('!WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled() && !WebSceneFx_HazeEnabled() &&',
-     '!WebSceneFx_ScopeRequested() && !WebSceneFx_HazeEnabled() &&'),
-    (' && !WebSceneFx_HazeEnabled() &&\n', ' &&\n'),
+    ('        s_backdropGray <= 0.0f && !WebSceneFx_ScopeRequested()', '        !WebSceneFx_ScopeRequested()'),
+    ('!WebSceneFx_ScopeRequested() && s_gunProjection[0] <= 0.0f', 's_gunProjection[0] <= 0.0f'),
+    ('s_gunProjection[0] <= 0.0f && !WebSceneFx_AoEnabled() &&\n', 's_gunProjection[0] <= 0.0f &&\n'),
+    ('        !WebSceneFx_HazeEnabled() && !WebSceneFx_ShaftsEnabled()', '        !WebSceneFx_ShaftsEnabled()'),
     # The sun's shafts.
-    (' &&\n        !WebSceneFx_ShaftsEnabled() && !WebSceneFx_BlastsActive() &&', ' &&\n        !WebSceneFx_BlastsActive() &&'),
+    (' && !WebSceneFx_ShaftsEnabled() && !WebSceneFx_BlastsActive() &&\n', ' && !WebSceneFx_BlastsActive() &&\n'),
     ('           s_hazeSunColor[0] + s_hazeSunColor[1] + s_hazeSunColor[2] > 0.0f;', '           1;'),
     ('    if (!WebSceneFx_ShaftsEnabled() || !(s_viewProjection[0] > 0.0f) || !(s_viewProjection[1] > 0.0f))',
      '    if (!WebSceneFx_ShaftsEnabled())'),
@@ -1599,8 +1822,15 @@ mutants = [
     ('           !(s_scope[SCENE_FX_SCOPE_PROJECTION - SCENE_FX_SCOPE] > 0.0f);', '           1;'),
     ('    WebSceneFx_EndViewmodel();\n    if (!s_active)\n        return;\n    s_active = 0;',
      '    if (!s_active)\n        return;\n    s_active = 0;'),
-    ('    return s_active && projection[0] > 0.0f ? projection : NULL;',
-     '    return projection[0] > 0.0f ? projection : NULL;'),
+    ('    return s_active ? WebSceneFx_ViewmodelScales() : NULL;', '    return WebSceneFx_ViewmodelScales();'),
+    # The weapon's own projection: not composing the view, ignored, put
+    # before a raised scope's, or kept when infinite or negative.
+    ('s_gunProjection[0] <= 0.0f && ', ''),
+    ('    return s_gunProjection[0] > 0.0f ? s_gunProjection : NULL;', '    return NULL;'),
+    ('    if (projection[0] > 0.0f)\n        return projection;\n', ''),
+    ('isfinite(projection[0]) && isfinite(projection[1]) && projection[0] > 0.0f',
+     'isfinite(projection[0]) && projection[0] > 0.0f'),
+    ('projection[0] > 0.0f &&\n        projection[1] > 0.0f) {', 'projection[0] > 0.0f) {'),
     ('    memcpy(params + SCENE_FX_SCOPE, s_scope, sizeof(s_scope));\n', ''),
     ('        s_scope[i - SCENE_FX_SCOPE] = WebSceneFx_Clamp(s_scope[i - SCENE_FX_SCOPE], 0.0f, 1.0f);', '        (void)0;'),
     ('    if (!(fabsf(axes[0] * axes[3] - axes[2] * axes[1]) > 1e-6f))\n'
@@ -1626,7 +1856,12 @@ mutants = [
     ('s_backdropGray = WebSceneFx_Clamp(gray, 0.0f, 1.0f);', 's_backdropGray = gray;'),
     ('!scaled && s_grayFrac <= 0.0f && ', '!scaled && '),
     ('    if (s_grayFrac > params[SCENE_FX_BACKDROP_GRAY])\n        params[SCENE_FX_BACKDROP_GRAY] = s_grayFrac;\n', ''),
-    ('params[SCENE_FX_CONTRAST] += 0.85f * s_grayFrac;', 'params[SCENE_FX_CONTRAST] += 0.0f * s_grayFrac;'),
+    ('params[SCENE_FX_CONTRAST] = 1.2f * s_grayFrac;', 'params[SCENE_FX_CONTRAST] = 0.0f * s_grayFrac;'),
+    ('params[SCENE_FX_SATURATION] = 1.12f;', 'params[SCENE_FX_SATURATION] = 0.96f;'),
+    ('params[SCENE_FX_TONE] = film ? SCENE_FX_SHADE_LIFT * (1.0f - s_grayFrac) : 0.0f;',
+     'params[SCENE_FX_TONE] = film ? SCENE_FX_SHADE_LIFT : 0.0f;'),
+    ('params[SCENE_FX_TONE] = film ? SCENE_FX_SHADE_LIFT * (1.0f - s_grayFrac) : 0.0f;',
+     'params[SCENE_FX_TONE] = SCENE_FX_SHADE_LIFT * (1.0f - s_grayFrac);'),
     ('s_grayFrac = WebSceneFx_Clamp(grayFrac, 0.0f, 1.0f);', 's_grayFrac = grayFrac;'),
     ('params[SCENE_FX_MOTION_PROJECTION + 1] = s_motionProjection[1];',
      'params[SCENE_FX_MOTION_PROJECTION + 1] = s_motionProjection[0];'),
@@ -1647,8 +1882,38 @@ mutants = [
      '    return WebSceneFx_Clamp(r_clarity->current.value, 0.0f, 2.0f);'),
     ('    return WebSceneFx_Clamp(r_clarity->current.value, 0.0f, 2.0f) * SCENE_FX_CLARITY_GAIN;',
      '    return r_clarity->current.value * SCENE_FX_CLARITY_GAIN;'),
-    (' && WebSceneFx_Clarity() <= 0.0f)\n        return;', ')\n        return;'),
+    ('        WebSceneFx_Clarity() <= 0.0f && !WebSceneFx_TaaEnabled())', '        !WebSceneFx_TaaEnabled())'),
     ('    params[SCENE_FX_CLARITY] = WebSceneFx_Clarity();\n', ''),
+    # Temporal antialiasing.
+    (' && !WebSceneFx_TaaEnabled())\n        return;', ')\n        return;'),
+    ('    return WebSceneFx_Enabled(r_taa) && !WebSceneFx_Enabled(r_fullbright);', '    return !WebSceneFx_Enabled(r_fullbright);'),
+    ('        projection[column * 4 + 1] += s_jitter[1] * projection[column * 4 + 3];',
+     '        projection[column * 4 + 1] += s_jitter[1];'),
+    ('        projection[column * 4] += s_jitter[0] * projection[column * 4 + 3];',
+     '        projection[column * 4] += s_jitter[1] * projection[column * 4 + 3];'),
+    ('    if (!s_active || !projection || (s_jitter[0] == 0.0f && s_jitter[1] == 0.0f))',
+     '    if (!projection || (s_jitter[0] == 0.0f && s_jitter[1] == 0.0f))'),
+    ('        unsigned index = s_jitterPhase++ % SCENE_FX_TAA_PHASES + 1;',
+     '        unsigned index = s_jitterPhase++ % SCENE_FX_TAA_PHASES;'),
+    ('#define SCENE_FX_TAA_PHASES 8', '#define SCENE_FX_TAA_PHASES 4'),
+    ('        s_jitter[0] = (WebSceneFx_Halton(index, 2) - 0.5f) * 2.0f / (float)sceneWidth;',
+     '        s_jitter[0] = WebSceneFx_Halton(index, 2) * 2.0f / (float)sceneWidth;'),
+    ('        s_jitter[1] = (WebSceneFx_Halton(index, 3) - 0.5f) * 2.0f / (float)sceneHeight;',
+     '        s_jitter[1] = (WebSceneFx_Halton(index, 2) - 0.5f) * 2.0f / (float)sceneHeight;'),
+    ('        result += fraction * (float)(index % base);', '        result += fraction * (float)(index % 2);'),
+    ('    s_jitter[0] = s_jitter[1] = 0.0f;\n    if (s_taaView) {', '    if (s_taaView) {'),
+    ('#define SCENE_FX_TAA_HISTORY 0.9f', '#define SCENE_FX_TAA_HISTORY 0.5f'),
+    ('            1.0f - SCENE_FX_TAA_HISTORY : 1.0f;', '            1.0f - SCENE_FX_TAA_HISTORY : 1.0f - SCENE_FX_TAA_HISTORY;'),
+    ('s_viewContinuous && s_viewProjection[0] > 0.0f && s_taaLastProjection[0] > 0.0f ?',
+     's_viewProjection[0] > 0.0f && s_taaLastProjection[0] > 0.0f ?'),
+    ('            memcpy(s_taaRotation, rotation, sizeof(s_taaRotation));\n', ''),
+    ('            memcpy(s_taaMove, move, sizeof(s_taaMove));\n', ''),
+    ('            s_taaLastProjection[1] = s_lastProjection[1];', '            s_taaLastProjection[1] = s_lastProjection[0];'),
+    ('    s_lastProjection[0] = s_cameraProjection[0];\n    s_lastProjection[1] = s_cameraProjection[1];\n', ''),
+    ('    params[SCENE_FX_SHARPEN] = film ? (s_taaView ? 0.12f : 0.06f) : 0.0f;',
+     '    params[SCENE_FX_SHARPEN] = film ? 0.06f : 0.0f;'),
+    ('    params[SCENE_FX_TAA_JITTER + 1] = s_jitter[1];\n', ''),
+    ('    s_taaView = s_active && WebSceneFx_TaaEnabled();', '    s_taaView = WebSceneFx_TaaEnabled();'),
 ]
 
 with tempfile.TemporaryDirectory(prefix='cod2-scene-fx-') as tmp:
@@ -1670,4 +1935,4 @@ with tempfile.TemporaryDirectory(prefix='cod2-scene-fx-') as tmp:
                         '-lm', '-o', str(path / f'mutant{index}')], check=True)
         result = subprocess.run([str(path / f'mutant{index}')], capture_output=True)
         assert result.returncode != 0, f'mutant survived: {after!r}'
-    print(f'PASS: {len(mutants)} motion blur, backdrop, scene size, scope window, haze, sun shaft, shockwave and local contrast mutants fail')
+    print(f'PASS: {len(mutants)} motion blur, backdrop, scene size, scope window, haze, sun shaft, shockwave, local contrast, tone and temporal antialiasing mutants fail')

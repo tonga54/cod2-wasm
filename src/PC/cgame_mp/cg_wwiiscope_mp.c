@@ -2,6 +2,7 @@
 #include "imports.h"
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_wwiiscope.h"
+#include "headers/PC/cgame_mp/cg_gunfov.h"
 #include "headers/PC/bgame/bg_attachments.h"
 #include "headers/PC/gfx_d3d/r_hud2d.h"
 #include <math.h>
@@ -883,6 +884,7 @@ static void CG_WwiiScopeProjection(const playerState_t *ps, const CgWwiiScopeGla
 
     if (hipFov < cg_fovMin->current.value)
         hipFov = cg_fovMin->current.value;
+    hipFov = CG_GunFovHipAngle(hipFov);
     CG_WwiiScopeProjectionScales(hipFov, cgs->viewAspect, CG_WwiiScopeSmoothstep(0.0f, 1.0f, ps->fWeaponPosFrac),
                                  glass->radius, glass->eye[0] > 0.0f ? glass->eye[0] : forward, projection);
 }

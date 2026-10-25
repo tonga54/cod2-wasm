@@ -12,9 +12,10 @@ extern void WebPointLights_Draw(const float *view, int enabled, int worldShadowE
                                int lightmapped, float specularScale, float sunShading, float sunVisibility,
                                int camoMap, int camoMask, float camoTiles, float camoReference, float lodBias,
                                float reflection, float cavity, float variation, float detailRelief,
-                               float sharpen);
+                               float sharpen, int viewmodel);
 extern float WebSceneFx_TextureLodBias(void);
 extern float WebSceneFx_WorldNearClip(void);
+extern void WebSceneFx_JitterProjection(float *projection);
 extern float g_webEntitySunVisibility;
 #include "web_materials.h"
 #include "web_effects.h"
@@ -2120,6 +2121,9 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                     proj,
                     dev->viewportW ? (float)dev->viewportW : 640.0f,
                     dev->viewportH ? (float)dev->viewportH : 480.0f);
+#ifdef __EMSCRIPTEN__
+                WebSceneFx_JitterProjection(proj);
+#endif
 
                 glMatrixMode(0x1701);
                 glLoadMatrixf(proj);
@@ -2493,7 +2497,9 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                 r_cavity ? r_cavity->current.value : 0.0f,
                 r_surfaceVariation ? r_surfaceVariation->current.value : 0.0f,
                 r_detailRelief ? r_detailRelief->current.value : 0.0f,
-                r_textureSharpen ? r_textureSharpen->current.value : 0.0f);
+                r_textureSharpen ? r_textureSharpen->current.value : 0.0f,
+                /* The viewmodel draws in the depth hack's range (rb_backend.c). */
+                !is2D && dev->viewportMinZ == 0.0f && dev->viewportMaxZ > 0.0f && dev->viewportMaxZ <= 0.2f);
         }
         {
             /* Multisample coverage for alpha-tested surfaces, and the feather

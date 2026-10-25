@@ -69,6 +69,7 @@ static EffectTemplate *CG_MuzzleLightsOnly(const EffectTemplate *original)
 }
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_wwiiscope.h"
+#include "headers/PC/cgame_mp/cg_gunfov.h"
 #include "headers/PC/cgame_mp/cg_attachmodels.h"
 #include "headers/PC/cgame_mp/cg_rumble.h"
 
@@ -1595,6 +1596,7 @@ static void CG_UpdateWebWeaponPresentation(playerState_t *ps, int weaponIndex, q
             if (drawGun && viewModel && CG_DObjGetViewModelTagPos(viewModel, flashTag, muzzle)) {
                 for (int i = 0; i < 3; ++i)
                     muzzle[i] += 6.0f * cg->viewModelAxis[0][i];
+                CG_GunFovPoint(muzzle);
             } else {
                 for (int i = 0; i < 3; ++i)
                     muzzle[i] = cg->refdef.vieworg[i] + 18.0f * cg->refdef.viewaxis[0][i]
@@ -1687,11 +1689,13 @@ void CG_AddViewWeapon(playerState_t *ps)
     float zoom;
     float sprintBlend;
     float sprintCycle;
+    float hip[CG_GUNFOV_HIP_POSE];
 
     playerState = ps;
 #ifdef __EMSCRIPTEN__
     g_webAimFrac = playerState->fWeaponPosFrac;
     CG_WwiiScopeClear();
+    CG_GunFovClear();
 #endif
 
     if (playerState->pm_type == 4 || playerState->pm_type == 5) {
@@ -1782,6 +1786,10 @@ void CG_AddViewWeapon(playerState_t *ps)
     weaponAngles[0] += sprintBlend * (10.0f + 2.0f * sinf(sprintCycle));
     weaponAngles[1] += sprintBlend * (-10.0f + 2.0f * cosf(sprintCycle));
     weaponAngles[2] += sprintBlend * (12.0f + 3.0f * sinf(sprintCycle));
+    /* The carry pose turns the weapon from Call of Duty 2's own. */
+    CG_GunFovHipPose(playerState, BG_GetPlayerWeaponDef(playerState, weaponIndex), hip);
+    for (int i = 0; i < 3; ++i)
+        weaponAngles[i] += hip[3 + i] * (1.0f - sprintBlend);
     CG_WwiiScopeAdjustViewWeapon(playerState, weaponIndex, weaponAngles);
 
     AnglesToAxis(weaponAngles, weaponAxis);
@@ -1818,9 +1826,9 @@ void CG_AddViewWeapon(playerState_t *ps)
         const WeaponDef *viewDef = (const WeaponDef *)BG_GetWeaponDef(weaponIndex);
 
         /* The weapon's right is the axis's left negated. */
-        CG_Madd(hand.origin, finalAxis[0], viewDef->vGunOfs[0]);
-        CG_Madd(hand.origin, finalAxis[1], -viewDef->vGunOfs[1]);
-        CG_Madd(hand.origin, finalAxis[2], viewDef->vGunOfs[2]);
+        CG_Madd(hand.origin, finalAxis[0], viewDef->vGunOfs[0] + hip[0]);
+        CG_Madd(hand.origin, finalAxis[1], -viewDef->vGunOfs[1] + hip[1]);
+        CG_Madd(hand.origin, finalAxis[2], viewDef->vGunOfs[2] + hip[2]);
     }
     CG_WwiiScopePlaceViewWeapon(playerState, weaponIndex, hand.origin);
 
@@ -1847,9 +1855,11 @@ void CG_AddViewWeapon(playerState_t *ps)
             ++vwTrace;
         }
     }
+    CG_GunFovUpdate(playerState, drawGun);
     CG_AddPlayerWeapon(&hand, playerState, &cg->predictedPlayerEntity, drawGun);
 #ifdef __EMSCRIPTEN__
     CG_WwiiScopeUpdate(playerState, weaponIndex, drawGun);
+    CG_GunFovFollowScope(CG_WwiiScopeLens()->projection);
     CG_UpdateWebWeaponPresentation(playerState, weaponIndex, drawGun);
 #endif
 }

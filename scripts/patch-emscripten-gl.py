@@ -335,7 +335,7 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 pointDefs += "uniform highp vec4 u_lightAmbient" + id + "; uniform highp vec4 u_lightDiffuse" + id +
                   "; uniform highp vec4 u_lightPosition" + id + ";\n";
               }
-              materialPass += "if (u_cod2Surface.x > 0.5 || u_cod2Surface.y > 0.5 || u_cod2Model.x > 0.0) {\n" +
+              materialPass += "if (u_cod2Surface.x > 0.5 || u_cod2Surface.y > 0.5 || u_cod2Model.x > 0.0 || u_cod2Model.y > 0.5) {\n" +
                 "highp vec3 cod2N = v_cod2Normal;\n" +
                 "cod2N *= inversesqrt(max(dot(cod2N, cod2N), 1e-30));\n" +
                 "highp vec3 cod2B = cod2N;\n" +
@@ -373,6 +373,15 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "cod2Bumped += (cod2Ambient - cod2Sun) * (cod2Sky(cod2B) / cod2Sky(cod2N) * cod2Cavity(cod2B, cod2N, u_cod2Model.x)) +\n" +
                 "  cod2Sun * cod2Incidence;\n" +
                 "gl_FragColor.rgb *= max(cod2Bumped, vec3(0.0)) / max(cod2Flat, vec3(0.004));\n" +
+                // COD2_VIEWMODEL_LIGHT: the arms and weapon, held under the open
+                // sky, take its light from above the left shoulder (eye space,
+                // toward the light): faces turned up and toward it brighten and
+                // faces turned down and away darken, so the weapon reads by its
+                // form in flat shade too, and the specular map catches it.
+                "if (u_cod2Model.y > 0.5) {\n" +
+                "const highp vec3 cod2Shoulder = vec3(-0.454, 0.655, 0.605);\n" +
+                "gl_FragColor.rgb *= mix(0.68, 1.28, smoothstep(-0.5, 0.9, dot(cod2B, cod2Shoulder)));\n" +
+                "cod2Spec += cod2Flat * 0.6 * cod2Phong(cod2B, cod2Shoulder, cod2P);\n}\n" +
                 "cod2Spec += cod2Sun * cod2Phong(cod2B, u_cod2SunEye, cod2P);\n" +
                 "gl_FragColor.rgb += cod2S.rgb * cod2Spec * (2.0 * u_cod2Surface.w);\n" +
                 // A broad reflection of the sky and ground, stronger at grazing
@@ -510,8 +519,8 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 // stone's own grain, take none.
                 "if (u_cod2Surface.x > 0.5 && u_cod2Relief.x > 0.0) {\n" +
                 "float cod2Fold = cod2Crease(" + pointUV + ");\n" +
-                "cod2Lit *= (1.0 - 0.45 * u_cod2Relief.x * smoothstep(0.2, 1.0, -cod2Fold)) *\n" +
-                "  (1.0 + 0.12 * u_cod2Relief.x * smoothstep(0.2, 1.0, cod2Fold));\n}\n" +
+                "cod2Lit *= (1.0 - 0.22 * u_cod2Relief.x * smoothstep(0.2, 1.0, -cod2Fold)) *\n" +
+                "  (1.0 + 0.06 * u_cod2Relief.x * smoothstep(0.2, 1.0, cod2Fold));\n}\n" +
                 "gl_FragColor.rgb *= max(cod2Lit, vec3(0.0)) / max(cod2L.rgb, vec3(0.004));\n" +
                 "gl_FragColor.rgb += cod2S.rgb * cod2SunPart * (2.0 * u_cod2Surface.w * cod2Phong(cod2B, u_cod2SunEye, cod2P));\n" +
                 // COD2_WORLD_REFLECTION: the light around the surface, the

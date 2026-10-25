@@ -325,7 +325,7 @@ retail CoD2:
 - **Relief folds and local contrast:** where a lightmapped surface's normal
   map folds into a joint or a groove the surface darkens, and over an edge it
   lightens, measured per world unit (`r_cavity`, 0 to 2, archived, 1). Each
-  pixel's light moves from its surroundings' by up to 14%, less in the
+  pixel's light moves from its surroundings' by up to about 6%, less in the
   highlights, so stones, bricks and planks stand out and near things separate
   from far ones (`r_clarity`, 0 to 2, archived, 1). See
   [graphics validation and limits](GRAPHICS_2026-10-16.md).
@@ -342,6 +342,25 @@ retail CoD2:
   0 to 2, archived, 1); both fade out as the maps minify. About 0.1 ms a
   frame on an Apple M4. See
   [graphics validation and limits](GRAPHICS_2026-10-16.md#surface-realism-october-25-2026).
+- **Soft tone:** the film grade lifts the shade, x + 0.45 x (1 - x)^2 a
+  channel, instead of a contrast curve, with saturation 1.12 for the color
+  the curve gave; highlights keep their level. Menus' gray keeps its look.
+- **The weapon in hand:** at the hip the arms and weapon take their own
+  field of view (`cg_gunFov`, 0 to 120, archived, 65; 0 for the view's) and
+  a pose per class after CoD WWII (`cg_gunHip`, 0 to 1, archived, 1; 0 for
+  Call of Duty 2's own): long guns nearer the eye and to the right, turned a
+  little in; scoped guns further out and turned so the rifle crosses from the
+  lower right with the eyepiece at the eye's height; pistols in the middle,
+  pointed ahead. Both leave by 0.6 of the raise, so sights and scopes aim as
+  before; effects on the weapon and the shooter's tracer follow it. The arms
+  and weapon take the sky's light from above the left shoulder, with a
+  highlight through their specular maps.
+- **Temporal antialiasing:** each frame's 3D view moves within its pixels
+  through eight Halton (2, 3) points and a pass keeps 0.9 of each pixel from
+  the frames before, reprojected by depth and the camera's motion and clipped
+  to the colors about it, so edges stop crawling without trails (`r_taa`,
+  archived, on). About 0.1 ms a frame on an Apple M4. See
+  [graphics validation and limits](GRAPHICS_2026-10-16.md#soft-tone-the-weapon-held-and-smoothed-as-in-cod-wwii-october-25-2026).
 - **Sun shafts and shockwaves:** the sky about the sun throws shafts of light
   past whatever stands against it, wider and longer when the sun is low, from
   two quarter-resolution passes (`r_sunShafts`, 0 to 2, archived, 1). Grenade,

@@ -45,7 +45,7 @@ EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShado
                                   int lightmapped, float specularScale, float sunShading, float sunVisibility,
                                   int camoMap, int camoMask, float camoTiles, float camoReference, float lodBias,
                                   float reflection, float cavity, float variation, float detailRelief,
-                                  float sharpen), {
+                                  float sharpen, int viewmodel), {
     Module.cod2VertexColorOrder = colorOrder;
     // The material's original maps, for the generated shaders' per-pixel pass,
     // and a camouflaged gun's pattern and paint mask.
@@ -124,6 +124,9 @@ EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShado
     // Whether surfaces with a specular map mirror the sky and ground (r_reflections).
     material.skyEye[3] = reflection;
     material.model[0] = sunVisibility;
+    // The arms and weapon, drawn in the depth hack's range, take the sky's
+    // light from above the shoulder.
+    material.model[1] = viewmodel ? 1 : 0;
     material.relief[0] = cavity > 0 ? Math.min(cavity, 2) : 0;
     material.relief[1] = variation > 0 ? Math.min(variation, 2) : 0;
     material.relief[2] = detailRelief > 0 ? Math.min(detailRelief, 2) : 0;

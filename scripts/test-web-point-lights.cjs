@@ -37,7 +37,7 @@ const set = emjs('WebPointLights_Set', ['packed', 'count']);
 // The device hands each draw's material maps over with its lights and shadows.
 const drawParams = ['view', 'enabled', 'worldShadowEnabled', 'colorOrder', 'normalMap', 'specularMap', 'detailMap',
   'detailX', 'detailY', 'lightmapped', 'specularScale', 'sunShading', 'sunVisibility', 'camoMap', 'camoMask', 'camoTiles',
-  'camoReference', 'lodBias', 'reflection', 'cavity', 'variation', 'detailRelief', 'sharpen'];
+  'camoReference', 'lodBias', 'reflection', 'cavity', 'variation', 'detailRelief', 'sharpen', 'viewmodel'];
 const drawHead = 'EM_JS(void, WebPointLights_Draw, (';
 const drawSignature = bridge.slice(bridge.indexOf(drawHead) + drawHead.length, bridge.indexOf('), {', bridge.indexOf(drawHead)));
 assert.deepEqual(drawSignature.split(',').map(param => param.trim().split(/[\s*]+/).pop()), drawParams);
@@ -509,7 +509,21 @@ assert.deepEqual(materialUploads, []);
 drawScene(256, 1, 1, 0, 22, 23, 21, 8, 6, 1, 1.5, 0.65, 0.25);
 upload.call(camoProgram, Module, materialGL);
 assert.deepEqual(materialUploads.splice(0), all(['camo']), 'an unpainted gun turns the paint off');
-console.log('PASS: material uniforms upload once per program and value across 2000 alternating world/model draws; detail-only programs; camouflage on lit model programs only; r_reflections in the sky\'s w for both; r_cavity in the relief\'s x');
+// The arms and weapon, drawn in the depth hack's range, reach the model
+// programs in the model's y, once per value; world programs never take it.
+drawScene(256, 1, 1, 0, 22, 23, 21, 8, 6, 1, 1.5, 0.65, 0.25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
+upload.call(modelProgram, Module, materialGL);
+assert.deepEqual(materialUploads.splice(0), all(['model']));
+assert.deepEqual(all(['model'])[0][2], [Math.fround(0.25), 1, 0, 0]);
+for (let i = 0; i < 1000; ++i) upload.call(modelProgram, Module, materialGL);
+assert.deepEqual(materialUploads, []);
+upload.call(worldProgram, Module, materialGL);
+assert(!materialUploads.splice(0).some(([, location]) => location === 'model'), 'world programs ignore the viewmodel');
+drawScene(256, 1, 1, 0, 22, 23, 21, 8, 6, 1, 1.5, 0.65, 0.25);
+upload.call(modelProgram, Module, materialGL);
+assert.deepEqual(materialUploads.splice(0), all(['model']));
+assert.equal(all(['model'])[0][2][1], 0, 'every other model turns the shoulder light off');
+console.log('PASS: material uniforms upload once per program and value across 2000 alternating world/model draws; detail-only programs; camouflage on lit model programs only; r_reflections in the sky\'s w for both; r_cavity in the relief\'s x; the viewmodel in the model\'s y');
 
 // The generated passes: a lightmapped world variant and a lit model with
 // three of the eight fixed-function lights.
@@ -551,8 +565,8 @@ for (const matrix of [false, true]) {
     '    (1.0 - smoothstep(0.75, 2.25, 0.5 * (length(dp1) + length(dp2))));\n'), 'folds fade out as pixels grow');
   const crease = world.pointPass.indexOf('if (u_cod2Surface.x > 0.5 && u_cod2Relief.x > 0.0) {\n' +
     `float cod2Fold = cod2Crease(${uv(0)});\n` +
-    'cod2Lit *= (1.0 - 0.45 * u_cod2Relief.x * smoothstep(0.2, 1.0, -cod2Fold)) *\n' +
-    '  (1.0 + 0.12 * u_cod2Relief.x * smoothstep(0.2, 1.0, cod2Fold));\n}\n');
+    'cod2Lit *= (1.0 - 0.22 * u_cod2Relief.x * smoothstep(0.2, 1.0, -cod2Fold)) *\n' +
+    '  (1.0 + 0.06 * u_cod2Relief.x * smoothstep(0.2, 1.0, cod2Fold));\n}\n');
   assert(crease > world.pointPass.indexOf('  cod2SunPart * cod2Incidence;\n') &&
     crease < world.pointPass.indexOf('gl_FragColor.rgb *= max(cod2Lit, vec3(0.0)) / max(cod2L.rgb, vec3(0.004));'),
     'folds shade the relit light before the bake divides out');
@@ -637,6 +651,19 @@ for (const matrix of [false, true]) {
     'models keep their tone, grain, sharpness and alpha');
   assert(model.pointPass.includes('if (u_cod2Surface.y > 0.5 && u_cod2SkyEye.w > 0.0) {'), 'r_reflections turns the models\' reflection off too');
   assert.equal(model.pointPass.match(/texture2D\(u_cod2SpecMap/g).length, 1);
+  // COD2_VIEWMODEL_LIGHT: the arms and weapon take the material pass without
+  // maps or sun, and the sky's light from above the left shoulder after their
+  // relief and before the sun's highlight.
+  assert(model.pointPass.includes('if (u_cod2Surface.x > 0.5 || u_cod2Surface.y > 0.5 || u_cod2Model.x > 0.0 || u_cod2Model.y > 0.5) {\n'),
+    'the viewmodel is lit by its form without maps or sun');
+  const shoulder = model.pointPass.indexOf('if (u_cod2Model.y > 0.5) {\n' +
+    'const highp vec3 cod2Shoulder = vec3(-0.454, 0.655, 0.605);\n' +
+    'gl_FragColor.rgb *= mix(0.68, 1.28, smoothstep(-0.5, 0.9, dot(cod2B, cod2Shoulder)));\n' +
+    'cod2Spec += cod2Flat * 0.6 * cod2Phong(cod2B, cod2Shoulder, cod2P);\n}\n');
+  assert(shoulder > model.pointPass.indexOf('gl_FragColor.rgb *= max(cod2Bumped, vec3(0.0)) / max(cod2Flat, vec3(0.004));') &&
+    shoulder < model.pointPass.indexOf('cod2Spec += cod2Sun * cod2Phong(cod2B, u_cod2SunEye, cod2P);'),
+    'the shoulder light shades the relit model before its highlights');
+  assert(Math.abs(Math.hypot(-0.454, 0.655, 0.605) - 1) < 2e-3, 'the shoulder light is a direction');
   assert(!model.pointPass.includes('gl_FragColor.a'));
   const single = generate.call({usedTexUnitList: [0]}, {...twoD, useTextureMatrix: matrix},
     {lightingEnabled: true, MAX_LIGHTS: 8, lightEnabled: [false, false, false, false, false, true, false, false]},

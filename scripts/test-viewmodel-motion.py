@@ -85,7 +85,7 @@ test = r'''
 #include <string.h>
 #include "SOURCE"
 static dvar_t glow, radius0, radius1, intensity0, intensity1, cutoff, desaturation, fullbright, samples, dof, film,
-    motion, scene, ssao, atmosphere, sunShafts, shockwave, clarity;
+    motion, scene, ssao, atmosphere, sunShafts, shockwave, clarity, taa;
 const dvar_t *r_glow = &glow;
 const dvar_t *r_glowRadius[2] = {&radius0, &radius1};
 const dvar_t *r_glowBloomIntensity[2] = {&intensity0, &intensity1};
@@ -102,6 +102,7 @@ const dvar_t *r_atmosphere = &atmosphere;
 const dvar_t *r_sunShafts = &sunShafts;
 const dvar_t *r_shockwave = &shockwave;
 const dvar_t *r_clarity = &clarity;
+const dvar_t *r_taa = &taa;
 void WebSunShadows_Render(void)
 {
 }
@@ -231,7 +232,7 @@ int main(void)
 {
     assert(SCENE_FX_VM_MOTION == 35 && SCENE_FX_VM_TRIANGLES == 36 && SCENE_FX_VM_INDEX_ROW == 37 &&
            SCENE_FX_VM_TILE_ROW == 38 && SCENE_FX_VM_ROWS == 39 && SCENE_FX_VM_TILE == 40 &&
-           SCENE_FX_VM_TILES_X == 41 && SCENE_FX_SCOPE == 42 && SCENE_FX_SCOPE_END == 55 && SCENE_FX_AO == 55 && SCENE_FX_HAZE == 59 && SCENE_FX_SHAFTS == 73 && SCENE_FX_CLARITY == 100 && SCENE_FX_PARAM_COUNT == 101);
+           SCENE_FX_VM_TILES_X == 41 && SCENE_FX_SCOPE == 42 && SCENE_FX_SCOPE_END == 55 && SCENE_FX_AO == 55 && SCENE_FX_HAZE == 59 && SCENE_FX_SHAFTS == 73 && SCENE_FX_CLARITY == 100 && SCENE_FX_PARAM_COUNT == 119);
     /* The mesh texture holds the most vertices, indices and tiles at once. */
     assert(SCENE_FX_VM_MESH_WIDTH == 1024 && SCENE_FX_VM_MESH_ROWS == 64);
     assert(SCENE_FX_VM_MAX_VERTICES * 2 / 1024 + SCENE_FX_VM_MAX_TRIANGLES * 3 / 4096 +
@@ -412,7 +413,32 @@ int main(void)
         begin(10, 0.34f, 161.5f); quad(&keyA, 20, 0.5f, 0); present();
         assert(near(s_vmMesh[0], 1.19f * (0.5f - corners[0][1])));
     }
-    puts("PASS: viewmodel vertices smear by their own screen motion over a 10 ms exposure at any frame rate, the bob's and sway's as they are and faster motion 3.5 times past a knee at 0.4% of the height, capped at 10%, the camera's motion cancelled; clip positions use the depth hack's near clip, or a raised WWII scope's projection and near clip; triangles, indices after the vertices and tiles holding the largest smear within a tile; cuts, swapped poses, new or changed surfaces, repeated surfaces, r_motionBlur 0, fullbright and partial views, still and off-screen motion, triangles behind the eye, spread vertices and an oversized viewmodel");
+    /* At the hip the arms and weapon are drawn with their own 1.4 x 2.48
+     * projection (cg_gunfov_mp.c) and the depth hack's near clip: the mesh
+     * and the smear follow it, and a raised scope's projection takes its
+     * place. */
+    {
+        const float gun[2] = {1.4f, 2.48f};
+        const float scope[SCENE_FX_SCOPE_LENS_FLOATS] = {0, 0, 0.5f, 0, 0, 0.9f, 1, 1, 0, 0, 1.7f, 3.0f, 0.8f};
+        WebSceneFx_SetGunProjection(gun);
+        begin(10, 0.34f, 161.5f); quad(&keyA, 20, 0, 0); present();
+        begin(10, 0.34f, 161.5f); quad(&keyA, 20, 0.5f, 0); present();
+        for (int i = 0; i < 4; ++i) {
+            float z = 20 + corners[i][0], x = 0.5f - corners[i][1], y = corners[i][2];
+            assert(near(s_vmMesh[i * 8], 1.4f * x) && near(s_vmMesh[i * 8 + 1], 2.48f * y));
+            assert(near(s_vmMesh[i * 8 + 2], 2 * (0.9995f * z - 0.1f) - z) && near(s_vmMesh[i * 8 + 3], z));
+            assert(near(smearOf(i, 0), boosted(smearX(ndcX(i, 20, 0), ndcX(i, 20, 0.5f), 10) * 1.4f / 1.19f)) &&
+                   still(smearOf(i, 1)));
+        }
+        WebSceneFx_SetScope(scope);
+        begin(10, 0.34f, 161.5f); quad(&keyA, 20, 0.5f, 0); present();
+        assert(near(s_vmMesh[0], 1.7f * (0.5f - corners[0][1])));
+        WebSceneFx_SetScope(NULL);
+        WebSceneFx_SetGunProjection(NULL);
+        begin(10, 0.34f, 161.5f); quad(&keyA, 20, 0.5f, 0); present();
+        assert(near(s_vmMesh[0], 1.19f * (0.5f - corners[0][1])));
+    }
+    puts("PASS: viewmodel vertices smear by their own screen motion over a 10 ms exposure at any frame rate, the bob's and sway's as they are and faster motion 3.5 times past a knee at 0.4% of the height, capped at 10%, the camera's motion cancelled; clip positions use the depth hack's near clip, or a raised WWII scope's projection and near clip, or the arms and weapon's own projection at the hip; triangles, indices after the vertices and tiles holding the largest smear within a tile; cuts, swapped poses, new or changed surfaces, repeated surfaces, r_motionBlur 0, fullbright and partial views, still and off-screen motion, triangles behind the eye, spread vertices and an oversized viewmodel");
     return 0;
 }
 '''
@@ -452,9 +478,12 @@ mutants = [
     ('(const char *)positions + (size_t)i * (size_t)stride', '(const char *)positions + (size_t)i * 12'),
     ('    s_vmOverflow = 0;\n}', '}'),
     ('tile = (int)ceilf(cap);', 'tile = (int)ceilf(cap) + 8;'),
-    ('        lens[0] = s_scope[SCENE_FX_SCOPE_PROJECTION - SCENE_FX_SCOPE];\n', ''),
-    ('        lens[5] = s_scope[SCENE_FX_SCOPE_PROJECTION + 1 - SCENE_FX_SCOPE];\n', ''),
-    ('        nearClip = WebSceneFx_ScopeNearClip(nearClip);\n', ''),
+    ('        lens[0] = scales[0];\n', ''),
+    ('        lens[5] = scales[1];\n', ''),
+    ('    nearClip = WebSceneFx_ScopeNearClip(nearClip);\n', ''),
+    # The weapon's own projection ignored, or put before a raised scope's.
+    ('    return s_gunProjection[0] > 0.0f ? s_gunProjection : NULL;', '    return NULL;'),
+    ('    if (projection[0] > 0.0f)\n        return projection;\n', ''),
 ]
 
 # r_model.c's capture hooks, compiled against the engine's own structures.

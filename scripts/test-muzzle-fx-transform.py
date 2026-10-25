@@ -47,6 +47,9 @@ typedef struct {struct {float value;}current;} dvar_t;
 static dvar_t debug,*debugp=&debug;
 static void *imp_fx_debugBolt=&debugp,*imp_colorRed,*imp_colorGreen,*imp_colorBlue;
 static void CL_AddDebugLine(const float*a,const float*b,const float*c,int d,int e,int f) {}
+/* The view's own projection leaves points where they are; calls are counted. */
+static int gunFovPoints;
+static void CG_GunFovPoint(vec_t *point) {gunFovPoints++;}
 typedef struct {int skelTimeStamp;} clientActive_t;
 static clientActive_t client,*cl=&client;static void *imp_cl=&cl;
 typedef struct {int cachedServerTime;FxBoltInfo mBolt;orientation_t orientation;} FxBoltFrame;
@@ -75,6 +78,7 @@ int main(void) {
   float qscale=1.7f;for(int i=0;i<3;i++)bones[2].quat[i]=unit[i]*sinf(angle/2)*qscale;
   bones[2].quat[3]=cosf(angle/2)*qscale;bones[2].transWeight=2/(qscale*qscale);
   bones[2].trans[0]=28;bones[2].trans[1]=-3;bones[2].trans[2]=-5;
+  gunFovPoints=0;
   orientation_t got;assert(FX_GetBoneOrientation(&bolt,&got));
   vec3_t expected;worldDir(bones[2].trans,parentAxis,expected);
   for(int i=0;i<3;i++)expected[i]+=parentOrigin[i];near3(got.origin,expected);
@@ -85,6 +89,8 @@ int main(void) {
   }
   bolt.boneIndex=-1;assert(FX_GetBoneOrientation(&bolt,&got));near3(got.origin,parentOrigin);
   for(int row=0;row<3;row++)near3(got.axis[row],parentAxis[row]);tested++;
+  /* The view weapon's tags, with or without a bone, go to its projection. */
+  assert(gunFovPoints==(handle?2:0));
  }
  FxBoltInfo bolt={1024,4};orientation_t out;assert(!FX_GetBoneOrientation(&bolt,&out));
  bolt.boneIndex=0;hasObject=0;assert(!FX_GetBoneOrientation(&bolt,&out));hasObject=1;
@@ -100,7 +106,7 @@ int main(void) {
  }
  hasObject=0;client.skelTimeStamp++;assert(!FxBoltFrame_GetOrientation(&frame));assert(frame.mBolt.dobjHandle==-1);
  assert(!FxBoltFrame_GetOrientation(&frame));
- printf("PASS: %d world/viewmodel transforms, nonunit quaternions, missing bones and 1,100 cached FX orientations\n",tested);
+ printf("PASS: %d world/viewmodel transforms, the viewmodel's handed to its own projection, nonunit quaternions, missing bones and 1,100 cached FX orientations\n",tested);
 }
 '''
 with tempfile.TemporaryDirectory(prefix='cod2-muzzle-fx-') as directory:

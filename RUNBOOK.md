@@ -6658,3 +6658,43 @@ Validation:
 Not covered: a vote's map and mode lists are the browser's eight arenas and
 five modes; temporary bans and mute stay out of the menu; F1/F2 still depend
 on the keyboard (a Mac needs Fn), Escape always works.
+
+## Soft tone, the weapon held and smoothed as in CoD WWII — 2026-10-25
+
+The owner found the picture darkened and too contrasty next to CoD WWII, the
+hand and weapon flat, the image not smoothed, and too much forearm with the
+weapon held far forward. Details and measurements are in
+`docs/GRAPHICS_2026-10-16.md` ("Soft tone, the weapon held and smoothed as in
+CoD WWII").
+
+- Tone (`web_scene_fx.c`, `patch-emscripten-gl.py`): the film grade lifts the
+  shade instead of applying its contrast curve, saturation 0.96 to 1.12;
+  ambient occlusion 0.85 to 0.55, local contrast 0.4 to 0.16, the texture
+  creases' darkening halved.
+- `cg_gunfov_mp.c` (new): at the hip the arms and weapon take their own field
+  of view (`cg_gunFov`, archived, 65) and a pose per class (`cg_gunHip`,
+  archived, 1): an offset and a turn about the eye, set against WWII's
+  captures; scoped rifles cross from the lower right with the eyepiece at the
+  eye's height. Both leave by 0.6 of the raise; the turn gives way to the
+  sprint's carry pose; effects on the weapon and the tracer follow it.
+- Viewmodels take a light from above the left shoulder with a specular
+  highlight (`u_cod2Model.y`, from the device's depth hack range).
+- Temporal antialiasing (`r_taa`, archived, on): Halton (2, 3) jitter on every
+  3D draw, a reprojected history clipped in YCoCg; sharpening 0.12 after it.
+
+Validation:
+
+- `test-gun-fov.py` (new, in `test-static.sh`, 42 mutants);
+  `test-web-scene-fx.py` (147 mutants), `test-web-point-lights.cjs`,
+  `test-web-materials.py`, `test-viewmodel-motion.py`,
+  `test-combat-presentation.py`. Full static suite.
+- Isolated QA stack on the M4 against the client from `30bdb47`: Toujane,
+  Burgundy and Leningrad's twelve views' mean luma 74 to 86, darkest twentieth
+  20 to 32, brightest 173 to 169, saturation 0.123 to 0.118; the scoped
+  Kar98k's eyepiece at about 82% of the width at eye height and the hand
+  near the bottom, as in WWII; raise, lower, sprint and hip fire recorded;
+  Carentan 291/308 and 195/186 frames a second before/after, temporal
+  antialiasing about 0.1 ms.
+
+Not covered: one pose per class; models, textures and the arms' animation are
+Call of Duty 2's; only the M4 in Chrome was measured.
