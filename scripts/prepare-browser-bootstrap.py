@@ -358,7 +358,8 @@ try:
     print(f"Attachments: {sum(name.startswith('xmodel/') for name in attachment_models)} first-person models")
     muzzle_flashes = muzzle_flash_assets(lambda name: originals[asset_index[name][0]].read(asset_index[name][1]))
     renderer.update(muzzle_flashes)
-    print(f"Muzzle flashes: {len(muzzle_flashes)} effects rewritten")
+    print(f"Muzzle flashes: {sum(name.endswith('.efx') for name in muzzle_flashes)} effects rewritten, "
+          f"{sum(name.startswith('images/') for name in muzzle_flashes)} textures")
     archives["cod2_browser_renderer.iwd"] = renderer
     hit_sound = root / "data/main" / HIT_SOUND_OWNER_FILE
     menu_music = root / "data/main" / MENU_MUSIC_OWNER_FILE

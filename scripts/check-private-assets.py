@@ -182,8 +182,11 @@ try:
         assert name in entries, "Missing attachment model: " + name
     for name, data in muzzle_flashes.items():
         assert name in entries, "Missing muzzle flash: " + name
-        for material in re.findall(rb'\tshaders\s*\[\s*(\S+)', data):
-            assert "materials/" + material.decode().lower() in entries, "Missing muzzle flash material: " + material.decode()
+        if name.endswith(".efx"):
+            for material in re.findall(rb'\tshaders\s*\[\s*(\S+)', data):
+                assert "materials/" + material.decode().lower() in entries, "Missing muzzle flash material: " + material.decode()
+        elif name.startswith("materials/"):
+            assert "images/" + name[len("materials/"):] + ".iwi" in entries, "Missing muzzle flash image: " + name
     for name, data in entries.items():
         if name.startswith("weapons/mp/"):
             fields = data.decode("latin-1").split("\\")

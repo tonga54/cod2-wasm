@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Rewrite muzzle flashes with the production generator (browser_muzzle_flashes.py) and parse every generated flag
 line and curve with the production EFX parser. Each original's lights and lasting smoke stay byte for byte and in
-order; its fireball puffs and other brief elements give way to a burst, a core, a forward tongue and sparks that
-show at full strength at once and fade out within 55, 35, 45 and 140 ms. Mutants of the generator fail."""
+order; its fireball puffs and other brief elements give way to CoD WWII's glow, a flame core drawn from eight shapes,
+fanning tongues, sparks and a puff of smoke, each shot drawing its own shape, size, proportion, strength and warmth.
+The generated textures are deterministic, warm, edged in black and different frame to frame; their IWIs carry the
+mip chain the production loader counts; their materials follow the engine's 32-bit layout. Mutants fail."""
 from pathlib import Path
 import re
+import struct
 import subprocess
 import tempfile
 import types
@@ -15,6 +18,7 @@ template = (root / 'src/PC/EffectsCore/FxTemplate.c').read_text()
 stubs = (root / 'src/stubs/link_stubs.c').read_text()
 curve_source = (root / 'src/PC/EffectsCore/FxCurve_load_obj.c').read_text()
 loader = (root / 'src/PC/EffectsCore/FxScheduler_load_obj.c').read_text()
+image_loader = (root / 'src/PC/gfx_d3d/r_image_load_obj.c').read_text()
 
 # The weapon files' view and world flashes (weapons/mp/*: viewFlashEffect, worldFlashEffect).
 FLASH_FILES = {'heavy_view.efx', 'heavy.efx', 'mg42hv_view.efx', 'mg42hv.efx', 'pistolflash_view.efx',
@@ -23,7 +27,12 @@ FLASH_FILES = {'heavy_view.efx', 'heavy.efx', 'mg42hv_view.efx', 'mg42hv.efx', '
 PUFFS = {'gfx_exp_fireball_atlas', 'gfx_muzflash2', 'gfx_muzflash2a', 'gfx_fire_ball'}
 PARSER_KEYS = {key.lower() for key in re.findall(r'stricmp\(key, "([^"]+)"\)', template)}
 PRIMITIVES = {name.lower() for name in re.findall(r'\{ "(\w+)", PT_\w+ \}', loader)}
-assert {'particle', 'tail', 'light'} <= PRIMITIVES and {'life', 'rgb', 'velocityx', 'shaders'} <= PARSER_KEYS
+assert {'particle', 'tail', 'light'} <= PRIMITIVES and {'life', 'rgb', 'velocityx', 'nonuniformscale'} <= PARSER_KEYS
+FAMILY_ORDER = ('pistol', 'smg', 'standard', 'heavy', 'rifle', 'mg', 'shotgun')
+LIVES = {'glow': 75, 'core': 45, 'tongue': 40, 'sparks': 140, 'puff': 750}
+# Calls whose last bit the platform's libm decides; the Pi must rebuild the textures byte for byte.
+LIBM = re.compile(r'\bmath\.(exp|expm1|log\w*|pow|sin|cos|tan|asin|acos|atan2?|sinh|cosh|tanh|hypot|dist|erf\w*|'
+                  r'gamma|lgamma|cbrt|exp2)\b|\*\*|\bpow\(')
 
 
 def function(source, name):
@@ -77,7 +86,7 @@ for name in ('PrimitiveTemplate_FindFlag', 'PrimitiveTemplate_ParseFlags', 'Ensu
              'PrimitiveTemplate_ParseChannelRanges', 'PrimitiveTemplate_CopyChannelRanges',
              'PrimitiveTemplate_ParseChannelFlags', 'PrimitiveTemplate_ParseChannel'):
     harness += function(template, name)
-harness += r'''
+harness += function(image_loader, 'Image_ComputeMipCount') + r'''
 static char *next_line(void)
 {
     static char line[1024];
@@ -87,13 +96,18 @@ static char *next_line(void)
     return line;
 }
 
-/* "flags 0|1 <names>", then "curve <dimensions> <keys> <scale|->" with the
- * key lines, the expected keys and the expected scale range. */
+/* "flags 0|1 <names>"; "curve <dimensions> <keys> <scale|->" with the key
+ * lines, the expected keys and the expected scale range; "mips <w> <h>". */
 int main(void)
 {
     int flags = 0, curves = 0;
     char *line;
     while ((line = next_line())) {
+        int width, height;
+        if (sscanf(line, "mips %d %d", &width, &height) == 2) {
+            printf("mips %d\n", Image_ComputeMipCount(width, height, 1));
+            continue;
+        }
         if (!strncmp(line, "flags ", 6)) {
             PrimitiveTemplate p = {0};
             int spawn = line[6] == '1';
@@ -224,32 +238,32 @@ def values(keys, column=1):
     return [float(key.split()[column]) for key in keys]
 
 
-def verify(module):
-    """Every design check on the generator's output; the parser cases for the harness."""
-    assert set(module.EFFECTS) == FLASH_FILES
-    assert set(module.EFFECTS.values()) <= set(module.FAMILIES)
+def varies(channels, base, rand, column=1):
+    """The shot's random pick spans at least a fifth of the base at the start."""
+    low, high = values(channels[base][0], column)[0], values(channels[rand][0], column)[0]
+    return abs(high - low) >= 0.2 * max(abs(low), abs(high))
+
+
+def verify_effects(module):
+    """Every design check on the generated effects; the parser cases for the harness."""
+    assert set(module.EFFECTS) == FLASH_FILES and set(module.EFFECTS.values()) <= set(module.FAMILIES)
+    assert set(module.FAMILIES) == set(FAMILY_ORDER)
     cases = []
-    read_names = []
-    assets = module.muzzle_flash_assets(lambda name: read_names.append(name) or ORIGINAL.encode('latin-1'))
-    assert sorted(assets) == sorted(read_names) == sorted('fx/muzzleflashes/' + name for name in FLASH_FILES)
     for name, family in module.EFFECTS.items():
-        text = assets['fx/muzzleflashes/' + name].decode('latin-1')
-        assert text == module.rewrite_flash(ORIGINAL, family).decode('latin-1')
+        text = module.rewrite_flash(ORIGINAL, family).decode('latin-1')
         assert '\n' not in text.replace('\r\n', ''), 'mixed line endings'
         elements = module.split_elements(text)
         assert [body for kind, body in elements[:len(KEPT)]] == KEPT, 'lights and smoke kept, verbatim, in order'
         for brief in BRIEF:
             assert brief not in text and brief.split('\r\n')[2] not in text, 'brief original element kept'
-        new = elements[len(KEPT):]
-        burst, core, tongue_length, tongue_width, (sparks_min, sparks_max), spark_speed = module.FAMILIES[family]
+        f = module.FAMILIES[family]
         parsed = {}
-        for kind, body in new:
+        for kind, body in elements[len(KEPT):]:
             assert kind.lower() in PRIMITIVES
             fields, channels, shaders = parse_new(body)
             for key in list(fields) + list(channels):
                 assert key.lower() in PARSER_KEYS, key
             assert len(shaders) == 1 and not set(shaders) & PUFFS
-            assert 'relative' in fields['flags'].split(), 'flash follows the muzzle'
             parsed[fields['name']] = (kind, fields, channels, shaders[0])
             cases.append('flags 0 ' + fields['flags'])
             if 'spawnFlags' in fields:
@@ -263,63 +277,202 @@ def verify(module):
                 cases += keys
                 cases.append(' '.join(' '.join(key.split()[:dimensions + 1]) for key in keys))
                 cases.append(f'{min(scales)} {max(scales)}')
-        assert list(parsed) == ['burst', 'core', 'tongue'] + (['sparks'] if sparks_max else [])
-        lives = {name: max(float(v) for v in fields['life'].split()) for name, (_, fields, _, _) in parsed.items()}
-        assert lives['burst'] <= 55 and lives['core'] <= 35 and lives['tongue'] <= 45, lives
+        assert list(parsed) == ['glow', 'core', 'tongue'] + ['sparks'] * bool(f.sparks[1]) + ['puff'] * bool(f.puff)
         for name, (kind, fields, channels, shader) in parsed.items():
+            assert max(float(v) for v in fields['life'].split()) <= LIVES[name], (name, fields['life'])
             for channel in ('alpha', 'alphaRand'):
                 alpha = values(channels[channel][0])
-                assert alpha[0] == max(alpha) > 0 and alpha[-1] == 0, (name, channel, alpha)
+                assert alpha[-1] == 0, (name, channel, 'fades out')
+                if name == 'puff':
+                    assert alpha[0] == 0 < max(alpha) <= 0.2, (name, channel, 'thin smoke fading in')
+                else:
+                    assert alpha[0] == max(alpha) > 0, (name, channel, 'at full strength at once')
             red, green, blue = (values(channels['rgb'][0], column) for column in (1, 2, 3))
             assert all(r >= g >= b for r, g, b in zip(red, green, blue)), (name, 'warm')
-        kind, fields, channels, shader = parsed['burst']
-        assert kind == 'Particle' and shader == 'gfx_explosion_flash' and fields['count'] == '1'
-        size = values(channels['size'][0])
-        assert size[0] >= 0.6 * size[-1] and float(channels['size'][1]) == burst, 'a burst, not a swelling puff'
+            assert ('relative' in fields['flags'].split()) == (name != 'puff'), (name, 'follows the muzzle')
+        kind, fields, channels, shader = parsed['glow']
+        assert kind == 'Particle' and shader == module.GLOW and float(channels['size'][1]) == f.glow
+        assert {'useRandomColors', 'useRandomAlpha', 'useRandomSize'} <= set(fields['flags'].split())
+        assert varies(channels, 'alpha', 'alphaRand') and varies(channels, 'size', 'sizeRand')
+        assert varies(channels, 'rgb', 'rgbRand', 3), 'each glow its own warmth'
         kind, fields, channels, shader = parsed['core']
-        assert kind == 'Particle' and shader == 'gfx_spark_atlas' and float(channels['size'][1]) == core
+        assert kind == 'Particle' and shader == module.BURST and fields['sequenceStartFrameMode'] == '1'
+        assert fields['nonUniformScale'] == '1' and {'useRandomSize', 'useRandomSize2'} <= set(fields['flags'].split())
+        assert float(channels['size'][1]) == float(channels['size2'][1]) == f.burst
+        assert varies(channels, 'size', 'sizeRand') and varies(channels, 'size2', 'size2Rand'), 'its own proportion'
+        assert fields['rotation'] == '180 -180' and varies(channels, 'rgb', 'rgbRand', 3)
         kind, fields, channels, shader = parsed['tongue']
-        assert kind == 'Tail' and shader == 'gfx_starburst_1p'
-        assert float(channels['length'][1]) == tongue_length and float(channels['size'][1]) == tongue_width
+        assert kind == 'Tail' and shader == module.TONGUE and fields['sequenceStartFrameMode'] == '1'
+        assert fields['count'] == f'{f.tongues[0]} {f.tongues[1]}' and f.tongues[1] >= 1
+        assert float(channels['length'][1]) == f.tongue_length and float(channels['size'][1]) == f.tongue_width
         assert max(values(channels['velocityX'][0]) + values(channels['velocityXRand'][0])) < 0, \
             'the tongue moves back, so its tail streaks forward out of the barrel'
-        if sparks_max:
+        for axis in 'YZ':
+            low, high = values(channels[f'velocity{axis}'][0])[0], values(channels[f'velocity{axis}Rand'][0])[0]
+            assert low == -high != 0, 'tongues fan to either side'
+        if f.sparks[1]:
             kind, fields, channels, shader = parsed['sparks']
-            assert kind == 'Tail' and shader == 'gfx_spark_atlas' and lives['sparks'] <= 140
-            assert fields['count'] == f'{sparks_min} {sparks_max}'
+            assert kind == 'Tail' and shader == 'gfx_spark_atlas' and fields['count'] == f'{f.sparks[0]} {f.sparks[1]}'
             assert min(values(channels['velocityX'][0]) + values(channels['velocityXRand'][0])) > 0
-            assert float(channels['velocityX'][1]) == spark_speed, 'sparks fly forward'
-    families = module.FAMILIES
-    assert families['pistol'][0] < families['standard'][0] <= families['heavy'][0] < families['rifle'][0]
-    assert max(families, key=lambda name: families[name][0]) == 'shotgun'
-    assert max(families, key=lambda name: families[name][2]) == 'mg'
+            assert float(channels['velocityX'][1]) == f.spark_speed, 'sparks fly forward'
+        if f.puff:
+            kind, fields, channels, shader = parsed['puff']
+            assert kind == 'Particle' and shader == 'gfx_smokepuff_atlas' and fields['sequenceStartFrameMode'] == '1'
+            assert float(channels['size'][1]) == f.puff and values(channels['size'][0])[0] < values(channels['size'][0])[-1]
+            assert min(values(channels['velocityZ'][0]) + values(channels['velocityZRand'][0])) > 0, 'rises'
+            assert min(values(channels['velocityX'][0]) + values(channels['velocityXRand'][0])) > 0, 'drifts forward'
+    for field in ('glow', 'burst'):
+        sizes = [getattr(module.FAMILIES[name], field) for name in FAMILY_ORDER]
+        assert sizes == sorted(sizes) and sizes[0] < sizes[-1], field
+    assert max(module.FAMILIES, key=lambda name: module.FAMILIES[name].tongue_length) == 'mg'
     return cases
 
 
-MUTANTS = [
+def frames(module, name, width, height, rgb):
+    frame_width, frame_height, columns, count = module.TEXTURES[name]
+    assert (width, height) == (frame_width * columns, frame_height * ((count + columns - 1) // columns))
+    out = []
+    for n in range(count):
+        left, top = (n % columns) * frame_width, (n // columns) * frame_height
+        out.append([rgb[((top + y) * width + left + x) * 3:((top + y) * width + left + x) * 3 + 3]
+                    for y in range(frame_height) for x in range(frame_width)])
+    return frame_width, frame_height, out
+
+
+MATERIAL_TEMPLATE = (struct.pack('<IIHHBBBBf', 0x61, 0x71, 0, 0, 0, 0x1b, 4, 4, 0.0) +
+                     struct.pack('<BBHIHHfii', 0, 0, 0x60, 0, 256, 256, 0.0, 0, 1) +
+                     struct.pack('<iiHHIII', 0x08128922, 4, 1, 0, 0x50, 0x44, 0x50) + struct.pack('<IBBBBI', 0x7d, 2, 2, 0, 0, 0x71) +
+                     b'effect_add_nofog\0gfx_spark_atlas\0spark_atlas\0colorMap\0')
+assert len(MATERIAL_TEMPLATE) == 134
+
+
+def cstring(blob, offset):
+    assert 0x50 <= offset < len(blob)
+    return blob[offset:blob.index(b'\0', offset)].decode()
+
+
+def verify_textures(module, mips, twice=False):
+    """Textures, IWIs and materials; mips(width, height) is the production loader's level count less one."""
+    assert not LIBM.search(generator_texture_source(module)), 'textures only by correctly rounded operations'
+    assert set(module.TEXTURES) == {module.GLOW, module.BURST, module.TONGUE}
+    generated = {name: module.texture_pixels(name) for name in module.TEXTURES}
+    module.texture_pixels = generated.__getitem__
+    assets = module.muzzle_flash_assets(lambda name: MATERIAL_TEMPLATE if name == module.MATERIAL_TEMPLATE
+                                        else ORIGINAL.encode('latin-1'))
+    if twice:
+        assert generated == {name: load(module.__source__).texture_pixels(name) for name in module.TEXTURES}, \
+            'deterministic'
+    for name, (frame_width, frame_height, columns, count) in module.TEXTURES.items():
+        width, height, rgb = generated[name]
+        fw, fh, shapes = frames(module, name, width, height, rgb)
+        for shape in shapes:
+            ring = [shape[y * fw + x] for y in range(fh) for x in range(fw) if x in (0, fw - 1) or y in (0, fh - 1)]
+            assert max(max(p) for p in ring) <= 2, (name, 'black at the frame edge')
+            assert max(p[0] for p in shape) >= 250 and max(p[2] for p in shape) >= 120, (name, 'a white-hot heart')
+            assert all(p[0] >= p[1] >= p[2] for p in shape), (name, 'warm')
+        for a in range(len(shapes)):
+            for b in range(a):
+                difference = sum(abs(x - y) for p, q in zip(shapes[a], shapes[b]) for x, y in zip(p, q))
+                assert difference / (fw * fh * 3) >= 4, (name, a, b, 'frames differ')
+        if name == module.GLOW:
+            row = shapes[0][(fh // 2) * fw + fw // 2:(fh // 2 + 1) * fw]
+            assert all(sum(row[i]) >= sum(row[i + 1]) for i in range(len(row) - 1)), 'glow falls from its heart'
+        if name == module.TONGUE:
+            for shape in shapes:
+                base = sum(sum(p) for p in shape[(fh - fh // 8) * fw:])
+                tip = sum(sum(p) for p in shape[:fh // 8 * fw])
+                assert base > 4 * tip, 'the base, at the bottom, outshines the tip'
+        iwi = assets['images/' + name + '.iwi']
+        assert iwi[:6] == b'IWi\x05\x01\x00' and struct.unpack_from('<HHH', iwi, 6) == (width, height, 1)
+        levels, w, h = [], width, height
+        while True:
+            levels.append((w, h))
+            if w == 1 and h == 1:
+                break
+            w, h = max(1, w // 2), max(1, h // 2)
+        assert len(levels) == mips(width, height) + 1, (name, 'the loader reads every level')
+        assert len(iwi) == 28 + 4 * sum(w * h for w, h in levels) == struct.unpack_from('<i', iwi, 12)[0]
+        top = iwi[len(iwi) - width * height * 4:]
+        assert top == b''.join(bytes((rgb[i + 2], rgb[i + 1], rgb[i], 255)) for i in range(0, len(rgb), 3)), \
+            'the full level last, BGRA'
+        smallest = iwi[28:32]
+        assert smallest[3] == 255 and smallest[2] >= smallest[1] >= smallest[0], 'the 1x1 level first, warm'
+        material = assets['materials/' + name]
+        info = struct.unpack_from('<IIHHBBBB', material, 0)
+        assert cstring(material, info[0]) == cstring(material, info[1]) == name
+        assert (info[6], info[7]) == ((count + columns - 1) // columns, columns), (name, 'atlas rows, columns')
+        assert struct.unpack_from('<HH', material, 28) == (width, height)
+        assert material[44:52] == MATERIAL_TEMPLATE[44:52], 'additive state of the template'
+        assert struct.unpack_from('<HH', material, 52) == (1, 0)
+        technique, textures = struct.unpack_from('<II', material, 56)
+        assert cstring(material, technique) == 'effect_add_nofog' and textures == 0x44
+        texture_name, sampler, semantic, image = struct.unpack_from('<IBBxxI', material, 0x44)
+        assert cstring(material, texture_name) == 'colorMap' and cstring(material, image) == name
+        assert (sampler, semantic) == (2, 2)
+    try:
+        module.effect_material(MATERIAL_TEMPLATE.replace(b'effect_add_nofog', b'2d\0\0\0\0\0\0\0\0\0\0\0\0\0\0'), 'x',
+                               1, 1, 1, 1)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('a non-additive template is refused')
+    return assets
+
+
+def generator_texture_source(module):
+    source = module.__dict__.get('__source__', '')
+    return source[source.index('def _decay('):]
+
+
+EFFECT_MUTANTS = [
     ("if kind.lower() == 'light' or life_max(element) > FLASH_LIFE_MS]", "if life_max(element) > FLASH_LIFE_MS]"),
     ('life_max(element) > FLASH_LIFE_MS]', 'life_max(element) >= 0]'),
     ('FLASH_LIFE_MS = 200', 'FLASH_LIFE_MS = 199'),
     ("r'^[ \\t]*life[ \\t]+([\\d.]+)(?:[ \\t]+([\\d.]+))?'", "r'^[ \\t]*life[ \\t]+([\\d.]+)'"),
     ('if start >= i:', 'if start > i:'),
     ("newline = '\\r\\n' if '\\r\\n' in original else '\\n'", "newline = '\\n'"),
-    ("('life', '40 55')", "('life', '40 100')"),
-    ("('life', '30 45')", "('life', '30 60')"),
-    ("((0, 1), (0.25, 0.72), (0.6, 0.24), (1, 0))", "((0, 0.2), (0.25, 0.72), (0.6, 0.24), (1, 0))"),
-    ("((0, 0.9), (0.4, 0.55), (1, 0))", "((0, 0.9), (0.4, 0.55), (1, 0.1))"),
-    ("((0, 0.8), (1, 1.15))", "((0, 0), (1, 1.15))"),
-    ("'gfx_explosion_flash'", "'gfx_exp_fireball_atlas'"),
+    ("('life', '50 75')", "('life', '50 120')"),
+    ("('life', '25 40')", "('life', '25 60')"),
+    ("((0, 1), (0.3, 0.75), (0.7, 0.2), (1, 0))", "((0, 0.2), (0.3, 0.75), (0.7, 0.2), (1, 0))"),
+    ("((0, 0.95), (0.35, 0.6), (1, 0))", "((0, 0.95), (0.35, 0.6), (1, 0.1))"),
+    ("'useRandomColors useRandomAlpha useRandomSize relative'", "'useRandomAlpha useRandomSize relative'"),
+    ("f.glow, rgb_rand=((0, 1, 0.84, 0.66), (1, 1, 0.68, 0.45))), GLOW)", "f.glow), GLOW)"),
+    ("((0, 0.55), (0.12, 0.45), (0.45, 0.15), (1, 0))", "((0, 0.95), (0.12, 0.8), (0.45, 0.28), (1, 0))"),
+    ("('nonUniformScale', '1'), ", ""),
+    ("f.burst, ((0, 0.8), (1, 1.15)), ((0, 0.55), (1, 0.8)), f.burst,",
+     "f.burst, ((0, 0.8), (1, 1.15)), ((0, 0.8), (1, 1.15)), f.burst,"),
+    ("('rotation', '180 -180'), ('nonUniformScale', '1'), ('sequenceStartFrameMode', '1'),",
+     "('rotation', '180 -180'), ('nonUniformScale', '1'), ('sequenceStartFrameMode', '0'),"),
     ("{'velocityX': (((0, -0.5), (1, -0.5)), 50)", "{'velocityX': (((0, 0.5), (1, 0.5)), 50)"),
-    ("'velocityX': (((0, 1), (1, 1)), spark_speed)", "'velocityX': (((0, -1), (1, -1)), spark_speed)"),
-    ("('flags', 'useRandomAlpha useRandomSize relative'),\n            ('spawnFlags'",
-     "('flags', 'useRandomAlpha useRandomSize'),\n            ('spawnFlags'"),
-    ("useRandomLength useRandomVelocity relative'),\n            ('life', '30 45')",
-     "useRandomLength useRandomVelocty relative'),\n            ('life', '30 45')"),
-    ("('spawnFlags', 'evenDistribution'), ('count', '1'), ('life', '40 55')",
-     "('spawnFlags', 'evenDistributon'), ('count', '1'), ('life', '40 55')"),
+    ("'velocityY': (((0, -0.08), (1, -0.08)), 50), 'velocityYRand': (((0, 0.08), (1, 0.08)), None)",
+     "'velocityY': (((0, 0), (1, 0)), 50), 'velocityYRand': (((0, 0), (1, 0)), None)"),
+    ("'velocityX': (((0, 1), (1, 1)), f.spark_speed)", "'velocityX': (((0, -1), (1, -1)), f.spark_speed)"),
+    ("('name', 'puff'), ('flags', 'useAlpha useRandomAlpha useRandomSize useRandomVelocity'),",
+     "('name', 'puff'), ('flags', 'useAlpha useRandomAlpha useRandomSize useRandomVelocity relative'),"),
+    ("'velocityZ': (((0, 0.07), (1, 0.07)), 60)", "'velocityZ': (((0, -0.07), (1, -0.07)), 60)"),
+    ("((0, 0), (0.08, 0.16), (1, 0))", "((0, 0.16), (0.08, 0.16), (1, 0))"),
+    ("useRandomLength useRandomVelocity relative'),\n            ('count', f'{f.tongues[0]} {f.tongues[1]}')",
+     "useRandomLength useRandomVelocty relative'),\n            ('count', f'{f.tongues[0]} {f.tongues[1]}')"),
+    ("('spawnFlags', 'evenDistribution'), ('count', '1'), ('life', '30 45')",
+     "('spawnFlags', 'evenDistributon'), ('count', '1'), ('life', '30 45')"),
     ("' '.join(_number(v) for v in key) for key in keys]", "' '.join(_number(v) for v in key[1:]) for key in keys]"),
-    ("    'heavy': (5.5,", "    'heavy': (8.5,"),
+    ("    'heavy': Family(14.0, 5.5,", "    'heavy': Family(18.0, 5.5,"),
     ("'thompson_view.efx': 'smg', ", ""),
+]
+TEXTURE_MUTANTS = [
+    ("pixels.append(_flame(heat * (1 - _smoothstep(0.85, 1.0, r))))", "pixels.append(_flame(heat))"),
+    ("        v = 1 - (y + 0.5) / height\n", "        v = (y + 0.5) / height\n"),
+    ("frames = [burst_frame(101 + n, frame_width) for n in range(count)]",
+     "frames = [burst_frame(101, frame_width) for n in range(count)]"),
+    ("frames = [tongue_frame(201 + n, frame_width, frame_height) for n in range(count)]",
+     "frames = [tongue_frame(201 + n % 2, frame_width, frame_height) for n in range(count)]"),
+    ("            b''.join(reversed(blobs)))", "            b''.join(blobs))"),
+    ("    while levels[-1][0] > 1 or levels[-1][1] > 1:", "    while levels[-1][0] > 1 and levels[-1][1] > 1:"),
+    ("bytes((data[i + 2], data[i + 1], data[i], 255))", "bytes((data[i], data[i + 1], data[i + 2], 255))"),
+    ("    head[14], head[15] = rows, columns\n", "    head[14], head[15] = columns, rows\n"),
+    ("struct.pack_into('<HH', head, 0x1c, width, height)", "struct.pack_into('<HH', head, 0x1c, height, width)"),
+    ("    y = 1.0 / (1.0 + x * 0.125)\n", "    return math.exp(-x)\n"),
+    ("min(1.0, max(0.0, (heat - 0.55) * 1.6)) * 0.8))", "min(1.0, max(0.0, (heat - 0.3) * 1.6))))"),
 ]
 
 with tempfile.TemporaryDirectory(prefix='cod2-muzzle-flashes-') as tmp:
@@ -331,15 +484,30 @@ with tempfile.TemporaryDirectory(prefix='cod2-muzzle-flashes-') as tmp:
     def parse(cases):
         return subprocess.run([str(binary)], input='\n'.join(cases) + '\n', text=True, capture_output=True)
 
-    cases = verify(load(generator))
+    mip_counts = {}
+
+    def mips(width, height):
+        if (width, height) not in mip_counts:
+            result = parse([f'mips {width} {height}'])
+            assert result.returncode == 0, result.stderr
+            mip_counts[(width, height)] = int(result.stdout.split()[1])
+        return mip_counts[(width, height)]
+
+    def module_of(text):
+        module = load(text)
+        module.__source__ = text
+        return module
+
+    cases = verify_effects(module_of(generator))
     result = parse(cases)
     assert result.returncode == 0, result.stderr
     flag_lines, curve_count = map(int, result.stdout.split())
+    assets = verify_textures(module_of(generator), mips, twice=True)
     killed = 0
-    for old, new in MUTANTS:
+    for old, new in EFFECT_MUTANTS:
         assert generator.count(old) == 1, old
         try:
-            mutant_cases = verify(load(generator.replace(old, new)))
+            mutant_cases = verify_effects(module_of(generator.replace(old, new)))
         except (AssertionError, KeyError, ValueError, IndexError):
             killed += 1
             continue
@@ -347,5 +515,14 @@ with tempfile.TemporaryDirectory(prefix='cod2-muzzle-flashes-') as tmp:
             killed += 1
             continue
         raise AssertionError('mutant survived: ' + new)
+    for old, new in TEXTURE_MUTANTS:
+        assert generator.count(old) == 1, old
+        try:
+            verify_textures(module_of(generator.replace(old, new)), mips)
+        except (AssertionError, KeyError, ValueError, IndexError, struct.error):
+            killed += 1
+            continue
+        raise AssertionError('mutant survived: ' + new)
 print(f'PASS: {len(FLASH_FILES)} muzzle flashes rewritten; {flag_lines} flag lines and {curve_count} curves through the '
-      f'production EFX parser; lights and smoke kept verbatim; {killed} mutants fail')
+      f'production EFX parser; three deterministic textures with the loader\'s mip chains and their materials; '
+      f'lights and smoke kept verbatim; {killed} mutants fail')

@@ -6373,3 +6373,43 @@ Validation:
 
 Not covered: the mounted .30 cal and MG42 were not fired; only the M4 in
 Chrome was measured.
+
+## Muzzle flashes after CoD WWII — 2026-10-25
+
+The owner found the bursts above still fake, every shot alike, and asked for
+CoD WWII's realism. Details and measurements are in
+`docs/GRAPHICS_2026-10-16.md` ("Muzzle flashes after CoD WWII").
+
+- CoD WWII's flash (the trench capture in `out/ww2hud-research/ref`) is a
+  broad soft glow, white at its heart and orange to salmon at its rim; the
+  bursts above drew one texture for every shot.
+- `scripts/browser_muzzle_flashes.py` now also generates three textures and
+  their additive materials: a glow, eight flame bursts and eight side views
+  of the jet. Each flash keeps its original's lights and smoke and draws the
+  glow (its strength, size and warmth drawn per shot), one burst of the
+  eight stretched by its own width and height, one to three fanning tongues,
+  sparks and, but for the rifles and the trench gun, a puff of smoke left in
+  the air. The flames are gone within 45 ms, the glow within 75.
+- The Pi rebuilds the archive and must match the manifest byte for byte, so
+  the textures use correctly rounded operations only and seeded generators.
+  `site/wasm-game-data.json` is regenerated with this commit; the renderer
+  archive grows by 267,760 bytes.
+
+Validation:
+
+- `test-browser-muzzle-flashes.py`: 82 flag lines and 1,392 curves through
+  the production parser; per-shot variety, lives and fades; textures the
+  same twice, black-edged, warm and different frame to frame; IWIs with the
+  production loader's level count; materials in the engine's layout; no libm
+  curve in the texture code; 38 mutants fail. `check-private-assets.py`,
+  `test-fx-curves.py` (8,697 curves), `test-fx-flags.py` and
+  `test-muzzle-flash-appearance.py` pass on the regenerated archives.
+- On the isolated QA stack at Carentan: eight MP44 shots, eight glows apart
+  in size, strength and warmth, about as large against the gun as CoD
+  WWII's; aimed, the post and the target stay clear; a second client's
+  shots show a warm burst at its muzzle from 450 units. Uncapped, MP44
+  bursts ran at 143–146 fps against 143–148 idle.
+
+Not covered: the textures are procedural; the mounted guns and seven other
+weapons were not fired; the Pi's rebuild was not run; only the M4 in Chrome
+was measured.
