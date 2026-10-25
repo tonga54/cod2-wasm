@@ -200,8 +200,6 @@ static void __attribute_regparm__(3) Image_LoadDxtc(GfxImage *image, const GfxIm
 
 extern void Wavelet_DecompressLevel(const byte *src, byte *dst, void *decode);   /* was int offset -> truncated dst on x64 */
 extern int Image_CubemapFace(int faceIndex);
-extern void *__Znam(unsigned int size);
-extern void __ZdaPv(void *ptr);
 extern void Com_Printf(const char *fmt, ...);
 static void __attribute_regparm__(3) Image_LoadWavelet(GfxImage *image, const byte *fileHeader,
                                                        const byte *data, D3DFORMAT format, int bytesPerPixel)
@@ -262,8 +260,6 @@ static void __attribute_regparm__(3) Image_LoadWavelet(GfxImage *image, const by
         if (faceCount <= 0)
             continue;
 
-        int allocSize = (sizeForLevel / 4) * 4;
-
         for (face = 0; face < faceCount; face++) {
 
             byte *oldAddr = hunkAddrs[face];
@@ -272,24 +268,9 @@ static void __attribute_regparm__(3) Image_LoadWavelet(GfxImage *image, const by
 
             Wavelet_DecompressLevel((byte *)oldAddr, newAddr, &decode);
 
-            void *pTemp = __Znam(allocSize);
-            memcpy(pTemp, newAddr, sizeForLevel);
-
-            {
-                unsigned int swapCount = (unsigned int)allocSize / 4;
-                unsigned int u;
-                for (u = 0; u < swapCount; u++) {
-                    DWORD v = ((DWORD *)pTemp)[u];
-                    ((DWORD *)pTemp)[u] =
-                        (v >> 24) | (v << 24) | ((v << 8) & 0xff0000) | ((v >> 8) & 0xff00);
-                }
-            }
-
-            int cubeFace = Image_CubemapFace(face);
-            Image_UploadData(image, format, cubeFace, level - picmip, (const byte *)pTemp);
-
-            if (pTemp)
-                __ZdaPv(pTemp);
+            /* The decoder writes the texels in the bitmaps' byte order, the
+             * one the D3D surfaces take: B, G, R, A. */
+            Image_UploadData(image, format, Image_CubemapFace(face), level - picmip, newAddr);
         }
     }
 

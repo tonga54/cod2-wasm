@@ -6165,3 +6165,30 @@ Validation:
   their own effects in both.
 - Not played in the browser: the S&D bomb, the HQ radio and the exploders,
   which take the same path as the minefields.
+
+## Wavelet textures in their colors — 2026-10-24
+
+Checking Matmata, its central well showed lavender plaster and bright blue
+wooden posts. Wavelet-compressed IWi textures (formats 6 to 10) decode to B,
+G, R, A, the order of the bitmap formats and of the D3D surfaces, but
+`Image_LoadWavelet` reversed each texel's four bytes before the upload, a step
+of the Mac build: RGB textures took their opaque alpha as blue and RGBA ones
+swapped alpha and blue, and a level of a one- or two-byte format smaller than
+four bytes was copied into a buffer of none. Besides the well, that turned
+Toujane's vases blue, the main menu's CoD2 logo violet with blue stars, the
+sun flare of Brecourt, Burgundy, Carentan, Dawnville, Matmata and Stalingrad
+blue, and the retail popups' dark background transparent. The loader now
+uploads each level as decoded. Details in `docs/GRAPHICS_2026-10-16.md`,
+"Wavelet textures in their colors".
+
+Validation:
+
+- `test-wavelet-images.py` (new, in `test-static.sh`) runs the real loaders
+  and decoder under the sanitizers on generated RGB, RGBA and luminance
+  images coded with the decoder's own Huffman tables; each mip level uploads
+  what the bitmap of the same texels does. 5 mutants fail, the Mac build's
+  reversal among them. The full `test-static.sh` passes.
+- The retail well, vase, sun flare and popup textures decoded with the
+  engine's `Image_LoadWavelet` come out in their colors.
+- In the QA stack the well shows white plaster and brown posts, and the menu
+  logo silver with gold stars.

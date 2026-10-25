@@ -432,6 +432,12 @@ retail CoD2:
   looked them up where CoD2 1.0 keeps its effect table, inside 1.3's larger
   game state, and `playFx` one entry early besides, so each showed the red
   Missing FX placeholder.
+- Wavelet-compressed textures keep their colors: Matmata's well, Toujane's
+  vases, the sun flare of Brecourt, Burgundy, Carentan, Dawnville, Matmata and
+  Stalingrad, the CoD2 logo of the main menu and the retail popups' dark
+  backgrounds. The loader reversed each texel's bytes after decoding, a step
+  of the Mac build, so RGB textures took their opaque alpha as blue and RGBA
+  ones swapped alpha and blue.
 - Original audio, tracers, wall impacts, bullet marks, map props, ladders and
   killcam are available. Smoke effects and sustained mounted-MG firing have
   dedicated crash regressions. Collision fixes cover angled walls and finite
