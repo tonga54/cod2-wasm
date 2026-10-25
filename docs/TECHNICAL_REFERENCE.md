@@ -282,6 +282,12 @@ retail CoD2:
 - **Ambient occlusion:** corners, crevices and the ground under objects darken
   from the scene's depth, computed at half resolution (`r_ssao`, archived, on).
   The weapon and the sky stay unaffected, and it fades out past 1,400 units.
+- **Sun shafts and shockwaves:** the sky about the sun throws shafts of light
+  past whatever stands against it, wider and longer when the sun is low, from
+  two quarter-resolution passes (`r_sunShafts`, 0 to 2, archived, 1). Grenade,
+  S-Mine, C4 and rocket explosions bend the view about a spreading front for
+  450 ms, never over the weapon (`r_shockwave`, archived, on). See
+  [graphics validation and limits](GRAPHICS_2026-10-16.md).
 - **WWII sniper scopes:** the scoped Kar98k, Springfield, Lee-Enfield and
   Mosin-Nagant, and the 4x Optic on the other rifles, the BAR and the Bren,
   stay on screen while raised, as in Call of Duty: WWII. The

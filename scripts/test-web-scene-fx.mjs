@@ -260,6 +260,92 @@ try {
       'the viewmodel keeps its own in the thickest haze');
     hazeAt(0, [0, 0, 0], [0, 0, 0]);
 
+    // r_sunShafts: the sky about the sun lights the air toward it, and what
+    // stands against the sky cuts dark lanes through that light. Parameters
+    // 73-79 as WebSceneFx_FillParams lays them: strength, the sun's place on
+    // the screen, how low it stands, its color. The sky is drawn at a window
+    // depth of 0.999995, where the compositor finds the sky.
+    const shaftsAt = (strength, sun = [0.5, 0.8], low = 1) => HEAPF32.set([strength, ...sun, low, 1, 0.95, 0.85], 16 + 73);
+    const sky = () => rect(-1, 0, 1, 1, 0.99999, [0.9, 0.9, 0.9], 0);
+    // Walls as bright as the sky: only the depth tells them from it.
+    function barLayout() {   // a bar across the sky below the sun, open at the centre
+      sky();
+      rect(-1, 0.15, -0.04, 0.3, worldDepth(1500), [0.9, 0.9, 0.9], 0);
+      rect(0.04, 0.15, 1, 0.3, worldDepth(1500), [0.9, 0.9, 0.9], 0);
+      rect(-1, -1, 1, 0, worldDepth(2000), [0.1, 0.1, 0.1], 0);
+      rect(0.6, -1, 1, -0.6, vmDepth(5), [0.5, 0.5, 0.5], 0);
+    }
+    function nearFarLayout() {   // far ground on the left, near on the right
+      sky();
+      rect(-1, -1, 0, 0, worldDepth(2000), [0.1, 0.1, 0.1], 0);
+      rect(0, -1, 1, 0, worldDepth(120), [0.1, 0.1, 0.1], 0);
+    }
+    function walledLayout() { rect(-1, -1, 1, 1, worldDepth(2000), [0.9, 0.9, 0.9], 0); }
+    const shaftFrame = (strength, layout) => { shaftsAt(strength); return render(1, 0, {glow: 0, film: 0, layout}); };
+    const unlit = shaftFrame(0, barLayout);
+    shaftsAt(0, [0, 0], 0);
+    check(same(render(1, 0, {glow: 0, film: 0, layout: barLayout}), unlit, [-1, -1, 1, 1]), 'no strength, no shafts');
+    const walled = region(shaftFrame(2.5, walledLayout), -1, -1, 1, 1).values;
+    check(region(shaftFrame(0, walledLayout), -1, -1, 1, 1).values.every((v, i) => Math.abs(v - walled[i]) <= 1),
+      'without sky in view nothing lights the air');
+    const lit = shaftFrame(2.5, barLayout); snapshot('shafts');
+    const gain = r => region(lit, ...r).mean - region(unlit, ...r).mean;
+    const aboutSun = [-0.06, 0.52, 0.06, 0.68], belowGap = [-0.02, -0.3, 0.02, -0.2], belowBar = [0.3, -0.3, 0.34, -0.2];
+    check(gain(aboutSun) > 20, `the sky about the sun glows: +${gain(aboutSun).toFixed(1)}`);
+    check(gain(belowGap) > 8, `the air before the far ground takes the light through the gap: +${gain(belowGap).toFixed(1)}`);
+    check(gain(belowGap) > gain(belowBar) + 3,
+      `the bar cuts a darker lane: +${gain(belowGap).toFixed(1)} under the gap, +${gain(belowBar).toFixed(1)} under the bar`);
+    check(same(lit, unlit, [0.62, -0.98, 0.98, -0.62]), 'the viewmodel takes none');
+    const half = shaftFrame(1.25, barLayout), halfGain = region(half, ...belowGap).mean - region(unlit, ...belowGap).mean;
+    check(halfGain > 0.3 * gain(belowGap) && halfGain < 0.75 * gain(belowGap),
+      `the strength scales the light: +${halfGain.toFixed(1)} at half against +${gain(belowGap).toFixed(1)}`);
+    const nearFar = shaftFrame(2.5, nearFarLayout), nearFarUnlit = shaftFrame(0, nearFarLayout);
+    const added = r => region(nearFar, ...r).mean - region(nearFarUnlit, ...r).mean;
+    check(added([-0.32, -0.3, -0.28, -0.2]) > 3 * added([0.28, -0.3, 0.32, -0.2]) + 1,
+      `far ground takes more of the light than near: +${added([-0.32, -0.3, -0.28, -0.2]).toFixed(1)} against ` +
+      `+${added([0.28, -0.3, 0.32, -0.2]).toFixed(1)}`);
+    // With the sun above the screen and only its top row of sky in view,
+    // the light gathered past the top edge stays out: the edge's sky is not
+    // drawn on toward the sun.
+    function edgeLayout() { rect(-1, 0.96, 1, 1, 0.99999, [0.9, 0.9, 0.9], 0); rect(-1, -1, 1, 0.96, worldDepth(2000), [0.1, 0.1, 0.1], 0); }
+    shaftsAt(2.5, [0.5, 1.6]);
+    const edgeLit = render(1, 0, {glow: 0, film: 0, layout: edgeLayout});
+    shaftsAt(0, [0, 0], 0);
+    const edgeUnlit = render(1, 0, {glow: 0, film: 0, layout: edgeLayout});
+    const edgeGain = region(edgeLit, -0.05, 0.8, 0.05, 0.88).mean - region(edgeUnlit, -0.05, 0.8, 0.05, 0.88).mean;
+    check(edgeGain <= 2, `no shaft runs in from past the screen's edge: +${edgeGain.toFixed(1)} under the top row of sky`);
+    shaftsAt(0, [0, 0], 0);
+
+    // r_shockwave: an explosion's front bends the view about it as a lens.
+    // Parameters 80-99 as WebSceneFx_FillParams lays them: four floats per
+    // shockwave (centre, front radius and bend in screen heights), then each
+    // one's distance ahead. Vertical stripes 1,000 units away show the bend.
+    const blastAt = (depth, centre = [0.5, 0.5], radius = 0.25, bend = 0.03) => {
+      HEAPF32.fill(0, 16 + 80, 16 + 100);
+      if (depth > 0) { HEAPF32.set([...centre, radius, bend], 16 + 80); HEAPF32[16 + 96] = depth; }
+    };
+    function stripes() {
+      for (let x = -1; x < 1; x += 0.05) rect(x, -1, x + 0.025, 1, worldDepth(1000), [0.8, 0.8, 0.8], 0);
+      rect(0.6, -1, 1, -0.6, vmDepth(5), [0.5, 0.5, 0.5], 0);
+    }
+    function nearStripes() { rect(-1, -1, 1, 1, worldDepth(300), [0.8, 0.8, 0.8], 1, 0, 16); }   // a checkered wall
+    const blastFrame = (depth, layout = stripes) => { blastAt(depth); return render(1, 0, {glow: 0, film: 0, layout}); };
+    const unbent = blastFrame(0);
+    // The front lies 0.25 screen heights (180 pixels) from the centre: at x = 0.225 in NDC across.
+    const onFront = [0.18, -0.05, 0.27, 0.05], inside = [-0.05, -0.05, 0.05, 0.05], outside = [-0.95, 0.75, -0.75, 0.95];
+    const bent = blastFrame(1200); snapshot('shockwave');
+    check(!same(bent, unbent, onFront), 'the front bends the stripes it crosses');
+    const moved = r => { const A = region(bent, ...r).values, B = region(unbent, ...r).values;
+      return Math.max(...A.map((v, i) => Math.abs(v - B[i]))); };
+    check(moved(onFront) > 100 && moved(inside) <= 0.1 * moved(onFront) && moved(outside) === 0,
+      `the bend stays at the front: ${moved(onFront)} on it, ${moved(inside)} well inside, ${moved(outside)} well outside`);
+    check(same(bent, unbent, [0.62, -0.98, 0.98, -0.62]), 'the viewmodel stays as it is');
+    const nearBent = blastFrame(1200, nearStripes), nearStill = blastFrame(0, nearStripes);
+    const nearMoved = Math.max(...region(nearBent, ...onFront).values.map((v, i) => Math.abs(v - region(nearStill, ...onFront).values[i])));
+    check(nearMoved === 0, `surfaces well before the explosion stay as they are: ${nearMoved}`);
+    blastAt(0);
+    check(same(render(1, 0, {glow: 0, film: 0, layout: stripes}), unbent, [-1, -1, 1, 1]), 'without a shockwave nothing moves');
+
     // The viewmodel's own motion. A white viewmodel square over the black
     // world covers pixels 576-703 by 324-395 and moves right with a half
     // smear of 15 pixels; its tiles reach pixels 504-791.
@@ -509,7 +595,10 @@ try {
     // Production state is restored exactly, including the cached WebGL entry points.
     check(bind(gl, Module, HEAPF32, W, H, 4) === 1, 'rebind without reallocating');
     drawScene();
-    const otherVao = gl.createVertexArray(), otherTexture = gl.createTexture();
+    const otherVao = gl.createVertexArray(), otherTexture = gl.createTexture(), camo = [gl.createTexture(), gl.createTexture()];
+    // A camouflaged gun's pattern and mask stay bound on units 16 and 17 across frames.
+    gl.activeTexture(gl.TEXTURE16); gl.bindTexture(gl.TEXTURE_2D, camo[0]);
+    gl.activeTexture(gl.TEXTURE17); gl.bindTexture(gl.TEXTURE_2D, camo[1]);
     gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, otherTexture);
     gl.bindVertexArray(otherVao); gl.viewport(10, 20, 300, 200);
     const caps = [gl.SCISSOR_TEST, gl.BLEND, gl.DEPTH_TEST, gl.CULL_FACE, gl.STENCIL_TEST, gl.POLYGON_OFFSET_FILL];
@@ -522,7 +611,9 @@ try {
     gl.checkFramebufferStatus = function(target) { queried.push('checkFramebufferStatus'); return checkStatus.call(this, target); };
     check(bind(gl, Module, HEAPF32, W, H, 4) === 1, 'steady-state bind');
     gl.useProgram(scene);
+    shaftsAt(2.5);
     compose(gl, Module, HEAPF32, params(1));
+    shaftsAt(0, [0, 0], 0);
     gl.getParameter = getParameter; gl.checkFramebufferStatus = checkStatus;
     check(queried.length && queried.every(pname => cached.has(pname)), 'a composed frame makes no synchronous GL queries');
     check(gl.getParameter(gl.CURRENT_PROGRAM) === scene, 'program restored');
@@ -533,9 +624,13 @@ try {
       'composite writes every channel and leaves depth writes alone');
     check(caps.every(cap => gl.isEnabled(cap)), 'capabilities restored');
     check(gl.getParameter(gl.FRAMEBUFFER_BINDING) === null, 'later 2D draws reach the canvas');
-    for (let unit = 8; unit < 15; ++unit) {
+    for (const unit of [8, 9, 10, 11, 12, 13, 14, 15, 20]) {
       gl.activeTexture(gl.TEXTURE0 + unit);
       check(gl.getParameter(gl.TEXTURE_BINDING_2D) === null, 'post texture unit ' + unit + ' released');
+    }
+    for (const unit of [16, 17]) {
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      check(gl.getParameter(gl.TEXTURE_BINDING_2D) === camo[unit - 16], 'the camouflage keeps unit ' + unit);
     }
     gl.activeTexture(gl.TEXTURE3);
     // The state cache observed every change: a following disable still reaches GL.

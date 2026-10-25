@@ -109,15 +109,16 @@ assert compose_shader.index('if (u_glow.x > 0.0)') < compose_shader.index('if (u
 # side writes them (55-58), resolves the multisampled depth it needs, runs at
 # half the scene's size in two passes, and darkens only world pixels in the
 # compose pass, before the aim blur mixes in; its result is the eighth source.
-assert 'var ao = H[o + 55] > 0, haze = H[o + 62] > 0;' in compositor
-assert 'dof || motion > 0 || vm || ao || haze ? (gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT) : gl.COLOR_BUFFER_BIT' in compositor
+assert 'var ao = H[o + 55] > 0, haze = H[o + 62] > 0, shafts = H[o + 73] > 0;' in compositor
+assert ('dof || motion > 0 || vm || ao || haze || shafts || blast ? (gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT) :\n'
+        '                    gl.COLOR_BUFFER_BIT, gl.NEAREST);') in compositor
 assert 'gl.uniform4f(A.u_aoView, H[o + 15], 0.9995002746582031, H[o + 57], H[o + 58]);' in compositor
 assert 'gl.uniform4f(A.u_aoParams, H[o + 56], H[o + 55], w, h);' in compositor
 assert 'fx.pass(A, t.aoFbo[0], t.hw, t.hh);' in compositor and 'fx.pass(P.aoBlur, t.aoFbo[1], t.hw, t.hh);' in compositor
 assert 'hw: Math.max(1, Math.ceil(w / 2)), hh: Math.max(1, Math.ceil(h / 2)),' in compositor
 assert 'gl.uniform4f(C.u_aoMix, ao ? 1 : 0, 0.5 / t.hw, 0.5 / t.hh, 0);' in compositor
-assert 'vm ? vm.smear : null, vm ? vm.mesh : null, ao ? t.ao[1] : null];' in compositor
-assert '["u_scene", "u_bloom", "u_depth", "u_dofMed", "u_dofLarge", "u_vmVelocity", "u_vmMesh", "u_ao"]' in compositor
+assert 'vm ? vm.smear : null, vm ? vm.mesh : null, ao ? t.ao[1] : null,\n                shafts ? t.sh[1] : null];' in compositor
+assert '["u_scene", "u_bloom", "u_depth", "u_dofMed", "u_dofLarge", "u_vmVelocity", "u_vmMesh", "u_ao", "u_shafts"]' in compositor
 ao_shader = compositor[compositor.index('link("ao"'):compositor.index('link("aoBlur"')]
 assert '"  if (d < 0.2 || d >= 0.9999 || r < 1.5) return;\\n"' in ao_shader, 'the viewmodel and the sky stay open'
 assert '"    if (dq < 0.2) continue;\\n"' in ao_shader, 'the viewmodel hides nothing behind it'
@@ -134,13 +135,66 @@ assert 'gl.uniform3f(C.u_hazeUp, H[o + 63], H[o + 64], H[o + 65]);' in composito
 assert 'gl.uniform3f(C.u_hazeSun, H[o + 66], H[o + 67], H[o + 68]);' in compositor
 assert 'gl.uniform3f(C.u_hazeSunColor, H[o + 69], H[o + 70], H[o + 71]);' in compositor
 assert 'gl.uniform3f(C.u_hazeProj, H[o + 57], H[o + 58], H[o + 72]);' in compositor
-assert '"u_haze", "u_hazeUp", "u_hazeSun", "u_hazeSunColor", "u_hazeProj"]' in compositor
+assert '"u_haze", "u_hazeUp", "u_hazeSun", "u_hazeSunColor", "u_hazeProj", "u_shaft", "u_blast", "u_blastDepth"]' in compositor
 haze_at = compose_shader.index('if (u_haze.a > 0.0) {')
 assert compose_shader.index('if (u_dof2.x > 0.0 || u_dof2.w > 0.0 || u_lens.z > 0.0) {') < haze_at < \
     compose_shader.index('if (lensIn > 0.0 && u_lens.w < 1.0) {') < compose_shader.index('if (u_glow.x > 0.0)')
 assert '"    if (hd >= 0.2 && hd < 0.99999) {\\n"' in compose_shader, 'the viewmodel and the sky keep their own'
 assert '"      float haze = 1.0 - exp(-u_haze.a * hdist * clamp(hf, 0.25, 3.0));\\n"' in compose_shader
 assert 'r_atmosphere = ri.Dvar_RegisterBool("r_atmosphere", 1, 0x2001);' in dvars
+# The sun's shafts (r_sunShafts) read their strength (73), the sun's place on
+# the screen (74-75), how low it stands (76) and its color (77-79). Two passes
+# at a quarter of the scene's size need the resolved depth: the lit sky about
+# the sun, then each texel's gathering toward it, with nothing past the
+# screen's edge. The compose pass lays them over the glow and under the grade,
+# by the air before each pixel, the viewmodel taking none; they are its ninth
+# source, on unit 20, past the camouflage's 16 and 17 and the shadow and
+# feather maps' 18 and 19.
+assert 'r_sunShafts = ri.Dvar_RegisterFloat("r_sunShafts", 1.0f, 0.0f, 2.0f, 0x2001);' in dvars
+assert 'var low = H[o + 76], S = P.shaftMask;' in compositor
+assert 'gl.uniform4f(S.u_sun, H[o + 74], H[o + 75], w / h, 1 / (glowRadius * glowRadius));' in compositor
+assert 'gl.uniform4f(P.shafts.u_ray, H[o + 74], H[o + 75], 0.95, mix(0.975, 0.98));' in compositor
+assert 'gl.uniform4f(C.u_shaft, shafts ? H[o + 73] : 0, H[o + 77], H[o + 78], H[o + 79]);' in compositor
+shafts_js = compositor[compositor.index('            if (shafts) {\n'):compositor.index('            var vmStart = H[o + 7]')]
+assert shafts_js.index('fx.texture(0, t.color);\n                fx.texture(1, t.depth);\n'
+                       '                fx.pass(S, t.shFbo[0], qw, qh);') < \
+    shafts_js.index('fx.texture(0, t.sh[0]);\n                fx.pass(P.shafts, t.shFbo[1], qw, qh);')
+assert compositor.count('t.sh.push(texture(gl.RGBA8, t.qw, t.qh, gl.LINEAR));') == 1
+shaft_mask = compositor[compositor.index('link("shaftMask"'):compositor.index('link("shafts"')]
+assert shaft_mask.count('step(0.99999, texelFetch(u_depth,') == 4, 'only the sky lights the shafts'
+shaft_blur = compositor[compositor.index('link("shafts"'):compositor.index('link("dof"')]
+assert '"    vec2 inside = step(vec2(0.0), p) * step(p, vec2(1.0));\\n"' in shaft_blur
+assert '"    sum += texture(u_src, p).rgb * (w * inside.x * inside.y);\\n"' in shaft_blur
+shafts_at = compose_shader.index('if (u_shaft.x > 0.0) {')
+assert compose_shader.index('if (u_glow.x > 0.0)') < shafts_at < compose_shader.index('if (u_film.w > 0.0) {')
+assert '"      (sd < 0.2 ? 0.0 : 1.0 - exp(-u_near.x / max(u_dof.x - sd, 0.000001) / 900.0));\\n"' in compose_shader
+assert 'fx.unit = function(s) { return s < 8 ? s : s + 4; };' in compositor
+assert 'gl.uniform1i(gl.getUniformLocation(program, samplers[s]), 8 + fx.unit(s));' in compositor
+assert 'gl.activeTexture(gl.TEXTURE8 + fx.unit(unit));' in compositor
+# Explosions' shockwaves (r_shockwave) read their four floats each from 80 and
+# their depths from 96; the depth is resolved for them. Before anything else
+# samples the scene, the compose pass moves where it samples by each front's
+# lens, except for the viewmodel and surfaces well before the explosion; the
+# sharpening samples about the moved point.
+assert 'r_shockwave = ri.Dvar_RegisterBool("r_shockwave", 1, 0x2001);' in dvars
+assert 'var blast = H[o + 96] > 0 || H[o + 97] > 0 || H[o + 98] > 0 || H[o + 99] > 0;' in compositor
+assert 'gl.uniform4f(C.u_blastDepth, H[o + 96], H[o + 97], H[o + 98], H[o + 99]);' in compositor
+assert 'if (blast) gl.uniform4fv(C.u_blast, H.subarray(o + 80, o + 96));' in compositor
+assert compose_shader.index('"  highp vec2 uv = v_uv;\\n"') < compose_shader.index('if (u_blastDepth != vec4(0.0)) {') < \
+    compose_shader.index('"  vec3 c = texture(u_scene, uv).rgb;\\n"')
+assert compose_shader.count('texture(u_scene, v_uv).rgb') == 0
+assert '"    highp float bz = bd < 0.2 ? 0.0 : u_near.x / max(u_dof.x - bd, 0.000001);\\n"' in compose_shader
+assert '"      if (u_blastDepth[i] <= 0.0 || bz < 0.5 * u_blastDepth[i]) continue;\\n"' in compose_shader
+assert compose_shader.count('texture(u_scene, uv + vec2(0.0, u_px.y)).rgb') == 1 and \
+    compose_shader.count('texture(u_scene, uv - vec2(u_px.x, 0.0)).rgb') == 1
+# The cgame hands every grenade, S-Mine, C4 and rocket blast over, with its
+# radius, after the explosion's own effects and before its rumble.
+events = (root / 'src/PC/cgame_mp/cg_event_mp.c').read_text()
+assert events.count('#ifdef __EMSCRIPTEN__\n            CG_ExplosionShockwave((const vec_t *)position, es->weapon);\n#endif\n'
+                    '#if COD2_FEATURE_RUMBLE\n            CG_RumbleExplosion((const vec_t *)position, es->weapon);\n#endif\n'
+                    '            return;') == 3
+assert ('    if (weapon > 0 && weapon <= BG_GetNumWeapons() && CG_EventWeaponDef(weapon)->iExplosionRadius > 0)\n'
+        '        WebSceneFx_AddExplosion(origin, (float)CG_EventWeaponDef(weapon)->iExplosionRadius);') in events
 # R_RenderScene hands over the map's exponential fog, under r_fog, and its sun.
 assert scene.index('WebMaterials_SetSun(&s_world);') < scene.index('WebSceneFx_SetAtmosphere(fogColor, fogged ? fog->density : 0.0f,')
 assert ('int fogged = rg_p->fogIndex && fog->registered && fog->techniqueOffset == 2 &&\n'
@@ -231,7 +285,7 @@ test = r'''
 #include <string.h>
 #include "SOURCE"
 static dvar_t glow, radius0, radius1, intensity0, intensity1, cutoff, desaturation, fullbright, samples, dof, film,
-    motion, scene, ssao, atmosphere;
+    motion, scene, ssao, atmosphere, sunShafts, shockwave;
 const dvar_t *r_glow = &glow;
 const dvar_t *r_glowRadius[2] = {&radius0, &radius1};
 const dvar_t *r_glowBloomIntensity[2] = {&intensity0, &intensity1};
@@ -245,6 +299,8 @@ const dvar_t *r_motionBlur = &motion;
 const dvar_t *r_sceneHeight = &scene;
 const dvar_t *r_ssao = &ssao;
 const dvar_t *r_atmosphere = &atmosphere;
+const dvar_t *r_sunShafts = &sunShafts;
+const dvar_t *r_shockwave = &shockwave;
 static int shadowRenders, bindsAtShadowRender;
 static double clockMs = 1000.0;
 double emscripten_get_now(void)
@@ -291,7 +347,7 @@ static void defaults(void)
     intensity0.current.value = 1; intensity1.current.value = 1; cutoff.current.value = 0.9f;
     desaturation.current.value = 0.75f; fullbright.current.enabled = 0; samples.current.integer = 4;
     dof.current.enabled = 1; film.current.enabled = 1; motion.current.enabled = 1; scene.current.integer = 720;
-    ssao.current.enabled = 1; atmosphere.current.enabled = 1;
+    ssao.current.enabled = 1; atmosphere.current.enabled = 1; sunShafts.current.value = 1; shockwave.current.enabled = 1;
 }
 static void frameNear(int x, int width, float nearClip, float worldNearClip)
 {
@@ -554,7 +610,7 @@ int main(void)
 
     /* A menu's blurred backdrop composes on its own, whatever the other
      * effects, and stays between none and all of it. */
-    assert(SCENE_FX_BACKDROP == 33 && SCENE_FX_BACKDROP_GRAY == 34 && SCENE_FX_PARAM_COUNT == 73);
+    assert(SCENE_FX_BACKDROP == 33 && SCENE_FX_BACKDROP_GRAY == 34 && SCENE_FX_PARAM_COUNT == 100);
     defaults();
     glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
     motion.current.enabled = 0; ssao.current.enabled = 0;
@@ -956,10 +1012,10 @@ int main(void)
         const float fog[3] = {0.9f, 0.95f, 1.0f}, sun[3] = {0, 3, 4}, sunColor[3] = {1.2f, 1.0f, 0.8f};
         const float noSun[3] = {0, 0, 0}, badColor[3] = {0.5f, NAN, 0.5f};
         assert(SCENE_FX_HAZE == 59 && SCENE_FX_HAZE_DENSITY == 62 && SCENE_FX_HAZE_UP == 63 && SCENE_FX_HAZE_SUN == 66 &&
-               SCENE_FX_HAZE_SUN_COLOR == 69 && SCENE_FX_HAZE_FALLOFF == 72 && SCENE_FX_PARAM_COUNT == 73);
+               SCENE_FX_HAZE_SUN_COLOR == 69 && SCENE_FX_HAZE_FALLOFF == 72);
         defaults();
         glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
-        motion.current.enabled = 0; ssao.current.enabled = 0;
+        motion.current.enabled = 0; ssao.current.enabled = 0; sunShafts.current.value = 0;
         WebSceneFx_SetAds(0, 6, 15, 512);
         WebSceneFx_SetAtmosphere(fog, 0, sun, sunColor);
         binds = composes = 0;
@@ -1078,7 +1134,279 @@ int main(void)
         fullbright.current.enabled = 0;
         WebSceneFx_SetAtmosphere(fog, 0, sun, sunColor);
     }
-    puts("PASS: 600 composed frames, single compose per frame before Present, partial/fullbright/disabled views drawn directly, bounded glow, viewmodel and near world focus parameters, camera motion reprojected over a 16 ms exposure with aim fade, cuts and still cameras, a bounded menu backdrop and its gray, scenes rendered at r_sceneHeight lines and the screen's aspect on taller screens, a scope window composed with its rifle projection and near clip and a stencil drawn once per view and lifted on every exit, bounded window floats, the outline a scope's rifle is kept off handed to the stencil and none for a sight's window, the stock overlay without a composed target, the sun's shadow map drawn once at the first full-screen view before its target binds, ambient occlusion composed on its own from the composed view's projection, the color maps' mip bias of a scaled scene, the composed view's near clip for effects, and the map's haze with the view's up and sun taken when it begins");
+
+    /* Shafts of sunlight (r_sunShafts) compose on their own wherever the
+     * scene has a sun: how strong, where the sun lies on the screen (its
+     * direction in the composed view's space through the projection, kept
+     * within 1.5 screens of the centre), how low it stands by the air its
+     * light crosses, and its color. They come in as the sun nears the view's
+     * axis, none at its side or behind; off, under r_fullbright or without a
+     * sun, nothing composes; without a camera they are dark. */
+    {
+        const float fog[3] = {0.9f, 0.95f, 1.0f}, sunColor[3] = {1.2f, 1.0f, 0.8f}, badColor[3] = {0.5f, NAN, 0.5f};
+        const float rad = 3.14159265f / 180.0f;
+        assert(SCENE_FX_SHAFTS == 73 && SCENE_FX_SHAFTS_SUN == 74 && SCENE_FX_SHAFTS_LOW == 76 &&
+               SCENE_FX_SHAFTS_COLOR == 77);
+        defaults();
+        glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
+        motion.current.enabled = 0; ssao.current.enabled = 0; atmosphere.current.enabled = 0;
+        WebSceneFx_SetAds(0, 6, 15, 512);
+        /* The sun e degrees up and a degrees left of a level camera facing
+         * +x: in its view x = -cos e sin a, y = sin e and z = cos e cos a. */
+        struct { float e, a, strength, u, v, low; } cases[] = {
+            /* Matmata's dusk, 20 degrees up ahead: low, the most light. */
+            {20, 0, SCENE_FX_SHAFTS_GAIN_LOW, 0.5f, 0.5f + 0.5f * 2.11f * tanf(20 * rad), 1},
+            /* 45 degrees up, as on Toujane: mostly high. */
+            {45, 0, 0, 0.5f, 0.5f + 0.5f * 2.11f, (1.41421356f - SCENE_FX_SHAFTS_HIGH_AIR) /
+                                                   (SCENE_FX_SHAFTS_LOW_AIR - SCENE_FX_SHAFTS_HIGH_AIR)},
+            /* 60 degrees up: high; above the screen, held 1.5 screens out. */
+            {60, 0, SCENE_FX_SHAFTS_GAIN_HIGH, 0.5f, 2.0f, 0},
+            /* Halfway into view from the left: half the light, held off the screen's left. */
+            {20, 69.7658f, 0.5f * SCENE_FX_SHAFTS_GAIN_LOW, -1.0f, 0, 1},
+            /* A quarter of the way in, eased: 0.15625 of the light, held off
+             * the screen's upper left corner. */
+            {20, 75.3602f, 0.15625f * SCENE_FX_SHAFTS_GAIN_LOW, -1.0f, 2.0f, 1},
+            /* At the view's side or behind it: none. */
+            {20, 81, 0, 0, 0, 0},
+            {20, 180, 0, 0, 0, 0},
+            /* Just under the horizon ahead: all the air there is. */
+            {-10, 0, SCENE_FX_SHAFTS_GAIN_LOW, 0.5f, 0.5f - 0.5f * 2.11f * tanf(10 * rad), 1},
+        };
+        cases[1].strength = SCENE_FX_SHAFTS_GAIN_HIGH + (SCENE_FX_SHAFTS_GAIN_LOW - SCENE_FX_SHAFTS_GAIN_HIGH) * cases[1].low;
+        for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+            const float e = cases[i].e * rad, a = cases[i].a * rad;
+            const float sun[3] = {cosf(e) * cosf(a), cosf(e) * sinf(a), sinf(e)};
+            const float x = -cosf(e) * sinf(a), z = cosf(e) * cosf(a);
+            WebSceneFx_SetAtmosphere(fog, 0, sun, sunColor);
+            binds = composes = 0;
+            clockMs += 10;
+            camera(0, 0, 100, 200, 60);
+            frame(0, 1280, 0.1f);
+            assert(binds == 1 && composes == 1);
+            assert(fabsf(composed[SCENE_FX_SHAFTS] - cases[i].strength) < 1e-4f);
+            assert(fabsf(composed[SCENE_FX_SHAFTS_LOW] - cases[i].low) < 1e-4f);
+            if (i == 3) {
+                assert(fabsf(z - 0.325f) < 1e-3f && 0.5f + 0.5f * 1.19f * x / z < -1.0f);
+                assert(composed[SCENE_FX_SHAFTS_SUN + 1] > 0.5f);
+            } else {
+                assert(fabsf(composed[SCENE_FX_SHAFTS_SUN] - cases[i].u) < 1e-4f);
+                assert(fabsf(composed[SCENE_FX_SHAFTS_SUN + 1] - cases[i].v) < 1e-4f);
+            }
+            if (i == 3)
+                assert(composed[SCENE_FX_SHAFTS_SUN] == -1.0f);
+            for (int k = 0; k < 3; ++k)
+                assert(composed[SCENE_FX_SHAFTS_COLOR + k] == sunColor[k]);
+        }
+        /* The sun to the right lies right of the centre, and r_sunShafts
+         * scales the light up to twice. */
+        {
+            const float sun[3] = {cosf(20 * rad) * cosf(-10 * rad), cosf(20 * rad) * sinf(-10 * rad), sinf(20 * rad)};
+            WebSceneFx_SetAtmosphere(fog, 0, sun, sunColor);
+            const float values[] = {2, 5};
+            for (int i = 0; i < 2; ++i) {
+                sunShafts.current.value = values[i];
+                clockMs += 10;
+                camera(0, 0, 100, 200, 60);
+                frame(0, 1280, 0.1f);
+                assert(fabsf(composed[SCENE_FX_SHAFTS] - 2 * SCENE_FX_SHAFTS_GAIN_LOW) < 1e-4f);
+                assert(fabsf(composed[SCENE_FX_SHAFTS_SUN] - (0.5f + 0.5f * 1.19f * tanf(10 * rad))) < 1e-4f);
+            }
+            sunShafts.current.value = 1;
+        }
+        /* A view without a camera keeps its sun dark. */
+        binds = composes = 0;
+        frame(0, 1280, 0.1f);
+        assert(composes == 1 && composed[SCENE_FX_SHAFTS] == 0 && composed[SCENE_FX_SHAFTS_SUN] == 0 &&
+               composed[SCENE_FX_SHAFTS_LOW] == 0);
+        /* r_sunShafts 0, r_fullbright, no sun or a broken one: nothing composes. */
+        sunShafts.current.value = 0;
+        binds = composes = 0;
+        clockMs += 10;
+        camera(0, 0, 100, 200, 60);
+        frame(0, 1280, 0.1f);
+        assert(!binds && !composes);
+        sunShafts.current.value = 1;
+        fullbright.current.enabled = 1;
+        clockMs += 10;
+        camera(0, 0, 100, 200, 60);
+        frame(0, 1280, 0.1f);
+        assert(!binds && !composes);
+        fullbright.current.enabled = 0;
+        {
+            const float ahead[3] = {1, 0, 0.36397f}, noSun[3] = {0, 0, 0};
+            WebSceneFx_SetAtmosphere(fog, 0, noSun, sunColor);
+            clockMs += 10;
+            camera(0, 0, 100, 200, 60);
+            frame(0, 1280, 0.1f);
+            assert(!binds && !composes);
+            WebSceneFx_SetAtmosphere(fog, 0, ahead, badColor);
+            clockMs += 10;
+            camera(0, 0, 100, 200, 60);
+            frame(0, 1280, 0.1f);
+            assert(!binds && !composes);
+            WebSceneFx_SetAtmosphere(fog, 0, ahead, sunColor);
+            film.current.enabled = 1;
+            clockMs += 10;
+            camera(0, 0, 100, 200, 60);
+            frame(0, 1280, 0.1f);
+            assert(composes == 1 && composed[SCENE_FX_SHAFTS] > 0);
+            sunShafts.current.value = 0;
+            clockMs += 10;
+            camera(0, 0, 100, 200, 60);
+            frame(0, 1280, 0.1f);
+            assert(composes == 2 && composed[SCENE_FX_SHAFTS] == 0);
+        }
+        defaults();
+        WebSceneFx_SetAtmosphere(fog, 0, NULL, sunColor);
+    }
+
+    /* Explosions' shockwaves (r_shockwave) compose on their own while they
+     * travel: each one's centre on the screen through the composed view's
+     * projection, its front running out to 1.6 times the blast's radius over
+     * 450 ms, its bend fading with age and beyond 1.5 radii from the eye, and
+     * how far ahead it is. One behind the eye has none; four travel at once,
+     * a fifth taking the oldest's place; a broken one takes no place. */
+    {
+        assert(SCENE_FX_BLAST == 80 && SCENE_FX_BLAST_DEPTH == 96 && SCENE_FX_PARAM_COUNT == 100);
+        defaults();
+        glow.current.enabled = 0; film.current.enabled = 0; samples.current.integer = 1; dof.current.enabled = 0;
+        motion.current.enabled = 0; ssao.current.enabled = 0; atmosphere.current.enabled = 0; sunShafts.current.value = 0;
+        WebSceneFx_SetAds(0, 6, 15, 512);
+        clockMs += 1000;
+        binds = composes = 0;
+        camera(0, 0, 0, 0, 0);
+        frame(0, 1280, 0.1f);
+        assert(!binds && !composes);
+        /* A level camera at the origin facing +x sees a point (x, y, z) at
+         * x right = -y, up = z and ahead = x. */
+        struct { float ms, origin[3], radius; } blast = {0, {400, 100, 50}, 256};
+        const float u = 0.5f - 0.5f * 100 * 1.19f / 400, v = 0.5f + 0.5f * 50 * 2.11f / 400;
+        const float near = 1.5f * 256 / sqrtf(400 * 400 + 100 * 100 + 50 * 50);
+        WebSceneFx_AddExplosion(blast.origin, blast.radius);
+        const float ages[] = {0, 225, 449};
+        for (int i = 0; i < 3; ++i) {
+            const float life = ages[i] / 450, left = 1 - life;
+            const float front = 256 * 1.6f * (1 - left * left * left);
+            clockMs += i ? ages[i] - ages[i - 1] : 0;
+            binds = composes = 0;
+            camera(0, 0, 0, 0, 0);
+            frame(0, 1280, 0.1f);
+            assert(binds == 1 && composes == 1);
+            assert(fabsf(composed[SCENE_FX_BLAST] - u) < 1e-5f && fabsf(composed[SCENE_FX_BLAST + 1] - v) < 1e-5f);
+            assert(fabsf(composed[SCENE_FX_BLAST + 2] - 0.5f * front * 2.11f / 400) < 1e-4f);
+            assert(fabsf(composed[SCENE_FX_BLAST + 3] - SCENE_FX_BLAST_BEND * left * left * near) < 1e-6f);
+            assert(fabsf(composed[SCENE_FX_BLAST_DEPTH] - 400) < 1e-3f);
+            for (int k = 1; k < SCENE_FX_BLASTS; ++k)
+                assert(composed[SCENE_FX_BLAST_DEPTH + k] == 0 && composed[SCENE_FX_BLAST + k * 4 + 3] == 0);
+        }
+        /* At 450 ms it is gone and nothing composes. */
+        clockMs += 1;
+        binds = composes = 0;
+        camera(0, 0, 0, 0, 0);
+        frame(0, 1280, 0.1f);
+        assert(!binds && !composes);
+        /* Close by it bends the most; far off, less. */
+        {
+            const float close[3] = {200, 0, 0}, far[3] = {3840, 0, 0};
+            WebSceneFx_AddExplosion(close, 256);
+            WebSceneFx_AddExplosion(far, 256);
+            camera(0, 0, 0, 0, 0);
+            frame(0, 1280, 0.1f);
+            float bends[2] = {0, 0};
+            for (int k = 0; k < SCENE_FX_BLASTS; ++k) {
+                if (composed[SCENE_FX_BLAST_DEPTH + k] == 200) bends[0] = composed[SCENE_FX_BLAST + k * 4 + 3];
+                if (composed[SCENE_FX_BLAST_DEPTH + k] == 3840) bends[1] = composed[SCENE_FX_BLAST + k * 4 + 3];
+            }
+            assert(bends[0] == SCENE_FX_BLAST_BEND && fabsf(bends[1] - SCENE_FX_BLAST_BEND * 0.1f) < 1e-6f);
+            /* The next view, without a camera, keeps none of them. */
+            frame(0, 1280, 0.1f);
+            for (int k = 0; k < 4 * SCENE_FX_BLASTS + SCENE_FX_BLASTS; ++k)
+                assert(composed[SCENE_FX_BLAST + k] == 0);
+            clockMs += 450;
+        }
+        /* Behind the eye: still travelling, so the view composes, but nothing bends. */
+        {
+            const float behind[3] = {-300, 0, 0};
+            WebSceneFx_AddExplosion(behind, 256);
+            binds = composes = 0;
+            camera(0, 0, 0, 0, 0);
+            frame(0, 1280, 0.1f);
+            assert(composes == 1);
+            for (int k = 0; k < 4 * SCENE_FX_BLASTS + SCENE_FX_BLASTS; ++k)
+                assert(composed[SCENE_FX_BLAST + k] == 0);
+            /* Nor does a view without a camera. */
+            frame(0, 1280, 0.1f);
+            assert(composes == 2);
+            for (int k = 0; k < 4 * SCENE_FX_BLASTS + SCENE_FX_BLASTS; ++k)
+                assert(composed[SCENE_FX_BLAST + k] == 0);
+            clockMs += 450;
+        }
+        /* Four travel at once; a fifth takes the oldest's place, and broken
+         * ones take none. */
+        {
+            float depths[5];
+            for (int n = 0; n < 5; ++n) {
+                const float at[3] = {300 + 100 * n, 0, 0};
+                depths[n] = at[0];
+                WebSceneFx_AddExplosion(at, 128);
+                clockMs += 10;
+            }
+            const float bad[][3] = {{NAN, 0, 0}, {500, INFINITY, 0}, {500, 0, NAN}};
+            for (int n = 0; n < 3; ++n)
+                WebSceneFx_AddExplosion(bad[n], 128);
+            const float fine[3] = {500, 0, 0};
+            WebSceneFx_AddExplosion(fine, NAN);
+            WebSceneFx_AddExplosion(fine, -5);
+            WebSceneFx_AddExplosion(fine, 0);
+            WebSceneFx_AddExplosion(NULL, 128);
+            camera(0, 0, 0, 0, 0);
+            frame(0, 1280, 0.1f);
+            int seen[5] = {0, 0, 0, 0, 0};
+            for (int k = 0; k < SCENE_FX_BLASTS; ++k)
+                for (int n = 0; n < 5; ++n)
+                    if (fabsf(composed[SCENE_FX_BLAST_DEPTH + k] - depths[n]) < 1e-3f) ++seen[n];
+            assert(!seen[0] && seen[1] == 1 && seen[2] == 1 && seen[3] == 1 && seen[4] == 1);
+            clockMs += 450;
+        }
+        /* A blast reaching further than any is held at 2,048 units. */
+        {
+            const float at[3] = {4000, 0, 0};
+            WebSceneFx_AddExplosion(at, 1e6f);
+            clockMs += 225;
+            camera(0, 0, 0, 0, 0);
+            frame(0, 1280, 0.1f);
+            assert(fabsf(composed[SCENE_FX_BLAST + 2] + composed[SCENE_FX_BLAST + 6] + composed[SCENE_FX_BLAST + 10] +
+                         composed[SCENE_FX_BLAST + 14] -
+                         0.5f * 2048 * 1.6f * 0.875f * 2.11f / 4000) < 1e-4f);
+            clockMs += 450;
+        }
+        /* r_shockwave 0 and r_fullbright compose nothing. */
+        {
+            const float at[3] = {400, 0, 0};
+            WebSceneFx_AddExplosion(at, 256);
+            shockwave.current.enabled = 0;
+            binds = composes = 0;
+            camera(0, 0, 0, 0, 0);
+            frame(0, 1280, 0.1f);
+            assert(!binds && !composes);
+            film.current.enabled = 1;
+            camera(0, 0, 0, 0, 0);
+            frame(0, 1280, 0.1f);
+            assert(composes == 1);
+            for (int k = 0; k < 4 * SCENE_FX_BLASTS + SCENE_FX_BLASTS; ++k)
+                assert(composed[SCENE_FX_BLAST + k] == 0);
+            film.current.enabled = 0;
+            shockwave.current.enabled = 1;
+            fullbright.current.enabled = 1;
+            binds = composes = 0;
+            frame(0, 1280, 0.1f);
+            assert(!binds && !composes);
+            fullbright.current.enabled = 0;
+            clockMs += 450;
+        }
+        defaults();
+    }
+    puts("PASS: 600 composed frames, single compose per frame before Present, partial/fullbright/disabled views drawn directly, bounded glow, viewmodel and near world focus parameters, camera motion reprojected over a 16 ms exposure with aim fade, cuts and still cameras, a bounded menu backdrop and its gray, scenes rendered at r_sceneHeight lines and the screen's aspect on taller screens, a scope window composed with its rifle projection and near clip and a stencil drawn once per view and lifted on every exit, bounded window floats, the outline a scope's rifle is kept off handed to the stencil and none for a sight's window, the stock overlay without a composed target, the sun's shadow map drawn once at the first full-screen view before its target binds, ambient occlusion composed on its own from the composed view's projection, the color maps' mip bias of a scaled scene, the composed view's near clip for effects, the map's haze with the view's up and sun taken when it begins, the sun's shafts from where it lies on the screen and how low it stands, and explosions' shockwaves from where they went off, how long ago and how far away");
     return 0;
 }
 '''
@@ -1102,13 +1430,60 @@ mutants = [
     ('WebSceneFx_Enabled(r_motionBlur) && ', ''),
     (' && s_motionScale <= 0.0f && ', ' && '),
     (' && s_backdropFrac <= 0.0f &&\n', ' &&\n'),
-    ('        s_backdropGray <= 0.0f && !WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled() && !WebSceneFx_HazeEnabled())',
-     '        !WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled() && !WebSceneFx_HazeEnabled())'),
+    ('        s_backdropGray <= 0.0f && !WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled() && !WebSceneFx_HazeEnabled() &&',
+     '        !WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled() && !WebSceneFx_HazeEnabled() &&'),
     ('s_backdropGray <= 0.0f && !WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled()',
      's_backdropGray <= 0.0f && !WebSceneFx_AoEnabled()'),
-    ('!WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled() && !WebSceneFx_HazeEnabled())',
-     '!WebSceneFx_ScopeRequested() && !WebSceneFx_HazeEnabled())'),
-    (' && !WebSceneFx_HazeEnabled())', ')'),
+    ('!WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled() && !WebSceneFx_HazeEnabled() &&',
+     '!WebSceneFx_ScopeRequested() && !WebSceneFx_HazeEnabled() &&'),
+    (' && !WebSceneFx_HazeEnabled() &&\n', ' &&\n'),
+    # The sun's shafts.
+    (' &&\n        !WebSceneFx_ShaftsEnabled() && !WebSceneFx_BlastsActive())', ' &&\n        !WebSceneFx_BlastsActive())'),
+    ('           s_hazeSunColor[0] + s_hazeSunColor[1] + s_hazeSunColor[2] > 0.0f;', '           1;'),
+    ('    if (!WebSceneFx_ShaftsEnabled() || !(s_viewProjection[0] > 0.0f) || !(s_viewProjection[1] > 0.0f))',
+     '    if (!WebSceneFx_ShaftsEnabled())'),
+    ('    if (!(facing > 0.0f))\n        return 0.0f;\n', ''),
+    ('    facing = facing < 1.0f ? facing * facing * (3.0f - 2.0f * facing) : 1.0f;',
+     '    facing = facing < 1.0f ? facing : 1.0f;'),
+    ('#define SCENE_FX_SHAFTS_FACING_START 0.15f', '#define SCENE_FX_SHAFTS_FACING_START 0.0f'),
+    ('    sunUv[0] = WebSceneFx_Clamp(0.5f + 0.5f * s_hazeSun[0] * s_viewProjection[0] / s_hazeSun[2],',
+     '    sunUv[0] = WebSceneFx_Clamp(0.5f - 0.5f * s_hazeSun[0] * s_viewProjection[0] / s_hazeSun[2],'),
+    ('    sunUv[1] = WebSceneFx_Clamp(0.5f + 0.5f * s_hazeSun[1] * s_viewProjection[1] / s_hazeSun[2],',
+     '    sunUv[1] = WebSceneFx_Clamp(0.5f + 0.5f * s_hazeSun[1] * s_viewProjection[0] / s_hazeSun[2],'),
+    ('#define SCENE_FX_SHAFTS_REACH 1.5f', '#define SCENE_FX_SHAFTS_REACH 4.0f'),
+    ('        WebSceneFx_Clamp((1.0f / s_hazeSunWorld[2] - SCENE_FX_SHAFTS_HIGH_AIR) /',
+     '        WebSceneFx_Clamp((s_hazeSunWorld[2] - SCENE_FX_SHAFTS_HIGH_AIR) /'),
+    ('                         (SCENE_FX_SHAFTS_LOW_AIR - SCENE_FX_SHAFTS_HIGH_AIR), 0.0f, 1.0f) : 1.0f;',
+     '                         (SCENE_FX_SHAFTS_LOW_AIR - SCENE_FX_SHAFTS_HIGH_AIR), 0.0f, 1.0f) : 0.0f;'),
+    ('(SCENE_FX_SHAFTS_GAIN_HIGH + (SCENE_FX_SHAFTS_GAIN_LOW - SCENE_FX_SHAFTS_GAIN_HIGH) * *low)',
+     'SCENE_FX_SHAFTS_GAIN_HIGH'),
+    ('    return WebSceneFx_Clamp(r_sunShafts->current.value, 0.0f, 2.0f) * facing *',
+     '    return r_sunShafts->current.value * facing *'),
+    ('    memcpy(params + SCENE_FX_SHAFTS_COLOR, s_hazeSunColor, sizeof(s_hazeSunColor));\n', ''),
+    # Explosions' shockwaves.
+    (' && !WebSceneFx_BlastsActive())', ')'),
+    ('    return WebSceneFx_Enabled(r_shockwave) && !WebSceneFx_Enabled(r_fullbright);', '    return !WebSceneFx_Enabled(r_fullbright);'),
+    ('        !(radius > 0.0f))\n        return;', '        0)\n        return;'),
+    ('    if (!origin || !isfinite(origin[0]) || !isfinite(origin[1]) || !isfinite(origin[2]) || !isfinite(radius) ||',
+     '    if (!origin || !isfinite(origin[0]) || !isfinite(radius) ||'),
+    ('        if (s_blasts[i].time < s_blasts[oldest].time)', '        if (s_blasts[i].time > s_blasts[oldest].time)'),
+    ('WebSceneFx_Clamp(radius, 0.0f, SCENE_FX_BLAST_MAX_RADIUS)', 'radius'),
+    ('now - s_blasts[i].time < SCENE_FX_BLAST_MS)', 'now - s_blasts[i].time < 1e9)'),
+    ('        if (!(p[2] > 1.0f))\n            continue;\n', ''),
+    ('(1.0f - left * left * left)', 'life'),
+    ('WebSceneFx_Clamp(SCENE_FX_BLAST_NEAR * blast->radius / distance, 0.0f, 1.0f)', '1.0f'),
+    ('SCENE_FX_BLAST_BEND * left * left * near', 'SCENE_FX_BLAST_BEND * left * near'),
+    ('WebSceneFx_Clamp(0.5f + 0.5f * p[0] * s_viewProjection[0] / p[2], -1.0f, 2.0f)',
+     'WebSceneFx_Clamp(0.5f - 0.5f * p[0] * s_viewProjection[0] / p[2], -1.0f, 2.0f)'),
+    ('WebSceneFx_Clamp(0.5f + 0.5f * p[1] * s_viewProjection[1] / p[2], -1.0f, 2.0f)',
+     'WebSceneFx_Clamp(0.5f + 0.5f * p[1] * s_viewProjection[0] / p[2], -1.0f, 2.0f)'),
+    ('        s_blastDepth[i] = p[2];', '        s_blastDepth[i] = distance;'),
+    ('    memcpy(params + SCENE_FX_BLAST, s_blastView, sizeof(s_blastView));\n', ''),
+    ('        WebSceneFx_HazeView();\n        WebSceneFx_BlastView();\n', '        WebSceneFx_HazeView();\n'),
+    ('    memset(s_blastView, 0, sizeof(s_blastView));\n    memset(s_blastDepth, 0, sizeof(s_blastDepth));\n'
+     '    if (s_cameraPending && WebSceneFx_CameraValid()) {',
+     '    if (s_cameraPending && WebSceneFx_CameraValid()) {'),
+    ('#define SCENE_FX_BLAST_REACH 1.6f', '#define SCENE_FX_BLAST_REACH 1.2f'),
     ('fminf(s_hazeDensity * SCENE_FX_HAZE_SHARE, SCENE_FX_HAZE_MAX_DENSITY)', 'fminf(s_hazeDensity, SCENE_FX_HAZE_MAX_DENSITY)'),
     ('fminf(s_hazeDensity * SCENE_FX_HAZE_SHARE, SCENE_FX_HAZE_MAX_DENSITY)', 's_hazeDensity * SCENE_FX_HAZE_SHARE'),
     ('    return WebSceneFx_Enabled(r_atmosphere) && !WebSceneFx_Enabled(r_fullbright) && s_hazeDensity > 0.0f;',
@@ -1216,4 +1591,4 @@ with tempfile.TemporaryDirectory(prefix='cod2-scene-fx-') as tmp:
                         '-lm', '-o', str(path / f'mutant{index}')], check=True)
         result = subprocess.run([str(path / f'mutant{index}')], capture_output=True)
         assert result.returncode != 0, f'mutant survived: {after!r}'
-    print(f'PASS: {len(mutants)} motion blur, backdrop, scene size and scope window mutants fail')
+    print(f'PASS: {len(mutants)} motion blur, backdrop, scene size, scope window, haze, sun shaft and shockwave mutants fail')

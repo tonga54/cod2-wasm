@@ -40,6 +40,8 @@ const dvar_t *r_reflections;
 const dvar_t *r_zfeather;
 const dvar_t *r_fxHeat;
 const dvar_t *r_atmosphere;
+const dvar_t *r_sunShafts;
+const dvar_t *r_shockwave;
 #endif
 extern const dvar_t *r_znear;
 extern const dvar_t *r_znear_depthhack;
@@ -549,6 +551,12 @@ void R_RegisterDvars(void)
     /* The map's haze thickens toward the ground and in the distance and
      * glows toward the sun (downstream/wasm/web_scene_fx.c). */
     r_atmosphere = ri.Dvar_RegisterBool("r_atmosphere", 1, 0x2001);
+    /* How strong the shafts of sunlight through what stands against the sky
+     * are, 0 for none (downstream/wasm/web_scene_fx.c). */
+    r_sunShafts = ri.Dvar_RegisterFloat("r_sunShafts", 1.0f, 0.0f, 2.0f, 0x2001);
+    /* An explosion's shockwave bends the view about it as it spreads
+     * (downstream/wasm/web_scene_fx.c). */
+    r_shockwave = ri.Dvar_RegisterBool("r_shockwave", 1, 0x2001);
 #endif
 
     r_outdoorAwayBias = ri.Dvar_RegisterFloat("r_outdoorAwayBias", 32.0f, -3.4028235e+38f, 3.4028235e+38f, 0x2000);

@@ -26,6 +26,18 @@ static const WeaponDef *CG_EventWeaponDef(int weapon)
 {
     return (const WeaponDef *)BG_GetWeaponDef(weapon);
 }
+#ifdef __EMSCRIPTEN__
+/* The compositor's shockwave (downstream/wasm/web_scene_fx.c): a grenade,
+ * S-Mine, C4 or rocket going off, as far as its blast reaches; smoke, which
+ * deals no damage, has no radius. */
+extern void WebSceneFx_AddExplosion(const float *origin, float radius);
+extern int BG_GetNumWeapons(void);
+static void CG_ExplosionShockwave(const vec_t *origin, int weapon)
+{
+    if (weapon > 0 && weapon <= BG_GetNumWeapons() && CG_EventWeaponDef(weapon)->iExplosionRadius > 0)
+        WebSceneFx_AddExplosion(origin, (float)CG_EventWeaponDef(weapon)->iExplosionRadius);
+}
+#endif
 extern int BG_WeaponIsClipOnly(int weapon);
 extern int CG_PlayEntitySoundAlias(int entNum, int alias);
 extern int CG_PlaySoundAlias(int entitynum, const vec_t *origin, snd_alias_list_t *aliasList);
@@ -1156,6 +1168,9 @@ void CG_EntityEvent(centity_t *cent, int event)
                     CG_PlaySoundAlias(0x3fe, position, sndAlias);
                 }
             }
+#ifdef __EMSCRIPTEN__
+            CG_ExplosionShockwave((const vec_t *)position, es->weapon);
+#endif
 #if COD2_FEATURE_RUMBLE
             CG_RumbleExplosion((const vec_t *)position, es->weapon);
 #endif
@@ -1205,6 +1220,9 @@ void CG_EntityEvent(centity_t *cent, int event)
             }
 
             cg->nomarks = 0;
+#ifdef __EMSCRIPTEN__
+            CG_ExplosionShockwave((const vec_t *)position, es->weapon);
+#endif
 #if COD2_FEATURE_RUMBLE
             CG_RumbleExplosion((const vec_t *)position, es->weapon);
 #endif
@@ -1254,6 +1272,9 @@ void CG_EntityEvent(centity_t *cent, int event)
             }
 
             cg->nomarks = 0;
+#ifdef __EMSCRIPTEN__
+            CG_ExplosionShockwave((const vec_t *)position, es->weapon);
+#endif
 #if COD2_FEATURE_RUMBLE
             CG_RumbleExplosion((const vec_t *)position, es->weapon);
 #endif

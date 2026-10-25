@@ -8,8 +8,10 @@
  * (multisampled when r_aaSamples > 1). Before the first 2D draw it is composed
  * into the canvas: CoD2's DX9 glow (r_glow*), WWII-style motion blur of the
  * camera and of the viewmodel's own movement (r_motionBlur), a CoD4-style
- * depth of field on the viewmodel and the near world while aiming, contrast
- * adaptive sharpening and a light film grade.
+ * depth of field on the viewmodel and the near world while aiming, shafts of
+ * sunlight through what stands against the sky (r_sunShafts), the shockwave
+ * of an explosion bending the view about it (r_shockwave), contrast adaptive
+ * sharpening and a light film grade.
  * A raised WWII scope (cg_wwiiscope_mp.c) turns its glass into a window: the
  * rifle is drawn with its own projection and near clip and kept off the glass
  * by the stencil, so the magnified world shows through, and the world around
@@ -34,9 +36,14 @@ extern const dvar_t *r_motionBlur;
 extern const dvar_t *r_sceneHeight;
 extern const dvar_t *r_ssao;
 extern const dvar_t *r_atmosphere;
+extern const dvar_t *r_sunShafts;
+extern const dvar_t *r_shockwave;
 
 /* Draws the sun's shadow map of the frame's moving models (web_sun_shadows.c). */
 void WebSunShadows_Render(void);
+
+/* The explosions whose shockwaves can travel at once. */
+#define SCENE_FX_BLASTS 4
 
 enum {
     SCENE_FX_GLOW0,
@@ -111,7 +118,21 @@ enum {
     SCENE_FX_HAZE_SUN = SCENE_FX_HAZE_UP + 3,
     SCENE_FX_HAZE_SUN_COLOR = SCENE_FX_HAZE_SUN + 3,
     SCENE_FX_HAZE_FALLOFF = SCENE_FX_HAZE_SUN_COLOR + 3,
-    SCENE_FX_PARAM_COUNT
+    /* Shafts of sunlight (r_sunShafts): how strong, 0 for none; where the
+     * sun lies on the screen, in texture coordinates, which may be off it;
+     * how low it stands, 0 high in the sky to 1 at the horizon's air; and
+     * the sun's color. */
+    SCENE_FX_SHAFTS,
+    SCENE_FX_SHAFTS_SUN,
+    SCENE_FX_SHAFTS_LOW = SCENE_FX_SHAFTS_SUN + 2,
+    SCENE_FX_SHAFTS_COLOR,
+    /* Explosions' shockwaves (r_shockwave), four floats each: the centre on
+     * the screen in texture coordinates, the front's radius and how far it
+     * bends the view, both in screen heights; then how far ahead of the eye
+     * each one is, 0 for none. */
+    SCENE_FX_BLAST = SCENE_FX_SHAFTS_COLOR + 3,
+    SCENE_FX_BLAST_DEPTH = SCENE_FX_BLAST + 4 * SCENE_FX_BLASTS,
+    SCENE_FX_PARAM_COUNT = SCENE_FX_BLAST_DEPTH + SCENE_FX_BLASTS
 };
 
 #define SCENE_FX_SCOPE_FLOATS (SCENE_FX_SCOPE_END - SCENE_FX_SCOPE)
@@ -128,6 +149,33 @@ enum {
 #define SCENE_FX_HAZE_MAX_DENSITY 0.0001f
 #define SCENE_FX_HAZE_SCALE_HEIGHT 640.0f
 #define SCENE_FX_HAZE_SUN_GLOW 0.45f
+
+/* The shafts come in as the sun's cosine to the view's axis rises from the
+ * first value to the second, so they fade before the sun leaves the screen's
+ * side; the sun's place on the screen is kept within this many screens of
+ * its centre. */
+#define SCENE_FX_SHAFTS_FACING_START 0.15f
+#define SCENE_FX_SHAFTS_FACING_FULL 0.5f
+#define SCENE_FX_SHAFTS_REACH 1.5f
+/* Sunlight crosses 1 / sin(elevation) times the air above: a sun 60 degrees
+ * up or higher counts as high, one 20 degrees up (Matmata's dusk) as low,
+ * whose light scatters into a wide glow and long shafts. The light the
+ * shafts add at r_sunShafts 1, as a multiple of the sky they gather, grows
+ * from the high sun's to the low one's. */
+#define SCENE_FX_SHAFTS_HIGH_AIR 1.1547005f
+#define SCENE_FX_SHAFTS_LOW_AIR 2.9238044f
+#define SCENE_FX_SHAFTS_GAIN_HIGH 2.16f
+#define SCENE_FX_SHAFTS_GAIN_LOW 2.52f
+
+/* A shockwave's front runs out to this multiple of its blast's radius over
+ * its life in milliseconds, quickly and then slowing; it bends the view by
+ * up to this share of the screen's height, fading as it ages and as the
+ * explosion lies further than this multiple of its radius from the eye. */
+#define SCENE_FX_BLAST_MS 450.0
+#define SCENE_FX_BLAST_REACH 1.6f
+#define SCENE_FX_BLAST_BEND 0.03f
+#define SCENE_FX_BLAST_NEAR 1.5f
+#define SCENE_FX_BLAST_MAX_RADIUS 2048.0f
 
 /* InfinitePerspectiveMatrix's depth scale times the default r_znear of 4. */
 #define SCENE_FX_DEFAULT_WORLD_NEAR_CLIP (0.9995002746582031f * 4.0f)
@@ -205,6 +253,17 @@ static float s_hazeSunColor[3];
 static float s_hazeUp[3];
 static float s_hazeSun[3];
 
+/* The latest explosions, where and when they went off and how far their
+ * blasts reach, and their shockwaves as the composed view sees them. */
+typedef struct {
+    float origin[3];
+    float radius;
+    double time;
+} WebSceneFxBlast;
+static WebSceneFxBlast s_blasts[SCENE_FX_BLASTS];
+static float s_blastView[4 * SCENE_FX_BLASTS];
+static float s_blastDepth[SCENE_FX_BLASTS];
+
 typedef struct {
     const void *key;
     const unsigned short *indices;
@@ -263,6 +322,10 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             discard: [gl.COLOR_ATTACHMENT0, gl.DEPTH_STENCIL_ATTACHMENT],
             still: new Float32Array([128 / 255, 128 / 255, 0, 0]), far: new Float32Array([1])
         };
+        /* A pass's sampler s binds on unit 8 + fx.unit(s): 8 to 15, then from
+         * 20, past the camouflage's units 16 and 17 and the shadow and
+         * feather maps' 18 and 19. */
+        fx.unit = function(s) { return s < 8 ? s : s + 4; };
         fx.build = function() {
             var header = "#version 300 es\nprecision mediump float;\nin highp vec2 v_uv;\nout vec4 o;\n";
             var vs = gl.createShader(gl.VERTEX_SHADER);
@@ -290,7 +353,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 gl.useProgram(program);
                 var entry = { program: program };
                 for (var s = 0; s < samplers.length; ++s)
-                    gl.uniform1i(gl.getUniformLocation(program, samplers[s]), 8 + s);
+                    gl.uniform1i(gl.getUniformLocation(program, samplers[s]), 8 + fx.unit(s));
                 for (var u = 0; u < uniforms.length; ++u)
                     entry[uniforms[u]] = gl.getUniformLocation(program, uniforms[u]);
                 programs[name] = entry;
@@ -507,6 +570,46 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "    }\n" +
                 "  o = vec4(weight > 0.0 ? sum / weight : centre.r, 0.0, 0.0, 1.0);\n}\n",
                 ["u_src"], []);
+            /* Shafts of sunlight at a quarter of the scene's resolution, after
+             * Mitchell's light scattering as a post-process (GPU Gems 3, 13):
+             * the sky seen about the sun, the brighter the more, as a disk
+             * where the sun is and a wider glow about it, then each texel
+             * averages it along the way to the sun, so what stands against
+             * the sky cuts dark lanes through the light, and the light fades
+             * with the distance from the sun. Nothing past the screen's edge
+             * counts, so no streak runs in from it. */
+            link("shaftMask", "uniform sampler2D u_src;\nuniform highp sampler2D u_depth;\n" +
+                "uniform highp vec4 u_sun;\nuniform highp vec4 u_shape;\n" +
+                "void main() {\n" +
+                "  ivec2 b = ivec2(gl_FragCoord.xy) * 4, m = textureSize(u_depth, 0) - 1;\n" +
+                "  float sky = 0.25 * (step(0.99999, texelFetch(u_depth, min(b + ivec2(1, 1), m), 0).r) +\n" +
+                "    step(0.99999, texelFetch(u_depth, min(b + ivec2(3, 1), m), 0).r) +\n" +
+                "    step(0.99999, texelFetch(u_depth, min(b + ivec2(1, 3), m), 0).r) +\n" +
+                "    step(0.99999, texelFetch(u_depth, min(b + ivec2(3, 3), m), 0).r));\n" +
+                "  vec3 c = texture(u_src, v_uv).rgb;\n" +
+                "  highp vec2 d = (v_uv - u_sun.xy) * vec2(u_sun.z, 1.0);\n" +
+                "  highp float dd = dot(d, d);\n" +
+                "  float light = (u_shape.x * exp(-dd * u_sun.w) + u_shape.y * exp(-dd * u_shape.z)) *\n" +
+                "    smoothstep(u_shape.w, u_shape.w + 0.5, dot(c, vec3(0.2126, 0.7152, 0.0722)));\n" +
+                "  o = vec4(c * (sky * light), 1.0);\n}\n",
+                ["u_src", "u_depth"], ["u_sun", "u_shape"]);
+            link("shafts", "uniform sampler2D u_src;\nuniform highp vec4 u_ray;\nuniform highp vec2 u_rayFall;\n" +
+                "void main() {\n" +
+                "  highp vec2 dp = (u_ray.xy - v_uv) * (u_ray.z / 32.0);\n" +
+                "  float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));\n" +
+                "  highp vec2 p = v_uv + dp * jitter;\n" +
+                "  vec3 sum = vec3(0.0);\n" +
+                "  float w = 1.0, total = 0.0;\n" +
+                "  for (int i = 0; i < 32; ++i) {\n" +
+                "    vec2 inside = step(vec2(0.0), p) * step(p, vec2(1.0));\n" +
+                "    sum += texture(u_src, p).rgb * (w * inside.x * inside.y);\n" +
+                "    total += w;\n" +
+                "    w *= u_ray.w;\n" +
+                "    p += dp;\n" +
+                "  }\n" +
+                "  highp vec2 f = (v_uv - u_ray.xy) * vec2(u_rayFall.x, 1.0);\n" +
+                "  o = vec4(sum / total * exp(-dot(f, f) * u_rayFall.y), 1.0);\n}\n",
+                ["u_src"], ["u_ray", "u_rayFall"]);
             link("dof", "uniform sampler2D u_src;\nuniform highp sampler2D u_depth;\n" +
                 "uniform highp vec2 u_texel;\nuniform highp vec4 u_dof;\n" + coc +
                 "float cocAt(ivec2 p, ivec2 m) { return vmBlur(texelFetch(u_depth, min(p, m), 0).r); }\n" +
@@ -527,9 +630,27 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "uniform sampler2D u_ao;\nuniform highp vec4 u_aoMix;\n" +
                 "uniform highp vec4 u_haze;\nuniform highp vec3 u_hazeUp;\nuniform highp vec3 u_hazeSun;\n" +
                 "uniform vec3 u_hazeSunColor;\nuniform highp vec3 u_hazeProj;\n" +
+                "uniform sampler2D u_shafts;\nuniform vec4 u_shaft;\n" +
+                "uniform highp vec4 u_blast[4];\nuniform highp vec4 u_blastDepth;\n" +
                 coc + nearWorld + viewmodelMotion +
                 drawnEyepiece + "void main() {\n" +
-                "  vec3 c = texture(u_scene, v_uv).rgb;\n" +
+                /* An explosion's shockwave bends the view about its front as a
+                 * lens would, the derivative of a Gaussian across the front a
+                 * third of its radius wide. What lies well before the
+                 * explosion, the viewmodel among it, stays as it is. */
+                "  highp vec2 uv = v_uv;\n" +
+                "  if (u_blastDepth != vec4(0.0)) {\n" +
+                "    highp float bd = texelFetch(u_depth, ivec2(gl_FragCoord.xy), 0).r;\n" +
+                "    highp float bz = bd < 0.2 ? 0.0 : u_near.x / max(u_dof.x - bd, 0.000001);\n" +
+                "    for (int i = 0; i < 4; ++i) {\n" +
+                "      if (u_blastDepth[i] <= 0.0 || bz < 0.5 * u_blastDepth[i]) continue;\n" +
+                "      highp vec2 d = (v_uv - u_blast[i].xy) * vec2(u_px.z, 1.0);\n" +
+                "      highp float r = length(d);\n" +
+                "      highp float x = (r - u_blast[i].z) / max(0.3 * u_blast[i].z, 0.01);\n" +
+                "      uv -= d / max(r, 0.0001) * vec2(1.0 / u_px.z, 1.0) * (u_blast[i].w * x * exp(-x * x));\n" +
+                "    }\n" +
+                "  }\n" +
+                "  vec3 c = texture(u_scene, uv).rgb;\n" +
                 "  vec3 col = c;\n" +
                 "  bool smeared = false;\n" +
                 /* Inside the scope's glass: 1 within its outline, which the
@@ -627,10 +748,10 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "    }\n" +
                 "  }\n" +
                 "  if (u_film.x > 0.0 && !smeared) {\n" +
-                "    vec3 n = texture(u_scene, v_uv + vec2(0.0, u_px.y)).rgb;\n" +
-                "    vec3 s = texture(u_scene, v_uv - vec2(0.0, u_px.y)).rgb;\n" +
-                "    vec3 e = texture(u_scene, v_uv + vec2(u_px.x, 0.0)).rgb;\n" +
-                "    vec3 w = texture(u_scene, v_uv - vec2(u_px.x, 0.0)).rgb;\n" +
+                "    vec3 n = texture(u_scene, uv + vec2(0.0, u_px.y)).rgb;\n" +
+                "    vec3 s = texture(u_scene, uv - vec2(0.0, u_px.y)).rgb;\n" +
+                "    vec3 e = texture(u_scene, uv + vec2(u_px.x, 0.0)).rgb;\n" +
+                "    vec3 w = texture(u_scene, uv - vec2(u_px.x, 0.0)).rgb;\n" +
                 "    vec3 lo = min(c, min(min(n, s), min(e, w)));\n" +
                 "    vec3 hi = max(c, max(max(n, s), max(e, w)));\n" +
                 "    vec3 wt = -u_film.x * sqrt(clamp(min(lo, 1.0 - hi) / max(hi, vec3(0.0001)), 0.0, 1.0));\n" +
@@ -711,6 +832,16 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "  }\n" +
                 "  if (u_glow.x > 0.0)\n" +
                 "    col = 1.0 - (1.0 - col) * (1.0 - min(texture(u_bloom, v_uv).rgb, vec3(1.0)));\n" +
+                /* The shafts light the air between the eye and what it sees:
+                 * the sky and far walls take them, the near ground little and
+                 * the viewmodel none. */
+                "  if (u_shaft.x > 0.0) {\n" +
+                "    highp float sd = texelFetch(u_depth, ivec2(gl_FragCoord.xy), 0).r;\n" +
+                "    float air = sd >= 0.99999 ? 1.0 :\n" +
+                "      (sd < 0.2 ? 0.0 : 1.0 - exp(-u_near.x / max(u_dof.x - sd, 0.000001) / 900.0));\n" +
+                "    vec3 rays = min(texture(u_shafts, v_uv).rgb * u_shaft.yzw * (u_shaft.x * air), vec3(1.0));\n" +
+                "    col = 1.0 - (1.0 - col) * (1.0 - rays);\n" +
+                "  }\n" +
                 "  if (u_film.w > 0.0) {\n" +
                 "    float l = dot(col, vec3(0.2126, 0.7152, 0.0722));\n" +
                 "    col = mix(vec3(l), col, u_film.y);\n" +
@@ -724,10 +855,10 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "  if (u_lens.z > 0.0)\n" +
                 "    col *= 1.0 - u_lensFx.y * (1.0 - lensIn);\n" +
                 "  o = vec4(col, 1.0);\n}\n",
-                ["u_scene", "u_bloom", "u_depth", "u_dofMed", "u_dofLarge", "u_vmVelocity", "u_vmMesh", "u_ao"],
+                ["u_scene", "u_bloom", "u_depth", "u_dofMed", "u_dofLarge", "u_vmVelocity", "u_vmMesh", "u_ao", "u_shafts"],
                 ["u_px", "u_glow", "u_dof", "u_dof2", "u_film", "u_near", "u_tier",
                  "u_motion", "u_motionRotation", "u_motionMove", "u_vm", "u_lens", "u_lensInv", "u_lensFx", "u_aoMix",
-                 "u_haze", "u_hazeUp", "u_hazeSun", "u_hazeSunColor", "u_hazeProj"]);
+                 "u_haze", "u_hazeUp", "u_hazeSun", "u_hazeSunColor", "u_hazeProj", "u_shaft", "u_blast", "u_blastDepth"]);
             /* A scene smaller than the canvas, filtered up to it with Catmull-Rom
              * in five bilinear taps (the corner taps weigh under 0.5%), as the
              * page scales the canvas again with its own bilinear filter. */
@@ -824,7 +955,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 ew: Math.max(1, Math.ceil(w / 8)), eh: Math.max(1, Math.ceil(h / 8)),
                 hw: Math.max(1, Math.ceil(w / 2)), hh: Math.max(1, Math.ceil(h / 2)),
                 textures: [], framebuffers: [], renderbuffers: [], ms: null, q: [], qFbo: [], e: [], eFbo: [],
-                ao: [], aoFbo: []
+                ao: [], aoFbo: [], sh: [], shFbo: []
             };
             var ok = true;
             var previousUnit = gl.getParameter(gl.ACTIVE_TEXTURE);
@@ -876,6 +1007,9 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 /* The raw occlusion and its depth, then the blurred occlusion. */
                 t.ao.push(texture(gl.RGBA8, t.hw, t.hh, i ? gl.LINEAR : gl.NEAREST));
                 t.aoFbo.push(framebuffer(t.ao[i], null, null, null));
+                /* The sky the sun lights, then its shafts. */
+                t.sh.push(texture(gl.RGBA8, t.qw, t.qh, gl.LINEAR));
+                t.shFbo.push(framebuffer(t.sh[i], null, null, null));
             }
             gl.bindTexture(gl.TEXTURE_2D, null);
             gl.activeTexture(previousUnit);
@@ -891,7 +1025,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             return true;
         };
         fx.texture = function(unit, texture) {
-            gl.activeTexture(gl.TEXTURE8 + unit);
+            gl.activeTexture(gl.TEXTURE8 + fx.unit(unit));
             gl.bindTexture(gl.TEXTURE_2D, texture);
         };
         fx.pass = function(program, framebuffer, w, h) {
@@ -1006,7 +1140,8 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             /* Any window the stencil cut also needs its glass. */
             var lens = lensPresence > 0, scopeBlur = lens && lensBlur > 0.004;
             var glow = glow0 > 0 || glow1 > 0, blurBehind = backdrop > 0.004, dof = ads > 0.004 || blurBehind || lens;
-            var ao = H[o + 55] > 0, haze = H[o + 62] > 0;
+            var ao = H[o + 55] > 0, haze = H[o + 62] > 0, shafts = H[o + 73] > 0;
+            var blast = H[o + 96] > 0 || H[o + 97] > 0 || H[o + 98] > 0 || H[o + 99] > 0;
             var lines = h / 480;
             var program = gl.getParameter(gl.CURRENT_PROGRAM);
             var vao = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
@@ -1024,7 +1159,8 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 gl.bindFramebuffer(gl.READ_FRAMEBUFFER, t.ms);
                 gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, t.scene);
                 gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h,
-                    dof || motion > 0 || vm || ao || haze ? (gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT) : gl.COLOR_BUFFER_BIT, gl.NEAREST);
+                    dof || motion > 0 || vm || ao || haze || shafts || blast ? (gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT) :
+                    gl.COLOR_BUFFER_BIT, gl.NEAREST);
                 gl.invalidateFramebuffer(gl.READ_FRAMEBUFFER, fx.discard);
             }
             /* Reading the write masks back would stall on the GPU process. Every
@@ -1081,6 +1217,27 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 gl.uniform2f(B.u_mix, glow0, glow1);
                 fx.texture(0, t.e[0]);
                 fx.pass(B, t.eFbo[1], ew, eh);
+            }
+            if (shafts) {
+                /* Distances are in screen heights. A high sun is a small, hot
+                 * disk (0.04) with a faint glow (0.25) whose light stays within
+                 * half a screen of it; a low one glows wide (0.3) and its
+                 * shafts reach across the screen. Each texel gathers 95% of
+                 * the way to the sun. */
+                var low = H[o + 76], S = P.shaftMask;
+                var mix = function(high, dusk) { return high + (dusk - high) * low; };
+                var glowRadius = mix(0.25, 0.3), diskRadius = mix(0.04, 0.05), reach = mix(0.5, 1.5);
+                gl.useProgram(S.program);
+                gl.uniform4f(S.u_sun, H[o + 74], H[o + 75], w / h, 1 / (glowRadius * glowRadius));
+                gl.uniform4f(S.u_shape, mix(0.2, 1), mix(4, 3), 1 / (diskRadius * diskRadius), mix(0.4, 0.3));
+                fx.texture(0, t.color);
+                fx.texture(1, t.depth);
+                fx.pass(S, t.shFbo[0], qw, qh);
+                gl.useProgram(P.shafts.program);
+                gl.uniform4f(P.shafts.u_ray, H[o + 74], H[o + 75], 0.95, mix(0.975, 0.98));
+                gl.uniform2f(P.shafts.u_rayFall, w / h, 1 / (reach * reach));
+                fx.texture(0, t.sh[0]);
+                fx.pass(P.shafts, t.shFbo[1], qw, qh);
             }
             var vmStart = H[o + 7], vmEnd = H[o + 8], nearEnd = H[o + 16];
             var invRange = 1 / Math.max(vmEnd - vmStart, 0.5);
@@ -1153,7 +1310,11 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 gl.uniform3f(C.u_hazeSunColor, H[o + 69], H[o + 70], H[o + 71]);
                 gl.uniform3f(C.u_hazeProj, H[o + 57], H[o + 58], H[o + 72]);
             }
-            var sources = [t.color, t.e[1], t.depth, t.q[0], t.q[1], vm ? vm.smear : null, vm ? vm.mesh : null, ao ? t.ao[1] : null];
+            gl.uniform4f(C.u_shaft, shafts ? H[o + 73] : 0, H[o + 77], H[o + 78], H[o + 79]);
+            gl.uniform4f(C.u_blastDepth, H[o + 96], H[o + 97], H[o + 98], H[o + 99]);
+            if (blast) gl.uniform4fv(C.u_blast, H.subarray(o + 80, o + 96));
+            var sources = [t.color, t.e[1], t.depth, t.q[0], t.q[1], vm ? vm.smear : null, vm ? vm.mesh : null, ao ? t.ao[1] : null,
+                shafts ? t.sh[1] : null];
             for (var s = 0; s < sources.length; ++s) fx.texture(s, sources[s]);
             if (scaled) {
                 fx.pass(C, t.outFbo, w, h);
@@ -1285,6 +1446,40 @@ static int WebSceneFx_HazeEnabled(void)
     return WebSceneFx_Enabled(r_atmosphere) && !WebSceneFx_Enabled(r_fullbright) && s_hazeDensity > 0.0f;
 }
 
+/* The scene has a sun, and r_sunShafts asks for its shafts. */
+static int WebSceneFx_ShaftsEnabled(void)
+{
+    return r_sunShafts && r_sunShafts->current.value > 0.0f && !WebSceneFx_Enabled(r_fullbright) &&
+           s_hazeSunColor[0] + s_hazeSunColor[1] + s_hazeSunColor[2] > 0.0f;
+}
+
+/* How strong the composed view's shafts are, where its sun lies on the
+ * screen (the sun's direction in the view's space projected, x right, y up
+ * and z ahead) and how low the sun stands. None without a camera, or with
+ * the sun at the view's side or behind it. */
+static float WebSceneFx_Shafts(float *sunUv, float *low)
+{
+    float facing;
+
+    sunUv[0] = sunUv[1] = *low = 0.0f;
+    if (!WebSceneFx_ShaftsEnabled() || !(s_viewProjection[0] > 0.0f) || !(s_viewProjection[1] > 0.0f))
+        return 0.0f;
+    facing = (s_hazeSun[2] - SCENE_FX_SHAFTS_FACING_START) /
+             (SCENE_FX_SHAFTS_FACING_FULL - SCENE_FX_SHAFTS_FACING_START);
+    if (!(facing > 0.0f))
+        return 0.0f;
+    facing = facing < 1.0f ? facing * facing * (3.0f - 2.0f * facing) : 1.0f;
+    sunUv[0] = WebSceneFx_Clamp(0.5f + 0.5f * s_hazeSun[0] * s_viewProjection[0] / s_hazeSun[2],
+                                0.5f - SCENE_FX_SHAFTS_REACH, 0.5f + SCENE_FX_SHAFTS_REACH);
+    sunUv[1] = WebSceneFx_Clamp(0.5f + 0.5f * s_hazeSun[1] * s_viewProjection[1] / s_hazeSun[2],
+                                0.5f - SCENE_FX_SHAFTS_REACH, 0.5f + SCENE_FX_SHAFTS_REACH);
+    *low = s_hazeSunWorld[2] > 0.0f ?
+        WebSceneFx_Clamp((1.0f / s_hazeSunWorld[2] - SCENE_FX_SHAFTS_HIGH_AIR) /
+                         (SCENE_FX_SHAFTS_LOW_AIR - SCENE_FX_SHAFTS_HIGH_AIR), 0.0f, 1.0f) : 1.0f;
+    return WebSceneFx_Clamp(r_sunShafts->current.value, 0.0f, 2.0f) * facing *
+           (SCENE_FX_SHAFTS_GAIN_HIGH + (SCENE_FX_SHAFTS_GAIN_LOW - SCENE_FX_SHAFTS_GAIN_HIGH) * *low);
+}
+
 static int WebSceneFx_Samples(void)
 {
     return r_aaSamples ? r_aaSamples->current.integer : 1;
@@ -1371,6 +1566,81 @@ static void WebSceneFx_HazeView(void)
     for (j = 0; j < 3; ++j) {
         s_hazeUp[j] = view[8 + j];
         s_hazeSun[j] = view[j] * s_hazeSunWorld[0] + view[4 + j] * s_hazeSunWorld[1] + view[8 + j] * s_hazeSunWorld[2];
+    }
+}
+
+/* An explosion going off at origin now, its blast reaching radius units: it
+ * takes the place of the oldest. */
+void WebSceneFx_AddExplosion(const float *origin, float radius)
+{
+    int i, oldest = 0;
+
+    if (!origin || !isfinite(origin[0]) || !isfinite(origin[1]) || !isfinite(origin[2]) || !isfinite(radius) ||
+        !(radius > 0.0f))
+        return;
+    for (i = 1; i < SCENE_FX_BLASTS; ++i)
+        if (s_blasts[i].time < s_blasts[oldest].time)
+            oldest = i;
+    memcpy(s_blasts[oldest].origin, origin, sizeof(s_blasts[oldest].origin));
+    s_blasts[oldest].radius = WebSceneFx_Clamp(radius, 0.0f, SCENE_FX_BLAST_MAX_RADIUS);
+    s_blasts[oldest].time = emscripten_get_now();
+}
+
+static int WebSceneFx_BlastEnabled(void)
+{
+    return WebSceneFx_Enabled(r_shockwave) && !WebSceneFx_Enabled(r_fullbright);
+}
+
+/* Whether a shockwave is still travelling. */
+static int WebSceneFx_BlastsActive(void)
+{
+    double now = emscripten_get_now();
+    int i;
+
+    if (!WebSceneFx_BlastEnabled())
+        return 0;
+    for (i = 0; i < SCENE_FX_BLASTS; ++i)
+        if (s_blasts[i].radius > 0.0f && now - s_blasts[i].time >= 0.0 && now - s_blasts[i].time < SCENE_FX_BLAST_MS)
+            return 1;
+    return 0;
+}
+
+/* The travelling shockwaves in the composed view, which takes a world point
+ * p to R p + t (x right, y up, z ahead): each one's centre on the screen,
+ * its front's radius there and its bend, and its distance ahead. One behind
+ * the eye or past its life is none. */
+static void WebSceneFx_BlastView(void)
+{
+    const float *view = s_cameraView;
+    double now = emscripten_get_now();
+    int i, j;
+
+    memset(s_blastView, 0, sizeof(s_blastView));
+    memset(s_blastDepth, 0, sizeof(s_blastDepth));
+    if (!WebSceneFx_BlastEnabled())
+        return;
+    for (i = 0; i < SCENE_FX_BLASTS; ++i) {
+        const WebSceneFxBlast *blast = &s_blasts[i];
+        double age = now - blast->time;
+        float p[3], life, left, front, distance, near;
+
+        if (!(blast->radius > 0.0f) || age < 0.0 || age >= SCENE_FX_BLAST_MS)
+            continue;
+        for (j = 0; j < 3; ++j)
+            p[j] = view[12 + j] + view[j] * blast->origin[0] + view[4 + j] * blast->origin[1] +
+                   view[8 + j] * blast->origin[2];
+        if (!(p[2] > 1.0f))
+            continue;
+        life = (float)(age / SCENE_FX_BLAST_MS);
+        left = 1.0f - life;
+        front = blast->radius * SCENE_FX_BLAST_REACH * (1.0f - left * left * left);
+        distance = sqrtf(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
+        near = WebSceneFx_Clamp(SCENE_FX_BLAST_NEAR * blast->radius / distance, 0.0f, 1.0f);
+        s_blastView[i * 4] = WebSceneFx_Clamp(0.5f + 0.5f * p[0] * s_viewProjection[0] / p[2], -1.0f, 2.0f);
+        s_blastView[i * 4 + 1] = WebSceneFx_Clamp(0.5f + 0.5f * p[1] * s_viewProjection[1] / p[2], -1.0f, 2.0f);
+        s_blastView[i * 4 + 2] = WebSceneFx_Clamp(0.5f * front * s_viewProjection[1] / p[2], 0.0f, 4.0f);
+        s_blastView[i * 4 + 3] = SCENE_FX_BLAST_BEND * left * left * near;
+        s_blastDepth[i] = p[2];
     }
 }
 
@@ -1889,6 +2159,10 @@ static void WebSceneFx_FillParams(float *params)
     params[SCENE_FX_HAZE_SUN_COLOR + 1] = s_hazeSunColor[1] * SCENE_FX_HAZE_SUN_GLOW;
     params[SCENE_FX_HAZE_SUN_COLOR + 2] = s_hazeSunColor[2] * SCENE_FX_HAZE_SUN_GLOW;
     params[SCENE_FX_HAZE_FALLOFF] = 1.0f / SCENE_FX_HAZE_SCALE_HEIGHT;
+    params[SCENE_FX_SHAFTS] = WebSceneFx_Shafts(params + SCENE_FX_SHAFTS_SUN, params + SCENE_FX_SHAFTS_LOW);
+    memcpy(params + SCENE_FX_SHAFTS_COLOR, s_hazeSunColor, sizeof(s_hazeSunColor));
+    memcpy(params + SCENE_FX_BLAST, s_blastView, sizeof(s_blastView));
+    memcpy(params + SCENE_FX_BLAST_DEPTH, s_blastDepth, sizeof(s_blastDepth));
 }
 
 /* The mip bias the 3D draws of the composed view give their color maps. */
@@ -1934,10 +2208,13 @@ void WebSceneFx_BeginView(int x, int y, int width, int height, int screenWidth, 
     WebSceneFx_SceneSize(width, height, &sceneWidth, &sceneHeight);
     nearClip = isfinite(depthHackNearClip) && depthHackNearClip > 0.0f ? depthHackNearClip : 0.1f;
     s_viewProjection[0] = s_viewProjection[1] = 0.0f;
+    memset(s_blastView, 0, sizeof(s_blastView));
+    memset(s_blastDepth, 0, sizeof(s_blastDepth));
     if (s_cameraPending && WebSceneFx_CameraValid()) {
         s_viewProjection[0] = s_cameraProjection[0];
         s_viewProjection[1] = s_cameraProjection[1];
         WebSceneFx_HazeView();
+        WebSceneFx_BlastView();
     }
     WebSceneFx_TrackCamera();
     WebSceneFx_TrackViewmodel(sceneWidth, sceneHeight, nearClip);
@@ -1950,7 +2227,8 @@ void WebSceneFx_BeginView(int x, int y, int width, int height, int screenWidth, 
     scaled = sceneWidth != width || sceneHeight != height;
     if (!scaled && s_grayFrac <= 0.0f && s_vmMotion <= 0.0f && !WebSceneFx_GlowEnabled() && !WebSceneFx_Enabled(r_filmTweakEnable) && samples <= 1 &&
         !(WebSceneFx_Enabled(r_dof_enable) && s_adsFrac > 0.0f) && s_motionScale <= 0.0f && s_backdropFrac <= 0.0f &&
-        s_backdropGray <= 0.0f && !WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled() && !WebSceneFx_HazeEnabled())
+        s_backdropGray <= 0.0f && !WebSceneFx_ScopeRequested() && !WebSceneFx_AoEnabled() && !WebSceneFx_HazeEnabled() &&
+        !WebSceneFx_ShaftsEnabled() && !WebSceneFx_BlastsActive())
         return;
     s_nearClip = nearClip;
     s_worldNearClip = isfinite(worldNearClip) && worldNearClip > 0.0f ? worldNearClip : SCENE_FX_DEFAULT_WORLD_NEAR_CLIP;

@@ -6295,3 +6295,40 @@ Validation:
   renderer archive, which holds the weapon files, changes.
 
 Not covered: nobody played with the new rifles in the browser.
+
+## Sun shafts and explosion shockwaves — 2026-10-24
+
+The owner asked for better graphics overall without costing much frame rate.
+Details and measurements are in `docs/GRAPHICS_2026-10-16.md` ("Sun shafts
+and explosion shockwaves").
+
+- Rendering the 3D view at more of the canvas's lines was measured first and
+  rejected: at Matmata's dusk on the M4, vsync off, 720 lines ran at 182 to
+  187 fps, 900 at 141 to 149 and 1080 at 118 to 134. The view stays at 720.
+- `downstream/wasm/web_scene_fx.c` adds shafts of sunlight (`r_sunShafts`,
+  0 to 2, archived, 1) in two quarter-resolution passes: the sky about the
+  sun, weighted by its brightness, gathered toward the sun so that what stands
+  against the sky cuts lanes through the light. A low sun glows wider and
+  throws longer shafts than a high one, by the air its light crosses.
+- Grenade, S-Mine, C4 and rocket explosions (`cg_event_mp.c`) start a
+  shockwave (`r_shockwave`, archived, on): for 450 ms a front spreading to
+  1.6 times the blast's radius bends the view about it by up to 3% of the
+  screen's height, fading with age and distance, never over the viewmodel or
+  surfaces well before the explosion.
+- Compositor samplers past the eighth bind from unit 20, clear of the
+  camouflage's units 16 and 17.
+
+Validation:
+
+- `test-web-scene-fx.py` (114 mutants, from 82), `test-viewmodel-motion.py`,
+  `test-web-point-lights.cjs` and `test-rumble.py` in `test-static.sh`, which
+  passes in full; the GPU script `test-web-scene-fx.mjs` (171 checks, from
+  138) on the M4.
+- On the isolated QA stack: shafts behind Matmata's palms at dusk, a compact
+  sun in Toujane's and Burgundy's skies, and a shockwave warping a tank and a
+  jeep 400 units off. With the sun in view at Matmata's dusk the shafts cost
+  about 2 to 4% of the uncapped frame rate over three sessions (189–191 to
+  185–187 fps in the first); facing away from it, nothing.
+
+Not covered: only the M4 in Chrome was measured; scripted explosions start no
+shockwave.
