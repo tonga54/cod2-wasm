@@ -319,6 +319,19 @@ retail CoD2:
   highlights, so stones, bricks and planks stand out and near things separate
   from far ones (`r_clarity`, 0 to 2, archived, 1). See
   [graphics validation and limits](GRAPHICS_2026-10-16.md).
+- **Surface realism:** lightmapped surfaces vary in tone over several
+  repeats of their color map, the ground by up to 22% and walls by 8%, its
+  paler patches drier and warmer and its darker ones cooler about the map's
+  own color, so fields, roads and sand no longer repeat one tile and each map
+  keeps its palette; terrain layers blended by their vertices meet along their
+  texture's own stones and tufts, at the same average opacity
+  (`r_surfaceVariation`, 0 to 2, archived, 1). A detail map's grain tilts the
+  lit normal, so the sun catches sand, stone and plaster up close
+  (`r_detailRelief`, 0 to 2, archived, 1), and a magnified color map is
+  sharpened against itself a mip and a half blurrier (`r_textureSharpen`,
+  0 to 2, archived, 1); both fade out as the maps minify. About 0.1 ms a
+  frame on an Apple M4. See
+  [graphics validation and limits](GRAPHICS_2026-10-16.md#surface-realism-october-25-2026).
 - **Sun shafts and shockwaves:** the sky about the sun throws shafts of light
   past whatever stands against it, wider and longer when the sun is low, from
   two quarter-resolution passes (`r_sunShafts`, 0 to 2, archived, 1). Grenade,

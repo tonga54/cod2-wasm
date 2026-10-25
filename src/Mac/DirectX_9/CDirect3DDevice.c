@@ -11,7 +11,8 @@ extern void WebPointLights_Draw(const float *view, int enabled, int worldShadowE
                                int normalMap, int specularMap, int detailMap, float detailX, float detailY,
                                int lightmapped, float specularScale, float sunShading, float sunVisibility,
                                int camoMap, int camoMask, float camoTiles, float camoReference, float lodBias,
-                               float reflection, float cavity);
+                               float reflection, float cavity, float variation, float detailRelief,
+                               float sharpen);
 extern float WebSceneFx_TextureLodBias(void);
 extern float WebSceneFx_WorldNearClip(void);
 extern float g_webEntitySunVisibility;
@@ -25,6 +26,9 @@ extern const dvar_t *r_specularColorScale;
 extern const dvar_t *r_sunShading;
 extern const dvar_t *r_reflections;
 extern const dvar_t *r_cavity;
+extern const dvar_t *r_surfaceVariation;
+extern const dvar_t *r_detailRelief;
+extern const dvar_t *r_textureSharpen;
 #endif
 
 /* This reconstructed translation unit doesn't include the GL header. Keep
@@ -2486,7 +2490,10 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                 (int)camoMap, (int)camoMask, camoTiles, camoReference,
                 is2D ? 0.0f : WebSceneFx_TextureLodBias(),
                 r_reflections && r_reflections->current.enabled ? 1.0f : 0.0f,
-                r_cavity ? r_cavity->current.value : 0.0f);
+                r_cavity ? r_cavity->current.value : 0.0f,
+                r_surfaceVariation ? r_surfaceVariation->current.value : 0.0f,
+                r_detailRelief ? r_detailRelief->current.value : 0.0f,
+                r_textureSharpen ? r_textureSharpen->current.value : 0.0f);
         }
         {
             /* Multisample coverage for alpha-tested surfaces, and the feather

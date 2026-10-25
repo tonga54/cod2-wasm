@@ -27,6 +27,22 @@ for (const [name, file] of Object.entries({before: baseline, after: candidate}))
     shaders[name].push({model, matrix, source: '#version 300 es\nout highp vec4 result;\n' +
       fragment.replace(/varying/g, 'in').replace(/texture2D/g, 'texture').replace(/gl_FragColor/g, 'result')});
   }
+  // The texture environment as the engine generates it for the lightmapped
+  // world: terrain layers blend by its vertex alpha.
+  for (const matrix of [false, true]) {
+    const uv = unit => matrix ? `(u_textureMatrix${unit} * v_texCoord${unit}).xy` : `v_texCoord${unit}.xy`;
+    const material = `vec4 tej_env0_texload0 = texture2D(u_texUnit0, ${uv(0)});\n` +
+      'vec3 tej_env0_color = v_color.rgb * tej_env0_texload0.rgb;\nfloat tej_env0_alpha = v_color.a * tej_env0_texload0.a;\n' +
+      `vec4 tej_env1_texload1 = texture2D(u_texUnit1, ${uv(1)});\n` +
+      'gl_FragColor = vec4(tej_env0_color * tej_env1_texload1.rgb * 2.0, tej_env0_alpha);';
+    const s = generate.call({usedTexUnitList: [0, 1]}, {useTextureMatrix: matrix, TexEnvJIT: {getTexUnitType: () => 0x0DE1}},
+      {lightingEnabled: false, MAX_LIGHTS: 8, lightEnabled: []}, material);
+    const fragment = 'precision mediump float; uniform sampler2D u_texUnit0; uniform sampler2D u_texUnit1;' +
+      'uniform mat4 u_textureMatrix0; uniform mat4 u_textureMatrix1; varying highp vec4 v_texCoord0; varying highp vec4 v_texCoord1;' +
+      `varying mediump vec4 v_color; ${s.pointDefs}\nvoid main(){${s.fsTexEnvPass}\n${s.pointPass}}`;
+    shaders[name].push({model: false, matrix, jit: true, source: '#version 300 es\nout highp vec4 result;\n' +
+      fragment.replace(/varying/g, 'in').replace(/texture2D/g, 'texture').replace(/gl_FragColor/g, 'result')});
+  }
 }
 const browser = await chromium.launch({headless: false, executablePath: process.env.CHROME_EXECUTABLE || undefined});
 try {
@@ -45,10 +61,10 @@ try {
     // A slope turns the world's plane away from the camera about its y axis.
     // eyeScale widens the plane, and each pixel, by its factor.
     const vs = compile(gl.VERTEX_SHADER, '#version 300 es\nprecision highp float;uniform vec3 normal;uniform float uvScale;uniform float slope;' +
-      'uniform float eyeScale;' +
+      'uniform float eyeScale;uniform float vertexAlpha;' +
       'out highp vec3 v_cod2Eye;out mediump vec3 v_cod2Normal;out highp vec4 v_texCoord0;out highp vec4 v_texCoord1;out mediump vec4 v_color;' +
       'void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.-1.,0,1);v_texCoord0=vec4(p*uvScale,0,1);' +
-      'v_texCoord1=vec4(p,0,1);v_cod2Eye=vec3((p-.5)*16.*eyeScale,-40.+slope*(p.x-.5)*16.*eyeScale);v_cod2Normal=normal;v_color=vec4(.5,.5,.5,1);}');
+      'v_texCoord1=vec4(p,0,1);v_cod2Eye=vec3((p-.5)*16.*eyeScale,-40.+slope*(p.x-.5)*16.*eyeScale);v_cod2Normal=normal;v_color=vec4(.5,.5,.5,vertexAlpha);}');
     const programs = {};
     for (const [name, list] of Object.entries(shaders)) programs[name] = list.map(shader => {
       const p = gl.createProgram(); gl.attachShader(p, vs); gl.attachShader(p, compile(gl.FRAGMENT_SHADER, shader.source));
@@ -83,9 +99,10 @@ try {
       gl.uniform1i(u('u_cod2SunShadowMap'), 18);
       gl.uniform3fv(u('normal'), set.normal || [0, 0, 1]); gl.uniform1f(u('uvScale'), set.uvScale || 1);
       gl.uniform1f(u('slope'), set.slope || 0); gl.uniform1f(u('eyeScale'), set.eyeScale || 1);
+      gl.uniform1f(u('vertexAlpha'), set.vertexAlpha === undefined ? 1 : set.vertexAlpha);
       gl.uniform4fv(u('u_cod2Surface'), set.surface || [0, 0, 0, 1]); gl.uniform4fv(u('u_cod2Detail'), set.detail || [0, 0, 0, 0]);
       gl.uniform4fv(u('u_cod2Model'), [set.sunVisibility || 0, 0, 0, 0]);
-      gl.uniform4fv(u('u_cod2Relief'), [set.cavity || 0, 0, 0, 0]);
+      gl.uniform4fv(u('u_cod2Relief'), [set.cavity || 0, set.variation || 0, set.detailRelief || 0, set.sharpen || 0]);
       gl.uniform3fv(u('u_cod2SunEye'), set.sun || [0, 0, 1]);
       if (uniformType(p, 'u_cod2SkyEye') === gl.FLOAT_VEC4)
         gl.uniform4fv(u('u_cod2SkyEye'), [...(set.sky || [0, 1, 0]), set.reflection === undefined ? 1 : set.reflection]);
@@ -244,6 +261,80 @@ try {
         close(center(draw(after, {detail: [1, 1, 1, 0]})), L.map(l => base * 2 * l * (64 / 255) * 2), 2, `${kind}: detail map at twice its value`);
         texture(5, 16, solid([128, 128, 128, 255]));
         check(same(draw(after, {detail: [1, 1, 1, 0]}), original, 1), `${kind}: a mid-grey detail map keeps the texture`);
+        // COD2_SURFACE_VARIATION: over eight repeats of a flat map the tone moves
+        // by at most 22% on the ground and 8% on a wall, about the same mean, the
+        // paler patches warmer and the darker cooler about the same color; it
+        // rides on the map's coordinates alone.
+        {
+          const ground = {surface: [0, 0, 1, 1], shading: 0, sun: [0, 0, 1], sky: [0, 0, 1], uvScale: 8};
+          const wall = {...ground, sky: [0, 1, 0]};
+          const plain = draw(after, ground);
+          check(same(draw(after, {...ground, variation: 0}), plain) && same(draw(before, {...ground, variation: 1}), draw(before, ground)),
+            `${kind}: r_surfaceVariation 0, or the baseline, varies nothing`);
+          const ratios = (pixels, channel) => {
+            const out = [];
+            for (let j = 0; j < 64 * 64; ++j) out.push(pixels[j * 4 + channel] / Math.max(plain[j * 4 + channel], 1));
+            return out;
+          };
+          const spread = r => [Math.min(...r), Math.max(...r)];
+          const groundGreen = ratios(draw(after, {...ground, variation: 1}), 1), wallGreen = ratios(draw(after, {...wall, variation: 1}), 1);
+          const [gLow, gHigh] = spread(groundGreen), [wLow, wHigh] = spread(wallGreen);
+          check(gLow >= 0.76 && gHigh <= 1.25 && gHigh - gLow > 0.15,
+            `${kind}: the ground's tone moves within 22% (${gLow.toFixed(3)} to ${gHigh.toFixed(3)})`);
+          check(wLow >= 0.9 && wHigh <= 1.1 && wHigh - wLow > 0.05 && (gHigh - gLow) > 2 * (wHigh - wLow),
+            `${kind}: a wall's within 8% (${wLow.toFixed(3)} to ${wHigh.toFixed(3)})`);
+          const mean = r => r.reduce((a, b) => a + b, 0) / r.length;
+          check(Math.abs(mean(groundGreen) - 1) < 0.05, `${kind}: about the same mean (${mean(groundGreen).toFixed(3)})`);
+          const varied = draw(after, {...ground, variation: 1});
+          const order = [...Array(64 * 64).keys()].sort((a, b) => groundGreen[a] - groundGreen[b]);
+          const warmth = list => mean(list.map(j => varied[j * 4 + 2] / Math.max(varied[j * 4], 1)));
+          check(warmth(order.slice(-400)) < warmth(order.slice(0, 400)) - 0.02,
+            `${kind}: its paler patches are warmer (blue to red ${warmth(order.slice(-400)).toFixed(3)} against ${warmth(order.slice(0, 400)).toFixed(3)})`);
+          const hue = mean(ratios(varied, 2)) / mean(ratios(varied, 0));
+          check(Math.abs(hue - 1) < 0.015, `${kind}: about the map's own color (blue to red ${hue.toFixed(3)} of the plain map's)`);
+          const [g2Low, g2High] = spread(ratios(draw(after, {...ground, variation: 2}), 1));
+          check(g2High - g2Low > 1.6 * (gHigh - gLow), `${kind}: r_surfaceVariation 2 varies more (${g2Low.toFixed(3)} to ${g2High.toFixed(3)})`);
+          check(same(draw(after, {...ground, variation: 1, eyeScale: 3}), varied, 1), `${kind}: it holds still on the surface as the eye moves off`);
+        }
+        // COD2_DETAIL_RELIEF: a detail map rising along +u leans the surface
+        // toward -u: lit from there it brightens, from +u it darkens, with or
+        // without a normal map; minified four texels a pixel, it lies flat.
+        {
+          texture(5, 16, x => [40 + 12 * x, 40 + 12 * x, 40 + 12 * x, 255]);
+          for (const surface of [[1, 0, 1, 1], [0, 0, 1, 1]]) {
+            const lit = {surface, shading: 1, detail: [1, 1, 1, 0]};
+            const px = pixels => pixels[(32 * 64 + 32) * 4];
+            for (const [side, sun, sign] of [['-u', [-0.6, 0, 0.8], 1], ['+u', [0.6, 0, 0.8], -1]]) {
+              const flat = px(draw(after, {...lit, sun})), relief = px(draw(after, {...lit, sun, detailRelief: 1}));
+              check(sign * (relief - flat) > 5, `${kind}${surface[0] ? '' : ', no normal map'}: lit from ${side} the grain ${sign > 0 ? 'brightens' : 'darkens'} (${flat} to ${relief})`);
+            }
+            const flat = draw(after, {...lit, sun: [-0.6, 0, 0.8]});
+            check(same(draw(after, {...lit, sun: [-0.6, 0, 0.8], detailRelief: 0}), flat), `${kind}: r_detailRelief 0 lifts nothing`);
+            const far = {...lit, sun: [-0.6, 0, 0.8], uvScale: 16};
+            check(same(draw(after, {...far, detailRelief: 1}), draw(after, far), 1), `${kind}: minified four texels a pixel, it lies flat`);
+          }
+          texture(5, 16, solid([128, 128, 128, 255]));
+        }
+        // COD2_TEXTURE_SHARPEN: beside an edge in a magnified map the dark side
+        // darkens and the light side lightens; texels well inside either half,
+        // and a map minified four texels a pixel, keep their color.
+        {
+          texture(0, 16, x => x < 8 ? [60, 60, 60, 200] : [180, 180, 180, 200]);
+          const plane = {surface: [0, 0, 1, 1], shading: 0, sun: [0, 0, 1]};
+          const px = (pixels, x) => pixels[(32 * 64 + x) * 4];
+          const soft = draw(after, plane), sharp = draw(after, {...plane, sharpen: 1});
+          check(px(sharp, 29) < px(soft, 29) - 3 && px(sharp, 34) > px(soft, 34) + 3,
+            `${kind}: an edge gains contrast (${px(soft, 29)} to ${px(sharp, 29)}, ${px(soft, 34)} to ${px(sharp, 34)})`);
+          // The map repeats: texels 4 and 12 lie farthest from both of its edges.
+          check(Math.abs(px(sharp, 18) - px(soft, 18)) <= 1 && Math.abs(px(sharp, 50) - px(soft, 50)) <= 1,
+            `${kind}: texels well inside keep their color`);
+          check(same(draw(after, {...plane, sharpen: 0}), soft) && same(draw(before, {...plane, sharpen: 1}), draw(before, plane)),
+            `${kind}: r_textureSharpen 0, or the baseline, sharpens nothing`);
+          const far = {...plane, uvScale: 16};
+          check(same(draw(after, {...far, sharpen: 1}), draw(after, far), 1), `${kind}: minified four texels a pixel, nothing`);
+          check(sharp.every((v, j) => j % 4 !== 3 || v === 200), `${kind}: sharpening keeps the alpha`);
+          texture(0, 16, solid([100, 100, 100, 200]));
+        }
       } else {
         const color = base * 0.5;
         // Lit models keep the vertex lighting; flat normals change nothing.
@@ -269,6 +360,32 @@ try {
       }
       check(draw(after, {surface: [1, 1, 1, 1], detail: [1, 1, 1, 0], sunVisibility: 1}).every((v, j) => j % 4 !== 3 || v === 200),
         `${kind}: every map keeps the material's alpha`);
+    }
+    // COD2_TERRAIN_BLEND: a layer at half its vertex alpha takes over where its
+    // texture is brighter than its mean and gives way where darker, about the
+    // same average opacity; at full vertex alpha, under r_surfaceVariation 0
+    // and in the baseline its alpha is as authored.
+    for (const index of [4, 5]) {
+      const before = programs.before[index], after = programs.after[index], kind = 'terrain layer' + (after.matrix ? ', matrix UV' : '');
+      texture(0, 16, (x, y) => ((x >> 1) + (y >> 1)) % 2 ? [190, 190, 190, 255] : [70, 70, 70, 255]);
+      lightmap(255);
+      const layer = {surface: [0, 0, 1, 1], shading: 0, sun: [0, 0, 1], vertexAlpha: 0.5};
+      const authored = draw(after, layer), blended = draw(after, {...layer, variation: 1});
+      const alphaAt = (pixels, x, y) => pixels[(y * 64 + x) * 4 + 3];
+      check([...Array(64 * 64).keys()].every(j => Math.abs(authored[j * 4 + 3] - 128) <= 1), `${kind}: r_surfaceVariation 0 keeps the vertex alpha`);
+      let bright = 0, dark = 0, total = 0, count = 0;
+      for (let y = 2; y < 62; y += 4) for (let x = 2; x < 62; x += 4) {
+        const texelBright = ((x >> 3) + (y >> 3)) % 2 === 1, a = alphaAt(blended, x, y);
+        if (texelBright) bright += a; else dark += a;
+        total += a; ++count;
+      }
+      bright /= count / 2; dark /= count / 2;
+      check(bright > 175 && dark < 80, `${kind}: brighter texels take over, darker give way (${bright.toFixed(0)} and ${dark.toFixed(0)})`);
+      check(Math.abs(total / count - 128) < 12, `${kind}: about the same average opacity (${(total / count).toFixed(0)})`);
+      const full = draw(after, {...layer, vertexAlpha: 1, variation: 1});
+      check(full.every((v, j) => j % 4 !== 3 || v === 255), `${kind}: at full vertex alpha it is as authored`);
+      check(same(draw(before, {...layer, variation: 1}), draw(before, layer)), `${kind}: the baseline blends as authored`);
+      texture(0, 16, solid([100, 100, 100, 200]));
     }
     check(gl.getError() === gl.NO_ERROR, 'no WebGL errors');
     const debug = gl.getExtension('WEBGL_debug_renderer_info');

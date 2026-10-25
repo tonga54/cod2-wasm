@@ -6512,3 +6512,41 @@ Validation:
 Not covered: the textures are procedural; snow, mud and wood were not seen in
 game; effects other than the grenades' that play CoD2's `grenade_flash` keep
 it; the Pi's rebuild was not run; only the M4 in Chrome was measured.
+
+## Surface realism — 2026-10-25
+
+The owner asked for the textures of every map to look more realistic. Details
+and measurements are in `docs/GRAPHICS_2026-10-16.md` ("Surface realism").
+
+- Large surfaces repeated one tile of their color map (Toujane's courtyard,
+  the Normandy fields and roads, Matmata's sand); terrain layers met in a
+  linear smear; detail maps only darkened and lightened the color; magnified
+  color maps blurred up close.
+- `scripts/patch-emscripten-gl.py` adds to the lightmapped world's shaders:
+  tone variation over two octaves of noise in the color map's coordinates, up
+  to 22% on the ground and 8% on walls, paler patches warmer and darker ones
+  cooler about the map's own color, and terrain
+  layers that follow their texture's relative brightness at the same average
+  opacity (`r_surfaceVariation`); the detail map's grain as relief
+  (`r_detailRelief`); magnified color maps sharpened against their own mip a
+  level and a half up (`r_textureSharpen`). All three are archived, 0 to 2,
+  default 1, and ride in `u_cod2Relief` beside `r_cavity`; models are
+  unchanged.
+
+Validation:
+
+- `test-web-point-lights.cjs` and `test-web-materials.py` in
+  `test-static.sh`; the GPU script `test-web-material-lighting.mjs` (169
+  checks, from 109) on the M4, which eleven temporary shader mutants fail,
+  a warm cast over the whole map among them. A first version that only
+  warmed the paler patches turned every map 6.5% warmer and Leningrad's snow
+  from faintly blue to neutral.
+- On the isolated QA stack, the 32 TDM-spawn views against the client built
+  from `458998c`: fields read as meadows, roads and sand vary, cobbles break
+  through Toujane's sand, cobbles and rubble walls gain grain up close; no
+  seams in the interiors. The three dvars switched off and on in a
+  drift-cancelling order cost about 0.1 ms a frame in Carentan's street and
+  Toujane's courtyard.
+
+Not covered: no new texture data; surfaces meeting with different mappings
+vary apart along their seam; only the M4 in Chrome was measured.

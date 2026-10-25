@@ -44,6 +44,9 @@ const dvar_t *r_sunShafts;
 const dvar_t *r_shockwave;
 const dvar_t *r_cavity;
 const dvar_t *r_clarity;
+const dvar_t *r_surfaceVariation;
+const dvar_t *r_detailRelief;
+const dvar_t *r_textureSharpen;
 #endif
 extern const dvar_t *r_znear;
 extern const dvar_t *r_znear_depthhack;
@@ -565,6 +568,16 @@ void R_RegisterDvars(void)
     /* How far each pixel's light moves from its surroundings', 0 for none
      * (downstream/wasm/web_scene_fx.c). */
     r_clarity = ri.Dvar_RegisterFloat("r_clarity", 1.0f, 0.0f, 2.0f, 0x2001);
+    /* How much lightmapped surfaces vary in tone over several repeats of
+     * their color map, and their terrain layers meet along the layer's own
+     * relief, 0 for neither. */
+    r_surfaceVariation = ri.Dvar_RegisterFloat("r_surfaceVariation", 1.0f, 0.0f, 2.0f, 0x2001);
+    /* How far a lightmapped surface's detail map tilts its lit normal, 0 for
+     * none. */
+    r_detailRelief = ri.Dvar_RegisterFloat("r_detailRelief", 1.0f, 0.0f, 2.0f, 0x2001);
+    /* How much a lightmapped surface's color map is sharpened where it is
+     * magnified, 0 for none. */
+    r_textureSharpen = ri.Dvar_RegisterFloat("r_textureSharpen", 1.0f, 0.0f, 2.0f, 0x2001);
 #endif
 
     r_outdoorAwayBias = ri.Dvar_RegisterFloat("r_outdoorAwayBias", 32.0f, -3.4028235e+38f, 3.4028235e+38f, 0x2000);

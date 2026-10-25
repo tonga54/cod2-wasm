@@ -37,7 +37,7 @@ const set = emjs('WebPointLights_Set', ['packed', 'count']);
 // The device hands each draw's material maps over with its lights and shadows.
 const drawParams = ['view', 'enabled', 'worldShadowEnabled', 'colorOrder', 'normalMap', 'specularMap', 'detailMap',
   'detailX', 'detailY', 'lightmapped', 'specularScale', 'sunShading', 'sunVisibility', 'camoMap', 'camoMask', 'camoTiles',
-  'camoReference', 'lodBias', 'reflection', 'cavity'];
+  'camoReference', 'lodBias', 'reflection', 'cavity', 'variation', 'detailRelief', 'sharpen'];
 const drawHead = 'EM_JS(void, WebPointLights_Draw, (';
 const drawSignature = bridge.slice(bridge.indexOf(drawHead) + drawHead.length, bridge.indexOf('), {', bridge.indexOf(drawHead)));
 assert.deepEqual(drawSignature.split(',').map(param => param.trim().split(/[\s*]+/).pop()), drawParams);
@@ -46,7 +46,7 @@ const externHead = 'extern void WebPointLights_Draw(';
 const externSignature = device.slice(device.indexOf(externHead) + externHead.length, device.indexOf(');', device.indexOf(externHead)));
 assert.equal(externSignature.replace(/\s+/g, ' '), drawSignature.replace(/\s+/g, ' '), 'the device declares the bridge it calls');
 const drawFloats = drawSignature.split(',').map(param => /^\s*float\s+\w+\s*$/.test(param));
-assert.equal(drawFloats.filter(Boolean).length, 10);
+assert.equal(drawFloats.filter(Boolean).length, 13);
 const drawJs = emjs('WebPointLights_Draw', drawParams);
 // The engine passes C floats, and passes every argument: the ones a check
 // leaves out are zero.
@@ -351,6 +351,17 @@ drawScene(256, 1, 1, 0, ...full, 0, 0, 0, 0, 0, 0, NaN);
 assert.equal(material.relief[0], 0);
 drawScene(256, 1, 1, 0, ...full);
 assert.equal(material.relief[0], 0);
+// r_surfaceVariation, r_detailRelief and r_textureSharpen ride in its y, z and w
+// alike: at most 2, and none for a broken or missing value.
+drawScene(256, 1, 1, 0, ...full, 0, 0, 0, 0, 0, 0, 1, 1, 0.5, 2);
+assert.deepEqual([...material.relief], [1, 1, 0.5, 2]);
+drawScene(256, 1, 1, 0, ...full, 0, 0, 0, 0, 0, 0, 0, 3, 7, 0.25);
+assert.deepEqual([...material.relief], [0, 2, 2, 0.25]);
+drawScene(256, 1, 1, 0, ...full, 0, 0, 0, 0, 0, 0, 0, NaN, -1, NaN);
+assert.deepEqual([...material.relief], [0, 0, 0, 0]);
+drawScene(256, 1, 1, 0, ...full, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1);
+drawScene(256, 1, 1, 0, ...full);
+assert.deepEqual([...material.relief], [0, 0, 0, 0]);
 for (let i = 0; i < 1000; ++i) drawScene(256, 1, 1, 0, ...full);
 assert.deepEqual(glCalls, [], '1000 draws of one material bind nothing more');
 // A material without maps leaves the units alone; its flags turn them off.
@@ -513,7 +524,8 @@ for (const matrix of [false, true]) {
     'UV derivatives read full-precision coordinates');
   assert.equal(world.fsTexEnvPass.split('\n')[0], `vec4 cod2LightmapTexel = ${lightmap};`);
   assert.equal((world.fsTexEnvPass + world.pointPass).split(lightmap).length, 2, 'one lightmap lookup');
-  assert.equal((world.fsTexEnvPass + world.pointPass).match(/texture2D\(u_texUnit0/g).length, 1);
+  assert.equal((world.fsTexEnvPass + world.pointPass).match(/texture2D\(u_texUnit0/g).length, 1,
+    'one lookup of the color map; sharpening and terrain blends add their own, behind their flags');
   assert(world.pointPass.startsWith('if (u_cod2Detail.z > 0.5)\n'));
   const lit = world.pointPass.indexOf('if (u_cod2Surface.z > 0.5) {');
   assert(lit > 0 && lit < world.pointPass.indexOf('if (u_cod2LightCount > 0)'), 'flashes add after the material');
@@ -556,6 +568,56 @@ for (const matrix of [false, true]) {
     'rough maps keep little of the grazing gain');
   assert(world.pointPass.includes('* (cod2Fresnel * cod2Gloss * u_cod2Surface.w);'));
   assert.equal(world.pointPass.match(/texture2D\(u_cod2SpecMap/g).length, 1, 'one specular lookup');
+  // COD2_SURFACE_VARIATION: two octaves of value noise over the color map's own
+  // coordinates vary the tone after the detail map and before the light, the
+  // ground more than walls; the paler patches turn drier and warmer and the
+  // darker ones cooler, about the map's own color.
+  assert(world.pointDefs.includes('highp float cod2Hash(highp vec2 p) {\n'));
+  assert(world.pointDefs.includes('float cod2Noise(highp vec2 p) {\n'));
+  const variation = world.pointPass.indexOf('if (u_cod2Relief.y > 0.0) {\n' +
+    `highp vec2 cod2VarUv = ${uv(0)};\n` +
+    'float cod2Var = 0.65 * cod2Noise(cod2VarUv * 0.43 + vec2(17.0, 31.0)) +\n' +
+    '  0.35 * cod2Noise(mat2(0.8, -0.6, 0.6, 0.8) * cod2VarUv * 1.37 + vec2(5.0, 9.0));\n' +
+    'float cod2Floor = dot(cod2N, u_cod2SkyEye.xyz);\n' +
+    'gl_FragColor.rgb *= 1.0 + u_cod2Relief.y * mix(0.08, 0.22, cod2Floor * cod2Floor) * (2.0 * cod2Var - 1.0);\n' +
+    'gl_FragColor.rgb *= 1.0 + 0.6 * min(u_cod2Relief.y, 1.5) * (cod2Var - 0.5) * vec3(0.05, -0.01, -0.16);\n}\n');
+  assert(variation > world.pointPass.indexOf('if (dot(cod2N, v_cod2Eye) > 0.0) cod2N = -cod2N;') &&
+    variation < world.pointPass.indexOf('highp vec3 cod2B = cod2N;'), 'the tone varies before the surface is lit');
+  // COD2_DETAIL_RELIEF: the detail map tilts the normal after the normal map,
+  // fading as it minifies, behind its own flag.
+  assert(world.pointDefs.includes('highp vec3 cod2DetailBump(highp vec3 b, highp vec3 n, highp vec2 uv, float strength) {\n'));
+  assert(world.pointDefs.includes('  float fade = clamp(1.5 - 0.5 * texels, 0.0, 1.0);\n  if (fade <= 0.0) return b;\n'),
+    'the grain flattens as the detail map minifies');
+  assert(world.pointDefs.includes('  highp vec3 r = b - (strength * fade) * ((hu - h) * tu + (hv - h) * tv) * s;\n'),
+    'the surface leans away from where the grain rises');
+  const detailRelief = world.pointPass.indexOf('if (u_cod2Detail.z > 0.5 && u_cod2Relief.z > 0.0) cod2B = cod2DetailBump(cod2B, cod2N, ' +
+    `${uv(0)} * u_cod2Detail.xy, 6.0 * u_cod2Relief.z);\n`);
+  assert(detailRelief > world.pointPass.indexOf(`cod2Bump(cod2N, ${uv(0)}, 1.0)`) &&
+    detailRelief < world.pointPass.indexOf('float cod2NLG = max(dot(cod2N, u_cod2SunEye), 0.0)'), 'the grain lifts the relit normal');
+  // The real texture environment's base texel and alpha: a magnified color map
+  // is sharpened against itself a mip and a half up, and a terrain layer blended
+  // by its vertex alpha follows its texture's relative brightness.
+  const jit = generate.call({usedTexUnitList: [0, 1]}, {...twoD, useTextureMatrix: matrix}, {lightingEnabled: false},
+    `vec4 tej_env0_texload0 = texture2D(u_texUnit0, ${uv(0)});\nvec3 tej_env0_color = v_color.rgb * tej_env0_texload0.rgb;\n` +
+    'float tej_env0_alpha = v_color.a * tej_env0_texload0.a;\n' +
+    `vec4 tej_env1_texload1 = ${lightmap};\ngl_FragColor = vec4(tej_env0_color * tej_env1_texload1.rgb * 2.0, tej_env0_alpha);`,
+    'varying vec4 v_texCoord0;\nvarying vec4 v_texCoord1;\nvarying vec4 v_color;\n');
+  const baseLine = `vec4 cod2BaseTexel = texture2D(u_texUnit0, ${uv(0)}, u_cod2Detail.w);\n`;
+  const sharpen = jit.fsTexEnvPass.indexOf(baseLine + 'if (u_cod2Surface.z > 0.5 && u_cod2Relief.w > 0.0) {\n');
+  assert(sharpen > 0 && sharpen < jit.fsTexEnvPass.indexOf('vec4 tej_env0_texload0 = cod2BaseTexel;'), 'sharpened before it is used');
+  assert(jit.fsTexEnvPass.includes('  float cod2Sharpen = 0.5 * u_cod2Relief.w * (1.0 - smoothstep(1.0, 2.5, cod2Span));\n'),
+    'off past two and a half texels a pixel');
+  assert(jit.fsTexEnvPass.includes(`    vec3 cod2Soft = textureLod(u_texUnit0, ${uv(0)}, max(log2(max(cod2Span, 1e-4)) + u_cod2Detail.w, 0.0) + 1.5).rgb;\n` +
+    '    cod2BaseTexel.rgb = max(cod2BaseTexel.rgb + cod2Sharpen * (cod2BaseTexel.rgb - cod2Soft), vec3(0.0));\n'));
+  const blend = jit.fsTexEnvPass.indexOf('float tej_env0_alpha = v_color.a * tej_env0_texload0.a;\n' +
+    'if (u_cod2Surface.z > 0.5 && u_cod2Relief.y > 0.0 && v_color.a < 0.995) {\n' +
+    `  float cod2Mean = dot(textureLod(u_texUnit0, ${uv(0)}, 12.0).rgb, vec3(0.299, 0.587, 0.114));\n` +
+    '  float cod2Height = dot(tej_env0_texload0.rgb, vec3(0.299, 0.587, 0.114)) / max(cod2Mean, 0.02) - 1.0;\n' +
+    '  float cod2Blend = clamp(v_color.a + 0.9 * u_cod2Relief.y * cod2Height * (1.0 - abs(2.0 * v_color.a - 1.0)), 0.0, 1.0);\n' +
+    '  tej_env0_alpha = mix(cod2Blend, smoothstep(0.0, 1.0, cod2Blend), 0.6 * min(u_cod2Relief.y, 1.0)) * tej_env0_texload0.a;\n}\n');
+  assert(blend > sharpen, 'terrain layers blend by their relief after the base texel');
+  assert.equal(jit.fsTexEnvPass.match(/texture2D\(u_texUnit0/g).length, 1);
+  assert.equal(jit.fsTexEnvPass.match(/textureLod\(u_texUnit0/g).length, 2, 'the sharpened blur and the layer\'s mean');
   const model = generate.call({usedTexUnitList: [0]}, {...twoD, useTextureMatrix: matrix},
     {lightingEnabled: true, MAX_LIGHTS: 8, lightEnabled: [true, true, false, true, false, false, false, false]},
     `gl_FragColor = texture2D(u_texUnit0, ${uv(0)}) * v_color;`);
@@ -571,6 +633,8 @@ for (const matrix of [false, true]) {
     '  cod2Sun * cod2Incidence;\n'));
   assert(!model.pointPass.includes('cod2LightmapTexel') && !world.pointPass.includes('u_cod2Model'));
   assert(!model.pointPass.includes('cod2Crease('), 'models keep their relief as it was');
+  assert(!/cod2Noise|cod2DetailBump|cod2Sharpen|cod2Blend|u_cod2Relief\.[yzw]/.test(model.pointDefs + model.pointPass + model.fsTexEnvPass),
+    'models keep their tone, grain, sharpness and alpha');
   assert(model.pointPass.includes('if (u_cod2Surface.y > 0.5 && u_cod2SkyEye.w > 0.0) {'), 'r_reflections turns the models\' reflection off too');
   assert.equal(model.pointPass.match(/texture2D\(u_cod2SpecMap/g).length, 1);
   assert(!model.pointPass.includes('gl_FragColor.a'));
@@ -579,7 +643,7 @@ for (const matrix of [false, true]) {
     `gl_FragColor = texture2D(u_texUnit0, ${uv(0)}) * v_color;`);
   assert.deepEqual(single.pointPass.match(/cod2Spec \+= u_lightDiffuse\d/g), ['cod2Spec += u_lightDiffuse5']);
 }
-console.log('PASS: lightmapped world and lit model material passes, with and without texture matrices: one lightmap lookup, enabled lights only, highlights from the grid\'s first and last lights, the world\'s and models\' reflections behind r_reflections, the world\'s folds per unit behind r_cavity');
+console.log('PASS: lightmapped world and lit model material passes, with and without texture matrices: one lightmap lookup, enabled lights only, highlights from the grid\'s first and last lights, the world\'s and models\' reflections behind r_reflections, the world\'s folds per unit behind r_cavity, its tone and terrain blends behind r_surfaceVariation, its detail relief behind r_detailRelief and its magnified color maps sharpened behind r_textureSharpen');
 
 // COD2_SUN_SHADOW: lightmapped world draws take the sun's depth map
 // (web_sun_shadows.c) in their own eye space, its parameters and the casters'

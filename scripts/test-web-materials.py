@@ -27,15 +27,20 @@ assert ('!r_normalMap || r_normalMap->current.integer == 0,\n'
 assert 'pointLight || lightmappedBlend, worldShadow, webColorOrder,' in device
 assert '(int)detailMap, detailScale[0], detailScale[1], materialLighting && stage1Bound == 1,' in device
 # 3D draws give the color map the composed view's mip bias, 2D draws none;
-# r_reflections turns every draw's mirrored surroundings on or off, and
-# r_cavity sets how much a lightmapped surface's folds shade it.
+# r_reflections turns every draw's mirrored surroundings on or off; r_cavity,
+# r_surfaceVariation, r_detailRelief and r_textureSharpen set how a lightmapped
+# surface's folds shade it, how much it varies in tone, how far its detail map
+# tilts its normal and how much its magnified color map is sharpened.
 assert ('materialLighting && dev->lighting ? g_webEntitySunVisibility : 0.0f,\n'
         '                (int)camoMap, (int)camoMask, camoTiles, camoReference,\n'
         '                is2D ? 0.0f : WebSceneFx_TextureLodBias(),\n'
         '                r_reflections && r_reflections->current.enabled ? 1.0f : 0.0f,\n'
-        '                r_cavity ? r_cavity->current.value : 0.0f);') in device
-assert 'extern const dvar_t *r_reflections;' in device
-assert 'extern const dvar_t *r_cavity;' in device
+        '                r_cavity ? r_cavity->current.value : 0.0f,\n'
+        '                r_surfaceVariation ? r_surfaceVariation->current.value : 0.0f,\n'
+        '                r_detailRelief ? r_detailRelief->current.value : 0.0f,\n'
+        '                r_textureSharpen ? r_textureSharpen->current.value : 0.0f);') in device
+for name in ('r_reflections', 'r_cavity', 'r_surfaceVariation', 'r_detailRelief', 'r_textureSharpen'):
+    assert f'extern const dvar_t *{name};' in device, name
 draw = device.index('WebMaterials_Select(((materialCommands_t *)imp_tess)->material,')
 assert device.index('stage1Bound = 1;') < draw < device.index('WebPointLights_Draw(pointLightViewValid', draw)
 # A camouflaged gun is a lit model draw of the frame's painted entity and
@@ -51,7 +56,10 @@ dvars = (root / 'src/PC/gfx_d3d/r_dvars.c').read_text()
 for registration in ('r_materialLighting = ri.Dvar_RegisterBool("r_materialLighting", 1, 0x2001);',
                      'r_sunShading = ri.Dvar_RegisterFloat("r_sunShading", 0.65f, 0.0f, 1.0f, 0x2001);',
                      'r_reflections = ri.Dvar_RegisterBool("r_reflections", 1, 0x2001);',
-                     'r_cavity = ri.Dvar_RegisterFloat("r_cavity", 1.0f, 0.0f, 2.0f, 0x2001);'):
+                     'r_cavity = ri.Dvar_RegisterFloat("r_cavity", 1.0f, 0.0f, 2.0f, 0x2001);',
+                     'r_surfaceVariation = ri.Dvar_RegisterFloat("r_surfaceVariation", 1.0f, 0.0f, 2.0f, 0x2001);',
+                     'r_detailRelief = ri.Dvar_RegisterFloat("r_detailRelief", 1.0f, 0.0f, 2.0f, 0x2001);',
+                     'r_textureSharpen = ri.Dvar_RegisterFloat("r_textureSharpen", 1.0f, 0.0f, 2.0f, 0x2001);'):
     at = dvars.index(registration)
     assert dvars.rindex('#ifdef __EMSCRIPTEN__', 0, at) > dvars.rindex('#endif', 0, at)
 scene = (root / 'src/PC/gfx_d3d/r_scene.c').read_text()

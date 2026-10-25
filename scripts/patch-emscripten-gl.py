@@ -411,15 +411,88 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "    textureLod(u_cod2SunShadowMap, vec3(p.xy + vec2(1.5, -0.5) * t, d), 0.0) +\n" +
                 "    textureLod(u_cod2SunShadowMap, vec3(p.xy + vec2(0.5, 1.5) * t, d), 0.0) +\n" +
                 "    textureLod(u_cod2SunShadowMap, vec3(p.xy + vec2(-1.5, 0.5) * t, d), 0.0);\n" +
-                "  return 1.0 - u_cod2SunShadow.x * fade * (1.0 - 0.25 * lit);\n}\n";
+                "  return 1.0 - u_cod2SunShadow.x * fade * (1.0 - 0.25 * lit);\n}\n" +
+                // COD2_SURFACE_VARIATION: smooth value noise over the color map's
+                // own coordinates, so it holds still on the surface and repeats
+                // nowhere the map does.
+                "highp float cod2Hash(highp vec2 p) {\n" +
+                "  highp vec3 q = fract(vec3(p.xyx) * 0.1031);\n" +
+                "  q += dot(q, q.yzx + 33.33);\n" +
+                "  return fract((q.x + q.y) * q.z);\n}\n" +
+                "float cod2Noise(highp vec2 p) {\n" +
+                "  highp vec2 i = floor(p), f = fract(p);\n" +
+                "  vec2 u = f * f * (3.0 - 2.0 * f);\n" +
+                "  return mix(mix(cod2Hash(i), cod2Hash(i + vec2(1.0, 0.0)), u.x),\n" +
+                "    mix(cod2Hash(i + vec2(0.0, 1.0)), cod2Hash(i + vec2(1.0, 1.0)), u.x), u.y);\n}\n" +
+                // COD2_DETAIL_RELIEF: the detail map's grain read as a height; its
+                // slope one texel along +u and +v tilts the lit normal. It flattens
+                // as the map minifies, as the normal map's relief does.
+                "highp vec3 cod2DetailBump(highp vec3 b, highp vec3 n, highp vec2 uv, float strength) {\n" +
+                "  highp vec2 du1 = dFdx(uv), du2 = dFdy(uv);\n" +
+                "  highp vec2 size = vec2(textureSize(u_cod2DetailMap, 0));\n" +
+                "  highp float texels = sqrt(max(dot(du1 * size, du1 * size), dot(du2 * size, du2 * size)));\n" +
+                "  float fade = clamp(1.5 - 0.5 * texels, 0.0, 1.0);\n" +
+                "  if (fade <= 0.0) return b;\n" +
+                "  float h = dot(texture2D(u_cod2DetailMap, uv).rgb, vec3(0.3333));\n" +
+                "  float hu = dot(texture2D(u_cod2DetailMap, uv + vec2(1.0 / size.x, 0.0)).rgb, vec3(0.3333));\n" +
+                "  float hv = dot(texture2D(u_cod2DetailMap, uv + vec2(0.0, 1.0 / size.y)).rgb, vec3(0.3333));\n" +
+                "  highp vec3 dp1 = dFdx(v_cod2Eye), dp2 = dFdy(v_cod2Eye);\n" +
+                "  highp vec3 a = cross(dp2, n), c = cross(n, dp1);\n" +
+                "  highp vec3 tu = a * du1.x + c * du2.x, tv = a * du1.y + c * du2.y;\n" +
+                "  highp float s = inversesqrt(max(max(dot(tu, tu), dot(tv, tv)), 1e-30));\n" +
+                "  highp vec3 r = b - (strength * fade) * ((hu - h) * tu + (hv - h) * tv) * s;\n" +
+                "  return r * inversesqrt(max(dot(r, r), 1e-30));\n}\n";
+              // COD2_TEXTURE_SHARPEN: a magnified color map against itself a mip
+              // and a half blurrier, so its stones, cracks and grain keep their
+              // edges. Past two and a half texels a pixel it would only sparkle.
+              var baseLine = "vec4 cod2BaseTexel = texture2D(u_texUnit0, " + pointUV + ", u_cod2Detail.w);\n";
+              if (fsTexEnvPass.indexOf(baseLine) !== -1)
+                fsTexEnvPass = fsTexEnvPass.replace(baseLine, baseLine +
+                  "if (u_cod2Surface.z > 0.5 && u_cod2Relief.w > 0.0) {\n" +
+                  "  highp vec2 cod2Texels = " + pointUV + " * vec2(textureSize(u_texUnit0, 0));\n" +
+                  "  highp float cod2Span = sqrt(max(dot(dFdx(cod2Texels), dFdx(cod2Texels)), dot(dFdy(cod2Texels), dFdy(cod2Texels))));\n" +
+                  "  float cod2Sharpen = 0.5 * u_cod2Relief.w * (1.0 - smoothstep(1.0, 2.5, cod2Span));\n" +
+                  "  if (cod2Sharpen > 0.0) {\n" +
+                  "    vec3 cod2Soft = textureLod(u_texUnit0, " + pointUV + ", max(log2(max(cod2Span, 1e-4)) + u_cod2Detail.w, 0.0) + 1.5).rgb;\n" +
+                  "    cod2BaseTexel.rgb = max(cod2BaseTexel.rgb + cod2Sharpen * (cod2BaseTexel.rgb - cod2Soft), vec3(0.0));\n" +
+                  "  }\n}\n");
+              // COD2_TERRAIN_BLEND: a terrain layer blended by its vertices' alpha
+              // takes over where its texture stands above its own average
+              // brightness and gives way where it sinks below, most about the
+              // middle of the blend, so layers meet along stones and tufts rather
+              // than in a smear; its average opacity holds.
+              var alphaLine = "float tej_env0_alpha = v_color.a * tej_env0_texload0.a;\n";
+              if (fsTexEnvPass.indexOf(alphaLine) !== -1)
+                fsTexEnvPass = fsTexEnvPass.replace(alphaLine, alphaLine +
+                  "if (u_cod2Surface.z > 0.5 && u_cod2Relief.y > 0.0 && v_color.a < 0.995) {\n" +
+                  "  float cod2Mean = dot(textureLod(u_texUnit0, " + pointUV + ", 12.0).rgb, vec3(0.299, 0.587, 0.114));\n" +
+                  "  float cod2Height = dot(tej_env0_texload0.rgb, vec3(0.299, 0.587, 0.114)) / max(cod2Mean, 0.02) - 1.0;\n" +
+                  "  float cod2Blend = clamp(v_color.a + 0.9 * u_cod2Relief.y * cod2Height * (1.0 - abs(2.0 * v_color.a - 1.0)), 0.0, 1.0);\n" +
+                  "  tej_env0_alpha = mix(cod2Blend, smoothstep(0.0, 1.0, cod2Blend), 0.6 * min(u_cod2Relief.y, 1.0)) * tej_env0_texload0.a;\n}\n");
               // The browser stores the sun's visibility in the lightmap alpha;
               // the DX7 bake added the sun at full strength whatever the angle.
               materialPass += "if (u_cod2Surface.z > 0.5) {\n" +
                 "highp vec3 cod2N = cross(dFdx(v_cod2Eye), dFdy(v_cod2Eye));\n" +
                 "cod2N *= inversesqrt(max(dot(cod2N, cod2N), 1e-30));\n" +
                 "if (dot(cod2N, v_cod2Eye) > 0.0) cod2N = -cod2N;\n" +
+                // COD2_SURFACE_VARIATION: two octaves of noise a few repeats of the
+                // map wide, set off its grid, vary the surface's tone, the ground
+                // by up to 22% and walls by 8%, its paler patches drier and warmer
+                // and its darker ones cooler about the map's own color, so a field
+                // or a road no longer repeats one tile and a map keeps its palette.
+                "if (u_cod2Relief.y > 0.0) {\n" +
+                "highp vec2 cod2VarUv = " + pointUV + ";\n" +
+                "float cod2Var = 0.65 * cod2Noise(cod2VarUv * 0.43 + vec2(17.0, 31.0)) +\n" +
+                "  0.35 * cod2Noise(mat2(0.8, -0.6, 0.6, 0.8) * cod2VarUv * 1.37 + vec2(5.0, 9.0));\n" +
+                "float cod2Floor = dot(cod2N, u_cod2SkyEye.xyz);\n" +
+                "gl_FragColor.rgb *= 1.0 + u_cod2Relief.y * mix(0.08, 0.22, cod2Floor * cod2Floor) * (2.0 * cod2Var - 1.0);\n" +
+                "gl_FragColor.rgb *= 1.0 + 0.6 * min(u_cod2Relief.y, 1.5) * (cod2Var - 0.5) * vec3(0.05, -0.01, -0.16);\n}\n" +
                 "highp vec3 cod2B = cod2N;\n" +
                 "if (u_cod2Surface.x > 0.5) cod2B = cod2Bump(cod2N, " + pointUV + ", 1.0);\n" +
+                // COD2_DETAIL_RELIEF: the detail map's grain lifts the surface it
+                // darkens and lightens, so the sun catches sand, stone and plaster.
+                "if (u_cod2Detail.z > 0.5 && u_cod2Relief.z > 0.0) cod2B = cod2DetailBump(cod2B, cod2N, " + pointUV +
+                  " * u_cod2Detail.xy, 6.0 * u_cod2Relief.z);\n" +
                 "vec4 cod2S = u_cod2Surface.y > 0.5 ? texture2D(u_cod2SpecMap, " + pointUV + ") : vec4(0.0);\n" +
                 "highp float cod2P = cod2SpecPower(cod2S.a);\n" +
                 "vec4 cod2L = " + lightmapTexel + ";\n" +
