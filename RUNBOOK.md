@@ -6614,3 +6614,47 @@ one; a view names at most four players; a modified client can pick any of the
 target's samples of the last second, as it could pick its command time
 before; the shooter's favour means a target can be hit just after reaching
 cover on its own screen; snapshots stay at 30 Hz.
+
+## Votes from the pause menu — 2026-10-25
+
+The owner asked to vote in a match: a map change and the like.
+
+- The server's votes worked (`callvote`, `vote`, the HUD's lines, F1/F2),
+  but nothing in the game called one: the WWII pause menu had replaced the
+  retail in-game menu and its Call Vote, and a release has no console. The
+  server also counted bots among the voters, so a room with bots failed every
+  vote: one player and six bots needed four yes.
+- `ui_pause_menu.c` adds a **Vote** tab after Change Team: Change Map (Start
+  New Server's arenas, `callvote map`), Change Mode (its modes,
+  `callvote g_gametype`, restarting the map), Restart Map, Next Map and Kick
+  Player (the people in the match, `callvote clientkick`), the map or mode
+  played tagged NOW. While a vote runs the tab is its ballot: what is voted
+  on, the seconds left, both counts and Vote Yes / Vote No (`vote`); Escape
+  opens on it while the player has not voted, and the HUD adds "Press ESC to
+  vote" under its F1/F2 line. `cg_overview_mp.c` hands the menu the vote, the
+  map and mode played and the people other than the viewer, bots left out.
+- `CalculateRanks` no longer counts bots in `numVotingClients`: a vote passes
+  when more than half of the people playing vote yes, a player alone with
+  bots by calling it.
+- The browser adapter keeps F1 and F2 from the browser in a match (Chrome's
+  help on Windows).
+
+Validation:
+
+- `test-pause-menu.py` covers the tab, its choices, ballot, spectators, the
+  pointer and Escape's way back (69 mutants); `test-vote-count.py` (new, in
+  `test-static.sh`) runs the production `CalculateRanks` and `CheckVote`
+  over rooms of players, watchers, joiners and bots, and the cgame's view of
+  the vote (8 mutants); `test-input-capture.cjs` covers F1/F2;
+  `test-pause-overview.py` builds the overview with the vote's fields. Full
+  static suite.
+- Isolated QA stack with the native server and two Chrome clients on
+  Toujane: alone with four bots, Escape, Vote, Change Map, Matmata called a
+  vote that passed at once (`eligible=1`) and loaded Matmata; with two
+  people, one called Headquarters, the other saw the HUD's lines and "Press
+  ESC to vote", Escape opened the ballot, Vote Yes passed it (`eligible=2`)
+  and the map restarted in the new mode. Shots: `out/ww2gfx-research/shots/vote-*.png`.
+
+Not covered: a vote's map and mode lists are the browser's eight arenas and
+five modes; temporary bans and mute stay out of the menu; F1/F2 still depend
+on the keyboard (a Mac needs Fn), Escape always works.

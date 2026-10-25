@@ -88,13 +88,13 @@ typedef union { unsigned int packed; byte array[4]; } GfxColor;
 ''' + header + r'''
 enum { TEAM_FREE, TEAM_AXIS, TEAM_ALLIES, TEAM_SPECTATOR };
 #define CG_SCORE_PANEL_NEUTRAL ''' + neutral + r'''
-typedef struct { int infoValid; int team; } clientInfo_t;
+typedef struct { int infoValid; int team; char name[32]; } clientInfo_t;
 typedef struct { int client; int score; int deaths; } score_t;
-typedef struct { struct { int clientNum; } ps; } snapshot_t;
+typedef struct { struct { int clientNum; int eFlags; } ps; } snapshot_t;
 static snapshot_t snapState;
-static struct { snapshot_t *snap; int time; int scoresRequestTime; int numScores; score_t scores[64];
+static struct { snapshot_t *snap, *nextSnap; int time; int scoresRequestTime; int numScores; score_t scores[64];
     struct { clientInfo_t clientinfo[64]; } bgs; } cgState;
-static struct { char gametype[32]; } cgsState;
+static struct { char gametype[32]; int voteTime, voteYes, voteNo; char voteString[256]; } cgsState;
 #define cg (&cgState)
 #define cgs (&cgsState)
 #include "headers/PC/cgame_mp/cg_overview.h"
@@ -125,6 +125,7 @@ void CalcScreenPlacement(float *x, float *y, float *w, float *h, int horzAlign, 
     *x *= pixelsPerUnit; *y *= pixelsPerUnit; *w *= pixelsPerUnit; *h *= pixelsPerUnit;
 }
 void I_strncpyz(char *dest, const char *src, int size) { strncpy(dest, src, size - 1); dest[size - 1] = 0; }
+char *I_CleanStr(char *string) { return string; }
 int Com_sprintf(char *dest, int size, const char *fmt, ...) { va_list ap; va_start(ap, fmt); int n = vsnprintf(dest, size, fmt, ap); va_end(ap); return n; }
 static int generation;
 int R_GetHudImageGeneration(void) { return generation; }

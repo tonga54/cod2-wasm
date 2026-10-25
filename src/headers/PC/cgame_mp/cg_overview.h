@@ -38,6 +38,28 @@ typedef struct {
     int open;
 } CG_TeamSlots;
 
+/* For the pause menu's Vote tab: the map and mode played, and the vote
+ * running, as the HUD shows it. */
+typedef struct {
+    char map[64];
+    char gametype[32];
+    /* The viewer watches: the server takes no vote from a spectator. */
+    int spectator;
+    int active;
+    int secondsLeft;
+    int yes;
+    int no;
+    /* The viewer has voted, or called the vote. */
+    int voted;
+    char text[256];
+} CG_Vote;
+
+/* A player a vote may kick: the people in the match, not the viewer. */
+typedef struct {
+    int clientNum;
+    char name[32];
+} CG_VotePlayer;
+
 /* 0 outside a match. */
 int CG_OverviewGet(CG_Overview *overview);
 int CG_OverviewTeamSlots(CG_TeamSlots *slots);
@@ -50,5 +72,9 @@ void CG_OverviewRequestScores(void);
 MaterialHandle CG_OverviewEmblems(float size, int *allies);
 /* "0.00": kills over deaths, or kills alone before the first death. */
 void CG_OverviewRatio(int kills, int deaths, char *buf, int size);
+/* 0 outside a match. */
+int CG_OverviewVote(CG_Vote *vote);
+/* The people other than the viewer, bots left out, in client order; how many. */
+int CG_OverviewVotePlayers(CG_VotePlayer *players, int max);
 
 #endif

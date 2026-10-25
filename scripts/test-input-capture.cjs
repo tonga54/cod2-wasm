@@ -179,6 +179,17 @@ const context = {
     {key:' ',metaKey:true},{key:'/',altKey:true}]) windowListeners.get('keydown')(event);
   assert.deepEqual(chatCharacters, [32,32,47], 'only shell-cancelled printable keys are forwarded');
   assert.equal(adapter.readCaptureIntent(),true,'in-game chat retains the mouse capture intent');
+  // In a match F1 and F2 cast votes: the browser keeps its help to itself.
+  for (const [state, key, modifier, expected] of [[2,'F1',null,true],[2,'F2',null,true],[3,'F1',null,false],
+    [1,'F2',null,false],[2,'F3',null,false],[2,'F1','ctrlKey',false],[2,'F2','metaKey',false]]) {
+    nativeState = state;
+    let prevented = false;
+    const event = {key, preventDefault() { prevented = true; }};
+    if (modifier) event[modifier] = true;
+    windowListeners.get('keydown')(event);
+    assert.equal(prevented, expected, `${key} in state ${state}${modifier ? ' with ' + modifier : ''}`);
+  }
+  nativeState = 3;
   nativeState = 1;
   assert.equal(adapter.readCaptureIntent(),false,'menus and console release the pointer');
   shellState = 'gameplay';

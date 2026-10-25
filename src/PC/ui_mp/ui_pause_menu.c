@@ -25,6 +25,7 @@ extern void Menus_CloseByName(displayContextDef_t *dc, const char *name);
 extern qboolean Menus_OpenByName(displayContextDef_t *dc, const char *name);
 extern int I_stricmp(const char *s0, const char *s1);
 extern int UI_PlayLocalSoundAliasByName(const char *aliasname);
+extern const char *UI_SafeTranslateString(const char *reference);
 #if COD2_FEATURE_GAMEPAD
 extern int CL_Gamepad_IsActiveDevice(void);
 #endif
@@ -199,16 +200,53 @@ extern int CL_Gamepad_IsActiveDevice(void);
 #define PAUSE_PROMPT_LABEL_BASELINE 29.2f
 #define PAUSE_PROMPT_GAP 3.1f
 #define PAUSE_PROMPT_SPACING 9.5f
+/* The Vote tab: its actions as the settings list, the focused one's name and
+ * note at the right over its choices, rows 18.5 apart, twelve at a time. */
+#define PAUSE_VOTE_PANEL_LEFT 300.0f
+#define PAUSE_VOTE_PANEL_WIDTH 270.0f
+#define PAUSE_VOTE_CHOICE_TOP 150.0f
+#define PAUSE_VOTE_CHOICE_HEIGHT 17.0f
+#define PAUSE_VOTE_CHOICE_PITCH 18.5f
+#define PAUSE_VOTE_CHOICE_ROWS 12
+#define PAUSE_VOTE_CHOICE_PAD 6.0f
+#define PAUSE_VOTE_CHOICE_CAP 5.6f
+#define PAUSE_VOTE_CHOICE_FOCUS_CAP 6.2f
+#define PAUSE_VOTE_CHOICES 64
+#define PAUSE_VOTE_TAG_CAP 4.6f
+#define PAUSE_VOTE_RULE_CAP 4.6f
+#define PAUSE_VOTE_RULE_WIDTH 205.0f
+#define PAUSE_VOTE_TEXT_CAP 8.0f
+#define PAUSE_VOTE_STAT_COLUMN 80.0f
+#define PAUSE_VOTE_STAT_LABEL_BASELINE 172.0f
+#define PAUSE_VOTE_STAT_VALUE_BASELINE 198.0f
+#define PAUSE_VOTE_RULE_BASELINE 228.0f
 
-enum { PAUSE_TAB_CLASS, PAUSE_TAB_OVERVIEW, PAUSE_TAB_TEAM, PAUSE_TAB_LEAVE, PAUSE_TAB_SETTINGS, PAUSE_TAB_COUNT };
+enum { PAUSE_TAB_CLASS, PAUSE_TAB_OVERVIEW, PAUSE_TAB_TEAM, PAUSE_TAB_VOTE, PAUSE_TAB_LEAVE, PAUSE_TAB_SETTINGS,
+       PAUSE_TAB_COUNT };
 enum { PAUSE_TEAM_ALLIES, PAUSE_TEAM_AXIS, PAUSE_TEAM_AUTO, PAUSE_TEAM_COUNT };
+enum { PAUSE_VOTE_MAP, PAUSE_VOTE_MODE, PAUSE_VOTE_RESTART, PAUSE_VOTE_NEXT, PAUSE_VOTE_KICK, PAUSE_VOTE_COUNT };
+enum { PAUSE_BALLOT_YES, PAUSE_BALLOT_NO, PAUSE_BALLOT_COUNT };
 enum { PAUSE_LEAVE_RETURN, PAUSE_LEAVE_MATCH, PAUSE_LEAVE_COUNT };
 enum { PAUSE_SETTINGS_CONTROLS, PAUSE_SETTINGS_GRAPHICS, PAUSE_SETTINGS_AUDIO, PAUSE_SETTINGS_GAME, PAUSE_SETTINGS_COUNT };
 /* What the cursor is over: the kind in the high byte, an index in the low. */
-enum { PAUSE_HOVER_NONE, PAUSE_HOVER_TAB, PAUSE_HOVER_ROW, PAUSE_HOVER_TOGGLE, PAUSE_HOVER_TILE };
+enum { PAUSE_HOVER_NONE, PAUSE_HOVER_TAB, PAUSE_HOVER_ROW, PAUSE_HOVER_TOGGLE, PAUSE_HOVER_TILE, PAUSE_HOVER_CHOICE };
 #define PAUSE_HOVER(kind, index) (((kind) << 8) | (index))
 
-static const char *const s_pauseTabs[PAUSE_TAB_COUNT] = { "CLASS", "OVERVIEW", "CHANGE TEAM", "LEAVE GAME", "SETTINGS" };
+static const char *const s_pauseTabs[PAUSE_TAB_COUNT] = { "CLASS", "OVERVIEW", "CHANGE TEAM", "VOTE", "LEAVE GAME",
+                                                          "SETTINGS" };
+/* What a vote may do, as the server's callvote takes it. */
+static const struct {
+    const char *name;
+    const char *note;
+} s_pauseVotes[PAUSE_VOTE_COUNT] = {
+    { "CHANGE MAP", "Move the match to another map, in the mode played now." },
+    { "CHANGE MODE", "Play another mode on this map, from the start." },
+    { "RESTART MAP", "Start this map over, with the scores and the clock." },
+    { "NEXT MAP", "Move on to the next map of the rotation." },
+    { "KICK PLAYER", "Remove a player from the match." },
+};
+static const char *const s_pauseBallots[PAUSE_BALLOT_COUNT] = { "VOTE YES", "VOTE NO" };
+#define PAUSE_VOTE_RULE "A vote passes when more than half of the players vote yes. Bots do not vote."
 static const char *const s_pauseSlots[CLASS_SLOT_COUNT] = { "PRIMARY", "SECONDARY", "LETHAL", "TACTICAL" };
 static const char *const s_pauseLeave[PAUSE_LEAVE_COUNT] = { "RETURN TO MATCH", "LEAVE MATCH" };
 static const struct {
@@ -283,6 +321,14 @@ static struct {
     int teamFocus;
     int leaveFocus;
     int settingsFocus;
+    /* The Vote tab: the action, its choice and which of the two lists keys
+     * move; while a vote runs, the ballot instead, and whether the last
+     * frame painted the ballot's rows. */
+    int voteFocus;
+    int voteChoice;
+    int voteColumn;
+    int ballotFocus;
+    int ballotRows;
     /* A settings page opened from here is up. */
     int settingsPage;
     int hover;
@@ -410,6 +456,7 @@ static void Pause_StepTab(int step)
 
 void UI_PauseMenu_Open(displayContextDef_t *dc)
 {
+    CG_Vote vote;
     int standard;
     int chosen;
 
@@ -429,6 +476,9 @@ void UI_PauseMenu_Open(displayContextDef_t *dc)
     s_pause.settingsPage = 0;
     s_pause.tab = PAUSE_TAB_CLASS;
     s_pause.teamFocus = PAUSE_TEAM_ALLIES;
+    s_pause.voteFocus = PAUSE_VOTE_MAP;
+    s_pause.voteColumn = 0;
+    s_pause.ballotFocus = PAUSE_BALLOT_YES;
     s_pause.leaveFocus = PAUSE_LEAVE_RETURN;
     s_pause.settingsFocus = PAUSE_SETTINGS_CONTROLS;
     chosen = UI_ClassMenu_Chosen(&standard);
@@ -436,6 +486,9 @@ void UI_PauseMenu_Open(displayContextDef_t *dc)
         s_pause.standard = standard;
         s_pause.classFocus = chosen;
     }
+    /* A vote waiting for the player's ballot comes first. */
+    if (CG_OverviewVote(&vote) && vote.active && !vote.voted && !vote.spectator)
+        s_pause.tab = PAUSE_TAB_VOTE;
 }
 
 void UI_PauseMenu_Return(displayContextDef_t *dc)
@@ -504,6 +557,121 @@ static void Pause_OpenSettings(displayContextDef_t *dc, int page)
     Menus_CloseByName(dc, "ingame");
 }
 
+/* An action's choices, capitals, each with the command that calls its vote,
+ * and the one in play now, -1 for none. */
+static struct {
+    int count;
+    int current;
+    char names[PAUSE_VOTE_CHOICES][64];
+    char commands[PAUSE_VOTE_CHOICES][96];
+} s_voteChoices;
+
+static void Pause_AddVoteChoice(const char *name, const char *command, int current)
+{
+    int i = s_voteChoices.count;
+    int n;
+
+    if (i >= PAUSE_VOTE_CHOICES)
+        return;
+    for (n = 0; name[n] && n < (int)sizeof(s_voteChoices.names[0]) - 1; n++)
+        s_voteChoices.names[i][n] = (char)(name[n] >= 'a' && name[n] <= 'z' ? name[n] - 32 : name[n]);
+    s_voteChoices.names[i][n] = '\0';
+    snprintf(s_voteChoices.commands[i], sizeof(s_voteChoices.commands[0]), "%s", command);
+    if (current)
+        s_voteChoices.current = i;
+    s_voteChoices.count = i + 1;
+}
+
+/* The arenas of Start New Server, its modes, or the people in the match;
+ * restarting and the next map call their vote at once and have none. */
+static void Pause_BuildVoteChoices(int action, const CG_Vote *vote)
+{
+    CG_VotePlayer players[PAUSE_VOTE_CHOICES];
+    char command[96];
+    int count;
+    int i;
+
+    s_voteChoices.count = 0;
+    s_voteChoices.current = -1;
+    switch (action) {
+    case PAUSE_VOTE_MAP:
+        for (i = 0; i < sharedUiInfo.mapCount; i++) {
+            snprintf(command, sizeof(command), "cmd callvote map %s\n", sharedUiInfo.mapList[i].mapLoadName);
+            Pause_AddVoteChoice(sharedUiInfo.mapList[i].mapName, command,
+                                !I_stricmp(sharedUiInfo.mapList[i].mapLoadName, vote->map));
+        }
+        break;
+    case PAUSE_VOTE_MODE:
+        for (i = 0; i < sharedUiInfo.numGameTypes; i++) {
+            const char *type = sharedUiInfo.gameTypes[i].gameType;
+            const char *name = sharedUiInfo.gameTypes[i].gameTypeName;
+
+            snprintf(command, sizeof(command), "cmd callvote g_gametype %s\n", type);
+            Pause_AddVoteChoice(UI_SafeTranslateString(name && name[0] ? name : type), command,
+                                !I_stricmp(type, vote->gametype));
+        }
+        break;
+    case PAUSE_VOTE_KICK:
+        count = CG_OverviewVotePlayers(players, PAUSE_VOTE_CHOICES);
+        for (i = 0; i < count; i++) {
+            snprintf(command, sizeof(command), "cmd callvote clientkick %d\n", players[i].clientNum);
+            Pause_AddVoteChoice(players[i].name, command, 0);
+        }
+        break;
+    default:
+        break;
+    }
+}
+
+static const char *Pause_VoteCommand(int action)
+{
+    if (action == PAUSE_VOTE_RESTART)
+        return "cmd callvote map_restart\n";
+    if (action == PAUSE_VOTE_NEXT)
+        return "cmd callvote map_rotate\n";
+    return NULL;
+}
+
+static void Pause_OpenVoteChoices(void)
+{
+    s_pause.voteColumn = 1;
+    s_pause.voteChoice = s_voteChoices.current >= 0 ? s_voteChoices.current : 0;
+}
+
+/* A ballot cast, an action's choices opened, or a vote called; whatever is
+ * sent closes the menu, so the vote shows on the HUD. */
+static void Pause_ActivateVote(displayContextDef_t *dc)
+{
+    CG_Vote vote;
+    const char *command;
+
+    if (!CG_OverviewVote(&vote) || vote.spectator)
+        return;
+    if (vote.active) {
+        if (vote.voted)
+            return;
+        Cbuf_ExecuteText(2, s_pause.ballotFocus == PAUSE_BALLOT_YES ? "cmd vote yes\n" : "cmd vote no\n");
+        Pause_Close(dc);
+        return;
+    }
+    command = Pause_VoteCommand(s_pause.voteFocus);
+    if (command) {
+        Cbuf_ExecuteText(2, command);
+        Pause_Close(dc);
+        return;
+    }
+    Pause_BuildVoteChoices(s_pause.voteFocus, &vote);
+    if (!s_pause.voteColumn) {
+        if (s_voteChoices.count)
+            Pause_OpenVoteChoices();
+        return;
+    }
+    if (s_pause.voteChoice >= 0 && s_pause.voteChoice < s_voteChoices.count) {
+        Cbuf_ExecuteText(2, s_voteChoices.commands[s_pause.voteChoice]);
+        Pause_Close(dc);
+    }
+}
+
 static void Pause_Activate(displayContextDef_t *dc)
 {
     Pause_Sound("mouse_click");
@@ -514,6 +682,9 @@ static void Pause_Activate(displayContextDef_t *dc)
         break;
     case PAUSE_TAB_TEAM:
         Pause_ChooseTeam(dc, s_pause.teamFocus);
+        break;
+    case PAUSE_TAB_VOTE:
+        Pause_ActivateVote(dc);
         break;
     case PAUSE_TAB_LEAVE:
         if (s_pause.leaveFocus == PAUSE_LEAVE_MATCH) {
@@ -534,6 +705,43 @@ static void Pause_Activate(displayContextDef_t *dc)
 static int Pause_Wrap(int value, int count)
 {
     return (value % count + count) % count;
+}
+
+/* Up and down through the ballot, the actions or the open action's choices;
+ * right opens the choices, left goes back to the actions. 1 when something
+ * moved. */
+static int Pause_NavigateVote(int key, int step, int vertical)
+{
+    CG_Vote vote;
+
+    if (!CG_OverviewVote(&vote) || vote.spectator)
+        return 0;
+    if (vote.active) {
+        if (!vertical || vote.voted)
+            return 0;
+        s_pause.ballotFocus = Pause_Wrap(s_pause.ballotFocus + step, PAUSE_BALLOT_COUNT);
+        return 1;
+    }
+    Pause_BuildVoteChoices(s_pause.voteFocus, &vote);
+    if (s_pause.voteColumn) {
+        if (key == PAUSE_KEY_LEFT || !s_voteChoices.count) {
+            s_pause.voteColumn = 0;
+            return 1;
+        }
+        if (!vertical)
+            return 0;
+        s_pause.voteChoice = Pause_Wrap(s_pause.voteChoice + step, s_voteChoices.count);
+        return 1;
+    }
+    if (vertical) {
+        s_pause.voteFocus = Pause_Wrap(s_pause.voteFocus + step, PAUSE_VOTE_COUNT);
+        return 1;
+    }
+    if (key == PAUSE_KEY_RIGHT && s_voteChoices.count) {
+        Pause_OpenVoteChoices();
+        return 1;
+    }
+    return 0;
 }
 
 /* Allies and Axis side by side over Auto-Assign. */
@@ -560,6 +768,10 @@ static void Pause_Navigate(int key)
         break;
     case PAUSE_TAB_TEAM:
         s_pause.teamFocus = Pause_TeamStep(s_pause.teamFocus, key);
+        break;
+    case PAUSE_TAB_VOTE:
+        if (!Pause_NavigateVote(key, step, vertical))
+            return;
         break;
     case PAUSE_TAB_LEAVE:
         if (vertical)
@@ -589,12 +801,22 @@ static int Pause_FocusHover(void)
         s_pause.teamFocus = index;
         return 1;
     case PAUSE_HOVER_ROW:
-        if (s_pause.tab == PAUSE_TAB_CLASS)
+        if (s_pause.tab == PAUSE_TAB_CLASS) {
             s_pause.classFocus = index;
-        else if (s_pause.tab == PAUSE_TAB_LEAVE)
+        } else if (s_pause.tab == PAUSE_TAB_LEAVE) {
             s_pause.leaveFocus = index;
-        else if (s_pause.tab == PAUSE_TAB_SETTINGS)
+        } else if (s_pause.tab == PAUSE_TAB_SETTINGS) {
             s_pause.settingsFocus = index;
+        } else if (s_pause.tab == PAUSE_TAB_VOTE && s_pause.ballotRows) {
+            s_pause.ballotFocus = index;
+        } else if (s_pause.tab == PAUSE_TAB_VOTE) {
+            s_pause.voteFocus = index;
+            s_pause.voteColumn = 0;
+        }
+        return 1;
+    case PAUSE_HOVER_CHOICE:
+        s_pause.voteChoice = index;
+        s_pause.voteColumn = 1;
         return 1;
     default:
         return 0;
@@ -616,7 +838,11 @@ int UI_PauseMenu_KeyEvent(displayContextDef_t *dc, menuDef_t *menu, int key, int
     switch (key) {
     case PAUSE_KEY_ESCAPE:
     case PAUSE_KEY_MOUSE2:
-        Pause_Close(dc);
+        /* Back from a vote's choices to its actions; else out of the menu. */
+        if (s_pause.tab == PAUSE_TAB_VOTE && s_pause.voteColumn)
+            s_pause.voteColumn = 0;
+        else
+            Pause_Close(dc);
         break;
     case PAUSE_KEY_ENTER:
     case PAUSE_KEY_KP_ENTER:
@@ -976,6 +1202,125 @@ static void Pause_PaintTeam(displayContextDef_t *dc)
                    PAUSE_TEAM_AUTO_HEIGHT, slots.open, NULL, 0.0f);
 }
 
+static void Pause_Wrapped(const char *text, float x, float baseline, float width, float cap, float tracking,
+                          float spacing, const vec_t *color);
+
+/* A choice: framed with its name in gold Bold where focused, the one in
+ * play now tagged at the right. */
+static void Pause_Choice(displayContextDef_t *dc, const char *name, int index, float top, int focused, int current)
+{
+    float middle = top + 0.5f * PAUSE_VOTE_CHOICE_HEIGHT;
+    float cap = focused ? PAUSE_VOTE_CHOICE_FOCUS_CAP : PAUSE_VOTE_CHOICE_CAP;
+
+    if (Pause_Hover(dc, PAUSE_VOTE_PANEL_LEFT, top, PAUSE_VOTE_PANEL_WIDTH, PAUSE_VOTE_CHOICE_HEIGHT, PAUSE_ALIGN_LEFT))
+        s_pause.hover = PAUSE_HOVER(PAUSE_HOVER_CHOICE, index);
+    if (focused)
+        Pause_Frame(PAUSE_VOTE_PANEL_LEFT, top, PAUSE_VOTE_PANEL_WIDTH, PAUSE_VOTE_CHOICE_HEIGHT, PAUSE_ALIGN_LEFT,
+                    s_pauseFrame);
+    Pause_Text(name, focused, PAUSE_VOTE_PANEL_LEFT + PAUSE_VOTE_CHOICE_PAD, middle + 0.5f * cap, PAUSE_ALIGN_LEFT, cap,
+               0.09f, focused ? s_pauseGold : s_pauseIdle);
+    if (current)
+        Pause_Text("NOW", 0,
+                   PAUSE_VOTE_PANEL_LEFT + PAUSE_VOTE_PANEL_WIDTH - PAUSE_VOTE_CHOICE_PAD -
+                       Pause_Width("NOW", 0, PAUSE_VOTE_TAG_CAP, 0.1f),
+                   middle + 0.5f * PAUSE_VOTE_TAG_CAP, PAUSE_ALIGN_LEFT, PAUSE_VOTE_TAG_CAP, 0.1f, s_pauseNote);
+}
+
+/* While a vote runs: Yes and No to choose, else why not; at the right what
+ * is voted on, the seconds left and both counts, as the overview's stats. */
+static void Pause_PaintBallot(displayContextDef_t *dc, const CG_Vote *vote)
+{
+    static const char *const labels[3] = { "TIME LEFT", "YES", "NO" };
+    float rowBaseline = PAUSE_SETTINGS_TOP + 0.5f * PAUSE_ROW_HEIGHT + 0.5f * s_pauseSettingsRows.cap;
+    char number[16];
+    int values[3];
+    int i;
+
+    if (!vote->voted && !vote->spectator) {
+        s_pause.ballotRows = 1;
+        for (i = 0; i < PAUSE_BALLOT_COUNT; i++)
+            Pause_Row(dc, s_pauseBallots[i], i, PAUSE_SETTINGS_TOP + (float)i * PAUSE_ROW_PITCH, PAUSE_LIST_RIGHT,
+                      i == s_pause.ballotFocus, &s_pauseSettingsRows);
+    } else {
+        Pause_Text(vote->spectator ? "Spectators cannot vote." : "Your vote is in.", 0, PAUSE_ROW_LEFT, rowBaseline,
+                   PAUSE_ALIGN_LEFT, s_pauseSettingsRows.cap, 0.04f, s_pauseLight);
+    }
+    Pause_Text("VOTE IN PROGRESS", 1, PAUSE_VOTE_PANEL_LEFT, PAUSE_SETTINGS_TITLE_BASELINE, PAUSE_ALIGN_LEFT,
+               PAUSE_SETTINGS_TITLE_CAP, PAUSE_SETTINGS_TITLE_TRACKING, s_pauseGold);
+    Pause_Wrapped(vote->text, PAUSE_VOTE_PANEL_LEFT, PAUSE_SETTINGS_NOTE_BASELINE + 4.0f, PAUSE_VOTE_PANEL_WIDTH,
+                  PAUSE_VOTE_TEXT_CAP, 0.04f, PAUSE_SETTINGS_NOTE_LINE, s_pauseBright);
+    values[0] = vote->secondsLeft;
+    values[1] = vote->yes;
+    values[2] = vote->no;
+    for (i = 0; i < 3; i++) {
+        float x = PAUSE_VOTE_PANEL_LEFT + (float)i * PAUSE_VOTE_STAT_COLUMN;
+
+        snprintf(number, sizeof(number), "%d", values[i]);
+        Pause_Text(labels[i], 0, x, PAUSE_VOTE_STAT_LABEL_BASELINE, PAUSE_ALIGN_LEFT, PAUSE_STAT_LABEL_CAP, 0.04f,
+                   s_pauseStatLabel);
+        Pause_Text(number, 1, x - PAUSE_STAT_VALUE_INSET, PAUSE_VOTE_STAT_VALUE_BASELINE, PAUSE_ALIGN_LEFT,
+                   PAUSE_STAT_VALUE_CAP, 0.02f, s_pauseValue);
+    }
+    Pause_Wrapped(PAUSE_VOTE_RULE, PAUSE_VOTE_PANEL_LEFT, PAUSE_VOTE_RULE_BASELINE, PAUSE_VOTE_PANEL_WIDTH,
+                  PAUSE_SETTINGS_NOTE_CAP, PAUSE_SETTINGS_NOTE_TRACKING, PAUSE_SETTINGS_NOTE_LINE, s_pauseNote);
+}
+
+/* The actions as the settings list, the rule under them; at the right the
+ * focused one's name, note and choices, twelve rows about the focused one. */
+static void Pause_PaintVote(displayContextDef_t *dc)
+{
+    CG_Vote vote;
+    int first = 0;
+    int i;
+
+    s_pause.ballotRows = 0;
+    if (!CG_OverviewVote(&vote))
+        return;
+    if (vote.active || vote.spectator)
+        s_pause.voteColumn = 0;
+    if (vote.active) {
+        Pause_PaintBallot(dc, &vote);
+        return;
+    }
+    if (vote.spectator) {
+        Pause_Text("Join a team to call a vote.", 0, PAUSE_ROW_LEFT,
+                   PAUSE_SETTINGS_TOP + 0.5f * PAUSE_ROW_HEIGHT + 0.5f * s_pauseSettingsRows.cap, PAUSE_ALIGN_LEFT,
+                   s_pauseSettingsRows.cap, 0.04f, s_pauseLight);
+        return;
+    }
+    for (i = 0; i < PAUSE_VOTE_COUNT; i++)
+        Pause_Row(dc, s_pauseVotes[i].name, i, PAUSE_SETTINGS_TOP + (float)i * PAUSE_ROW_PITCH, PAUSE_LIST_RIGHT,
+                  i == s_pause.voteFocus, &s_pauseSettingsRows);
+    Pause_Wrapped(PAUSE_VOTE_RULE, PAUSE_ROW_LEFT, PAUSE_SETTINGS_TOP + (float)PAUSE_VOTE_COUNT * PAUSE_ROW_PITCH + 12.0f,
+                  PAUSE_VOTE_RULE_WIDTH, PAUSE_VOTE_RULE_CAP, 0.0f, PAUSE_SETTINGS_NOTE_LINE, s_pauseNote);
+    Pause_Text(s_pauseVotes[s_pause.voteFocus].name, 1, PAUSE_VOTE_PANEL_LEFT, PAUSE_SETTINGS_TITLE_BASELINE,
+               PAUSE_ALIGN_LEFT, PAUSE_SETTINGS_TITLE_CAP, PAUSE_SETTINGS_TITLE_TRACKING, s_pauseGold);
+    Pause_Wrapped(s_pauseVotes[s_pause.voteFocus].note, PAUSE_VOTE_PANEL_LEFT, PAUSE_SETTINGS_NOTE_BASELINE,
+                  PAUSE_VOTE_PANEL_WIDTH, PAUSE_SETTINGS_NOTE_CAP, PAUSE_SETTINGS_NOTE_TRACKING, PAUSE_SETTINGS_NOTE_LINE,
+                  s_pauseNoteText);
+    Pause_BuildVoteChoices(s_pause.voteFocus, &vote);
+    if (!s_voteChoices.count) {
+        s_pause.voteColumn = 0;
+        if (s_pause.voteFocus == PAUSE_VOTE_KICK)
+            Pause_Text("No one else is in the match.", 0, PAUSE_VOTE_PANEL_LEFT,
+                       PAUSE_VOTE_CHOICE_TOP + 0.5f * (PAUSE_VOTE_CHOICE_HEIGHT + PAUSE_VOTE_CHOICE_CAP), PAUSE_ALIGN_LEFT,
+                       PAUSE_VOTE_CHOICE_CAP, 0.04f, s_pauseNote);
+        return;
+    }
+    if (s_pause.voteChoice >= s_voteChoices.count)
+        s_pause.voteChoice = s_voteChoices.count - 1;
+    if (s_pause.voteColumn && s_voteChoices.count > PAUSE_VOTE_CHOICE_ROWS) {
+        first = s_pause.voteChoice - PAUSE_VOTE_CHOICE_ROWS / 2;
+        if (first > s_voteChoices.count - PAUSE_VOTE_CHOICE_ROWS)
+            first = s_voteChoices.count - PAUSE_VOTE_CHOICE_ROWS;
+        if (first < 0)
+            first = 0;
+    }
+    for (i = first; i < s_voteChoices.count && i < first + PAUSE_VOTE_CHOICE_ROWS; i++)
+        Pause_Choice(dc, s_voteChoices.names[i], i, PAUSE_VOTE_CHOICE_TOP + (float)(i - first) * PAUSE_VOTE_CHOICE_PITCH,
+                     s_pause.voteColumn && i == s_pause.voteChoice, i == s_voteChoices.current);
+}
+
 static void Pause_PaintLeave(displayContextDef_t *dc)
 {
     int i;
@@ -1065,7 +1410,8 @@ static float Pause_PromptWidth(const char *key, const char *label, int gamepad)
 }
 
 /* As the captures: Select on every tab with something to choose, Back on
- * the Class tab, and the class editor for the player's own classes. */
+ * the Class tab and out of a vote's choices, and the class editor for the
+ * player's own classes. */
 static void Pause_PaintPrompts(int gamepad)
 {
     float x = PAUSE_PROMPT_LEFT;
@@ -1074,7 +1420,7 @@ static void Pause_PaintPrompts(int gamepad)
         x += Pause_Prompt(x, PAUSE_ALIGN_LEFT, "ENTER", "A", s_pauseGlyphA, "Select", gamepad) + PAUSE_PROMPT_SPACING;
     if (s_pause.tab == PAUSE_TAB_CLASS && !s_pause.standard && !gamepad)
         Pause_Prompt(x, PAUSE_ALIGN_LEFT, "F1", "", NULL, "Edit", 0);
-    if (s_pause.tab == PAUSE_TAB_CLASS)
+    if (s_pause.tab == PAUSE_TAB_CLASS || (s_pause.tab == PAUSE_TAB_VOTE && s_pause.voteColumn))
         Pause_Prompt(-PAUSE_PROMPT_RIGHT - Pause_PromptWidth(gamepad ? "B" : "ESC", "Back", gamepad), PAUSE_ALIGN_RIGHT,
                      "ESC", "B", s_pauseGlyphB, "Back", gamepad);
 }
@@ -1112,6 +1458,9 @@ void UI_PauseMenu_Paint(displayContextDef_t *dc, menuDef_t *menu)
     case PAUSE_TAB_TEAM:
         Pause_PaintTeam(dc);
         break;
+    case PAUSE_TAB_VOTE:
+        Pause_PaintVote(dc);
+        break;
     case PAUSE_TAB_LEAVE:
         Pause_PaintLeave(dc);
         break;
@@ -1125,11 +1474,13 @@ void UI_PauseMenu_Paint(displayContextDef_t *dc, menuDef_t *menu)
     /* Pointer motion moves the focus to what it is over now, with the retail
      * menus' mouse_over as it enters another element; keys move it otherwise. */
     if (moved && (s_pause.hover >> 8) != PAUSE_HOVER_TOGGLE) {
-        int focus[4] = { s_pause.classFocus, s_pause.teamFocus, s_pause.leaveFocus, s_pause.settingsFocus };
+        int focus[7] = { s_pause.classFocus, s_pause.teamFocus, s_pause.leaveFocus, s_pause.settingsFocus,
+                         s_pause.voteFocus, s_pause.voteChoice, s_pause.ballotFocus };
 
         Pause_FocusHover();
         if (focus[0] != s_pause.classFocus || focus[1] != s_pause.teamFocus || focus[2] != s_pause.leaveFocus ||
-            focus[3] != s_pause.settingsFocus)
+            focus[3] != s_pause.settingsFocus || focus[4] != s_pause.voteFocus || focus[5] != s_pause.voteChoice ||
+            focus[6] != s_pause.ballotFocus)
             Pause_Sound("mouse_over");
     }
     Pause_PaintPrompts(gamepad);

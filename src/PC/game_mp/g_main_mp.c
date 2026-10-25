@@ -101,6 +101,7 @@ extern const dvar_t *player_meleeHeight;
 extern const dvar_t *g_antilag;
 const dvar_t *g_exactAim;
 extern void G_RecordShotSamples(void);
+extern qboolean SV_BotIsTestClient(int clientNum);
 extern const dvar_t *g_oldVoting;
 extern const dvar_t *g_playerCollisionEjectSpeed;
 extern const dvar_t *g_mantleBlockTimeBuffer;
@@ -385,8 +386,10 @@ void CalculateRanks(void)
             level.sortedClients[level.numConnectedClients] = i;
             level.numConnectedClients++;
 
+            /* Bots never vote: counted, they would fail every vote of a room
+             * with bots. */
             if (level.clients[i].sess.cs.team != TEAM_SPECTATOR) {
-                if (level.clients[i].sess.connected == CON_CONNECTED) {
+                if (level.clients[i].sess.connected == CON_CONNECTED && !SV_BotIsTestClient(i)) {
                     level.numVotingClients++;
                 }
             }

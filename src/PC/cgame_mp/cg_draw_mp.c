@@ -2161,6 +2161,9 @@ unsigned int CG_Draw2D(void)
             UI_DrawText(va("%s(%s):%i, %s(%s):%i", UI_SafeTranslateString("CGAME_YES"), yesKey,
                            cgs->voteYes, UI_SafeTranslateString("CGAME_NO"), noKey, cgs->voteNo),
                         0x7fffffff, font, 8.0f, 222.0f, 0, 0, 0.5f, colorYellow, 3);
+            /* A browser may keep F1 and F2, a Mac's keyboard often does: the
+             * pause menu opens on its ballot. */
+            UI_DrawText("Press ESC to vote", 0x7fffffff, font, 8.0f, 244.0f, 0, 0, 0.5f, colorYellow, 3);
         }
     }
 

@@ -81,13 +81,32 @@ typedef struct { const char *name; } windowDef_t;
 typedef struct menuDef_t { windowDef_t window; } menuDef_t;
 typedef struct itemDef_s itemDef_t;
 typedef struct displayContextDef_t { int realTime; int cursorx, cursory; } displayContextDef_t;
-typedef struct sharedUiInfo_t { struct { MaterialHandle whiteMaterial; } assets; } sharedUiInfo_t;
+typedef struct { const char *mapName, *mapLoadName; } mapInfo;
+typedef struct { const char *gameType, *gameTypeName; } gameTypeInfo;
+typedef struct sharedUiInfo_t { struct { MaterialHandle whiteMaterial; } assets; int mapCount; mapInfo mapList[128];
+    int numGameTypes; gameTypeInfo gameTypes[16]; } sharedUiInfo_t;
 enum { TEAM_FREE, TEAM_AXIS, TEAM_ALLIES, TEAM_SPECTATOR };
 #include "headers/PC/ui_mp/ui_class_data.h"
 #include "headers/PC/cgame_mp/cg_overview.h"
 
 static Material white = { "white" }, emblemMaterial = { "emblems" };
-sharedUiInfo_t sharedUiInfo = { { &white } };
+/* Start New Server's eight arenas and five modes, as UI_LoadArenas and the
+ * gametypes file leave them. */
+sharedUiInfo_t sharedUiInfo = { { &white }, 8,
+    { { "Toujane, Tunisia", "mp_toujane" }, { "Carentan, France", "mp_carentan" },
+      { "Dawnville, France", "mp_dawnville" }, { "Burgundy, France", "mp_burgundy" },
+      { "Stalingrad, Russia", "mp_railyard" }, { "Brecourt, France", "mp_brecourt" },
+      { "Matmata, Tunisia", "mp_matmata" }, { "Leningrad, Russia", "mp_leningrad" } },
+    5, { { "dm", "MPUI_DEATHMATCH" }, { "tdm", "MPUI_TEAM_DEATHMATCH" }, { "sd", "MPUI_SEARCH_AND_DESTROY" },
+         { "ctf", "MPUI_CAPTURE_THE_FLAG" }, { "hq", "MPUI_HEADQUARTERS" } } };
+const char *UI_SafeTranslateString(const char *reference) {
+    static const char *const names[][2] = { { "MPUI_DEATHMATCH", "Deathmatch" },
+        { "MPUI_TEAM_DEATHMATCH", "Team Deathmatch" }, { "MPUI_SEARCH_AND_DESTROY", "Search & Destroy" },
+        { "MPUI_CAPTURE_THE_FLAG", "Capture the Flag" }, { "MPUI_HEADQUARTERS", "Headquarters" } };
+    for (unsigned i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+        if (!strcmp(reference, names[i][0])) return names[i][1];
+    return reference;
+}
 
 /* Every drawing call, as it was made. */
 enum { FILL = 1, TEXT, KEYCAP, WEAPON, MAP };
@@ -196,6 +215,16 @@ static int alliesKind = 0;
 MaterialHandle CG_OverviewEmblems(float size, int *allies) { assert(size == 117.0f); *allies = alliesKind;
     return &emblemMaterial; }
 void CG_OverviewRatio(int kills, int deaths, char *buf, int size) { snprintf(buf, size, "r%d/%d", kills, deaths); }
+/* The vote: none running on Toujane's TDM until a check starts one. */
+static CG_Vote voteState = { "mp_toujane", "tdm" };
+static int voteValid = 1;
+int CG_OverviewVote(CG_Vote *vote) { *vote = voteState; return voteValid; }
+static CG_VotePlayer votePlayers[64];
+static int votePlayerCount;
+int CG_OverviewVotePlayers(CG_VotePlayer *players, int max) {
+    int n = votePlayerCount < max ? votePlayerCount : max;
+    memcpy(players, votePlayers, (size_t)n * sizeof(*players)); return n;
+}
 void CG_DrawMinimapOverview(float x, float y, float w, float h, int horzAlign, int vertAlign, float alpha) {
     Drawn *d = record(MAP);
     d->x = x; d->y = y; d->w = w; d->h = h; d->horz = horzAlign; d->vert = vertAlign; d->cap = alpha;
@@ -244,20 +273,22 @@ int main(void) {
     chosenIndex = 3; chosenStandard = 1;
     UI_PauseMenu_Open(&dc);
     assert(s_pause.open && s_pause.tab == PAUSE_TAB_CLASS && s_pause.standard && s_pause.classFocus == 3);
-    assert(s_pause.tabCount == 5);
+    assert(s_pause.tabCount == 6);
     key('e'); assert(s_pause.tab == PAUSE_TAB_OVERVIEW);
     key(0xd4); assert(s_pause.tab == PAUSE_TAB_TEAM);
-    key(0x09); assert(s_pause.tab == PAUSE_TAB_LEAVE);
+    key(0x09); assert(s_pause.tab == PAUSE_TAB_VOTE);
+    key('e'); assert(s_pause.tab == PAUSE_TAB_LEAVE);
     key('e'); key('e'); assert(s_pause.tab == PAUSE_TAB_CLASS);
     key('q'); assert(s_pause.tab == PAUSE_TAB_SETTINGS);
-    key(0xd3); key(0xd3); assert(s_pause.tab == PAUSE_TAB_TEAM);
+    key(0xd3); key(0xd3); key(0xd3); assert(s_pause.tab == PAUSE_TAB_TEAM);
     /* Characters are a typed copy of the keys: ignored. */
     key(0x400 | 'e'); assert(s_pause.tab == PAUSE_TAB_TEAM);
     /* Where everyone plays for himself there are no teams to change to. */
     teams.freeForAll = 1;
     UI_PauseMenu_Open(&dc);
-    assert(s_pause.tabCount == 4 && s_pause.tab == PAUSE_TAB_CLASS);
-    key('e'); key('e'); assert(s_pause.tab == PAUSE_TAB_LEAVE);
+    assert(s_pause.tabCount == 5 && s_pause.tab == PAUSE_TAB_CLASS);
+    key('e'); key('e'); assert(s_pause.tab == PAUSE_TAB_VOTE);
+    key('e'); assert(s_pause.tab == PAUSE_TAB_LEAVE);
     s_pause.tab = PAUSE_TAB_TEAM; paint(); assert(s_pause.tab == PAUSE_TAB_CLASS);
     teams.freeForAll = 0;
     /* Escape and the right button close it. */
@@ -560,6 +591,122 @@ int main(void) {
     point(20.0f, 98.3f + 4.0f * 29.25f + 10.0f); UI_PauseMenu_Open(&dc); paint();
     assert(s_pause.tab == PAUSE_TAB_CLASS && s_pause.classFocus == 2);
 
+    /* Vote: the actions as the settings list, the rule under them, and at the
+     * right the focused one's name, note and choices, the one in play tagged.
+     * Enter or right opens the choices at the one in play, Enter there calls
+     * its vote and closes; left, Escape or the right button go back. */
+    UI_PauseMenu_Open(&dc); assert(s_pause.tab == PAUSE_TAB_CLASS);
+    s_pause.tab = PAUSE_TAB_VOTE; paint();
+    assert(text("CHANGE MAP") && text("CHANGE MODE") && text("RESTART MAP") && text("NEXT MAP") && text("KICK PLAYER"));
+    assert(text("CHANGE MAP")->bold && near(text("CHANGE MAP")->x, 62.5f) && near(text("CHANGE MODE")->cap, 6.8f));
+    assert(near(text("CHANGE MODE")->y, 89.6f + 29.25f + 0.5f * 27.9f - 1.3f + 0.5f * 6.8f));
+    {
+        const Drawn *title = NULL, *rule = NULL;
+        for (i = 0; i < drawCount; i++) {
+            if (drawn[i].kind == TEXT && !strcmp(drawn[i].text, "CHANGE MAP") && near(drawn[i].x, 300.0f)) title = &drawn[i];
+            if (drawn[i].kind == TEXT && !strncmp(drawn[i].text, "A vote passes", 13)) rule = &drawn[i];
+        }
+        assert(title && title->bold && near(title->cap, 9.6f) && near(title->y, 106.7f));
+        assert(rule && near(rule->x, 54.2f) && near(rule->y, 89.6f + 5.0f * 29.25f + 12.0f) && near(rule->cap, 4.6f));
+    }
+    assert(text("Move the match to another map, in the mode played now.") && near(text("Move the match to another map, in the mode played now.")->x, 300.0f));
+    assert(text("TOUJANE, TUNISIA") && text("LENINGRAD, RUSSIA") && text("NOW") && !text("TOUJANE, TUNISIA")->bold);
+    assert(near(text("TOUJANE, TUNISIA")->x, 306.0f) && near(text("TOUJANE, TUNISIA")->y, 150.0f + 8.5f + 2.8f));
+    assert(near(text("NOW")->y, 150.0f + 8.5f + 2.3f) && near(text("CARENTAN, FRANCE")->y - text("TOUJANE, TUNISIA")->y, 18.5f));
+    assert(text("Select") && !text("Back"));
+    key(0x0d); assert(s_pause.voteColumn == 1 && s_pause.voteChoice == 0 && s_pause.open);
+    paint(); assert(text("TOUJANE, TUNISIA")->bold && near(text("TOUJANE, TUNISIA")->cap, 6.2f) && text("Back"));
+    key(0x9b); key(0x9b); assert(s_pause.voteChoice == 2);
+    key(0x9a); key(0x9a); key(0x9a); assert(s_pause.voteChoice == 7);
+    clearLogs(); key(0x0d);
+    assert(commandCount == 1 && !strcmp(commands[0], "cmd callvote map mp_leningrad\n") && logged("-ingame") && !s_pause.open);
+    /* The choices open at the map played now. */
+    snprintf(voteState.map, sizeof(voteState.map), "mp_matmata");
+    UI_PauseMenu_Open(&dc); s_pause.tab = PAUSE_TAB_VOTE;
+    key(0x9d); assert(s_pause.voteColumn == 1 && s_pause.voteChoice == 6);
+    key(0x9c); assert(s_pause.voteColumn == 0 && s_pause.open);
+    key(0x9d); clearLogs(); key(0x1b); assert(s_pause.voteColumn == 0 && s_pause.open && !logged("-ingame"));
+    key(0x9d); key(0xc9); assert(s_pause.voteColumn == 0 && s_pause.open);
+    key(0x1b); assert(!s_pause.open);
+    snprintf(voteState.map, sizeof(voteState.map), "mp_toujane");
+    /* Modes by their names, the one played tagged; they call g_gametype. */
+    UI_PauseMenu_Open(&dc); s_pause.tab = PAUSE_TAB_VOTE;
+    key(0x9b); assert(s_pause.voteFocus == PAUSE_VOTE_MODE);
+    paint(); assert(text("TEAM DEATHMATCH") && text("SEARCH & DESTROY") && text("HEADQUARTERS") && text("NOW"));
+    key(0x0d); assert(s_pause.voteColumn == 1 && s_pause.voteChoice == 1);
+    key(0x9b); clearLogs(); key(0x0d);
+    assert(commandCount == 1 && !strcmp(commands[0], "cmd callvote g_gametype sd\n") && !s_pause.open);
+    /* Restarting and the next map call theirs at once; up wraps to Kick Player. */
+    {
+        static const char *const direct[2] = { "cmd callvote map_restart\n", "cmd callvote map_rotate\n" };
+        for (i = 0; i < 2; i++) {
+            UI_PauseMenu_Open(&dc); s_pause.tab = PAUSE_TAB_VOTE; s_pause.voteFocus = PAUSE_VOTE_RESTART + i;
+            key(0x9d); assert(s_pause.voteColumn == 0);
+            clearLogs(); key(0x0d); assert(commandCount == 1 && !strcmp(commands[0], direct[i]) && !s_pause.open);
+        }
+    }
+    UI_PauseMenu_Open(&dc); s_pause.tab = PAUSE_TAB_VOTE; key(0x9a); assert(s_pause.voteFocus == PAUSE_VOTE_KICK);
+    /* Kick Player: with nobody else a note and nothing to open; else the
+     * people by name, kicked by their number. */
+    votePlayerCount = 0; paint(); assert(text("No one else is in the match.") && !text("NOW"));
+    clearLogs(); key(0x0d); key(0x9d); assert(s_pause.voteColumn == 0 && commandCount == 0 && s_pause.open);
+    votePlayerCount = 2; votePlayers[0].clientNum = 3; snprintf(votePlayers[0].name, 32, "Alice");
+    votePlayers[1].clientNum = 7; snprintf(votePlayers[1].name, 32, "Bob");
+    paint(); assert(text("ALICE") && text("BOB") && !text("NOW") && !text("No one else is in the match."));
+    key(0x0d); assert(s_pause.voteColumn == 1 && s_pause.voteChoice == 0);
+    key(0x9b); clearLogs(); key(0x0d); assert(commandCount == 1 && !strcmp(commands[0], "cmd callvote clientkick 7\n"));
+    /* Twenty: twelve rows, about the focused one. */
+    votePlayerCount = 20;
+    for (i = 0; i < 20; i++) { votePlayers[i].clientNum = i + 2; snprintf(votePlayers[i].name, 32, "P%02d", i); }
+    UI_PauseMenu_Open(&dc); s_pause.tab = PAUSE_TAB_VOTE; s_pause.voteFocus = PAUSE_VOTE_KICK;
+    paint(); assert(text("P00") && text("P11") && !text("P12"));
+    key(0x0d); for (i = 0; i < 15; i++) key(0x9b);
+    paint(); assert(s_pause.voteChoice == 15 && text("P08") && text("P19") && !text("P07"));
+    assert(near(text("P08")->y, 150.0f + 8.5f + 2.8f) && text("P15")->bold);
+    votePlayerCount = 0;
+    /* A spectator calls no vote. */
+    voteState.spectator = 1;
+    UI_PauseMenu_Open(&dc); s_pause.tab = PAUSE_TAB_VOTE; paint();
+    assert(text("Join a team to call a vote.") && !text("CHANGE MAP"));
+    clearLogs(); key(0x0d); key(0x9b); key(0x9d); assert(commandCount == 0 && s_pause.open && s_pause.voteColumn == 0);
+    voteState.spectator = 0;
+    /* A vote running: the menu opens on its ballot at Yes, with what is voted
+     * on, the seconds left and both counts; Enter votes and closes. */
+    voteState.active = 1; voteState.secondsLeft = 23; voteState.yes = 4; voteState.no = 1;
+    snprintf(voteState.text, sizeof(voteState.text), "Map: Matmata, Tunisia");
+    UI_PauseMenu_Open(&dc); assert(s_pause.tab == PAUSE_TAB_VOTE && s_pause.ballotFocus == PAUSE_BALLOT_YES);
+    paint();
+    assert(text("VOTE YES") && text("VOTE NO") && text("VOTE YES")->bold && !text("VOTE NO")->bold);
+    assert(text("VOTE IN PROGRESS") && text("Map: Matmata, Tunisia") && text("TIME LEFT") && !text("CHANGE MAP"));
+    assert(text("23") && text("4") && text("1") && near(text("23")->y, 198.0f) && near(text("4")->x, 300.0f + 80.0f - 2.5f));
+    assert(near(text("TIME LEFT")->y, 172.0f) && near(text("Map: Matmata, Tunisia")->cap, 8.0f));
+    clearLogs(); key(0x0d); assert(commandCount == 1 && !strcmp(commands[0], "cmd vote yes\n") && !s_pause.open);
+    UI_PauseMenu_Open(&dc); key(0x9d); key(0x9b); assert(s_pause.ballotFocus == PAUSE_BALLOT_NO);
+    clearLogs(); key(0x0d); assert(commandCount == 1 && !strcmp(commands[0], "cmd vote no\n"));
+    /* A click on a ballot row votes with it. */
+    UI_PauseMenu_Open(&dc); point(20.0f, 89.6f + 29.25f + 10.0f); paint(); assert(s_pause.ballotFocus == PAUSE_BALLOT_NO);
+    clearLogs(); key(0xc8); assert(commandCount == 1 && !strcmp(commands[0], "cmd vote no\n"));
+    /* Once voted, or watching, no ballot: the menu keeps its Class tab. */
+    voteState.voted = 1;
+    UI_PauseMenu_Open(&dc); assert(s_pause.tab == PAUSE_TAB_CLASS);
+    s_pause.tab = PAUSE_TAB_VOTE; paint(); assert(text("Your vote is in.") && !text("VOTE YES") && text("VOTE IN PROGRESS"));
+    clearLogs(); key(0x0d); key(0x9b); assert(commandCount == 0);
+    voteState.voted = 0; voteState.spectator = 1;
+    UI_PauseMenu_Open(&dc); assert(s_pause.tab == PAUSE_TAB_CLASS);
+    s_pause.tab = PAUSE_TAB_VOTE; paint(); assert(text("Spectators cannot vote.") && !text("VOTE YES"));
+    clearLogs(); key(0x0d); assert(commandCount == 0);
+    voteState.spectator = 0; voteState.active = 0;
+    /* The pointer: an action row takes the focus and leaves the choices; a
+     * choice row takes it, and a click calls it. */
+    UI_PauseMenu_Open(&dc); s_pause.tab = PAUSE_TAB_VOTE;
+    point(24.0f, 89.6f + 29.25f + 14.0f); paint(); assert(s_pause.voteFocus == PAUSE_VOTE_MODE && s_pause.voteColumn == 0);
+    point(400.0f, 150.0f + 3.0f * 18.5f + 8.0f); paint(); assert(s_pause.voteColumn == 1 && s_pause.voteChoice == 3);
+    clearLogs(); key(0xc8); assert(commandCount == 1 && !strcmp(commands[0], "cmd callvote g_gametype ctf\n"));
+    /* Out of a match the tab paints nothing of its own. */
+    voteValid = 0; UI_PauseMenu_Open(&dc); s_pause.tab = PAUSE_TAB_VOTE; paint();
+    assert(!text("CHANGE MAP") && !text("VOTE IN PROGRESS") && keycap("Q"));
+    clearLogs(); key(0x0d); assert(commandCount == 0); voteValid = 1;
+
     /* The wash fades in over 150 ms. */
     dc.realTime = 5000; UI_PauseMenu_Open(&dc); s_pause.tab = PAUSE_TAB_LEAVE;
     paint(); assert(drawn[0].kind == FILL && drawn[0].horz == 4 && near(drawn[0].color[3], 0.0f));
@@ -575,8 +722,28 @@ mutants = [
     ('index = index < 0 ? 0 : (index + step + s_pause.tabCount) % s_pause.tabCount;',
      'index = index < 0 ? 0 : (index - step + s_pause.tabCount) % s_pause.tabCount;'),
     ('        if (i == PAUSE_TAB_TEAM && slots.freeForAll)\n            continue;\n', ''),
-    ('    case PAUSE_KEY_ESCAPE:\n    case PAUSE_KEY_MOUSE2:\n        Pause_Close(dc);\n',
-     '    case PAUSE_KEY_ESCAPE:\n    case PAUSE_KEY_MOUSE2:\n'),
+    ('        else\n            Pause_Close(dc);\n        break;', '        else\n            ;\n        break;'),
+    ('        if (s_pause.tab == PAUSE_TAB_VOTE && s_pause.voteColumn)\n            s_pause.voteColumn = 0;\n'
+     '        else\n            Pause_Close(dc);', '        Pause_Close(dc);'),
+    ('    if (CG_OverviewVote(&vote) && vote.active && !vote.voted && !vote.spectator)\n        s_pause.tab = PAUSE_TAB_VOTE;\n',
+     ''),
+    ('    s_pause.voteChoice = s_voteChoices.current >= 0 ? s_voteChoices.current : 0;', '    s_pause.voteChoice = 0;'),
+    ('"cmd vote yes\\n" : "cmd vote no\\n"', '"cmd vote no\\n" : "cmd vote yes\\n"'),
+    ('        if (vote.voted)\n            return;\n        Cbuf_ExecuteText', '        Cbuf_ExecuteText'),
+    ('    if (!CG_OverviewVote(&vote) || vote.spectator)\n        return;\n    if (vote.active) {\n        if (vote.voted)\n            return;',
+     '    if (!CG_OverviewVote(&vote))\n        return;\n    if (vote.active) {\n        if (vote.voted)\n            return;'),
+    ('"cmd callvote clientkick %d\\n"', '"cmd callvote kick %d\\n"'),
+    ('"cmd callvote map %s\\n", sharedUiInfo.mapList[i].mapLoadName', '"cmd callvote map %s\\n", sharedUiInfo.mapList[i].mapName'),
+    ('!I_stricmp(sharedUiInfo.mapList[i].mapLoadName, vote->map)', '0'),
+    ('"cmd callvote g_gametype %s\\n", type', '"cmd callvote typemap %s\\n", type'),
+    ('        return "cmd callvote map_restart\\n";', '        return "cmd callvote map_rotate\\n";'),
+    ('        first = s_pause.voteChoice - PAUSE_VOTE_CHOICE_ROWS / 2;', '        first = 0;'),
+    ('        s_pause.voteChoice = index;\n        s_pause.voteColumn = 1;', '        s_pause.voteChoice = index;'),
+    ('        } else if (s_pause.tab == PAUSE_TAB_VOTE && s_pause.ballotRows) {', '        } else if (0) {'),
+    ('    if (!vote->voted && !vote->spectator) {\n        s_pause.ballotRows = 1;', '    if (1) {\n        s_pause.ballotRows = 1;'),
+    ('        if (key == PAUSE_KEY_LEFT || !s_voteChoices.count) {', '        if (!s_voteChoices.count) {'),
+    ('    if (s_pause.tab == PAUSE_TAB_CLASS || (s_pause.tab == PAUSE_TAB_VOTE && s_pause.voteColumn))',
+     '    if (s_pause.tab == PAUSE_TAB_CLASS)'),
     ("    case 'q':\n", ''),
     ('    case PAUSE_KEY_RSHLDR:\n', ''),
     ('s_pause.classFocus = Pause_Wrap(s_pause.classFocus + step, CLASS_COUNT);',
@@ -608,8 +775,8 @@ mutants = [
     ('    if (s_pause.tab != PAUSE_TAB_OVERVIEW)\n        x +=', '    if (1)\n        x +='),
     ('    if (s_pause.tab == PAUSE_TAB_CLASS && !s_pause.standard && !gamepad)', '    if (s_pause.tab == PAUSE_TAB_CLASS)'),
     ('    if (moved && (s_pause.hover >> 8) != PAUSE_HOVER_TOGGLE) {', '    if (moved) {'),
-    ('            focus[3] != s_pause.settingsFocus)\n            Pause_Sound("mouse_over");',
-     '            focus[3] != s_pause.settingsFocus) {\n        }'),
+    ('            focus[6] != s_pause.ballotFocus)\n            Pause_Sound("mouse_over");',
+     '            focus[6] != s_pause.ballotFocus) {\n        }'),
     # The focus from the hover the last frame painted, where the pointer was.
     ('    s_pause.hover = PAUSE_HOVER_NONE;\n    Pause_PaintTabs(dc, gamepad);',
      '    if (moved && (s_pause.hover >> 8) != PAUSE_HOVER_TOGGLE)\n        Pause_FocusHover();\n    moved = 0;\n'
@@ -665,10 +832,12 @@ with tempfile.TemporaryDirectory(prefix='cod2-pause-menu-') as tmp:
         assert body.count(before) == 1, before
         result = build(body.replace(before, after), f'mutant{index}', '-O0')
         assert result.returncode != 0, f'mutant survived: {after!r}'
-print('PASS: Escape opens the pause menu over the blurred view on the Class tab at the class chosen last; Q/E, the '
-      'bumpers or Tab page through Class, Overview, Change Team (not in deathmatch), Leave Game and Settings; '
-      'classes choose from either list, F1 edits the player\'s own; teams send the team menu\'s response, an '
-      'auto-assign from a side only balances; leaving disconnects; Controls opens the settings list and the other '
+print('PASS: Escape opens the pause menu over the blurred view on the Class tab at the class chosen last, or on a '
+      'running vote\'s ballot; Q/E, the bumpers or Tab page through Class, Overview, Change Team (not in deathmatch), '
+      'Vote, Leave Game and Settings; classes choose from either list, F1 edits the player\'s own; teams send the team '
+      'menu\'s response, an auto-assign from a side only balances; votes call a map, a mode, a restart, the next map '
+      'or a kick from Start New Server\'s arenas and modes and the people in the match, the one in play tagged, and '
+      'cast yes or no, never for a spectator or twice; leaving disconnects; Controls opens the settings list and the other '
       'settings rows their page, each returning to the tab; the tab bar, '
       'prompts, lists, tiles, overview and pointer follow the captures\' layout; the pointer entering another row '
       'plays mouse_over; the hooks and menu file are wired; '

@@ -207,10 +207,20 @@ retail CoD2:
   under Custom, the five defaults under Standard Issue, with the focused
   loadout), **Overview** (mode and map, both scores, your K/D, score, kills,
   assists, deaths and headshots, the time left and the whole map with your
-  team), **Change Team** (free slots per side, Auto-Assign), **Leave Game**
-  and **Settings** (Controls, Graphics, Audio, Game). It replaces the retail
-  in-game menu, so its Call Vote and Mute Players entries are gone. See
+  team), **Change Team** (free slots per side, Auto-Assign), **Vote**,
+  **Leave Game** and **Settings** (Controls, Graphics, Audio, Game). It
+  replaces the retail in-game menu, whose Mute Players entry is gone. See
   [the pause menu's measurements](GRAPHICS_2026-10-16.md#wwii-pause-menu-october-18-2026).
+- **Votes in a match:** the pause menu's **Vote** tab calls the server's
+  votes: Change Map (the eight arenas of Start New Server, in the mode played),
+  Change Mode (the five modes, restarting the map), Restart Map, Next Map and
+  Kick Player (the people in the match); the map or mode played is tagged NOW.
+  While a vote runs, the HUD shows it with its keys (F1 yes, F2 no) and "Press
+  ESC to vote", and Escape opens the menu on its ballot: what is voted on, the
+  seconds left, both counts and Vote Yes / Vote No. A vote passes when more
+  than half of the people playing vote yes, the caller's own yes included;
+  spectators and bots do not count, so a player alone with bots passes one by
+  calling it. In a match the browser leaves F1 and F2 to the game.
 - **Sprint:** Shift + W increases movement speed, lowers and swings the weapon,
   and uses the running body animation. It also stands up from crouch/prone when
   headroom permits. Sprint currently has no stamina limit.
@@ -577,7 +587,8 @@ sheet metal offer less protection than thick masonry or rock. See
 | Send / cancel chat | Enter / Escape |
 | Quick messages | H |
 | Class screens | Enter selects, F1 renames (edits a Custom class in a match), F2 or a controller's Y customizes a gun's camouflage, Escape goes back; in a match ← → or Tab switch Custom / Standard Issue and 1–5 choose |
-| Pause menu (in a match) | Escape opens and closes; Q / E, Tab or LB / RB change tab; Enter or a click selects; arrows move; F1 edits a custom class; 1–5 choose a class |
+| Pause menu (in a match) | Escape opens and closes; Q / E, Tab or LB / RB change tab; Enter or a click selects; arrows move; F1 edits a custom class; 1–5 choose a class; on Vote, → or Enter opens an action's choices and ← or Escape goes back |
+| Vote yes / no | F1 / F2, or Escape and the Vote tab's ballot |
 | Start New Server | ↑ ↓ or the pointer choose, Enter or a click opens and selects, ← → change a rule or bot setting, Escape or right-click goes back |
 | Enter / exit fullscreen | F10 |
 

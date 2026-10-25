@@ -892,6 +892,10 @@
             !event.ctrlKey && !event.metaKey && !event.altKey &&
             (event.key === ' ' || event.key === '/'))
           native._web_chat_char(event.key.charCodeAt(0));
+        // In a match F1 and F2 cast votes; the browser would open its help.
+        if (nativeState === 2 && (event.key === 'F1' || event.key === 'F2') &&
+            !event.ctrlKey && !event.metaKey && !event.altKey)
+          event.preventDefault();
         // Escape can release capture at browser level. A subsequent real game
         // key reacquires it without making the player click the scene again.
         if ((nativeState === 2 || nativeState === 3) && event.isTrusted &&

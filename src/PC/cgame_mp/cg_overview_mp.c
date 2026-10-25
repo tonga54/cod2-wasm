@@ -16,10 +16,15 @@ extern const char *SEH_LocalizeTextMessage(const char *msg, const char *context,
 extern void CL_AddReliableCommand(const char *cmd);
 extern void CalcScreenPlacement(float *x, float *y, float *w, float *h, int horzAlign, int vertAlign);
 extern void I_strncpyz(char *dest, const char *src, int destsize);
+extern char *I_CleanStr(char *string);
 extern int Com_sprintf(char *dest, int size, const char *fmt, ...);
 
 #define OVERVIEW_MAX_CLIENTS 64
 #define OVERVIEW_SCORES_MSEC 2000
+/* The player state's flag for a vote cast, as the server and the HUD use it. */
+#define OVERVIEW_VOTED 0x100000
+/* The name the server gives its bots (SV_AddTestClient). */
+#define OVERVIEW_BOT_PREFIX "[BOT]"
 #define OVERVIEW_ALIGN_LEFT 1
 #define OVERVIEW_ALIGN_TOP 1
 /* The emblems are built at the size they are drawn, within these bounds. */
@@ -170,4 +175,47 @@ void CG_OverviewRatio(int kills, int deaths, char *buf, int size)
     if (deaths < 0)
         deaths = 0;
     Com_sprintf(buf, size, "%.2f", deaths > 0 ? (double)kills / (double)deaths : (double)kills);
+}
+
+int CG_OverviewVote(CG_Vote *vote)
+{
+    memset(vote, 0, sizeof(*vote));
+    if (!cg->snap || !cg->nextSnap)
+        return 0;
+    I_strncpyz(vote->map, Info_ValueForKey(CL_GetConfigString(0), "mapname"), sizeof(vote->map));
+    I_strncpyz(vote->gametype, cgs->gametype, sizeof(vote->gametype));
+    vote->spectator = CG_OverviewTeam(cg->snap->ps.clientNum) == TEAM_SPECTATOR;
+    if (!cgs->voteTime)
+        return 1;
+    vote->active = 1;
+    vote->secondsLeft = (cgs->voteTime - cg->time) / 1000;
+    if (vote->secondsLeft < 0)
+        vote->secondsLeft = 0;
+    vote->yes = cgs->voteYes;
+    vote->no = cgs->voteNo;
+    vote->voted = (cg->nextSnap->ps.eFlags & OVERVIEW_VOTED) != 0;
+    I_strncpyz(vote->text, cgs->voteString, sizeof(vote->text));
+    I_CleanStr(vote->text);
+    return 1;
+}
+
+int CG_OverviewVotePlayers(CG_VotePlayer *players, int max)
+{
+    int count = 0;
+    int i;
+
+    if (!cg->snap)
+        return 0;
+    for (i = 0; i < OVERVIEW_MAX_CLIENTS && count < max; ++i) {
+        const clientInfo_t *info = &cg->bgs.clientinfo[i];
+
+        if (!info->infoValid || i == cg->snap->ps.clientNum ||
+            !strncmp(info->name, OVERVIEW_BOT_PREFIX, sizeof(OVERVIEW_BOT_PREFIX) - 1))
+            continue;
+        players[count].clientNum = i;
+        I_strncpyz(players[count].name, info->name, sizeof(players[count].name));
+        I_CleanStr(players[count].name);
+        ++count;
+    }
+    return count;
 }
