@@ -67,6 +67,8 @@ EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShado
             // A swaying model's push in its own space, and where it stands, its
             // scale and the wind's clock (web_effects.c).
             wind: new Float32Array(4), windAt: new Float32Array(4),
+            // A scope's glass: its disc in the color map (web_effects.c).
+            lens: new Float32Array(4),
             sunShadowRevision: -1,
             bound: [null, null, null, null, null], present: [0, 0, 0, 0, 0], sunRevision: -1,
             // The detail, normal and specular maps, then the camouflage's pattern

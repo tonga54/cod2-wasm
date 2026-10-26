@@ -1279,6 +1279,54 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             }
             return true;
         };
+        /* The world as drawn so far, for a scope's glass in the hands to mirror
+         * (web_effects.c): copied once a view at its first lens draw, before
+         * the glass, with its mips, so a lens a few dozen pixels wide reads the
+         * world softened rather than shimmering. It stays bound on unit 22,
+         * clear of the units the compositor binds and unbinds. */
+        fx.lensScene = function() {
+            var t = fx.t;
+            if (!t || !fx.drawing) return false;
+            var l = t.lens;
+            if (!l) {
+                l = t.lens = { ok: false, ready: false };
+                var unit = gl.getParameter(gl.ACTIVE_TEXTURE);
+                var levels = Math.floor(Math.log2(Math.max(fx.width, fx.height))) + 1;
+                l.color = gl.createTexture();
+                t.textures.push(l.color);
+                gl.activeTexture(gl.TEXTURE22);
+                gl.bindTexture(gl.TEXTURE_2D, l.color);
+                gl.texStorage2D(gl.TEXTURE_2D, levels, gl.RGB8, fx.width, fx.height);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+                gl.activeTexture(unit);
+                l.fbo = gl.createFramebuffer();
+                t.framebuffers.push(l.fbo);
+                gl.bindFramebuffer(gl.FRAMEBUFFER, l.fbo);
+                gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, l.color, 0);
+                l.ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+                gl.bindFramebuffer(gl.FRAMEBUFFER, t.ms || t.scene);
+                if (!l.ok) console.warn("[scene-fx] the world's copy for scope glass is unavailable; scopes keep their painted glass");
+            }
+            if (!l.ok) return false;
+            if (!l.ready) {
+                var scissor = gl.isEnabled(gl.SCISSOR_TEST), active = gl.getParameter(gl.ACTIVE_TEXTURE);
+                if (scissor) gl.disable(gl.SCISSOR_TEST);
+                gl.bindFramebuffer(gl.READ_FRAMEBUFFER, t.ms || t.scene);
+                gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, l.fbo);
+                gl.blitFramebuffer(0, 0, fx.width, fx.height, 0, 0, fx.width, fx.height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+                gl.bindFramebuffer(gl.FRAMEBUFFER, t.ms || t.scene);
+                gl.activeTexture(gl.TEXTURE22);
+                gl.bindTexture(gl.TEXTURE_2D, l.color);
+                gl.generateMipmap(gl.TEXTURE_2D);
+                gl.activeTexture(active);
+                if (scissor) gl.enable(gl.SCISSOR_TEST);
+                l.ready = true;
+            }
+            return true;
+        };
         /* Normalized Gaussian over texels 0..2 * pairs, folded into bilinear taps:
          * [center weight, pair weights...] and [pair offsets...]. */
         fx.kernel = function(sigma, pairs) {
@@ -1553,6 +1601,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
     if (width !== screenWidth || height !== screenHeight) fx.scale(screenWidth, screenHeight);
     fx.drawing = true;
     if (fx.t.feather) fx.t.feather.ready = false;
+    if (fx.t.lens) fx.t.lens.ready = false;
     return 1;
 });
 

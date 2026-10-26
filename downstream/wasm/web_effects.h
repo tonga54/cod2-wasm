@@ -33,11 +33,15 @@ typedef struct {
      * where it stands in the world (x, y), its scale and the wind's clock in
      * seconds. All 0 for a draw the wind leaves still. */
     float wind[8];
+    /* A scope's glass in the viewmodel: its disc's centre and radii in the
+     * color map's coordinates; all 0 for anything else. */
+    float lens[4];
 } WebEffectDraw;
 
 float WebEffects_Feather(const Material *material);
 int WebEffects_IsFire(const Material *material);
 float WebEffects_Foliage(const Material *material);
+const float *WebEffects_Lens(const Material *material);
 void WebEffects_Select(const Material *material, const WebEffectState *state, WebEffectDraw *draw);
 void WebEffects_Apply(const Material *material, const WebEffectState *state, float worldNearClip);
 

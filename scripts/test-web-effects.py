@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the production per-draw effects: coverage, z-feather, heat and wind."""
+"""Exercise the production per-draw effects: coverage, z-feather, heat, wind and scope glass."""
 from pathlib import Path
 import subprocess
 import tempfile
@@ -41,8 +41,12 @@ assert '{ "ui_zfeather", "Soften the edges where smoke meets the world." },' in 
 # WebPointLights_Draw makes the material's effect uniform before this runs.
 assert 'effect: new Float32Array(4),' in (root / 'downstream/wasm/web_point_lights.c').read_text()
 assert 'wind: new Float32Array(4), windAt: new Float32Array(4),' in (root / 'downstream/wasm/web_point_lights.c').read_text()
+assert 'lens: new Float32Array(4),' in (root / 'downstream/wasm/web_point_lights.c').read_text()
+# The world's copy for scope glass is made again in every view.
+assert 'if (fx.t.lens) fx.t.lens.ready = false;' in (root / 'downstream/wasm/web_scene_fx.c').read_text()
 # Every material program declares the wind and sways its vertices in the
-# model's space before the view; the two vectors upload with the others.
+# model's space before the view; the two vectors upload with the others, as
+# the scope glass's disc does, its world copy read from unit 22.
 gl_patch = (root / 'scripts/patch-emscripten-gl.py').read_text()
 for text in ('"uniform highp vec4 u_cod2Wind; uniform highp vec4 u_cod2WindAt;"',
              "WIND_POSITION_ORIGINAL = '\"  vec4 ecPosition = u_modelView * a_position;\"'",
@@ -50,7 +54,10 @@ for text in ('"uniform highp vec4 u_cod2Wind; uniform highp vec4 u_cod2WindAt;"'
              'cod2Position.xyz += u_cod2Wind.xyz * (cod2Height / (cod2Height + 50.0) * cod2Gust);',
              '(WIND_POSITION_ORIGINAL, WIND_POSITION_REPLACEMENT),',
              'this.cod2WindLocation = GLctx.getUniformLocation(this.program, "u_cod2Wind");',
-             '"effect", "relief", "wind", "windAt"];'):
+             '"effect", "relief", "wind", "windAt", "lens"];',
+             'uniform highp vec4 u_cod2Lens; uniform sampler2D u_cod2LensScene;',
+             'this.cod2LensLocation = GLctx.getUniformLocation(this.program, "u_cod2Lens");',
+             'if (this.cod2LensSceneLocation) GLctx.uniform1i(this.cod2LensSceneLocation, 22);'):
     assert gl_patch.count(text) == 1, text
 
 emscripten = '#define EM_JS(ret, name, params, ...) ret name params;\n'
@@ -77,12 +84,14 @@ const dvar_t *r_aaAlpha = &aaAlpha;
 const dvar_t *r_zfeather = &zfeather;
 const dvar_t *r_fxHeat = &fxHeat;
 const dvar_t *r_wind = &windDvar;
-static float drawn[4], drawnWind[8];
+static float drawn[4], drawnWind[8], drawnLens[4];
 static int draws;
-void WebEffects_Draw(float coverage, float feather, float heat, float worldNearClip, const float *wind)
+void WebEffects_Draw(float coverage, float feather, float heat, float worldNearClip, const float *wind,
+                     const float *lens)
 {
     drawn[0] = coverage; drawn[1] = feather; drawn[2] = heat; drawn[3] = worldNearClip;
     memcpy(drawnWind, wind, sizeof(drawnWind));
+    memcpy(drawnLens, lens, sizeof(drawnLens));
     ++draws;
 }
 /* A model's D3D world matrix: turned yaw radians about the vertical,
@@ -330,6 +339,49 @@ int main(void)
         assert(draws == 2 && drawnWind[3] == 0);
     }
 
+    /* Scope glass: the Kar98k's, Enfield's and Springfield's scopes (the 4x
+     * Optic wears one of them) name their glass's disc in the color map; the
+     * bare rifles, other scopes and anything else name none. */
+    {
+        const struct { const char *name; float disc[4]; } lenses[] = {
+            {"mtl_weapon_kar98_scope", {0.1719f, 0.7070f, 0.1426f, 0.2852f}},
+            {"mtl_weapon_enfield_scope", {0.1602f, 0.6875f, 0.1504f, 0.3008f}},
+            {"mtl_weapon_springfield", {0.6289f, 0.2051f, 0.1289f, 0.1289f}}};
+        for (int i = 0; i < 3; ++i) {
+            Material m = {{lenses[i].name}, 0, NULL};
+            const float *disc = WebEffects_Lens(&m);
+            assert(disc && !memcmp(disc, lenses[i].disc, sizeof(lenses[i].disc)));
+        }
+        const char *bare[] = {"mtl_weapon_kar98", "mtl_weapon_kar98_scope_cap", "mtl_weapon_enfield",
+                              "mtl_weapon_mosin_scope", ""};
+        for (int i = 0; i < 5; ++i) {
+            Material m = {{bare[i]}, 0, NULL};
+            assert(!WebEffects_Lens(&m));
+        }
+        assert(!WebEffects_Lens(&unnamed) && !WebEffects_Lens(NULL));
+        /* Only in the hands, in the depth hack's range: a rifle lying in the
+         * world or drawn in 2D keeps its painted glass. The opaque glass takes
+         * no coverage, feather, heat or wind. */
+        Material kar = {{"mtl_weapon_kar98_scope"}, 0, NULL};
+        WebEffectState held = {0, 0, 8, 0, 0, 1, ONE, ZERO, 0};
+        pick(&kar, &held);
+        assert(!memcmp(draw.lens, lenses[0].disc, sizeof(draw.lens)) && none() && still());
+        WebEffectState lying = held;
+        lying.fullDepthRange = 1;
+        pick(&kar, &lying);
+        assert(draw.lens[0] == 0 && draw.lens[1] == 0 && draw.lens[2] == 0 && draw.lens[3] == 0);
+        lying = held;
+        lying.is2D = 1;
+        pick(&kar, &lying);
+        assert(draw.lens[2] == 0 && draw.lens[3] == 0);
+        /* The device's call hands the disc over, zeros for anything else. */
+        draws = 0;
+        WebEffects_Apply(&kar, &held, 3.998f);
+        assert(draws == 1 && !memcmp(drawnLens, lenses[0].disc, sizeof(drawnLens)));
+        WebEffects_Apply(&leaves, &held, 3.998f);
+        assert(draws == 2 && drawnLens[0] == 0 && drawnLens[2] == 0);
+    }
+
     /* No state or no material changes nothing. */
     pick(&fire, NULL);
     assert(none());
@@ -351,7 +403,8 @@ int main(void)
          "opaque GE128-style alpha tests under r_aaAlpha, the feather of alpha or color by the blend in the world's "
          "depth range under r_zfeather, heat for additive fire scaled by r_fxHeat up to twice, models' grass, bushes, "
          "hedges and trees swaying under r_wind by their material, their push turned into their own space, where they "
-         "stand and the wind's 600 s clock, the map, the viewmodel and other materials still, nothing for 2D draws");
+         "stand and the wind's 600 s clock, the map, the viewmodel and other materials still, the Kar98k, Enfield and "
+         "Springfield scopes' glass discs in the hands only, nothing for 2D draws");
     return 0;
 }
 '''
@@ -389,8 +442,15 @@ mutants = [
     ('draw->heat = isfinite(heat) && heat > 0.0f ? fminf(heat, 2.0f) * WEB_EFFECTS_HEAT : 0.0f;',
      'draw->heat = isfinite(heat) && heat > 0.0f ? heat * WEB_EFFECTS_HEAT : 0.0f;'),
     ('    memset(draw, 0, sizeof(*draw));\n', ''),
-    ('    WebEffects_Draw(draw.coverage, draw.feather, draw.heat, worldNearClip, draw.wind);',
-     '    WebEffects_Draw(draw.coverage, draw.feather, draw.heat, 4.0f, draw.wind);'),
+    ('    WebEffects_Draw(draw.coverage, draw.feather, draw.heat, worldNearClip, draw.wind, draw.lens);',
+     '    WebEffects_Draw(draw.coverage, draw.feather, draw.heat, 4.0f, draw.wind, draw.lens);'),
+    ('    WebEffects_Draw(draw.coverage, draw.feather, draw.heat, worldNearClip, draw.wind, draw.lens);',
+     '    WebEffects_Draw(draw.coverage, draw.feather, draw.heat, worldNearClip, draw.wind, draw.wind);'),
+    # Scope glass: exact names, each disc, only in the hands, the whole disc.
+    ('        if (!strcmp(name, s_webLenses[i].name))', '        if (!strncmp(name, s_webLenses[i].name, 16))'),
+    ('{0.1719f, 0.7070f, 0.1426f, 0.2852f}', '{0.1719f, 0.2930f, 0.1426f, 0.2852f}'),
+    ('    if (!state->fullDepthRange) {\n        const float *disc', '    if (1) {\n        const float *disc'),
+    ('            memcpy(draw->lens, disc, sizeof(draw->lens));', '            memcpy(draw->lens, disc, sizeof(draw->lens) / 2);'),
     # Wind: each kind's share, the steel hedgehogs, the map's own materials,
     # the map's identity, the push's turn into the model, where it stands,
     # its scale and clock, the viewmodel and r_wind.
@@ -429,4 +489,4 @@ with tempfile.TemporaryDirectory(prefix='cod2-web-effects-') as tmp:
                         str(path / f'mutant{index}-test.c'), '-lm', '-o', str(path / f'mutant{index}')], check=True)
         result = subprocess.run([str(path / f'mutant{index}')], capture_output=True)
         assert result.returncode != 0, f'mutant survived: {after!r}'
-    print(f'PASS: {len(mutants)} coverage, feather, heat and wind mutants fail')
+    print(f'PASS: {len(mutants)} coverage, feather, heat, wind and scope glass mutants fail')

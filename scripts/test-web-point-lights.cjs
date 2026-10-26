@@ -288,10 +288,12 @@ assert(material.sunShadowDefault);
 // and their sampler stay clear of them, within WebGL2's 32 combined units.
 {
   const sceneFx = fs.readFileSync('downstream/wasm/web_scene_fx.c', 'utf8');
-  // ... and the effects' copy of the scene's depth stays bound on unit 19.
-  assert.deepEqual([...new Set(sceneFx.match(/gl\.TEXTURE\d+/g))].sort(), ['gl.TEXTURE19', 'gl.TEXTURE8'],
-    'the compositor binds from unit 8, the effects\' depth on 19');
+  // ... the effects' copy of the scene's depth stays bound on unit 19, and the
+  // world's copy for scope glass on 22.
+  assert.deepEqual([...new Set(sceneFx.match(/gl\.TEXTURE\d+/g))].sort(), ['gl.TEXTURE19', 'gl.TEXTURE22', 'gl.TEXTURE8'],
+    'the compositor binds from unit 8, the effects\' depth on 19, the lenses\' world on 22');
   assert(linked.includes('GLctx.uniform1i(this.cod2FeatherDepthLocation, 19);'));
+  assert(linked.includes('GLctx.uniform1i(this.cod2LensSceneLocation, 22);'));
   assert(sceneFx.includes('gl.activeTexture(gl.TEXTURE19);\n                gl.bindTexture(gl.TEXTURE_2D, f.depth);'));
   assert(sceneFx.includes('gl.activeTexture(gl.TEXTURE8 + fx.unit(unit));'));
   assert(sceneFx.includes('gl.uniform1i(gl.getUniformLocation(program, samplers[s]), 8 + fx.unit(s));'));
@@ -303,7 +305,7 @@ assert(material.sunShadowDefault);
   const fxUnits = sources[1].split(',').map((_, i) => 8 + fxUnit(i));
   assert.deepEqual(fxUnits, [8, 9, 10, 11, 12, 13, 14, 15, 20, 21]);
   assert.deepEqual(material.units, [5, 6, 7, 16, 17]);
-  for (const unit of [...material.units, 18, 19]) assert(!fxUnits.includes(unit) && unit < 32, `unit ${unit}`);
+  for (const unit of [...material.units, 18, 19, 22]) assert(!fxUnits.includes(unit) && unit < 32, `unit ${unit}`);
   assert(!material.units.includes(19), 'the effects\' depth shares no unit with the material maps or the sun\'s');
   // The sun's depth map stays bound on unit 18 across frames.
   const sunShadows = fs.readFileSync('downstream/wasm/web_sun_shadows.c', 'utf8');
@@ -827,7 +829,8 @@ console.log('PASS: the sun\'s depth map in 3 views\' eye space for world draws o
   // scene, toggled when it changes; a feather only with the scene's depth
   // copied and the view's near clip, which goes along with it.
   const effectsSource = fs.readFileSync('downstream/wasm/web_effects.c', 'utf8');
-  const bridgeStart = effectsSource.indexOf('EM_JS(void, WebEffects_Draw, (float coverage, float feather, float heat, float worldNearClip, const float *wind), {');
+  const bridgeStart = effectsSource.indexOf('EM_JS(void, WebEffects_Draw, (float coverage, float feather, float heat, float worldNearClip, const float *wind,\n' +
+    '                              const float *lens), {');
   assert(bridgeStart >= 0);
   let bodyStart = effectsSource.indexOf('{', effectsSource.indexOf('), {', bridgeStart) + 2), bodyEnd = bodyStart + 1, depth = 1;
   while (depth) { depth += (effectsSource[bodyEnd] === '{') - (effectsSource[bodyEnd] === '}'); ++bodyEnd; }
@@ -835,7 +838,7 @@ console.log('PASS: the sun\'s depth map in 3 views\' eye space for world draws o
   const effectGL = {SAMPLE_ALPHA_TO_COVERAGE: 0x809E, enable: c => capabilities.push(['enable', c]),
     disable: c => capabilities.push(['disable', c])};
   const M = {}, windHeap = new Float32Array(64);
-  const bridge = Function('Module', 'GLctx', 'HEAPF32', 'coverage', 'feather', 'heat', 'worldNearClip', 'wind',
+  const bridge = Function('Module', 'GLctx', 'HEAPF32', 'coverage', 'feather', 'heat', 'worldNearClip', 'wind', 'lens',
     effectsSource.slice(bodyStart + 1, bodyEnd - 1)).bind(null, M, effectGL, windHeap);
   const f = Math.fround;
   bridge(1, 0.25, 0.65, 4);
@@ -884,6 +887,30 @@ console.log('PASS: the sun\'s depth map in 3 views\' eye space for world draws o
   assert(effectValues.wind === wind && effectValues.windAt === windAt, 'the arrays are kept, not replaced');
   bridge(1, 0, 0, f(3.998), 32 * 4);
   assert.deepEqual([...wind, ...windAt], [0, 0, 0, 0, 0, 0, 0, 0]);
+  // A scope's glass takes its disc only with the world copied for it in the
+  // composed view; a draw without a disc copies nothing.
+  const lens = effectValues.lens = new Float32Array(4), disc = [0.1719, 0.707, 0.1426, 0.2852].map(f);
+  windHeap.set(disc, 40);
+  let lensCopies = 0, lensCopied = true;
+  M.cod2SceneFx = {t: {}, drawing: true, samples: 4, lensScene: () => (++lensCopies, lensCopied)};
+  bridge(0, 0, 0, f(3.998), 32 * 4, 40 * 4);
+  assert.deepEqual([...lens], disc);
+  assert.equal(lensCopies, 1);
+  bridge(0, 0, 0, f(3.998), 32 * 4, 48 * 4);
+  assert.deepEqual([...lens], [0, 0, 0, 0]);
+  assert.equal(lensCopies, 1, 'no disc, no copy');
+  lensCopied = false;
+  bridge(0, 0, 0, f(3.998), 32 * 4, 40 * 4);
+  assert.deepEqual([...lens], [0, 0, 0, 0], 'no copy, the painted glass');
+  lensCopied = true;
+  M.cod2SceneFx.drawing = false;
+  bridge(0, 0, 0, f(3.998), 32 * 4, 40 * 4);
+  assert.deepEqual([...lens], [0, 0, 0, 0]);
+  assert.equal(lensCopies, 2, 'outside the composed view nothing is copied');
+  delete M.cod2SceneFx;
+  bridge(0, 0, 0, f(3.998), 32 * 4, 40 * 4);
+  assert.deepEqual([...lens], [0, 0, 0, 0]);
+  assert(effectValues.lens === lens, 'the array is kept, not replaced');
 
   // Programs with the effects upload the depth's unit once and their values
   // when they change.
@@ -904,5 +931,19 @@ console.log('PASS: the sun\'s depth map in 3 views\' eye space for world draws o
   upload.call(effectProgram, Module, effectUploadGL);
   assert.deepEqual(uploads.splice(0), [['4fv', 'effect', [0, 0, f(0.65), f(3.998)]]]);
   Module.cod2Material.effect.fill(0);
+  // Lit model programs upload the lenses' world unit once and the disc when
+  // it changes.
+  const lensProgram = materialProgram({cod2ModelLocation: 'model', cod2LensLocation: 'lens',
+    cod2LensSceneLocation: 'lensScene'});
+  Module.cod2Material.lens.set([0.1719, 0.707, 0.1426, 0.2852]);
+  upload.call(lensProgram, Module, effectUploadGL);
+  assert(uploads.some(([type, location, value]) => type === '1i' && location === 'lensScene' && value === 22));
+  assert.deepEqual(uploads.find(([, location]) => location === 'lens'), ['4fv', 'lens', [...Module.cod2Material.lens]]);
+  uploads.length = 0;
+  for (let i = 0; i < 1000; ++i) upload.call(lensProgram, Module, effectUploadGL);
+  assert.deepEqual(uploads, []);
+  Module.cod2Material.lens.fill(0);
+  upload.call(lensProgram, Module, effectUploadGL);
+  assert.deepEqual(uploads.splice(0), [['4fv', 'lens', [0, 0, 0, 0]]]);
 }
-console.log('PASS: the effect uniform in every textured program, the zfeather and heat in unlit ones only, coverage wrapping GREATER/GEQUAL tests with the mip-level alpha, toggled once per change in the multisampled scene, feathering only with the depth copy and the near clip, uploads per program and value');
+console.log('PASS: the effect uniform in every textured program, the zfeather and heat in unlit ones only, coverage wrapping GREATER/GEQUAL tests with the mip-level alpha, toggled once per change in the multisampled scene, feathering only with the depth copy and the near clip, a scope glass\'s disc only with the world copied for it, uploads per program and value');

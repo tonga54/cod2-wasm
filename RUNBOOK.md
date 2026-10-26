@@ -6815,3 +6815,30 @@ the QA stack with every server packet held 150 ms, a shot at the bunker's wall
 showed its splinters in the first frame after the shot and one bullet hole;
 the old client showed none within 430 ms of the shot. The full static suite
 was not run.
+
+## Scope glass that mirrors the world — 2026-10-25
+
+The owner found that scope lenses (the 4x Optic, the Kar98k's scope and the
+like) showed a picture rather than a reflection, unlike CoD WWII's. The glass
+is a disc painted into each scope's color map: a fixed dark lens with white
+highlights and the outline of a window. `web_effects.c` names the disc in the
+three scopes' color maps (`mtl_weapon_kar98_scope`, `mtl_weapon_enfield_scope`,
+`mtl_weapon_springfield`; the 4x Optic wears one of them) and hands it over
+only for the viewmodel, in the depth hack's range. `web_scene_fx.c` copies the
+world drawn so far, once a view at the first lens draw, into a mipmapped
+texture bound on unit 22 (`fx.lensScene`). The lit model shader
+(`COD2_SCOPE_GLASS` in `patch-emscripten-gl.py`) replaces the painted disc with
+dark coated glass that mirrors that copy as a convex lens does (upright,
+flipped left to right, drawn in toward the rim), more at grazing angles and
+toward the rim, cool at the centre and violet at the rim, with the sun's glint
+where it reaches the weapon and the rim shaded by its mount. A rifle lying in
+the world, a 2D draw or a failed copy keeps the painted glass; the
+Mosin-Nagant's glass is plain dark metal in its map and is unchanged.
+
+Validation: `test-web-effects.py` (names, discs, viewmodel only; 46 mutants,
+5 new), `test-web-point-lights.cjs` (the bridge hands the disc over only with
+the copy made; uploads per value; unit 22 clear of the compositor's units),
+`test-emscripten-gl.cjs`, `test-web-scene-fx.py`,
+`test-web-scene-fx-scale.cjs`. Captures at Carentan with the Kar98k's scope at
+the hip: the painted highlights and window are gone, the lens carries the wall
+and post on screen and darkens indoors. The full static suite was not run.

@@ -17,7 +17,9 @@
  *    zfeather techniques did from the float Z buffer;
  *  - r_fxHeat: fire and explosions burn hotter, their cores reaching the glow;
  *  - r_wind: grass, bushes, hedges and trees sway, their tops further than
- *    their feet, in gusts that cross the map. */
+ *    their feet, in gusts that cross the map;
+ *  - a scope's glass held in the hands mirrors the world around it instead
+ *    of the picture painted on it. */
 
 extern const dvar_t *r_aaAlpha;
 extern const dvar_t *r_zfeather;
@@ -125,6 +127,27 @@ static void WebEffects_Wind(const float *world, int time, float share, float *wi
     wind[7] = (float)((time % WEB_EFFECTS_WIND_PERIOD_MS + WEB_EFFECTS_WIND_PERIOD_MS) % WEB_EFFECTS_WIND_PERIOD_MS) * 0.001f;
 }
 
+/* Where each scope's glass lies in its color map, the disc of its painted
+ * reflection: centre and radii, v from the top. The 4x Optic wears one of
+ * these three; the Mosin-Nagant's glass is plain dark metal. */
+static const struct {
+    const char *name;
+    float disc[4];
+} s_webLenses[] = {{"mtl_weapon_kar98_scope", {0.1719f, 0.7070f, 0.1426f, 0.2852f}},
+                   {"mtl_weapon_enfield_scope", {0.1602f, 0.6875f, 0.1504f, 0.3008f}},
+                   {"mtl_weapon_springfield", {0.6289f, 0.2051f, 0.1289f, 0.1289f}}};
+
+const float *WebEffects_Lens(const Material *material)
+{
+    const char *name = material ? material->info.name : NULL;
+    size_t i;
+
+    for (i = 0; name && i < sizeof(s_webLenses) / sizeof(s_webLenses[0]); ++i)
+        if (!strcmp(name, s_webLenses[i].name))
+            return s_webLenses[i].disc;
+    return NULL;
+}
+
 void WebEffects_Select(const Material *material, const WebEffectState *state, WebEffectDraw *draw)
 {
     memset(draw, 0, sizeof(*draw));
@@ -138,6 +161,12 @@ void WebEffects_Select(const Material *material, const WebEffectState *state, We
         state->alphaRef >= WEB_EFFECTS_COVERAGE_MIN_REF && state->alphaRef <= WEB_EFFECTS_COVERAGE_MAX_REF &&
         r_aaAlpha && r_aaAlpha->current.integer != 0)
         draw->coverage = 1.0f;
+    /* Only the viewmodel's, in the depth hack's range: a scope in the hands. */
+    if (!state->fullDepthRange) {
+        const float *disc = WebEffects_Lens(material);
+        if (disc)
+            memcpy(draw->lens, disc, sizeof(draw->lens));
+    }
     if (state->world && state->fullDepthRange && r_wind) {
         float share = WebEffects_Foliage(material) * r_wind->current.value;
         if (share > 0.0f && isfinite(share))
@@ -169,9 +198,15 @@ void WebEffects_Select(const Material *material, const WebEffectState *state, We
  * depth, copied once a view before the first feathered draw (web_scene_fx.c);
  * the depth's linear distance takes the view's near clip times the infinite
  * projection's depth scale, as the compositor's does. */
-EM_JS(void, WebEffects_Draw, (float coverage, float feather, float heat, float worldNearClip, const float *wind), {
+EM_JS(void, WebEffects_Draw, (float coverage, float feather, float heat, float worldNearClip, const float *wind,
+                              const float *lens), {
     var material = Module.cod2Material, fx = Module.cod2SceneFx;
     if (!material || !material.effect) return;
+    if (material.lens) {
+        // The glass mirrors the world drawn before it, copied once a view.
+        var disc = lens >> 2, glass = HEAPF32[disc + 2] > 0 && !!(fx && fx.t && fx.drawing && fx.lensScene());
+        for (var k = 0; k < 4; ++k) material.lens[k] = glass ? HEAPF32[disc + k] : 0;
+    }
     if (material.wind) {
         var at = wind >> 2;
         for (var i = 0; i < 4; ++i) {
@@ -200,5 +235,5 @@ void WebEffects_Apply(const Material *material, const WebEffectState *state, flo
     WebEffectDraw draw;
 
     WebEffects_Select(material, state, &draw);
-    WebEffects_Draw(draw.coverage, draw.feather, draw.heat, worldNearClip, draw.wind);
+    WebEffects_Draw(draw.coverage, draw.feather, draw.heat, worldNearClip, draw.wind, draw.lens);
 }

@@ -392,6 +392,46 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "float cod2Fresnel = 0.2 + 0.8 * pow(1.0 - max(dot(cod2B, cod2V), 0.0), 5.0);\n" +
                 "vec3 cod2Env = (cod2Ambient - cod2Sun) * 2.0 * mix(0.35, 1.0, smoothstep(-0.3, 0.7, cod2Up));\n" +
                 "gl_FragColor.rgb += cod2S.rgb * cod2Env * (cod2Fresnel * clamp(cod2P / 48.0, 0.25, 1.0) * u_cod2Surface.w);\n}\n}\n";
+              // COD2_SCOPE_GLASS: a scope's glass in the hands (web_effects.c
+              // names its disc in the color map) mirrors the world drawn before
+              // it, as a convex lens shows what faces it: upright, turned left
+              // for right and drawn in toward its rim, through a cool coating
+              // over dark glass, more at grazing angles and toward the rim; the
+              // sun glints off its curve and its mount shades its edge. Placed by
+              // where the disc lies on the screen, the world stays upright
+              // however the glass was mapped. Derivatives come before the
+              // branch, where they are defined.
+              pointDefs += "uniform highp vec4 u_cod2Lens; uniform sampler2D u_cod2LensScene;\n";
+              materialPass += "if (u_cod2Lens.z > 0.0) {\n" +
+                "highp vec2 cod2LensUv = " + pointUV + ";\n" +
+                "highp mat2 cod2LensJ = mat2(dFdx(cod2LensUv), dFdy(cod2LensUv));\n" +
+                "float cod2LensR = length((cod2LensUv - u_cod2Lens.xy) / u_cod2Lens.zw);\n" +
+                "if (cod2LensR < 1.0 && abs(determinant(cod2LensJ)) > 1e-14) {\n" +
+                "highp mat2 cod2LensI = inverse(cod2LensJ);\n" +
+                "highp vec2 cod2LensO = cod2LensI * (cod2LensUv - u_cod2Lens.xy);\n" +
+                "highp float cod2LensPx = max(0.5 * (length(cod2LensI * vec2(u_cod2Lens.z, 0.0)) +\n" +
+                "  length(cod2LensI * vec2(0.0, u_cod2Lens.w))), 1.0);\n" +
+                "highp vec2 cod2LensM = vec2(-cod2LensO.x, cod2LensO.y) / cod2LensPx;\n" +
+                "cod2LensM *= 0.42 + 0.16 * dot(cod2LensM, cod2LensM);\n" +
+                "float cod2LensLod = log2(max(0.6 * float(textureSize(u_cod2LensScene, 0).x) / cod2LensPx, 1.0)) + 1.0;\n" +
+                "vec3 cod2LensWorld = textureLod(u_cod2LensScene, clamp(vec2(0.5) + cod2LensM, 0.0, 1.0), cod2LensLod).rgb;\n" +
+                "highp vec3 cod2LensV = -v_cod2Eye * inversesqrt(max(dot(v_cod2Eye, v_cod2Eye), 1e-30));\n" +
+                "highp vec3 cod2LensN = v_cod2Normal * inversesqrt(max(dot(v_cod2Normal, v_cod2Normal), 1e-30));\n" +
+                // The glass faces the eye whichever way the model wound it.
+                "if (dot(cod2LensN, cod2LensV) < 0.0) cod2LensN = -cod2LensN;\n" +
+                "float cod2LensFresnel = mix(0.3, 0.8, pow(1.0 - dot(cod2LensN, cod2LensV), 4.0)) *\n" +
+                "  mix(0.85, 1.25, cod2LensR * cod2LensR);\n" +
+                // The coating cools the reflection, and turns violet toward the rim.
+                "vec3 cod2LensCoat = mix(vec3(0.66, 0.78, 0.95), vec3(0.85, 0.62, 1.0), smoothstep(0.55, 0.95, cod2LensR));\n" +
+                "vec3 cod2LensColor = vec3(0.008, 0.010, 0.014) + cod2LensWorld * cod2LensCoat * cod2LensFresnel;\n" +
+                // The sun where it reaches the weapon, and the light it is held
+                // under, glint off the glass's curve.
+                "highp vec3 cod2LensCurve = normalize(cod2LensN + 0.5 * vec3(cod2LensO / cod2LensPx, 0.0));\n" +
+                "highp vec3 cod2LensR3 = reflect(-cod2LensV, cod2LensCurve);\n" +
+                "cod2LensColor += u_cod2SunColor.rgb * (1.5 * u_cod2Model.x * pow(max(dot(cod2LensR3, u_cod2SunEye), 0.0), 80.0)) +\n" +
+                "  vec3(0.12) * pow(max(dot(cod2LensR3, vec3(-0.454, 0.655, 0.605)), 0.0), 40.0);\n" +
+                "cod2LensColor *= 1.0 - 0.5 * smoothstep(0.75, 1.0, cod2LensR);\n" +
+                "gl_FragColor.rgb = mix(gl_FragColor.rgb, cod2LensColor, 1.0 - smoothstep(0.93, 1.0, cod2LensR));\n}\n}\n";
             } else if (materialLightmap) {
               var lightmapUV = GLImmediate.useTextureMatrix ? "(u_textureMatrix1 * v_texCoord1).xy" : "v_texCoord1.xy";
               var lightmapSample = "texture2D(u_texUnit1, " + lightmapUV + ")";
@@ -647,6 +687,8 @@ POINT_UNIFORMS_REPLACEMENT = r'''        this.normalMatrixLocation = GLctx.getUn
         this.cod2ReliefLocation = GLctx.getUniformLocation(this.program, "u_cod2Relief");
         this.cod2WindLocation = GLctx.getUniformLocation(this.program, "u_cod2Wind");
         this.cod2WindAtLocation = GLctx.getUniformLocation(this.program, "u_cod2WindAt");
+        this.cod2LensLocation = GLctx.getUniformLocation(this.program, "u_cod2Lens");
+        this.cod2LensSceneLocation = GLctx.getUniformLocation(this.program, "u_cod2LensScene");
         this.cod2FeatherDepthLocation = GLctx.getUniformLocation(this.program, "u_cod2FeatherDepth");
         this.cod2MaterialUniforms = null;
         this.cod2LightCount = -1;
@@ -711,15 +753,18 @@ POINT_UPLOAD_REPLACEMENT = r'''        // COD2_POINT_LIGHT_UNIFORMS: cache per p
             if (this.cod2SunShadowMapLocation) GLctx.uniform1i(this.cod2SunShadowMapLocation, 18);
             // Only unlit programs feather effects into the scene's depth.
             if (this.cod2FeatherDepthLocation) GLctx.uniform1i(this.cod2FeatherDepthLocation, 19);
+            // Only lit model programs mirror the world in a scope's glass.
+            if (this.cod2LensSceneLocation) GLctx.uniform1i(this.cod2LensSceneLocation, 22);
             // Values are compared per program: world and model draws
             // alternate, but each program mostly sees the same ones.
             materialUniforms = this.cod2MaterialUniforms = [];
             var materialNames = ["surface", "detail", "sunEye", "sunColor", "skyEye", "model", "camo",
-              "sunShadowEye", "sunShadow", "sunShadowRect", "effect", "relief", "wind", "windAt"];
+              "sunShadowEye", "sunShadow", "sunShadowRect", "effect", "relief", "wind", "windAt", "lens"];
             var materialLocations = [this.cod2SurfaceLocation, this.cod2DetailLocation, this.cod2SunEyeLocation,
               this.cod2SunColorLocation, this.cod2SkyEyeLocation, this.cod2ModelLocation, this.cod2CamoLocation,
               this.cod2SunShadowEyeLocation, this.cod2SunShadowLocation, this.cod2SunShadowRectLocation,
-              this.cod2EffectLocation, this.cod2ReliefLocation, this.cod2WindLocation, this.cod2WindAtLocation];
+              this.cod2EffectLocation, this.cod2ReliefLocation, this.cod2WindLocation, this.cod2WindAtLocation,
+              this.cod2LensLocation];
             for (var materialIndex = 0; materialIndex < materialNames.length; ++materialIndex) {
               if (!materialLocations[materialIndex]) continue;
               materialUniforms.push({name: materialNames[materialIndex], location: materialLocations[materialIndex],
