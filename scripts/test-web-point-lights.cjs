@@ -829,17 +829,16 @@ console.log('PASS: the sun\'s depth map in 3 views\' eye space for world draws o
   // scene, toggled when it changes; a feather only with the scene's depth
   // copied and the view's near clip, which goes along with it.
   const effectsSource = fs.readFileSync('downstream/wasm/web_effects.c', 'utf8');
-  const bridgeStart = effectsSource.indexOf('EM_JS(void, WebEffects_Draw, (float coverage, float feather, float heat, float worldNearClip, const float *wind,\n' +
-    '                              const float *lens), {');
+  const bridgeStart = effectsSource.indexOf('EM_JS(void, WebEffects_Draw, (float coverage, float feather, float heat, float worldNearClip, const float *lens), {');
   assert(bridgeStart >= 0);
   let bodyStart = effectsSource.indexOf('{', effectsSource.indexOf('), {', bridgeStart) + 2), bodyEnd = bodyStart + 1, depth = 1;
   while (depth) { depth += (effectsSource[bodyEnd] === '{') - (effectsSource[bodyEnd] === '}'); ++bodyEnd; }
   const capabilities = [];
   const effectGL = {SAMPLE_ALPHA_TO_COVERAGE: 0x809E, enable: c => capabilities.push(['enable', c]),
     disable: c => capabilities.push(['disable', c])};
-  const M = {}, windHeap = new Float32Array(64);
-  const bridge = Function('Module', 'GLctx', 'HEAPF32', 'coverage', 'feather', 'heat', 'worldNearClip', 'wind', 'lens',
-    effectsSource.slice(bodyStart + 1, bodyEnd - 1)).bind(null, M, effectGL, windHeap);
+  const M = {}, lensHeap = new Float32Array(64);
+  const bridge = Function('Module', 'GLctx', 'HEAPF32', 'coverage', 'feather', 'heat', 'worldNearClip', 'lens',
+    effectsSource.slice(bodyStart + 1, bodyEnd - 1)).bind(null, M, effectGL, lensHeap);
   const f = Math.fround;
   bridge(1, 0.25, 0.65, 4);
   assert.deepEqual(capabilities, [], 'nothing before the first material');
@@ -877,38 +876,28 @@ console.log('PASS: the sun\'s depth map in 3 views\' eye space for world draws o
   bridge(1, 0.25, f(0.65), f(3.998));
   assert.deepEqual([...effectValues.effect], [0, 0, f(0.65), 0]);
   assert.deepEqual(capabilities, []);
-  // A swaying model's push and where it stands land in the material's own
-  // arrays, read from the draw's eight floats; a still draw's zeros too.
-  const wind = effectValues.wind = new Float32Array(4), windAt = effectValues.windAt = new Float32Array(4);
-  windHeap.set([1.5, -2, 0.25, 1, 2800, 400, 1.5, 123.5], 8);
-  bridge(1, 0, 0, f(3.998), 8 * 4);
-  assert.deepEqual([...wind], [1.5, -2, 0.25, 1]);
-  assert.deepEqual([...windAt], [2800, 400, 1.5, 123.5]);
-  assert(effectValues.wind === wind && effectValues.windAt === windAt, 'the arrays are kept, not replaced');
-  bridge(1, 0, 0, f(3.998), 32 * 4);
-  assert.deepEqual([...wind, ...windAt], [0, 0, 0, 0, 0, 0, 0, 0]);
   // A scope's glass takes its disc only with the world copied for it in the
   // composed view; a draw without a disc copies nothing.
   const lens = effectValues.lens = new Float32Array(4), disc = [0.1719, 0.707, 0.1426, 0.2852].map(f);
-  windHeap.set(disc, 40);
+  lensHeap.set(disc, 40);
   let lensCopies = 0, lensCopied = true;
   M.cod2SceneFx = {t: {}, drawing: true, samples: 4, lensScene: () => (++lensCopies, lensCopied)};
-  bridge(0, 0, 0, f(3.998), 32 * 4, 40 * 4);
+  bridge(0, 0, 0, f(3.998), 40 * 4);
   assert.deepEqual([...lens], disc);
   assert.equal(lensCopies, 1);
-  bridge(0, 0, 0, f(3.998), 32 * 4, 48 * 4);
+  bridge(0, 0, 0, f(3.998), 48 * 4);
   assert.deepEqual([...lens], [0, 0, 0, 0]);
   assert.equal(lensCopies, 1, 'no disc, no copy');
   lensCopied = false;
-  bridge(0, 0, 0, f(3.998), 32 * 4, 40 * 4);
+  bridge(0, 0, 0, f(3.998), 40 * 4);
   assert.deepEqual([...lens], [0, 0, 0, 0], 'no copy, the painted glass');
   lensCopied = true;
   M.cod2SceneFx.drawing = false;
-  bridge(0, 0, 0, f(3.998), 32 * 4, 40 * 4);
+  bridge(0, 0, 0, f(3.998), 40 * 4);
   assert.deepEqual([...lens], [0, 0, 0, 0]);
   assert.equal(lensCopies, 2, 'outside the composed view nothing is copied');
   delete M.cod2SceneFx;
-  bridge(0, 0, 0, f(3.998), 32 * 4, 40 * 4);
+  bridge(0, 0, 0, f(3.998), 40 * 4);
   assert.deepEqual([...lens], [0, 0, 0, 0]);
   assert(effectValues.lens === lens, 'the array is kept, not replaced');
 

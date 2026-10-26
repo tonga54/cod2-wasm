@@ -64,9 +64,6 @@ EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShado
             sunShadowEye: new Float32Array(16), sunShadow: new Float32Array(4), sunShadowRect: new Float32Array(4),
             // Coverage, feather, heat and near clip: web_effects.c sets them after these.
             effect: new Float32Array(4),
-            // A swaying model's push in its own space, and where it stands, its
-            // scale and the wind's clock (web_effects.c).
-            wind: new Float32Array(4), windAt: new Float32Array(4),
             // A scope's glass: its disc in the color map (web_effects.c).
             lens: new Float32Array(4),
             sunShadowRevision: -1,

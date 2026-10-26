@@ -6842,3 +6842,48 @@ the copy made; uploads per value; unit 22 clear of the compositor's units),
 `test-web-scene-fx-scale.cjs`. Captures at Carentan with the Kar98k's scope at
 the hip: the painted highlights and window are gone, the lens carries the wall
 and post on screen and darkens indoors. The full static suite was not run.
+
+## Steady world updates while firing and turning; no wind — 2026-10-25
+
+The owner still saw everything stall when firing without stopping while
+strafing and turning at full speed, indoors in Carentan in particular, and
+asked for the trees' wind to go.
+
+Measured on the QA stack in a Carentan house with eight bots and the MP44, the
+burst against standing still: the server process stayed at 25-29% of a core
+with or without firing, the Oct 24 server (before shot views) and the current
+one alike; a capture inside the gateway showed the server's snapshots arriving
+and leaving for the browser every 33 ms (gaps up to about 45 ms) and the
+page's commands 60 a second throughout. The page itself received the snapshots
+in clumps (65-72 gaps over 100 ms in 10 s, up to 158 ms) only when the left
+mouse button was held while the mouse moved and the main thread had no idle
+time (the QA browser without vsync); firing from a key in the same browser
+(the same game work) gave none, nor did 120 Hz with vsync on this Mac at
+1280×720 or 1728×1117 at twice the pixels. Chrome holds back the page's own
+tasks, the WebSocket's messages among them, while the mouse drags on a busy
+main thread; on a slower or busier machine each frame fills its refresh and
+the world arrives in bursts, the player's own movement corrected each time.
+
+`web_net.c`: when the page is cross-origin isolated (it is: COOP/COEP), the
+gameplay WebSocket lives in a dedicated worker made from a blob, which writes
+each packet, after its length, into a 256 KiB SharedArrayBuffer ring;
+`WebNet_Receive` reads the ring every frame after the page's own queue.
+Commands are posted to the worker, which drops them behind more than 8 KiB of
+uplink backlog as before; a hidden page's frames are woken by the worker. If
+the worker cannot start or never reaches the gateway, the page opens the
+socket itself as before. In the QA browser without vsync, firing with the
+mouse while turning: frames took packets every 33 ms, the longest gap 61 ms,
+none over 100 ms. At 120 Hz: 120 fps, none over 100 ms.
+
+The wind (r_wind, the generated vertex shader's sway, the foliage table and
+the scene time the device handed over) is removed.
+
+Validation: `test-web-net-worker.cjs` (new, in `test-static.sh`: order and
+bytes across the ring's end and 32-bit positions, a full ring, oversized
+packets, copied commands, the uplink's backlog, hidden pages, a closed
+connection, leaving a room, the hand-over to the page's socket and no shared
+memory; six deliberate breaks each fail it), `test-web-net-errors.cjs`,
+`test-web-background.cjs`, `test-web-qport.cjs`, the room tests,
+`test-web-effects.py` (32 mutants), `test-web-point-lights.cjs`,
+`test-emscripten-gl.cjs`. Not measured: the Pi's server under real load,
+Safari and Firefox. The full static suite was not run.

@@ -2563,12 +2563,6 @@ static void WebSceneFx_FillParams(float *params)
     params[SCENE_FX_TAA_JITTER + 1] = s_jitter[1];
 }
 
-/* The game's time of the view being drawn, in milliseconds. */
-int WebSceneFx_SceneTime(void)
-{
-    return s_cameraTime;
-}
-
 /* The mip bias the 3D draws of the composed view give their color maps. */
 float WebSceneFx_TextureLodBias(void)
 {

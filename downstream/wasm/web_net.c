@@ -14,8 +14,117 @@ EM_JS(void, WebNet_Open, (int room), {
     const url = new URL('/game', location.href);
     url.searchParams.set('room', String(room));
     url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const socket = new WebSocket(url);
-    socket.binaryType = 'arraybuffer';
+    // Runs in a worker: the gateway's packets go into the shared ring as they
+    // arrive, each after its length (4 bytes, little-endian); the page's go
+    // out as it posts them.
+    function receiver() {
+        let socket = null, meta = null, ring = null;
+        self.onmessage = ({data}) => {
+            if (data.url) {
+                meta = new Int32Array(data.ring, 0, 4);
+                ring = new Uint8Array(data.ring, 16);
+                socket = new WebSocket(data.url);
+                socket.binaryType = 'arraybuffer';
+                socket.onopen = () => self.postMessage({event: 'open'});
+                socket.onerror = () => self.postMessage({event: 'error'});
+                socket.onclose = event => self.postMessage({event: 'close', code: event.code, reason: event.reason});
+                socket.onmessage = event => {
+                    if (!(event.data instanceof ArrayBuffer)) return;
+                    const packet = new Uint8Array(event.data), size = ring.length, n = packet.length;
+                    const write = Atomics.load(meta, 0);
+                    if (!n || n > 65507) return;
+                    if (((write - Atomics.load(meta, 1)) >>> 0) + 4 + n > size) { Atomics.add(meta, 2, 1); return; }
+                    const put = (offset, chunk) => {
+                        const at = (offset >>> 0) % size, first = Math.min(chunk.length, size - at);
+                        ring.set(chunk.subarray(0, first), at);
+                        ring.set(chunk.subarray(first), 0);
+                    };
+                    put(write, new Uint8Array([n & 255, n >> 8 & 255, n >> 16 & 255, n >>> 24]));
+                    put(write + 4, packet);
+                    Atomics.store(meta, 0, write + 4 + n);
+                    if (Atomics.load(meta, 3)) self.postMessage({event: 'packet'});
+                };
+            } else if (data.packet) {
+                if (socket.readyState !== 1) return;
+                if (socket.bufferedAmount > 8192) { Atomics.add(meta, 2, 1); return; }
+                socket.send(data.packet);
+            } else if (data.close) socket.close(data.close);
+        };
+    }
+    // A socket for the code below whose packets reach the frame through the
+    // ring, held by a worker; if the worker never reaches the gateway, the
+    // page connects itself and its packets take the usual path.
+    function workerSocket(href) {
+        const shared = new SharedArrayBuffer(16 + 262144);
+        const source = URL.createObjectURL(new Blob(['(' + receiver + ')();'], {type: 'text/javascript'}));
+        let worker = null, direct = null, ended = false;
+        const socket = { readyState: 0, bufferedAmount: 0, onopen: null, onmessage: null, onerror: null, onclose: null,
+            ring: { meta: new Int32Array(shared, 0, 4), bytes: new Uint8Array(shared, 16) },
+            send(packet) {
+                if (direct) { direct.send(packet); return; }
+                const copy = packet.slice();
+                worker.postMessage({packet: copy}, [copy.buffer]);
+            },
+            close(code) {
+                socket.readyState = Math.max(socket.readyState, 2);
+                if (direct) direct.close(code);
+                else { worker.postMessage({close: code}); setTimeout(() => worker.terminate(), 2000); }
+            } };
+        const closed = event => {
+            if (ended) return;
+            ended = true;
+            socket.readyState = 3;
+            Atomics.store(socket.ring.meta, 1, Atomics.load(socket.ring.meta, 0));
+            socket.onclose?.(event);
+        };
+        const fallback = () => {
+            if (direct || ended) return;
+            worker.terminate();
+            URL.revokeObjectURL(source);
+            if (socket.readyState) { closed({code: 1006, reason: ''}); return; }
+            direct = new WebSocket(href);
+            direct.binaryType = 'arraybuffer';
+            Object.defineProperty(socket, 'bufferedAmount', {get: () => direct.bufferedAmount});
+            direct.onopen = () => { socket.readyState = 1; socket.onopen?.(); };
+            direct.onmessage = event => socket.onmessage?.(event);
+            direct.onerror = () => socket.onerror?.();
+            direct.onclose = closed;
+        };
+        worker = new Worker(source);
+        if (!Module.cod2NetVisibility && typeof document !== 'undefined') {
+            // The worker wakes a hidden page's frames with its packets.
+            Module.cod2NetVisibility = () => {
+                const ring = Module.cod2Transport?.socket.ring;
+                if (ring) Atomics.store(ring.meta, 3, document.hidden ? 1 : 0);
+            };
+            document.addEventListener('visibilitychange', Module.cod2NetVisibility);
+        }
+        worker.onmessage = ({data}) => {
+            if (data.event === 'packet') Module.cod2BackgroundPump?.();
+            else if (data.event === 'open') { URL.revokeObjectURL(source); socket.readyState = 1; socket.onopen?.(); }
+            else if (data.event === 'error') { if (socket.readyState) socket.onerror?.(); }
+            else if (data.event === 'close') {
+                if (!socket.readyState) { fallback(); return; }
+                worker.terminate();
+                closed(data);
+            }
+        };
+        worker.onerror = event => { event.preventDefault?.(); fallback(); };
+        Atomics.store(socket.ring.meta, 3, typeof document !== 'undefined' && document.hidden ? 1 : 0);
+        worker.postMessage({url: href, ring: shared});
+        return socket;
+    }
+    // With memory the page can share, a worker receives: its packets arrive as
+    // they come, even while the browser holds the page's own tasks back, as it
+    // does on a busy main thread while the mouse drags (firing while turning).
+    let socket = null;
+    if (globalThis.crossOriginIsolated && typeof SharedArrayBuffer === 'function' && typeof Worker === 'function') {
+        try { socket = workerSocket(url.href); } catch (_) { socket = null; }
+    }
+    if (!socket) {
+        socket = new WebSocket(url);
+        socket.binaryType = 'arraybuffer';
+    }
     state = { socket, room, packets: [], bytes: 0, sends: [], sendBytes: 0,
         stopped: false, failurePending: false, opened: false, dropped: 0 };
     Module.cod2Transport = state;
@@ -93,6 +202,23 @@ EM_JS(int, WebNet_Receive, (void *destination, int capacity, int *room), {
         HEAPU8.set(packet, destination);
         HEAP32[room >> 2] = state.room;
         return packet.length;
+    }
+    const ring = state.socket.ring;
+    if (!ring) return 0;
+    const meta = ring.meta, bytes = ring.bytes, size = bytes.length;
+    let read = Atomics.load(meta, 1);
+    while (read !== Atomics.load(meta, 0)) {
+        const at = (read >>> 0) % size;
+        const length = (bytes[at] | bytes[(at + 1) % size] << 8 | bytes[(at + 2) % size] << 16 |
+            bytes[(at + 3) % size] << 24) >>> 0;
+        const start = (at + 4) % size, first = Math.min(length, size - start);
+        read = (read + 4 + length) | 0;
+        if (length > capacity) { Atomics.store(meta, 1, read); ++state.dropped; continue; }
+        HEAPU8.set(bytes.subarray(start, start + first), destination);
+        HEAPU8.set(bytes.subarray(0, length - first), destination + first);
+        Atomics.store(meta, 1, read);
+        HEAP32[room >> 2] = state.room;
+        return length;
     }
     return 0;
 });
