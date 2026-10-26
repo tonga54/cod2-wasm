@@ -6731,3 +6731,18 @@ match with temporary angle dvars against `cg_gunHip 0`.
 Validation: `test-gun-fov.py` (42 mutants); the scoped MP44, the scoped
 Mosin-Nagant and the Luger captured in the QA stack. The full static suite
 was not run.
+
+## Wind in grass, bushes, hedges and trees — 2026-10-25
+
+The owner asked for graphics improvements that show. Plants now sway: model
+draws whose material names grass, flowers, bushes, hedges or trees move in the
+generated vertex shader, their tops further than their feet, in gusts that
+cross the map (`r_wind`, 0 to 2, archived, 1; `web_effects.c`,
+`patch-emscripten-gl.py`, the device's world matrix and the scene's time).
+Details in `docs/GRAPHICS_2026-10-16.md`, "Wind in grass, bushes, hedges and
+trees".
+
+Validation: `test-web-effects.py` (41 mutants), `test-web-point-lights.cjs`,
+`test-emscripten-gl.cjs`; in the QA stack an oak and bush moved about 9 luma
+levels between screenshots 0.6 s apart (0.2 still) and the orchard's grass 2.9
+(0.7), at the same frame rate. The full static suite was not run.

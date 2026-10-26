@@ -827,16 +827,16 @@ console.log('PASS: the sun\'s depth map in 3 views\' eye space for world draws o
   // scene, toggled when it changes; a feather only with the scene's depth
   // copied and the view's near clip, which goes along with it.
   const effectsSource = fs.readFileSync('downstream/wasm/web_effects.c', 'utf8');
-  const bridgeStart = effectsSource.indexOf('EM_JS(void, WebEffects_Draw, (float coverage, float feather, float heat, float worldNearClip), {');
+  const bridgeStart = effectsSource.indexOf('EM_JS(void, WebEffects_Draw, (float coverage, float feather, float heat, float worldNearClip, const float *wind), {');
   assert(bridgeStart >= 0);
   let bodyStart = effectsSource.indexOf('{', effectsSource.indexOf('), {', bridgeStart) + 2), bodyEnd = bodyStart + 1, depth = 1;
   while (depth) { depth += (effectsSource[bodyEnd] === '{') - (effectsSource[bodyEnd] === '}'); ++bodyEnd; }
   const capabilities = [];
   const effectGL = {SAMPLE_ALPHA_TO_COVERAGE: 0x809E, enable: c => capabilities.push(['enable', c]),
     disable: c => capabilities.push(['disable', c])};
-  const M = {};
-  const bridge = Function('Module', 'GLctx', 'coverage', 'feather', 'heat', 'worldNearClip',
-    effectsSource.slice(bodyStart + 1, bodyEnd - 1)).bind(null, M, effectGL);
+  const M = {}, windHeap = new Float32Array(64);
+  const bridge = Function('Module', 'GLctx', 'HEAPF32', 'coverage', 'feather', 'heat', 'worldNearClip', 'wind',
+    effectsSource.slice(bodyStart + 1, bodyEnd - 1)).bind(null, M, effectGL, windHeap);
   const f = Math.fround;
   bridge(1, 0.25, 0.65, 4);
   assert.deepEqual(capabilities, [], 'nothing before the first material');
@@ -874,6 +874,16 @@ console.log('PASS: the sun\'s depth map in 3 views\' eye space for world draws o
   bridge(1, 0.25, f(0.65), f(3.998));
   assert.deepEqual([...effectValues.effect], [0, 0, f(0.65), 0]);
   assert.deepEqual(capabilities, []);
+  // A swaying model's push and where it stands land in the material's own
+  // arrays, read from the draw's eight floats; a still draw's zeros too.
+  const wind = effectValues.wind = new Float32Array(4), windAt = effectValues.windAt = new Float32Array(4);
+  windHeap.set([1.5, -2, 0.25, 1, 2800, 400, 1.5, 123.5], 8);
+  bridge(1, 0, 0, f(3.998), 8 * 4);
+  assert.deepEqual([...wind], [1.5, -2, 0.25, 1]);
+  assert.deepEqual([...windAt], [2800, 400, 1.5, 123.5]);
+  assert(effectValues.wind === wind && effectValues.windAt === windAt, 'the arrays are kept, not replaced');
+  bridge(1, 0, 0, f(3.998), 32 * 4);
+  assert.deepEqual([...wind, ...windAt], [0, 0, 0, 0, 0, 0, 0, 0]);
 
   // Programs with the effects upload the depth's unit once and their values
   // when they change.

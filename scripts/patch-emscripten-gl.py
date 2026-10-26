@@ -565,7 +565,25 @@ POINT_VERTEX_ORIGINAL = 'vsPointSizeDefs, vsClipPlaneDefs, vsLightingDefs, "void
 POINT_VERTEX_LEGACY = 'vsPointSizeDefs, vsClipPlaneDefs, vsLightingDefs, pointVarying, "void main()"'
 POINT_POSITION_ORIGINAL = '"  gl_Position = u_projection * ecPosition;", "  v_color = a_color;"'
 POINT_POSITION_LEGACY = '"  gl_Position = u_projection * ecPosition;", (pointLights ? "v_cod2Eye = ecPosition.xyz;" : ""), (pointNormal ? "v_cod2Normal = u_normalMatrix * a_normal;" : ""), "  v_color = a_color;"'
-POINT_VERTEX_REPLACEMENT = POINT_VERTEX_LEGACY.replace('pointVarying,', 'pointVarying, "uniform lowp int u_cod2ColorOrder;",')
+POINT_VERTEX_COLOR_ORDER = POINT_VERTEX_LEGACY.replace('pointVarying,', 'pointVarying, "uniform lowp int u_cod2ColorOrder;",')
+POINT_VERTEX_REPLACEMENT = POINT_VERTEX_COLOR_ORDER.replace('"void main()"',
+    '(pointLights ? "uniform highp vec4 u_cod2Wind; uniform highp vec4 u_cod2WindAt;" : ""), "void main()"')
+# COD2_WIND: a material program sways what web_effects.c names foliage, in the
+# model's own space before its view: its push (u_cod2Wind.xyz) eased in with
+# the height above its feet, half of it 50 units up, times a gust that
+# crosses the map with where the model stands (u_cod2WindAt.xy) and the clock
+# (u_cod2WindAt.w, wrapping at 600 s, whole periods of each sine), and a
+# flutter of its own vertices.
+WIND_POSITION_ORIGINAL = '"  vec4 ecPosition = u_modelView * a_position;"'
+WIND_POSITION_REPLACEMENT = ('(pointLights ? "  highp vec4 cod2Position = a_position;\\n" +\n'
+    '  "  if (u_cod2Wind.w > 0.0) {\\n" +\n'
+    '  "    highp float cod2Height = max(a_position.z * u_cod2WindAt.z, 0.0);\\n" +\n'
+    '  "    highp vec2 cod2At = u_cod2WindAt.xy + a_position.xy * u_cod2WindAt.z;\\n" +\n'
+    '  "    highp float cod2Gust = 0.55 + 0.3 * sin(1.0995574 * u_cod2WindAt.w + dot(cod2At, vec2(0.0023, 0.0017))) +\\n" +\n'
+    '  "      0.15 * sin(2.9007371 * u_cod2WindAt.w + dot(cod2At, vec2(0.011, -0.007))) +\\n" +\n'
+    '  "      0.12 * sin(6.9952797 * u_cod2WindAt.w + dot(a_position.xyz, vec3(0.31, 0.23, 0.17)));\\n" +\n'
+    '  "    cod2Position.xyz += u_cod2Wind.xyz * (cod2Height / (cod2Height + 50.0) * cod2Gust);\\n" +\n'
+    '  "  }" : "  vec4 cod2Position = a_position;"), "  vec4 ecPosition = u_modelView * cod2Position;"')
 POINT_POSITION_REPLACEMENT = POINT_POSITION_LEGACY.replace('"  v_color = a_color;"',
     '"  vec4 cod2VertexColor = u_cod2ColorOrder == 2 ? a_color.yzwx : (u_cod2ColorOrder == 1 ? a_color.zyxw : a_color);", "  v_color = cod2VertexColor;"')
 
@@ -627,6 +645,8 @@ POINT_UNIFORMS_REPLACEMENT = r'''        this.normalMatrixLocation = GLctx.getUn
         this.cod2SunShadowMapLocation = GLctx.getUniformLocation(this.program, "u_cod2SunShadowMap");
         this.cod2EffectLocation = GLctx.getUniformLocation(this.program, "u_cod2Effect");
         this.cod2ReliefLocation = GLctx.getUniformLocation(this.program, "u_cod2Relief");
+        this.cod2WindLocation = GLctx.getUniformLocation(this.program, "u_cod2Wind");
+        this.cod2WindAtLocation = GLctx.getUniformLocation(this.program, "u_cod2WindAt");
         this.cod2FeatherDepthLocation = GLctx.getUniformLocation(this.program, "u_cod2FeatherDepth");
         this.cod2MaterialUniforms = null;
         this.cod2LightCount = -1;
@@ -695,11 +715,11 @@ POINT_UPLOAD_REPLACEMENT = r'''        // COD2_POINT_LIGHT_UNIFORMS: cache per p
             // alternate, but each program mostly sees the same ones.
             materialUniforms = this.cod2MaterialUniforms = [];
             var materialNames = ["surface", "detail", "sunEye", "sunColor", "skyEye", "model", "camo",
-              "sunShadowEye", "sunShadow", "sunShadowRect", "effect", "relief"];
+              "sunShadowEye", "sunShadow", "sunShadowRect", "effect", "relief", "wind", "windAt"];
             var materialLocations = [this.cod2SurfaceLocation, this.cod2DetailLocation, this.cod2SunEyeLocation,
               this.cod2SunColorLocation, this.cod2SkyEyeLocation, this.cod2ModelLocation, this.cod2CamoLocation,
               this.cod2SunShadowEyeLocation, this.cod2SunShadowLocation, this.cod2SunShadowRectLocation,
-              this.cod2EffectLocation, this.cod2ReliefLocation];
+              this.cod2EffectLocation, this.cod2ReliefLocation, this.cod2WindLocation, this.cod2WindAtLocation];
             for (var materialIndex = 0; materialIndex < materialNames.length; ++materialIndex) {
               if (!materialLocations[materialIndex]) continue;
               materialUniforms.push({name: materialNames[materialIndex], location: materialLocations[materialIndex],
@@ -835,6 +855,7 @@ def main():
         end = source.index(COVERAGE_ORIGINAL, start)
         source = source[:start] + source[end:]
     for legacy, original in ((LIGHT_COLOR_LEGACY, LIGHT_COLOR_ORIGINAL),
+                             (POINT_VERTEX_COLOR_ORDER, POINT_VERTEX_ORIGINAL),
                              (POINT_VERTEX_LEGACY, POINT_VERTEX_ORIGINAL),
                              (POINT_POSITION_LEGACY, POINT_POSITION_ORIGINAL),
                              (POINT_DEFS_LEGACY, POINT_DEFS_ORIGINAL),
@@ -851,6 +872,7 @@ def main():
                                   (POINT_DEFS_ORIGINAL, POINT_DEFS_REPLACEMENT),
                                   (POINT_VERTEX_ORIGINAL, POINT_VERTEX_REPLACEMENT),
                                   (POINT_POSITION_ORIGINAL, POINT_POSITION_REPLACEMENT),
+                                  (WIND_POSITION_ORIGINAL, WIND_POSITION_REPLACEMENT),
                                   (POINT_FRAGMENT_ORIGINAL, POINT_FRAGMENT_REPLACEMENT),
                                   (POINT_PASS_ORIGINAL, POINT_PASS_REPLACEMENT),
                                   (COVERAGE_ORIGINAL, COVERAGE_REPLACEMENT),

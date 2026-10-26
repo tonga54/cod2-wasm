@@ -39,6 +39,7 @@ const dvar_t *r_ssao;
 const dvar_t *r_reflections;
 const dvar_t *r_zfeather;
 const dvar_t *r_fxHeat;
+const dvar_t *r_wind;
 const dvar_t *r_atmosphere;
 const dvar_t *r_sunShafts;
 const dvar_t *r_shockwave;
@@ -554,6 +555,9 @@ void R_RegisterDvars(void)
     r_zfeather = ri.Dvar_RegisterBool("r_zfeather", 1, 0x2001);
     /* How much hotter fire and explosions burn, 0 for the original. */
     r_fxHeat = ri.Dvar_RegisterFloat("r_fxHeat", 1.0f, 0.0f, 2.0f, 0x2001);
+    /* How far the wind sways grass, bushes, hedges and trees, 0 for still
+     * (downstream/wasm/web_effects.c). */
+    r_wind = ri.Dvar_RegisterFloat("r_wind", 1.0f, 0.0f, 2.0f, 0x2001);
     /* The map's haze thickens toward the ground and in the distance and
      * glows toward the sun (downstream/wasm/web_scene_fx.c). */
     r_atmosphere = ri.Dvar_RegisterBool("r_atmosphere", 1, 0x2001);

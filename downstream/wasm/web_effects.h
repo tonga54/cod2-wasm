@@ -13,6 +13,11 @@ typedef struct {
     unsigned int dstBlend;
     /* The world's depth range, [0, 1]: not the viewmodel's depth hack. */
     int fullDepthRange;
+    /* The draw's D3D world matrix (rows: its axes, then its origin), or NULL;
+     * the identity draws the map itself. */
+    const float *world;
+    /* The game's time of the view, in milliseconds. */
+    int time;
 } WebEffectState;
 
 typedef struct {
@@ -24,10 +29,15 @@ typedef struct {
     float feather;
     /* The emissive gain of fire and explosions. */
     float heat;
+    /* A swaying model's push at full gust in its own space, then 1; then
+     * where it stands in the world (x, y), its scale and the wind's clock in
+     * seconds. All 0 for a draw the wind leaves still. */
+    float wind[8];
 } WebEffectDraw;
 
 float WebEffects_Feather(const Material *material);
 int WebEffects_IsFire(const Material *material);
+float WebEffects_Foliage(const Material *material);
 void WebEffects_Select(const Material *material, const WebEffectState *state, WebEffectDraw *draw);
 void WebEffects_Apply(const Material *material, const WebEffectState *state, float worldNearClip);
 

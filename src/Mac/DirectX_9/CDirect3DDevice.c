@@ -15,6 +15,7 @@ extern void WebPointLights_Draw(const float *view, int enabled, int worldShadowE
                                float sharpen, int viewmodel);
 extern float WebSceneFx_TextureLodBias(void);
 extern float WebSceneFx_WorldNearClip(void);
+extern int WebSceneFx_SceneTime(void);
 extern void WebSceneFx_JitterProjection(float *projection);
 extern float g_webEntitySunVisibility;
 #include "web_materials.h"
@@ -2515,6 +2516,8 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
             effectState.srcBlend = dev->srcBlend;
             effectState.dstBlend = dev->destBlend;
             effectState.fullDepthRange = dev->viewportMinZ == 0.0f && dev->viewportMaxZ == 1.0f;
+            effectState.world = dev->worldMatrix;
+            effectState.time = WebSceneFx_SceneTime();
             WebEffects_Apply(((materialCommands_t *)imp_tess)->material, &effectState, WebSceneFx_WorldNearClip());
         }
 #endif
