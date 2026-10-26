@@ -6698,3 +6698,22 @@ Validation:
 
 Not covered: one pose per class; models, textures and the arms' animation are
 Call of Duty 2's; only the M4 in Chrome was measured.
+
+## Steady motion blur; walking no longer smears small rooms — 2026-10-25
+
+The owner found Brecourt's lantern bunker stuttering while moving, with motion
+blur on the walls and on weapon switches that showed nowhere else. The blur
+divided motion the game makes in whole milliseconds by the browser's time
+between frames; a cheap room draws frames in bursts, so the blur popped
+between none and double, and walking smeared near walls by depth.
+`web_scene_fx.c` now measures on the scene's game time (`rb_backend.c` hands
+it `backEnd.sceneDef.time`), spans the camera's blur over the last 16 ms of
+views, keeps the weapon's smear through frames in the same millisecond, and
+takes what is nearer than 2,048 units back as if it were that far, so walking
+smears nothing while turns and the weapon blur as before. Details in
+`docs/GRAPHICS_2026-10-16.md`, "Motion blur in small rooms".
+
+Validation: `test-web-scene-fx.py` (153 mutants), `test-viewmodel-motion.py`
+(38), `test-web-scene-fx.mjs` (188 WebGL2 checks); in the QA bunker the blur
+holds steady, strafing frames are as sharp as without it, turns still blur and
+the frame rate is unchanged. The full static suite was not run.

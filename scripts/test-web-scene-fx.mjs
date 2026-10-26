@@ -207,11 +207,16 @@ try {
     const turning = render(4, 0, {motion: turn(0.03)}); snapshot('turn');
     check(kept(turning, feet) < 0.5 && kept(turning, ground) < 0.5, 'turning smears the world near and far');
     check(same(turning, graded, receiver) && same(turning, graded, hand), 'turning leaves the viewmodel sharp');
-    // Strafing 2 units moves the ground at 120 units 10.7 pixels, at 380 units
-    // 3.4, and the world at 1,400 units and beyond under one.
+    // Strafing 2 units moves what is nearer than 2,048 units as if it were
+    // that far, 0.6 pixels, and smears none of it: not the ground at 120
+    // units, which would move 10.7 pixels, nor at 380, nor the world beyond.
     const strafing = render(4, 0, {motion: strafe(2)}); snapshot('strafe');
-    check(kept(strafing, feet) < 0.6 && kept(strafing, ground) > 1.3 * kept(strafing, feet),
-      'strafing smears near surfaces more than farther ones');
+    check(same(strafing, graded, feet) && same(strafing, graded, ground),
+      'strafing smears neither the ground at the feet nor farther ground');
+    // An 80-unit move, 25 pixels at 2,048 units, smears both, and alike.
+    const striding = render(4, 0, {motion: strafe(80)}); snapshot('stride');
+    check(kept(striding, feet) < 0.5 && Math.abs(kept(striding, feet) - kept(striding, ground)) < 0.05,
+      'a long move smears near and farther ground alike');
     check(same(strafing, graded, [-0.95, 0.2, -0.6, 0.9]) && same(strafing, graded, centreWorld),
       'strafing leaves the distant world sharp');
     check(same(strafing, graded, receiver), 'strafing leaves the viewmodel sharp');

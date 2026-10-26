@@ -211,8 +211,16 @@ enum {
 /* InfinitePerspectiveMatrix's depth scale times the default r_znear of 4. */
 #define SCENE_FX_DEFAULT_WORLD_NEAR_CLIP (0.9995002746582031f * 4.0f)
 
-/* Milliseconds of camera motion the blur spans, at any frame rate. */
+/* Milliseconds of camera motion the blur spans, at any frame rate. The game
+ * moves the camera and the viewmodel only as its clock ticks in whole
+ * milliseconds, so motion is measured on that clock: frames drawn in the same
+ * millisecond show the same moment, and the camera's blur spans the views of
+ * the last 16 ms rather than the last frame, whose share of a millisecond
+ * varies. */
 #define SCENE_FX_MOTION_EXPOSURE 16.0
+/* The views kept for it, each from a later millisecond than the one before:
+ * more than the exposure holds. */
+#define SCENE_FX_MOTION_HISTORY 32
 /* The viewmodel's own motion smears over 10 ms. A half smear up to the knee,
  * a fraction of the screen's height, is the bob and sway and stays as it is;
  * a faster motion (a switch, a reload, the sprint pose) counts each pixel past
@@ -262,12 +270,23 @@ static float s_viewProjection[2];
 static float s_lodBias;
 static float s_cameraLens[16];
 static int s_cameraPending;
+/* The game's time of the view about to begin, in milliseconds. */
+static int s_cameraTime;
 static float s_lastView[16];
-static double s_lastViewTime;
+static int s_lastViewTime;
 static int s_lastViewValid;
-/* Whether this view follows the last one without a cut, and how long after. */
+/* Whether this view follows the last one without a cut, and how many of the
+ * game's milliseconds after it. */
 static int s_viewContinuous;
-static double s_viewGap;
+static int s_viewGap;
+/* The views since the last cut, newest last, for the camera's blur. */
+typedef struct WebSceneFxPastView {
+    float view[16];
+    int time;
+} WebSceneFxPastView;
+static WebSceneFxPastView s_pastViews[SCENE_FX_MOTION_HISTORY];
+static int s_pastViewCount;
+static int s_pastViewNewest;
 static float s_motionScale;
 static float s_motionRotation[9];
 static float s_motionMove[3];
@@ -798,14 +817,18 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "    c = vec3(texture(u_scene, v_uv + shift).r, c.g, texture(u_scene, v_uv - shift).b);\n" +
                 "    col = c;\n" +
                 "  }\n" +
-                /* Each world pixel goes back to where the last frame's camera saw
-                 * it, and the scene is averaged along that path. The viewmodel
-                 * moves with the camera: it stays sharp and stays out of the
-                 * world's average. */
+                /* Each world pixel goes back to where the camera saw it over the
+                 * exposure, and the scene is averaged along that path. The
+                 * viewmodel moves with the camera: it stays sharp and stays out
+                 * of the world's average. What is nearer than 2,048 units goes
+                 * back as if it were that far: a walk's 3 units moves it under a
+                 * pixel and smears nothing, by a wall or in the open, a fall
+                 * smears a little, and a turn, which moves the near and the far
+                 * alike, smears as it is. */
                 "  if (u_motion.x > 0.0) {\n" +
                 "    highp float depth = texelFetch(u_depth, ivec2(gl_FragCoord.xy), 0).r;\n" +
                 "    highp vec2 ndc = v_uv * 2.0 - 1.0;\n" +
-                "    highp float z = min(u_near.x / max(u_dof.x - depth, 0.000001), 1000000.0);\n" +
+                "    highp float z = clamp(u_near.x / max(u_dof.x - depth, 0.000001), 2048.0, 1000000.0);\n" +
                 "    highp vec3 p = u_motionRotation * vec3(ndc * z / u_motion.yz, z) + u_motionMove;\n" +
                 "    highp vec2 v = (ndc - p.xy * u_motion.yz / max(p.z, 0.001)) * (0.5 * u_motion.x);\n" +
                 "    float len = length(v / u_px.xy);\n" +
@@ -2000,8 +2023,9 @@ void WebSceneFx_EndViewmodel(void)
     s_scopeMasking = 0;
 }
 
-/* The D3D view and projection matrices of the view about to begin. */
-void WebSceneFx_SetCamera(const float *viewMatrix, const float *projectionMatrix)
+/* The D3D view and projection matrices of the view about to begin, and the
+ * game's time it shows in milliseconds. */
+void WebSceneFx_SetCamera(const float *viewMatrix, const float *projectionMatrix, int time)
 {
     if (!viewMatrix || !projectionMatrix)
         return;
@@ -2009,6 +2033,7 @@ void WebSceneFx_SetCamera(const float *viewMatrix, const float *projectionMatrix
     memcpy(s_cameraLens, projectionMatrix, sizeof(s_cameraLens));
     s_cameraProjection[0] = projectionMatrix[0];
     s_cameraProjection[1] = projectionMatrix[5];
+    s_cameraTime = time;
     s_cameraPending = 1;
 }
 
@@ -2024,15 +2049,67 @@ static int WebSceneFx_CameraValid(void)
 }
 
 /* A view takes a world point p to R p + t, with R[j][i] = view[i * 4 + j] and
- * t[j] = view[12 + j]. From this view's space into the last one's, a point
- * turns by R_last R^T and then moves by t_last - R_last R^T t. */
+ * t[j] = view[12 + j]. From the space of view into that of then, a point
+ * turns by R_then R^T and then moves by t_then - R_then R^T t; returns the
+ * turn in radians and the move's length in *moved. */
+static float WebSceneFx_RelativeView(const float *view, const float *then, float *rotation, float *move, float *moved)
+{
+    int i, j, k;
+
+    for (j = 0; j < 3; ++j)
+        for (k = 0; k < 3; ++k) {
+            float sum = 0.0f;
+            for (i = 0; i < 3; ++i)
+                sum += then[i * 4 + j] * view[i * 4 + k];
+            rotation[k * 3 + j] = sum;
+        }
+    for (j = 0; j < 3; ++j) {
+        float sum = then[12 + j];
+        for (k = 0; k < 3; ++k)
+            sum -= rotation[k * 3 + j] * view[12 + k];
+        move[j] = sum;
+    }
+    *moved = sqrtf(move[0] * move[0] + move[1] * move[1] + move[2] * move[2]);
+    return 0.5f * sqrtf((rotation[5] - rotation[7]) * (rotation[5] - rotation[7]) +
+                        (rotation[6] - rotation[2]) * (rotation[6] - rotation[2]) +
+                        (rotation[1] - rotation[3]) * (rotation[1] - rotation[3]));
+}
+
+/* Keeps the view the game shows at time: a later millisecond adds it, the
+ * same one takes the place of the view kept for it. */
+static void WebSceneFx_KeepView(const float *view, int time)
+{
+    if (!s_pastViewCount || s_pastViews[s_pastViewNewest].time != time) {
+        s_pastViewNewest = (s_pastViewNewest + 1) % SCENE_FX_MOTION_HISTORY;
+        if (s_pastViewCount < SCENE_FX_MOTION_HISTORY)
+            ++s_pastViewCount;
+    }
+    memcpy(s_pastViews[s_pastViewNewest].view, view, sizeof(s_pastViews[0].view));
+    s_pastViews[s_pastViewNewest].time = time;
+}
+
+/* The newest view kept at or before time, else the oldest one kept. */
+static const WebSceneFxPastView *WebSceneFx_PastView(int time)
+{
+    int slot = s_pastViewNewest, i;
+
+    for (i = 0; i < s_pastViewCount; ++i) {
+        slot = (s_pastViewNewest - i + SCENE_FX_MOTION_HISTORY) % SCENE_FX_MOTION_HISTORY;
+        if (s_pastViews[slot].time <= time)
+            break;
+    }
+    return &s_pastViews[slot];
+}
+
+/* The last frame's view takes temporal antialiasing's history to this one;
+ * the view kept 16 ms of the game's time before gives the motion blur. */
 static void WebSceneFx_TrackCamera(void)
 {
-    const float *view = s_cameraView, *last = s_lastView;
+    const float *view = s_cameraView;
+    const WebSceneFxPastView *past = NULL;
     float rotation[9], move[3];
     float turn, moved, trace;
-    double now, gap;
-    int valid, i, j, k;
+    int valid, gap;
 
     s_motionScale = 0.0f;
     s_viewContinuous = 0;
@@ -2042,27 +2119,10 @@ static void WebSceneFx_TrackCamera(void)
     }
     s_cameraPending = 0;
     valid = WebSceneFx_CameraValid();
-    now = emscripten_get_now();
-    gap = now - s_lastViewTime;
-    if (valid && s_lastViewValid && gap >= 1.0 && gap <= SCENE_FX_MOTION_MAX_GAP) {
-        for (j = 0; j < 3; ++j)
-            for (k = 0; k < 3; ++k) {
-                float sum = 0.0f;
-                for (i = 0; i < 3; ++i)
-                    sum += last[i * 4 + j] * view[i * 4 + k];
-                rotation[k * 3 + j] = sum;
-            }
-        for (j = 0; j < 3; ++j) {
-            float sum = last[12 + j];
-            for (k = 0; k < 3; ++k)
-                sum -= rotation[k * 3 + j] * view[12 + k];
-            move[j] = sum;
-        }
+    gap = s_cameraTime - s_lastViewTime;
+    if (valid && s_lastViewValid && gap >= 0 && gap <= SCENE_FX_MOTION_MAX_GAP) {
+        WebSceneFx_RelativeView(view, s_lastView, rotation, move, &moved);
         trace = rotation[0] + rotation[4] + rotation[8];
-        turn = 0.5f * sqrtf((rotation[5] - rotation[7]) * (rotation[5] - rotation[7]) +
-                            (rotation[6] - rotation[2]) * (rotation[6] - rotation[2]) +
-                            (rotation[1] - rotation[3]) * (rotation[1] - rotation[3]));
-        moved = sqrtf(move[0] * move[0] + move[1] * move[1] + move[2] * move[2]);
         if (trace > 1.0f + 2.0f * cosf(SCENE_FX_MOTION_MAX_TURN) && moved < SCENE_FX_MOTION_MAX_MOVE) {
             s_viewContinuous = 1;
             s_viewGap = gap;
@@ -2070,20 +2130,28 @@ static void WebSceneFx_TrackCamera(void)
             memcpy(s_taaMove, move, sizeof(s_taaMove));
             s_taaLastProjection[0] = s_lastProjection[0];
             s_taaLastProjection[1] = s_lastProjection[1];
-            if (WebSceneFx_Enabled(r_motionBlur) && s_aimFrac < 1.0f &&
-                (turn > SCENE_FX_MOTION_MIN_TURN || moved > SCENE_FX_MOTION_MIN_MOVE)) {
-                s_motionScale = (float)(SCENE_FX_MOTION_EXPOSURE / gap) * (1.0f - s_aimFrac);
-                memcpy(s_motionRotation, rotation, sizeof(s_motionRotation));
-                memcpy(s_motionMove, move, sizeof(s_motionMove));
-                s_motionProjection[0] = s_cameraProjection[0];
-                s_motionProjection[1] = s_cameraProjection[1];
-            }
+        }
+    }
+    if (!s_viewContinuous)
+        s_pastViewCount = 0;
+    if (valid) {
+        WebSceneFx_KeepView(view, s_cameraTime);
+        past = WebSceneFx_PastView(s_cameraTime - (int)SCENE_FX_MOTION_EXPOSURE);
+    }
+    if (past && past->time < s_cameraTime && WebSceneFx_Enabled(r_motionBlur) && s_aimFrac < 1.0f) {
+        turn = WebSceneFx_RelativeView(view, past->view, rotation, move, &moved);
+        if (turn > SCENE_FX_MOTION_MIN_TURN || moved > SCENE_FX_MOTION_MIN_MOVE) {
+            s_motionScale = (float)(SCENE_FX_MOTION_EXPOSURE / (s_cameraTime - past->time)) * (1.0f - s_aimFrac);
+            memcpy(s_motionRotation, rotation, sizeof(s_motionRotation));
+            memcpy(s_motionMove, move, sizeof(s_motionMove));
+            s_motionProjection[0] = s_cameraProjection[0];
+            s_motionProjection[1] = s_cameraProjection[1];
         }
     }
     memcpy(s_lastView, view, sizeof(s_lastView));
     s_lastProjection[0] = s_cameraProjection[0];
     s_lastProjection[1] = s_cameraProjection[1];
-    s_lastViewTime = now;
+    s_lastViewTime = s_cameraTime;
     s_lastViewValid = valid;
 }
 
@@ -2180,6 +2248,20 @@ static int WebSceneFx_MarkViewmodelTiles(const float *lo, const float *hi, const
     return 1;
 }
 
+/* Whether this frame skinned the last frame's surfaces, each with as many
+ * vertices. */
+static int WebSceneFx_SameViewmodel(void)
+{
+    int i;
+
+    if (s_vmSurfaceCount != s_vmLastSurfaceCount)
+        return 0;
+    for (i = 0; i < s_vmSurfaceCount; ++i)
+        if (s_vmSurfaces[i].key != s_vmLastSurfaces[i].key || s_vmSurfaces[i].count != s_vmLastSurfaces[i].count)
+            return 0;
+    return 1;
+}
+
 /* This view's camera, with the depth hack's near clip, puts each viewmodel
  * vertex on the screen, and the vertex smears along the way it moved there
  * since the last frame: the viewmodel's own motion, which the camera's does
@@ -2197,6 +2279,10 @@ static void WebSceneFx_TrackViewmodel(int width, int height, float nearClip)
     float knee, cap, scale, motion = 0.0f;
     int blur, tile, tilesX, tilesY, vertexRows, tileRow, s, t, i, j, k, n = 0;
 
+    /* A frame in the game's same millisecond shows the viewmodel as the last
+     * one did, and keeps its smear. */
+    if (s_lastViewValid && s_viewContinuous && !s_viewGap && !s_vmOverflow && WebSceneFx_SameViewmodel())
+        return;
     s_vmMotion = 0.0f;
     s_vmTriangles = s_vmIndexRow = s_vmTileRow = s_vmRows = s_vmTile = s_vmTilesX = 0;
     if (!s_lastViewValid || s_vmOverflow) {
@@ -2225,7 +2311,7 @@ static void WebSceneFx_TrackViewmodel(int width, int height, float nearClip)
     tile = (int)ceilf(cap);
     tilesX = (width + tile - 1) / tile;
     tilesY = (height + tile - 1) / tile;
-    blur = tilesX * tilesY <= SCENE_FX_VM_MAX_TILES && s_viewContinuous && WebSceneFx_Enabled(r_motionBlur);
+    blur = tilesX * tilesY <= SCENE_FX_VM_MAX_TILES && s_viewContinuous && s_viewGap > 0 && WebSceneFx_Enabled(r_motionBlur);
     scale = blur ? (float)(SCENE_FX_VM_EXPOSURE / s_viewGap) * 0.25f : 0.0f;
     for (s = 0; s < s_vmSurfaceCount; ++s) {
         const WebSceneFxVmSurface *surface = &s_vmSurfaces[s];

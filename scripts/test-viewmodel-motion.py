@@ -156,7 +156,7 @@ static void camera(float yaw, float pitch, float x, float y, float z)
         eyeForward[i] = f[i]; eyeLeft[i] = l[i]; eyeUp[i] = u[i]; eyeOrigin[i] = o[i];
     }
     view[15] = 1;
-    WebSceneFx_SetCamera(view, lens);
+    WebSceneFx_SetCamera(view, lens, (int)clockMs);
 }
 /* A 4 x 2 quad facing the eye, its model x along the camera's forward. */
 static const float corners[4][3] = {{0, 2, 1}, {0, -2, 1}, {0, -2, -1}, {0, 2, -1}};
@@ -271,9 +271,9 @@ int main(void)
         }
 
     /* The camera turns and walks with the viewmodel in its hands: the world
-     * smears, the viewmodel does not. */
+     * smears, over the 20 ms since the first view, the viewmodel does not. */
     begin(10, 0.34f, 101.5f); quad(&keyA, 20, 0.5f, 0); present();
-    assert(composes == 2 && composed[SCENE_FX_MOTION] == 1.6f && composed[SCENE_FX_VM_MOTION] == 0);
+    assert(composes == 2 && composed[SCENE_FX_MOTION] == 0.8f && composed[SCENE_FX_VM_MOTION] == 0);
     for (int i = 0; i < 4; ++i)
         assert(still(smearOf(i, 0)) && still(smearOf(i, 1)));
 
@@ -291,14 +291,61 @@ int main(void)
     assert(near(composed[SCENE_FX_VM_MOTION], 72.0f) && near(smearOf(0, 0), -72.0f) && still(smearOf(0, 1)));
 
     /* Cuts start over: a camera jump of 48 units or more, a gap past 100 ms
-     * or under 1 ms. Each still records where the viewmodel was. */
+     * or one back in time. Each still records where the viewmodel was. */
     int before = composes;
     begin(10, 0.34f, 161.5f); quad(&keyA, 20, 1.25f, 0); present();
     begin(150, 0.34f, 161.5f); quad(&keyA, 20, 1.75f, 0); present();
-    begin(0.5f, 0.34f, 161.5f); quad(&keyA, 20, 2.25f, 0); present();
+    begin(-5, 0.34f, 161.5f); quad(&keyA, 20, 2.25f, 0); present();
     assert(composes == before && s_vmMotion == 0);
     begin(10, 0.34f, 161.5f); quad(&keyA, 20, 2.75f, 0); present();
     assert(composes == before + 1 && near(composed[SCENE_FX_VM_MOTION], 26.12f));
+    /* The game moves the viewmodel only as its clock ticks: frames bunched
+     * within its milliseconds, up to five in one, each smear the same 10 ms
+     * of motion, and one in the same millisecond as the last keeps its
+     * smear. */
+    {
+        const int start = (int)(clockMs += 1000.0);
+        int repeats = 0;
+        for (int i = 0; i < 120; ++i) {
+            const int last = (int)clockMs;
+            const float kept = smearOf(0, 0);
+            begin((float)(0.13 + 0.12 * (double)(i % 3)), 0.34f, 161.5f);
+            quad(&keyA, 20, 3.0f + 0.05f * (float)((int)clockMs - start), 0);
+            present();
+            if ((int)clockMs - start < 2)
+                continue;
+            assert(near(s_vmMotion, 26.12f) && near(smearOf(0, 0), 26.12f) && still(smearOf(0, 1)));
+            if ((int)clockMs == last) {
+                assert(smearOf(0, 0) == kept);
+                ++repeats;
+            }
+        }
+        assert(repeats > 50);
+    }
+    /* In the same millisecond, other surfaces, more of them or the same with
+     * other vertices have no last frame to keep: they smear nothing. */
+    begin(10, 0.34f, 161.5f); quad(&keyA, 20, 0, 0); quad(&keyB, 20, 0, 3); present();
+    begin(10, 0.34f, 161.5f); quad(&keyA, 20, 0, 0); present();
+    begin(10, 0.34f, 161.5f); quad(&keyA, 20, 0.5f, 0); present();
+    assert(near(s_vmMotion, 26.12f));
+    begin(0, 0.34f, 161.5f); quad(&keyA, 20, 0.5f, 0); quad(&keyB, 20, 0.5f, 3); present();
+    assert(s_vmMotion == 0 && still(smearOf(0, 0)) && still(smearOf(4, 0)));
+    begin(10, 0.34f, 161.5f); quad(&keyA, 20, 1, 0); present();
+    begin(10, 0.34f, 161.5f); quad(&keyA, 20, 1.5f, 0); present();
+    assert(near(s_vmMotion, 26.12f));
+    begin(0, 0.34f, 161.5f); quad(&keyB, 20, 1.5f, 0); present();
+    assert(s_vmMotion == 0);
+    begin(10, 0.34f, 161.5f); quad(&keyA, 20, 2, 0); present();
+    begin(10, 0.34f, 161.5f); quad(&keyA, 20, 2.5f, 0); present();
+    assert(near(s_vmMotion, 26.12f));
+    {
+        float transform[12];
+        placement(transform, 20, 2.5f, 0);
+        begin(0, 0.34f, 161.5f);
+        WebSceneFx_AddViewmodelSurface(&keyA, &corners[0][0], (int)sizeof(corners[0]), 3, quadTriangles, 1, transform);
+        present();
+        assert(s_vmMotion == 0);
+    }
     /* A surface that moved over a whole screen width on average was swapped
      * for another pose. */
     begin(10, 0.34f, 161.5f); quad(&keyA, 20, -10, 0); present();
@@ -438,7 +485,7 @@ int main(void)
         begin(10, 0.34f, 161.5f); quad(&keyA, 20, 0.5f, 0); present();
         assert(near(s_vmMesh[0], 1.19f * (0.5f - corners[0][1])));
     }
-    puts("PASS: viewmodel vertices smear by their own screen motion over a 10 ms exposure at any frame rate, the bob's and sway's as they are and faster motion 3.5 times past a knee at 0.4% of the height, capped at 10%, the camera's motion cancelled; clip positions use the depth hack's near clip, or a raised WWII scope's projection and near clip, or the arms and weapon's own projection at the hip; triangles, indices after the vertices and tiles holding the largest smear within a tile; cuts, swapped poses, new or changed surfaces, repeated surfaces, r_motionBlur 0, fullbright and partial views, still and off-screen motion, triangles behind the eye, spread vertices and an oversized viewmodel");
+    puts("PASS: viewmodel vertices smear by their own screen motion over a 10 ms exposure at any frame rate, measured on the game's clock so frames bunched within its milliseconds smear alike and one in the same millisecond keeps the last smear, the bob's and sway's as they are and faster motion 3.5 times past a knee at 0.4% of the height, capped at 10%, the camera's motion cancelled; clip positions use the depth hack's near clip, or a raised WWII scope's projection and near clip, or the arms and weapon's own projection at the hip; triangles, indices after the vertices and tiles holding the largest smear within a tile; cuts, swapped poses, new or changed surfaces, repeated surfaces, r_motionBlur 0, fullbright and partial views, still and off-screen motion, triangles behind the eye, spread vertices and an oversized viewmodel");
     return 0;
 }
 '''
@@ -463,8 +510,16 @@ mutants = [
     ('return s_vmLastSurfaces[i].count == surface->count ? &s_vmLastSurfaces[i] : NULL;',
      'return &s_vmLastSurfaces[i];'),
     ('if (jump > SCENE_FX_VM_MAX_JUMP * (float)surface->count)', 'if (0)'),
-    ('s_viewContinuous && WebSceneFx_Enabled(r_motionBlur);', 'WebSceneFx_Enabled(r_motionBlur);'),
-    ('s_viewContinuous && WebSceneFx_Enabled(r_motionBlur);', 's_viewContinuous;'),
+    ('s_viewContinuous && s_viewGap > 0 && WebSceneFx_Enabled(r_motionBlur);', 's_viewGap > 0 && WebSceneFx_Enabled(r_motionBlur);'),
+    ('s_viewGap > 0 && WebSceneFx_Enabled(r_motionBlur);', 's_viewGap > 0;'),
+    # A frame in the game's same millisecond measured as any other, or kept
+    # whatever surfaces it skinned.
+    ('s_viewContinuous && s_viewGap > 0 && ', 's_viewContinuous && '),
+    ('    if (s_lastViewValid && s_viewContinuous && !s_viewGap && !s_vmOverflow && WebSceneFx_SameViewmodel())\n'
+     '        return;\n', ''),
+    ('    if (s_vmSurfaceCount != s_vmLastSurfaceCount)\n        return 0;\n', ''),
+    ('s_vmSurfaces[i].key != s_vmLastSurfaces[i].key || ', ''),
+    (' || s_vmSurfaces[i].count != s_vmLastSurfaces[i].count)', ')'),
     ('s_vmMotion <= 0.0f && !WebSceneFx_GlowEnabled()', '!WebSceneFx_GlowEnabled()'),
     ('for (y = j > 0 ? j - 1 : 0; y <= j + 1 && y < tilesY; ++y)', 'for (y = j; y <= j && y < tilesY; ++y)'),
     ('for (x = i > 0 ? i - 1 : 0; x <= i + 1 && x < tilesX; ++x)', 'for (x = i; x <= i && x < tilesX; ++x)'),
