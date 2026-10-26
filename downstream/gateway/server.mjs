@@ -31,6 +31,32 @@ export const CLIENT_BUDGET = Object.freeze({ packets: [200, 400], bytes: [131072
 // Snapshots queued behind a stalled TCP connection are stale; past this many
 // bytes they are dropped as UDP would, instead of arriving seconds late.
 export const SERVER_BACKLOG_BYTES = 65536;
+// The bytes above count only what Node still holds: the kernel's TCP buffer
+// takes seconds of snapshots first. Each client datagram says which server
+// message it last received, so past about a second of messages it has not
+// acknowledged, more only wait behind the stall, and the world and the
+// acknowledgement of the player's commands arrive as late as the queue is
+// long. They are dropped as UDP would until the client catches up; the engine
+// resends what was reliable and deltas from what the client received.
+export const SERVER_LAG_MESSAGES = 30;
+// A sequence this far from the last is a new channel, not a late message.
+const SEQUENCE_RESET = 4096;
+
+// A server datagram's netchan sequence, its fragments sharing their
+// message's; null when it is connectionless.
+export function serverSequence(data) {
+  if (data.length < 4) return null;
+  const value = data.readInt32LE(0);
+  return value === -1 ? null : value & 0x7fffffff;
+}
+
+// The server message a client datagram acknowledges: after its netchan
+// sequence and qport, CL_WritePacket writes the serverId and the
+// serverMessageSequence uncompressed. null when connectionless or a fragment.
+export function clientAcknowledge(data) {
+  if (data.length < 11 || data.readInt32LE(0) < 0) return null;
+  return data.readInt32LE(7);
+}
 
 // SV_ConnectionlessPacket's command: the bytes after 0xffffffff up to the
 // first whitespace or control byte. Anything odd (quotes, leading spaces) is
@@ -348,6 +374,9 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
     const byteBudget = tokenBucket(clientBudget.bytes, now);
     const oobBudget = tokenBucket(clientBudget.oob, now);
     let drops = 0, dropWindow = now();
+    // The newest server message sent on, and the newest the client has said it
+    // received; -1 until known.
+    let forwarded = -1, acknowledged = -1;
     // One send callback per peer avoids allocating a closure for every command.
     const sentToUdp = error => {
       if (error && ws.readyState === WebSocket.OPEN) ws.close(1011, 'UDP send failed');
@@ -376,6 +405,8 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
     ws.on('message', (data, binary) => {
       if (!binary || !data.length) { ws.close(1003, 'Binary datagrams required'); return; }
       if (closed || !admitted(data)) return;
+      const acknowledge = clientAcknowledge(data);
+      if (acknowledge !== null) acknowledged = acknowledge;
       if (udpReady) udp.send(data, sentToUdp);
       else {
         // WebSocket open can precede UDP DNS/connect readiness. Preserve the
@@ -388,8 +419,18 @@ export function createGateway({ webHost = 'cod2-web', webPort = 8088,
       }
     });
     udp.on('message', data => {
-      if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount < SERVER_BACKLOG_BYTES)
-        ws.send(data, wsBinaryOptions);
+      if (ws.readyState !== WebSocket.OPEN) return;
+      const sequence = serverSequence(data);
+      if (sequence !== null) {
+        if (forwarded >= 0 && Math.abs(sequence - forwarded) > SEQUENCE_RESET) forwarded = acknowledged = -1;
+        // A new message waits for the client to catch up; the rest of a
+        // message already on its way follows it.
+        if (sequence > forwarded && forwarded >= 0 && acknowledged >= 0 &&
+            forwarded - acknowledged >= SERVER_LAG_MESSAGES) return;
+      }
+      if (ws.bufferedAmount >= SERVER_BACKLOG_BYTES) return;
+      ws.send(data, wsBinaryOptions);
+      if (sequence !== null && sequence > forwarded) forwarded = sequence;
     });
     udp.on('error', error => {
       console.error('[gateway] UDP:', error.code);

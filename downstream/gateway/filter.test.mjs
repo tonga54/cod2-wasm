@@ -3,7 +3,8 @@ import { once } from 'node:events';
 import dgram from 'node:dgram';
 import test from 'node:test';
 import WebSocket from 'ws';
-import { createGateway, oobCommand, MAX_CLIENT_DATAGRAM, SERVER_BACKLOG_BYTES } from './server.mjs';
+import { createGateway, oobCommand, serverSequence, clientAcknowledge, MAX_CLIENT_DATAGRAM, SERVER_BACKLOG_BYTES,
+  SERVER_LAG_MESSAGES } from './server.mjs';
 
 const oob = text => Buffer.concat([Buffer.from([255, 255, 255, 255]), Buffer.from(text, 'latin1')]);
 
@@ -146,6 +147,75 @@ test('snapshots behind a stalled connection are dropped beyond a bounded backlog
     }
     assert.ok(peak >= SERVER_BACKLOG_BYTES / 2, `the stalled connection built a backlog (${peak} bytes)`);
     assert.ok(peak <= SERVER_BACKLOG_BYTES + 1500, `the backlog stays bounded (${peak} bytes)`);
+  } finally { await h.close(); }
+});
+
+// A client datagram as Netchan_Transmit and CL_WritePacket lay it out: its
+// sequence, qport, serverId and the server message it last received.
+const clientPacket = (acknowledge, sequence = 100) => {
+  const bytes = Buffer.alloc(16);
+  bytes.writeInt32LE(sequence, 0);
+  bytes.writeUInt16LE(1234, 4);
+  bytes[6] = 9;
+  bytes.writeInt32LE(acknowledge, 7);
+  return bytes;
+};
+const serverMessage = (sequence, fill = 1) => {
+  const bytes = Buffer.alloc(40, fill);
+  bytes.writeInt32LE(sequence | 0, 0);
+  return bytes;
+};
+const FRAGMENT = 0x80000000;
+
+test('a server datagram carries its message sequence and a client one the last it received', () => {
+  assert.equal(serverSequence(oob('statusResponse')), null, 'connectionless');
+  assert.equal(serverSequence(Buffer.from([1, 0, 0])), null);
+  assert.equal(serverSequence(serverMessage(7342)), 7342);
+  assert.equal(serverSequence(serverMessage(7342 | FRAGMENT)), 7342, "a fragment carries its message's");
+  assert.equal(clientAcknowledge(clientPacket(7339)), 7339);
+  assert.equal(clientAcknowledge(oob('getstatus xxxxxxx')), null, 'connectionless');
+  assert.equal(clientAcknowledge(Buffer.from([1, 0, 0, 0, 2, 0, 3])), null, 'too short to say');
+  assert.equal(clientAcknowledge(clientPacket(7339, 14406 | FRAGMENT)), null, 'a fragment');
+});
+
+test('server messages a second past what the client acknowledged wait until it catches up', {timeout: 10000}, async () => {
+  const h = await harness();
+  try {
+    const got = [];
+    h.client.on('message', data => got.push(Buffer.from(data)));
+    h.client.send(clientPacket(0));
+    await h.settle(1);
+    const { port, address } = h.peer();
+    const deliver = async list => {
+      for (const datagram of list) h.game.send(datagram, port, address);
+      await new Promise(resolve => setTimeout(resolve, 200));
+    };
+    const sequences = () => got.map(bytes => serverSequence(bytes));
+    const range = (from, count) => Array.from({ length: count }, (_, i) => from + i);
+    await deliver(range(1, 50).map(sequence => serverMessage(sequence)));
+    assert.deepEqual(sequences(), range(1, SERVER_LAG_MESSAGES), 'thirty past the acknowledged one, then none');
+    await deliver([oob('print\nhello')]);
+    assert.equal(got.length, SERVER_LAG_MESSAGES + 1, 'a connectionless message always passes');
+    // Acknowledging what it was sent lets new messages through again.
+    h.client.send(clientPacket(SERVER_LAG_MESSAGES));
+    await h.settle(2);
+    got.length = 0;
+    await deliver([serverMessage(51), serverMessage(52)]);
+    assert.deepEqual(sequences(), [51, 52]);
+    // A message's fragments follow its first, the next message waits.
+    h.client.send(clientPacket(52 - (SERVER_LAG_MESSAGES - 1)));
+    await h.settle(3);
+    got.length = 0;
+    await deliver([serverMessage(53 | FRAGMENT, 1), serverMessage(53 | FRAGMENT, 2), serverMessage(53 | FRAGMENT, 3),
+      serverMessage(54)]);
+    assert.deepEqual(sequences(), [53, 53, 53]);
+    assert.deepEqual(got.map(bytes => bytes[39]), [1, 2, 3]);
+    // A sequence far from the last is a new channel: it starts over.
+    got.length = 0;
+    await deliver([serverMessage(20000), serverMessage(20001)]);
+    assert.deepEqual(sequences(), [20000, 20001]);
+    // A client that never says what it received keeps the byte bound alone.
+    assert.equal(h.client.readyState, WebSocket.OPEN);
   } finally { await h.close(); }
 });
 

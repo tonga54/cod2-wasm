@@ -4,6 +4,7 @@
 #include "cod2_feature_config.h"
 #include "cod2_sprint.h"
 #include "headers/PC/bgame/bg_shot_view.h"
+#include "headers/PC/client_mp/cl_cmd_history.h"
 #include <math.h>
 
 #if COD2_FEATURE_GAMEPAD
@@ -1614,6 +1615,7 @@ void CL_SendCmdInternal(void)
         cl = *(clientActive_t **)imp_cl;
         ++cl->cmdNumber;
         cl->cmds[cl->cmdNumber & 127] = CL_CreateCmd();
+        CL_KeepUserCmd(cl->cmdNumber, &cl->cmds[cl->cmdNumber & 127]);
         CL_SampleShotView(cl);
     }
 

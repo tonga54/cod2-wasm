@@ -1,5 +1,6 @@
 #include "common_types.h"
 #include "imports.h"
+#include "headers/PC/client_mp/cl_cmd_history.h"
 
 #ifndef __EMSCRIPTEN__
 #    include <mmintrin.h>
@@ -232,6 +233,21 @@ void CL_GetScreenDimensions(int *width, int *height, float *aspect)
     *aspect = cls->vidConfig.aspectRatioWindow;
 }
 
+static usercmd_t cl_cmdHistory[CL_CMD_HISTORY];
+/* The first command of this session and the newest kept. */
+static int cl_cmdHistoryFirst;
+static int cl_cmdHistoryLast = -1;
+
+/* A command number that does not follow the last starts a new session, whose
+ * earlier numbers read as empty commands, as a cleared cl.cmds did. */
+void CL_KeepUserCmd(int cmdNumber, const usercmd_t *cmd)
+{
+    if (cmdNumber != cl_cmdHistoryLast + 1)
+        cl_cmdHistoryFirst = cmdNumber;
+    cl_cmdHistoryLast = cmdNumber;
+    cl_cmdHistory[cmdNumber & (CL_CMD_HISTORY - 1)] = *cmd;
+}
+
 qboolean CL_GetUserCmd(int cmdNumber, usercmd_t *ucmd)
 {
     clientActive_t *cl = CL_LOCAL;
@@ -242,12 +258,14 @@ qboolean CL_GetUserCmd(int cmdNumber, usercmd_t *ucmd)
         currentCmd = cl->cmdNumber;
     }
 
-    if (cmdNumber <= currentCmd - 128) {
+    if (cmdNumber <= currentCmd - CL_CMD_HISTORY) {
         return 0;
     }
 
-    int idx = cmdNumber & 0x7f;
-    *ucmd = cl->cmds[idx];
+    if (cmdNumber < cl_cmdHistoryFirst || cmdNumber > cl_cmdHistoryLast)
+        memset(ucmd, 0, sizeof(*ucmd));
+    else
+        *ucmd = cl_cmdHistory[cmdNumber & (CL_CMD_HISTORY - 1)];
     return 1;
 }
 

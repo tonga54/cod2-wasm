@@ -6756,3 +6756,37 @@ local contrast 0.16 to 0.28, the history 0.9 to 0.85 and its color clip 1.25 to
 earlier detail to about 85% (mean luma gradient 11.0 to 18.3, 9.2 to 15.9;
 21.7 and 18.1 before the soft pass). `test-web-scene-fx.py` (153 mutants) and
 `test-web-scene-fx.mjs` (188) pass; the full static suite was not run.
+
+## Connection Interrupted in firefights — 2026-10-25
+
+The owner saw everything freeze with "Connection Interrupted" when firing a
+lot and turning fast, above all on Carentan and Toujane. In the QA stack the
+client's packets stayed at 32 to 106 bytes and 2 to 3 KB/s, snapshots at 4.6
+to 5.8 KB/s with eight bots, the server room's CPU rose from 15% to 18%, and
+Carentan with eight bots held 150 to 165 frames a second (worst frame 16.5 ms)
+while firing and turning: none of it is the cause. Two things made ordinary
+TCP stalls on the player's link freeze the game:
+
+- The client made a command a frame and kept 128: CoD2 showed "Connection
+  Interrupted" once the 127th was unacknowledged, half a second at 250 frames
+  a second (a held 0.9 s stall at 199 frames a second showed it), and
+  prediction had nothing older to replay. `cl_cgame_mp.c` now keeps 1024 for
+  prediction (`CL_KeepUserCmd`, `CL_CMD_HISTORY`, a new session reading what
+  came before it as empty commands), and `CG_DrawDisconnect` shows the message
+  once the oldest unacknowledged command has waited a second
+  (`CG_FirstUnacknowledgedCommand`), so neither the frame rate nor the
+  client's own stalls raise it.
+- The gateway dropped server datagrams only past 64 KB held in Node, ten
+  seconds of snapshots, behind the kernel's own TCP buffer: after a stall the
+  world and the acknowledgements arrived as late as the queue was long.
+  `downstream/gateway/server.mjs` now reads each client datagram's
+  acknowledged server message (after its sequence and qport, the serverId and
+  serverMessageSequence, uncompressed) and holds new messages once 30, about a
+  second, are unacknowledged, until it catches up; a message's fragments go
+  together, connectionless ones always pass, a far sequence starts over. The
+  64 KB bound stays for connecting and clients that have not yet said.
+
+Validation: `test-command-history.py` (new, in `test-static.sh`, 4 mutants),
+`test-prediction-command-window.py`, the gateway's `filter.test.mjs` (two new
+tests; dropping the hold fails them) and its other suites. The gateway must be
+redeployed for its part to apply. The full static suite was not run.

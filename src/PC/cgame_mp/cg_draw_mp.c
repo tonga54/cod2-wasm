@@ -5,6 +5,7 @@
 #include "bytematch.h"
 #include "headers/PC/bgame/bg_attachments.h"
 #include "headers/PC/cgame_mp/cg_local.h"
+#include "headers/PC/client_mp/cl_cmd_history.h"
 #include "headers/PC/cgame_mp/cg_ammocounter.h"
 #include "headers/PC/cgame_mp/cg_attachmentsight.h"
 #include "headers/PC/cgame_mp/cg_breathprompt.h"
@@ -114,6 +115,7 @@ extern int Sys_Milliseconds(void);
 extern int CL_GetCurrentCmdNumber(void);
 extern int CL_GetKeyCatchers(void);
 extern qboolean CL_GetUserCmd(int cmdNumber, usercmd_t *ucmd);
+extern int CG_FirstUnacknowledgedCommand(int commandTime);
 extern Bool CL_IsRenderingSplitScreen(void);
 extern void CG_SetUserCmdAim(void);
 extern void CL_SetUserCmdValue(int weapon, int offHandIndex, float sensitivity);
@@ -356,16 +358,22 @@ void CG_AddLagometerSnapshotInfo(snapshot_t *snap)
 
 void CG_DrawDisconnect(void)
 {
-    usercmd_t cmd;
+    usercmd_t cmd, newest;
     snapshot_t *snap;
     const char *text;
     FontHandle font;
     int textWidth;
+    int latest = CL_GetCurrentCmdNumber(), first;
     vec4_t color = { 1.0f, 1.0f, 1.0f, 1.0f };
 
-    CL_GetUserCmd(CL_GetCurrentCmdNumber() - 127, &cmd);
+    /* The oldest command the server has not acknowledged has waited a
+     * second; counted in commands, as CoD2 did, it was half a second at
+     * 250 frames a second. After the client itself stalls, its first new
+     * command is the oldest waiting, and has not. */
     snap = cg->nextSnap;
-    if (cmd.serverTime <= snap->ps.commandTime || cmd.serverTime > cg->time) {
+    first = CG_FirstUnacknowledgedCommand(snap->ps.commandTime);
+    if (first > latest || !CL_GetUserCmd(first, &cmd) || !CL_GetUserCmd(latest, &newest) ||
+        newest.serverTime - cmd.serverTime < CL_CONNECTION_INTERRUPTED_MS || newest.serverTime > cg->time) {
         return;
     }
 

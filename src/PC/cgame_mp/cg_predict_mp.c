@@ -2,6 +2,7 @@
 #include "imports.h"
 #include "bytematch.h"
 #include "headers/PC/cgame_mp/cg_local.h"
+#include "headers/PC/client_mp/cl_cmd_history.h"
 
 extern float sinf(float x);
 extern float cosf(float x);
@@ -173,8 +174,8 @@ static void CG_InterpolatePlayerState(qboolean grabAngles)
 }
 
 /* CL's clock is monotonic, including its bounded post-stall horizon. Find
- * the first unacknowledged sample without copying the entire 128-command
- * ring on every render frame. Duplicated timestamps remain valid. */
+ * the first unacknowledged sample without copying the whole command
+ * history on every render frame. Duplicated timestamps remain valid. */
 static int CG_FirstPredictionCommand(int oldest, int latest, int commandTime)
 {
     int low = oldest, high = latest;
@@ -189,6 +190,15 @@ static int CG_FirstPredictionCommand(int oldest, int latest, int commandTime)
             high = middle - 1;
     }
     return low;
+}
+
+/* The oldest command the server has not acknowledged as of commandTime, or
+ * one past the newest when it has acknowledged them all. */
+int CG_FirstUnacknowledgedCommand(int commandTime)
+{
+    int latest = CL_GetCurrentCmdNumber();
+
+    return CG_FirstPredictionCommand(latest - (CL_CMD_HISTORY - 1), latest, commandTime);
 }
 
 void CG_PredictPlayerState(void)
@@ -241,7 +251,7 @@ void CG_PredictPlayerState(void)
     }
 
     cmdNum = CL_GetCurrentCmdNumber();
-    oldest = cmdNum - 127;
+    oldest = cmdNum - (CL_CMD_HISTORY - 1);
 
     {
         usercmd_t oldestCmd;
