@@ -12,17 +12,16 @@
 /* Call of Duty: WWII holds a long gun nearer the eye and further right than
  * Call of Duty 2's viewmodels stand, so its barrel runs along the view from
  * the lower right and the hand on the stock takes the forearm's place,
- * turned a little in and canted so its left side shows; and a pistol larger,
- * in the middle and pointed straight ahead: their poses at cg_gunHip 1, each
- * a little up, as the narrower field of view draws the weapon lower on
- * screen. Call of Duty 2's scopes reach back nearly to the eye: a scoped gun
- * stands further out, its nose turned in and down and canted left, so the
- * rifle crosses from the lower right corner toward the middle with the
- * eyepiece at the eye's height and the forearm below the screen, as WWII's
- * scoped Kar98k is held. */
-static const float s_hipLongGun[CG_GUNFOV_HIP_POSE] = {-3.0f, -1.5f, 0.75f, 2.0f, -2.0f, -4.0f};
-static const float s_hipScoped[CG_GUNFOV_HIP_POSE] = {3.0f, -0.75f, 1.5f, 8.0f, -6.0f, -12.0f};
-static const float s_hipPistol[CG_GUNFOV_HIP_POSE] = {-3.5f, 3.25f, 1.0f, 0.0f, 3.0f, 0.0f};
+ * turned a little in and canted so its left side shows: its pose at
+ * cg_gunHip 1, a little up, as the narrower field of view draws the weapon
+ * lower on screen. Call of Duty 2's scopes reach back nearly to the eye: a
+ * scoped gun stands further out, its nose turned in and canted a little, so
+ * the rifle crosses from the lower right toward the middle. Neither is
+ * pitched: a nose turned down reads as a weapon pointed at the ground. A
+ * pistol keeps Call of Duty 2's own pose; drawn nearer the middle it read as
+ * small and too close to the eye. */
+static const float s_hipLongGun[CG_GUNFOV_HIP_POSE] = {-3.0f, -1.5f, 0.75f, 0.0f, -2.0f, -4.0f};
+static const float s_hipScoped[CG_GUNFOV_HIP_POSE] = {3.0f, -0.75f, 1.5f, 0.0f, -6.0f, -4.0f};
 
 /* Between weapons the hip offset eases over about this many seconds. */
 #define CG_GUNFOV_HIP_EASE 0.1f
@@ -73,9 +72,6 @@ void CG_GunFovHipTarget(int weapClass, int scoped, float scale, float *pose)
     case WEAPCLASS_SPREAD:
     case WEAPCLASS_ROCKETLAUNCHER:
         hip = scoped ? s_hipScoped : s_hipLongGun;
-        break;
-    case WEAPCLASS_PISTOL:
-        hip = s_hipPistol;
         break;
     default:
         break;

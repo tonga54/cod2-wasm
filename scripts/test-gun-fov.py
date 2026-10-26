@@ -130,9 +130,10 @@ static int near(float a, float b, float tolerance)
     return fabsf(a - b) <= tolerance;
 }
 /* The tables' poses: forward, left, up, then pitch, yaw, roll. */
-static const float LONG_GUN[6] = {-3.0f, -1.5f, 0.75f, 2.0f, -2.0f, -4.0f};
-static const float SCOPED[6] = {3.0f, -0.75f, 1.5f, 8.0f, -6.0f, -12.0f};
-static const float PISTOL[6] = {-3.5f, 3.25f, 1.0f, 0.0f, 3.0f, 0.0f};
+static const float LONG_GUN[6] = {-3.0f, -1.5f, 0.75f, 0.0f, -2.0f, -4.0f};
+static const float SCOPED[6] = {3.0f, -0.75f, 1.5f, 0.0f, -6.0f, -4.0f};
+/* A pistol keeps Call of Duty 2's own pose. */
+static const float PISTOL[6];
 static const float NONE[6];
 /* a is want scaled by scale, with a NaN or infinity anywhere failing. */
 static int pose(const float *a, const float *want, float scale, float tolerance)
@@ -261,10 +262,9 @@ int main(void)
     }
 
     /* Hip targets, offsets in the weapon's forward, left and up then turns in
-     * degrees: a long gun nearer the eye and to the right, turned a little in,
-     * nose down and canted left; a scoped one further out, turned in, down and
-     * canted left further; a pistol in the middle, pointed ahead; each a
-     * little up; nothing for the rest. */
+     * degrees: a long gun nearer the eye and to the right, turned a little in
+     * and canted left; a scoped one further out and turned in further; each a
+     * little up and neither pitched; nothing for a pistol or the rest. */
     {
         const int longGuns[] = {WEAPCLASS_RIFLE, WEAPCLASS_MG, WEAPCLASS_SMG, WEAPCLASS_SPREAD, WEAPCLASS_ROCKETLAUNCHER};
         const int others[] = {WEAPCLASS_GRENADE, WEAPCLASS_TURRET, WEAPCLASS_NON_PLAYER, WEAPCLASS_ITEM, WEAPCLASS_NUM, -1, 1000};
@@ -373,8 +373,8 @@ int main(void)
         /* A new map's first weapon is held where it belongs at once again. */
         registrations = 0;
         CG_GunFovInit();
-        CG_GunFovHipPose(&ps, &pistol, h);
-        assert(pose(h, PISTOL, 1.0f, 1e-6f));
+        CG_GunFovHipPose(&ps, &sniper, h);
+        assert(pose(h, SCOPED, 1.0f, 1e-6f));
     }
 
     /* Each frame: its own projection only with a view weapon, in first
@@ -480,7 +480,7 @@ int main(void)
         assert(CG_GunFovHipAngle(80.0f) == 80.0f);
         cg_gunFov = registered;
     }
-    puts("PASS: the weapon's projection at a cg_fov-style 65 with the view's aspect, a third further spread than cg_fov 80's on 16:9 and 4:3, narrowing without a step to the view's own by 0.6 of the raise; cg_gunFov 0 and angles or views that are no field of view drawn with the view's; hip poses, offsets and turns, for long guns, scoped guns and pistols, scaled by cg_gunHip up to 1, leaving over the raise and eased over a tenth of a second between weapons; a scope only with both its overlay and material; points on the weapon remapped to where the view draws them, a raised scope's projection taking the weapon's place; its own projection only with a view weapon, in first person, in a composed full-screen view");
+    puts("PASS: the weapon's projection at a cg_fov-style 65 with the view's aspect, a third further spread than cg_fov 80's on 16:9 and 4:3, narrowing without a step to the view's own by 0.6 of the raise; cg_gunFov 0 and angles or views that are no field of view drawn with the view's; hip poses, offsets and turns without a pitch, for long guns and scoped guns, pistols as Call of Duty 2 holds them, scaled by cg_gunHip up to 1, leaving over the raise and eased over a tenth of a second between weapons; a scope only with both its overlay and material; points on the weapon remapped to where the view draws them, a raised scope's projection taking the weapon's place; its own projection only with a view weapon, in first person, in a composed full-screen view");
     return 0;
 }
 '''
@@ -514,18 +514,21 @@ int main(void)
 
 # Each mutant must fail the checks above.
 mutants = [
-    ('{-3.0f, -1.5f, 0.75f, 2.0f, -2.0f, -4.0f}', '{-3.0f, -2.0f, 0.75f, 2.0f, -2.0f, -4.0f}'),
-    ('{-3.0f, -1.5f, 0.75f, 2.0f, -2.0f, -4.0f}', '{-3.0f, -1.5f, 0.75f, 2.0f, -2.0f, 0.0f}'),
-    ('{3.0f, -0.75f, 1.5f, 8.0f, -6.0f, -12.0f}', '{-3.0f, -1.5f, 0.75f, 2.0f, -2.0f, -4.0f}'),
-    ('{3.0f, -0.75f, 1.5f, 8.0f, -6.0f, -12.0f}', '{3.0f, -0.75f, 1.5f, 0.0f, -6.0f, -12.0f}'),
-    ('{3.0f, -0.75f, 1.5f, 8.0f, -6.0f, -12.0f}', '{3.0f, -0.75f, 1.5f, 8.0f, 6.0f, -12.0f}'),
-    ('{-3.5f, 3.25f, 1.0f, 0.0f, 3.0f, 0.0f}', '{-3.5f, 3.25f, 0.0f, 0.0f, 3.0f, 0.0f}'),
-    ('{-3.5f, 3.25f, 1.0f, 0.0f, 3.0f, 0.0f}', '{-3.5f, 3.25f, 1.0f, 0.0f, 0.0f, 0.0f}'),
+    ('{-3.0f, -1.5f, 0.75f, 0.0f, -2.0f, -4.0f}', '{-3.0f, -2.0f, 0.75f, 0.0f, -2.0f, -4.0f}'),
+    ('{-3.0f, -1.5f, 0.75f, 0.0f, -2.0f, -4.0f}', '{-3.0f, -1.5f, 0.75f, 0.0f, -2.0f, 0.0f}'),
+    ('{3.0f, -0.75f, 1.5f, 0.0f, -6.0f, -4.0f}', '{-3.0f, -1.5f, 0.75f, 0.0f, -2.0f, -4.0f}'),
+    ('{3.0f, -0.75f, 1.5f, 0.0f, -6.0f, -4.0f}', '{3.0f, -0.75f, 1.5f, 0.0f, 6.0f, -4.0f}'),
+    # The noses turned down again, which read as weapons pointed at the
+    # ground, the scoped gun's old cant, and a pistol drawn with a pose.
+    ('{-3.0f, -1.5f, 0.75f, 0.0f, -2.0f, -4.0f}', '{-3.0f, -1.5f, 0.75f, 2.0f, -2.0f, -4.0f}'),
+    ('{3.0f, -0.75f, 1.5f, 0.0f, -6.0f, -4.0f}', '{3.0f, -0.75f, 1.5f, 8.0f, -6.0f, -4.0f}'),
+    ('{3.0f, -0.75f, 1.5f, 0.0f, -6.0f, -4.0f}', '{3.0f, -0.75f, 1.5f, 0.0f, -6.0f, -12.0f}'),
+    ('    default:\n        break;\n    }\n    if (!(scale',
+     '    case WEAPCLASS_PISTOL:\n        hip = s_hipLongGun;\n        break;\n    default:\n        break;\n    }\n    if (!(scale'),
     ('    for (i = 0; i < CG_GUNFOV_HIP_POSE; i++)\n        pose[i] = hip ?',
      '    for (i = 0; i < 3; i++)\n        pose[i] = hip ?'),
     ('    for (i = 0; i < CG_GUNFOV_HIP_POSE; i++) {\n        s_hip[i] +=', '    for (i = 0; i < 3; i++) {\n        s_hip[i] +='),
     ('        hip = scoped ? s_hipScoped : s_hipLongGun;', '        hip = s_hipLongGun;'),
-    ('        hip = s_hipPistol;', '        hip = scoped ? s_hipScoped : s_hipLongGun;'),
     ('hip[i] * (scale < 1.0f ? scale : 1.0f)', 'hip[i] * scale'),
     ('    if (!(scale > 0.0f) || !isfinite(scale))', '    if (!(scale > 0.0f))'),
     ('#define CG_GUNFOV_RAISED 0.6f', '#define CG_GUNFOV_RAISED 1.0f'),

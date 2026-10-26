@@ -6717,3 +6717,17 @@ Validation: `test-web-scene-fx.py` (153 mutants), `test-viewmodel-motion.py`
 (38), `test-web-scene-fx.mjs` (188 WebGL2 checks); in the QA bunker the blur
 holds steady, strafing frames are as sharp as without it, turns still blur and
 the frame rate is unchanged. The full static suite was not run.
+
+## Level hip poses; pistols as Call of Duty 2 holds them — 2026-10-25
+
+The owner found pistols at the hip small and too close to the eye, and the
+sniper rifles and the scoped MP44 pointed at the ground. `cg_gunfov_mp.c`'s
+hip poses pitched long guns' noses down 2° and scoped guns' 8° (cant 12°), and
+drew pistols 3.5 units nearer the eye and 3.25 toward the middle. Now neither
+long nor scoped guns are pitched, scoped guns cant 4°, and pistols keep Call
+of Duty 2's own pose; offsets and turns are otherwise unchanged. Set in a
+match with temporary angle dvars against `cg_gunHip 0`.
+
+Validation: `test-gun-fov.py` (42 mutants); the scoped MP44, the scoped
+Mosin-Nagant and the Luger captured in the QA stack. The full static suite
+was not run.
