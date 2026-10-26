@@ -6746,3 +6746,13 @@ Validation: `test-web-effects.py` (41 mutants), `test-web-point-lights.cjs`,
 `test-emscripten-gl.cjs`; in the QA stack an oak and bush moved about 9 luma
 levels between screenshots 0.6 s apart (0.2 still) and the orchard's grass 2.9
 (0.7), at the same frame rate. The full static suite was not run.
+
+## Less softness — 2026-10-25
+
+The owner found the image too soft after the soft pass. `web_scene_fx.c`:
+sharpening after temporal antialiasing 0.12 to 0.2 (0.06 to 0.1 without it),
+local contrast 0.16 to 0.28, the history 0.9 to 0.85 and its color clip 1.25 to
+1 standard deviation. Brecourt's orchard and field went from half of their
+earlier detail to about 85% (mean luma gradient 11.0 to 18.3, 9.2 to 15.9;
+21.7 and 18.1 before the soft pass). `test-web-scene-fx.py` (153 mutants) and
+`test-web-scene-fx.mjs` (188) pass; the full static suite was not run.

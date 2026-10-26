@@ -175,7 +175,7 @@ assert ('"    highp vec3 p = u_taaRotation * vec3((v_uv * 2.0 - 1.0 - u_taaLens.
         'u_taaMove;\\n"') in taa_shader
 assert '"    if (p.z <= 0.001) weight = 1.0;\\n"' in taa_shader
 assert '"  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) weight = 1.0;\\n"' in taa_shader
-assert '"  vec3 spread = max(sqrt(max(m2 * (1.0 / 9.0) - m1 * m1, 0.0)) * 1.25, vec3(0.004));\\n"' in taa_shader
+assert '"  vec3 spread = max(sqrt(max(m2 * (1.0 / 9.0) - m1 * m1, 0.0)), vec3(0.004));\\n"' in taa_shader
 assert '"  h = m1 + (k > 1.0 ? h / k : h);\\n"' in taa_shader
 assert 'r_taa = ri.Dvar_RegisterBool("r_taa", 1, 0x2001);' in dvars
 # Every 3D draw of the composed view moves by the jitter after its projection
@@ -818,7 +818,7 @@ int main(void)
     defaults();
     frame(0, 1280, 0.1f);
     assert(composes == 5 && composed[SCENE_FX_BACKDROP_GRAY] == 0 && composed[SCENE_FX_CONTRAST] == 0);
-    assert(composed[SCENE_FX_TONE] == SCENE_FX_SHADE_LIFT && composed[SCENE_FX_SHARPEN] == 0.06f);
+    assert(composed[SCENE_FX_TONE] == SCENE_FX_SHADE_LIFT && composed[SCENE_FX_SHARPEN] == 0.1f);
     /* Without the contrast curve the grade keeps its color by saturation. */
     assert(composed[SCENE_FX_SATURATION] == 1.12f);
     /* At gray 0.6 the grade lifts 0.4 of the shade and takes 0.72 contrast. */
@@ -1607,7 +1607,7 @@ int main(void)
         }
         defaults();
     }
-    /* Local contrast (r_clarity) composes on its own, at 0.16 of the dvar,
+    /* Local contrast (r_clarity) composes on its own, at 0.28 of the dvar,
      * which holds between 0 and 2; r_fullbright and a broken value take none. */
     {
         assert(SCENE_FX_CLARITY == 100 && SCENE_FX_PARAM_COUNT == 119);
@@ -1617,8 +1617,8 @@ int main(void)
         binds = composes = 0;
         frame(0, 1280, 0.1f);
         assert(!binds && !composes);
-        assert(SCENE_FX_CLARITY_GAIN == 0.16f);
-        const float values[][2] = {{1, 0.16f}, {2, 0.32f}, {0.5f, 0.08f}, {5, 0.32f}};
+        assert(SCENE_FX_CLARITY_GAIN == 0.28f);
+        const float values[][2] = {{1, 0.28f}, {2, 0.56f}, {0.5f, 0.14f}, {5, 0.56f}};
         for (int i = 0; i < 4; ++i) {
             clarity.current.value = values[i][0];
             binds = composes = 0;
@@ -1647,7 +1647,7 @@ int main(void)
     /* Temporal antialiasing (r_taa) composes on its own. Each composed view
      * moves within its pixels to the next of the first 8 points of the Halton
      * (2, 3) sequence, centred on the pixel: every 3D draw's clip x and y gain
-     * the jitter times w. It keeps 0.9 of the frames before once the camera
+     * the jitter times w. It keeps 0.85 of the frames before once the camera
      * has moved on continuously, with the rotation and offset into the last
      * view and that view's projection; the first frame and a cut keep none.
      * r_taa 0 and r_fullbright neither compose nor move the view. */
@@ -1709,18 +1709,18 @@ int main(void)
         frame(0, 1280, 0.1f);
         assert(composed[SCENE_FX_TAA_JITTER] == 0 &&
                fabsf(composed[SCENE_FX_TAA_JITTER + 1] - (halton3[0] - 0.5f) * 2.0f / 720.0f) < 1e-7f);
-        /* A camera moving on keeps 0.9 of the frames before, from the last
+        /* A camera moving on keeps 0.85 of the frames before, from the last
          * view's place and projection; the film grade sharpens the average
          * twice as much. */
         film.current.enabled = 1;
         clockMs += 16;
         camera(0.3f, 0.05f, 10, 20, 60);
         frame(0, 1280, 0.1f);
-        assert(composed[SCENE_FX_TAA] == 1 && composed[SCENE_FX_SHARPEN] == 0.12f);
+        assert(composed[SCENE_FX_TAA] == 1 && composed[SCENE_FX_SHARPEN] == 0.2f);
         clockMs += 16;
         camera(0.31f, 0.05f, 12, 20, 60);
         frame(0, 1280, 0.1f);
-        assert(fabsf(composed[SCENE_FX_TAA] - 0.1f) < 1e-6f && composed[SCENE_FX_SHARPEN] == 0.12f);
+        assert(fabsf(composed[SCENE_FX_TAA] - 0.15f) < 1e-6f && composed[SCENE_FX_SHARPEN] == 0.2f);
         assert(composed[SCENE_FX_TAA_PROJECTION] == 1.19f && composed[SCENE_FX_TAA_PROJECTION + 1] == 2.11f);
         {
             static const float p[][3] = {{100, 40, 70}, {-300, 900, 10}, {35, -12, 64}};
@@ -1765,7 +1765,7 @@ int main(void)
         WebSceneFx_EndView();
         WebSceneFx_EndFrame();
         assert(composed[SCENE_FX_TAA] == 0 && composed[SCENE_FX_TAA_JITTER] == 0 && composed[SCENE_FX_TAA_JITTER + 1] == 0);
-        assert(composed[SCENE_FX_SHARPEN] == 0.06f && !memcmp(jittered, projection, sizeof(jittered)));
+        assert(composed[SCENE_FX_SHARPEN] == 0.1f && !memcmp(jittered, projection, sizeof(jittered)));
         defaults();
     }
     puts("PASS: 600 composed frames, single compose per frame before Present, partial/fullbright/disabled views drawn directly, bounded glow, viewmodel and near world focus parameters, camera motion reprojected over 16 ms of the game's time from the views kept since the last cut, steady through frames bunched within its milliseconds, with aim fade, cuts and still cameras, a bounded menu backdrop and its gray, scenes rendered at r_sceneHeight lines and the screen's aspect on taller screens, a scope window composed with its rifle projection and near clip and a stencil drawn once per view and lifted on every exit, bounded window floats, the arms and weapon's own projection at the hip composing on its own behind a raised scope's, the outline a scope's rifle is kept off handed to the stencil and none for a sight's window, the stock overlay without a composed target, the sun's shadow map drawn once at the first full-screen view before its target binds, ambient occlusion composed on its own from the composed view's projection, the color maps' mip bias of a scaled scene, the composed view's near clip for effects, the map's haze with the view's up and sun taken when it begins, the sun's shafts from where it lies on the screen and how low it stands, explosions' shockwaves from where they went off, how long ago and how far away, bounded local contrast composed on its own, the film grade's lift of the shade in place of its contrast, and temporal antialiasing's jitter on every 3D draw, its history kept only while the camera moves on, and nothing from r_taa 0, r_fullbright or a failed bind");
@@ -1978,7 +1978,7 @@ mutants = [
      '        s_jitter[1] = (WebSceneFx_Halton(index, 2) - 0.5f) * 2.0f / (float)sceneHeight;'),
     ('        result += fraction * (float)(index % base);', '        result += fraction * (float)(index % 2);'),
     ('    s_jitter[0] = s_jitter[1] = 0.0f;\n    if (s_taaView) {', '    if (s_taaView) {'),
-    ('#define SCENE_FX_TAA_HISTORY 0.9f', '#define SCENE_FX_TAA_HISTORY 0.5f'),
+    ('#define SCENE_FX_TAA_HISTORY 0.85f', '#define SCENE_FX_TAA_HISTORY 0.5f'),
     ('            1.0f - SCENE_FX_TAA_HISTORY : 1.0f;', '            1.0f - SCENE_FX_TAA_HISTORY : 1.0f - SCENE_FX_TAA_HISTORY;'),
     ('s_viewContinuous && s_viewProjection[0] > 0.0f && s_taaLastProjection[0] > 0.0f ?',
      's_viewProjection[0] > 0.0f && s_taaLastProjection[0] > 0.0f ?'),
@@ -1986,8 +1986,8 @@ mutants = [
     ('            memcpy(s_taaMove, move, sizeof(s_taaMove));\n', ''),
     ('            s_taaLastProjection[1] = s_lastProjection[1];', '            s_taaLastProjection[1] = s_lastProjection[0];'),
     ('    s_lastProjection[0] = s_cameraProjection[0];\n    s_lastProjection[1] = s_cameraProjection[1];\n', ''),
-    ('    params[SCENE_FX_SHARPEN] = film ? (s_taaView ? 0.12f : 0.06f) : 0.0f;',
-     '    params[SCENE_FX_SHARPEN] = film ? 0.06f : 0.0f;'),
+    ('    params[SCENE_FX_SHARPEN] = film ? (s_taaView ? 0.2f : 0.1f) : 0.0f;',
+     '    params[SCENE_FX_SHARPEN] = film ? 0.1f : 0.0f;'),
     ('    params[SCENE_FX_TAA_JITTER + 1] = s_jitter[1];\n', ''),
     ('    s_taaView = s_active && WebSceneFx_TaaEnabled();', '    s_taaView = WebSceneFx_TaaEnabled();'),
 ]

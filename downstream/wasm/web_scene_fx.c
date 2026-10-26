@@ -196,7 +196,7 @@ enum {
 
 /* At r_clarity 1 a pixel's light moves this share of its difference from its
  * surroundings' further from them. */
-#define SCENE_FX_CLARITY_GAIN 0.16f
+#define SCENE_FX_CLARITY_GAIN 0.28f
 
 /* The film grade lifts the shade, as WWII's filmic toe does, by this much of
  * x (1 - x)^2 for a channel x: 0.05 to 0.07, 0.2 to 0.26, 0.6 to 0.64. */
@@ -205,7 +205,7 @@ enum {
 /* Temporal antialiasing keeps this share of each pixel from the frames
  * before; the view moves within its pixels through this many points of the
  * Halton (2, 3) sequence. */
-#define SCENE_FX_TAA_HISTORY 0.9f
+#define SCENE_FX_TAA_HISTORY 0.85f
 #define SCENE_FX_TAA_PHASES 8
 
 /* InfinitePerspectiveMatrix's depth scale times the default r_znear of 4. */
@@ -745,7 +745,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "      m2 += s * s;\n" +
                 "    }\n" +
                 "  m1 *= 1.0 / 9.0;\n" +
-                "  vec3 spread = max(sqrt(max(m2 * (1.0 / 9.0) - m1 * m1, 0.0)) * 1.25, vec3(0.004));\n" +
+                "  vec3 spread = max(sqrt(max(m2 * (1.0 / 9.0) - m1 * m1, 0.0)), vec3(0.004));\n" +
                 "  highp float d = texelFetch(u_depth, px, 0).r;\n" +
                 "  highp vec2 uv = v_uv;\n" +
                 "  float weight = u_taa.x;\n" +
@@ -2454,7 +2454,7 @@ static void WebSceneFx_FillParams(float *params)
     params[SCENE_FX_NEAR_CLIP] = WebSceneFx_ScopeNearClip(s_nearClip);
     params[SCENE_FX_NEAR_BLUR] = 3.0f;
     /* Temporal antialiasing softens what it averages: sharpen its result more. */
-    params[SCENE_FX_SHARPEN] = film ? (s_taaView ? 0.12f : 0.06f) : 0.0f;
+    params[SCENE_FX_SHARPEN] = film ? (s_taaView ? 0.2f : 0.1f) : 0.0f;
     /* The color the contrast curve used to give, without its darker shade. */
     params[SCENE_FX_SATURATION] = 1.12f;
     params[SCENE_FX_CONTRAST] = 0.0f;
