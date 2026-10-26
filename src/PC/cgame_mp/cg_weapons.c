@@ -238,6 +238,8 @@ void CG_BulletHitClientEvent(int sourceEntityNum, vec_t *position, int surfType,
 void CG_AddPlayerWeapon(GfxEntity *parent, playerState_t *ps, centity_t *cent, qboolean bDrawGun);
 void CG_AddViewWeapon(playerState_t *ps);
 void CG_BulletHitEvent(int sourceEntityNum, vec_t *position, vec_t *normal, vec_t *reflected, int surfType, int event);
+static void CG_BulletImpact(int sourceEntityNum, vec_t *position, vec_t *normal, vec_t *reflected, int surfType,
+                            int event);
 unsigned int CG_TracerSeed(const trajectory_t *pos);
 void CG_DrawTracer(vec_t *start, vec_t *finish, unsigned int seed);
 void CG_WeaponSlot_f(qboolean next, qboolean ignoreEmpty);
@@ -1537,6 +1539,33 @@ static float CG_WebAdsNearestPlayer(int skipClient)
     return nearest;
 }
 
+/* Where the shooter's own bullet strikes, the moment it leaves, as
+ * Bullet_Fire_Extended marks it: not the sky, not a player, whose blood waits
+ * for the server's word; a corpse as flesh; a rifle's bullet large. */
+static void CG_WebLocalImpact(const trace_t *trace, const vec_t *start, const vec_t *end, const vec_t *hitPos,
+                              const WeaponDef *weapDef)
+{
+    vec3_t position, normal, reflect;
+    float dot;
+    int surfType, i;
+
+    if (trace->startsolid || trace->allsolid || trace->fraction >= 1.0f || (trace->surfaceFlags & 4) ||
+        trace->entityNum < 64 || !cg->nextSnap)
+        return;
+    surfType = trace->entityNum < 1022 && cg_entities[trace->entityNum].nextState.eType == 2 ? 7 :
+               (trace->surfaceFlags & 0x1f00000) >> 20;
+    for (i = 0; i < 3; ++i) {
+        position[i] = hitPos[i];
+        normal[i] = trace->normal[i];
+        reflect[i] = end[i] - start[i];
+    }
+    Vec3Normalize(reflect);
+    dot = reflect[0] * normal[0] + reflect[1] * normal[1] + reflect[2] * normal[2];
+    for (i = 0; i < 3; ++i)
+        reflect[i] -= 2.0f * dot * normal[i];
+    CG_BulletImpact(cg->nextSnap->ps.clientNum, position, normal, reflect, surfType, weapDef->bRifleBullet ? 0xb6 : 0xb5);
+}
+
 static void CG_UpdateWebWeaponPresentation(playerState_t *ps, int weaponIndex, qboolean drawGun)
 {
     static const vec3_t zeroBounds = { 0.0f, 0.0f, 0.0f };
@@ -1583,7 +1612,7 @@ static void CG_UpdateWebWeaponPresentation(playerState_t *ps, int weaponIndex, q
         int barrel = s_pendingLocalFireBarrel & 3;
         WeaponDef *weapDef = BG_GetPlayerWeaponDef(ps, fireWeapon);
         s_pendingLocalFireTime = 0;
-        if (weapDef && weapDef->weapType == 0 && cg_tracerChance->current.value > 0.0f) {
+        if (weapDef && weapDef->weapType == 0) {
             /* Like the muzzle sprites, the shooter's own tracer stays out of
              * a WWII scope's window; the server's copy is still suppressed. */
             int scoped = CG_WwiiScopeLens()->presence > 0.0f;
@@ -1610,7 +1639,7 @@ static void CG_UpdateWebWeaponPresentation(playerState_t *ps, int weaponIndex, q
             BG_GetSpreadForWeapon(ps, fireWeapon, &minSpread, &maxSpread);
             spread = BG_GetShotSpread(ps, weapDef, minSpread, maxSpread, ps->aimSpreadScale * (1.0f / 255.0f), 1);
             if (weapDef->weapClass == 3) {
-                shots = weapDef->shotCount > 3 ? 3 : (weapDef->shotCount > 0 ? weapDef->shotCount : 1);
+                shots = weapDef->shotCount > 12 ? 12 : (weapDef->shotCount > 0 ? weapDef->shotCount : 1);
                 if (weapDef->fMinDamageRange > 256.0f)
                     range = weapDef->fMinDamageRange;
             }
@@ -1626,15 +1655,19 @@ static void CG_UpdateWebWeaponPresentation(playerState_t *ps, int weaponIndex, q
                     end[i] = cg->refdef.vieworg[i] + range * forward[i] +
                              rightOfs * right[i] + upOfs * up[i];
                 }
-                if (scoped || randomf() >= cg_tracerChance->current.value)
-                    continue;
                 CG_TraceCapsule(&trace, cg->refdef.vieworg, zeroBounds, zeroBounds,
                                 end, ps->clientNum, 0x2802831);
                 for (int i = 0; i < 3; ++i)
                     hitPos[i] = cg->refdef.vieworg[i] + trace.fraction * (end[i] - cg->refdef.vieworg[i]);
+                CG_WebLocalImpact(&trace, cg->refdef.vieworg, end, hitPos, weapDef);
+                /* A shotgun's blast streaks at most three of its pellets. */
+                if (s >= 3 || scoped || cg_tracerChance->current.value <= 0.0f ||
+                    randomf() >= cg_tracerChance->current.value)
+                    continue;
                 CG_SpawnTracerImmediate(muzzle, hitPos);
             }
-            s_localTracerSpawnedTime = cg->time;
+            if (cg_tracerChance->current.value > 0.0f)
+                s_localTracerSpawnedTime = cg->time;
         }
     }
 }
@@ -1864,15 +1897,15 @@ void CG_AddViewWeapon(playerState_t *ps)
 #endif
 }
 
-void CG_BulletHitEvent(int sourceEntityNum, vec_t *position, vec_t *normal, vec_t *reflected, int surfType, int event)
+/* A bullet's impact on a surface: its sound and effects, by the bullet's size
+ * (event 0xb5 small, 0xb6 rifle, 0xb7 shotgun) and the surface. */
+static void CG_BulletImpact(int sourceEntityNum, vec_t *position, vec_t *normal, vec_t *reflected, int surfType,
+                            int event)
 {
     byte *fxTable;
     snd_alias_list_t *alias;
     void *fxNormal;
     void *fxReflect;
-    unsigned int flashTag;
-    vec3_t muzzle;
-    float tracerChance;
 
     if (event == 0xb5) {
         alias = cgs->media.bulletHitSmallSound[surfType];
@@ -1908,6 +1941,22 @@ void CG_BulletHitEvent(int sourceEntityNum, vec_t *position, vec_t *normal, vec_
 
     if (fxReflect)
         FX_PlayEffect(fxReflect, position, reflected);
+}
+
+void CG_BulletHitEvent(int sourceEntityNum, vec_t *position, vec_t *normal, vec_t *reflected, int surfType, int event)
+{
+    unsigned int flashTag;
+    vec3_t muzzle;
+    float tracerChance;
+
+#ifdef __EMSCRIPTEN__
+    /* The shooter seen in first person struck it already, the moment the shot
+     * left (CG_UpdateWebWeaponPresentation); the server's word comes a round
+     * trip later. */
+    if (cg->nextSnap && !cg->renderingThirdPerson && sourceEntityNum == cg->nextSnap->ps.clientNum)
+        return;
+#endif
+    CG_BulletImpact(sourceEntityNum, position, normal, reflected, surfType, event);
 
     flashTag = *(unsigned short *)s_barrelTags[0];
     tracerChance = cg_tracerChance->current.value;

@@ -56,7 +56,7 @@ assert add_view.index('CG_AddPlayerWeapon(&hand, playerState, &cg->predictedPlay
 # would streak across the glass, is not drawn.
 assert 'fx = bDrawGun && !CG_WwiiScopeMuzzleLightsOnly() ? weapInfo->viewFlashEffect :' in weapons
 assert 'int scoped = CG_WwiiScopeLens()->presence > 0.0f;' in weapons
-assert 'if (scoped || randomf() >= cg_tracerChance->current.value)' in weapons
+assert 'if (s >= 3 || scoped || cg_tracerChance->current.value <= 0.0f ||' in weapons
 # The world zooms over at least the scope's share of the raise, on the curve
 # CG_WwiiScopeZoomFraction follows below.
 view = (root / 'src/PC/cgame_mp/cg_view_mp.c').read_text()

@@ -6790,3 +6790,28 @@ Validation: `test-command-history.py` (new, in `test-static.sh`, 4 mutants),
 `test-prediction-command-window.py`, the gateway's `filter.test.mjs` (two new
 tests; dropping the hold fails them) and its other suites. The gateway must be
 redeployed for its part to apply. The full static suite was not run.
+
+## Bullet impacts the moment the shot leaves — 2026-10-25
+
+The owner fired at a wall and saw the muzzle flash at once but the bullet's
+impact late. A wall's impact (its effect, sound and the shooter's tracer) came
+only from the server's event, a round trip, a server frame and the client's
+interpolation after the shot, while the muzzle flash was the client's own.
+`cg_weapons.c`: the shooter's own shot (`CG_UpdateWebWeaponPresentation`, which
+already traced the first-person tracer) now traces every round and every
+shotgun pellet and plays the impact where it strikes (`CG_WebLocalImpact`, as
+`Bullet_Fire_Extended` marks it: not the sky, not players, a corpse as flesh,
+a rifle's bullet large); at most three pellets of a blast streak. The server's
+copy of a wall impact by the shooter seen in first person is dropped
+(`CG_BulletHitEvent`); blood on players stays the server's word, and so do
+third person and other players' impacts. Hip fire's spread is the client's
+own roll, as the server's is its own; penetration's exit marks are the
+server's and are no longer drawn for the shooter.
+
+Validation: `test-combat-presentation.py` (the local impact's size, surface,
+sky, players, misses, corpses and every pellet; the server's copy dropped only
+for the first-person shooter; four mutants checked), `test-wwii-scope.py`. In
+the QA stack with every server packet held 150 ms, a shot at the bunker's wall
+showed its splinters in the first frame after the shot and one bullet hole;
+the old client showed none within 430 ms of the shot. The full static suite
+was not run.

@@ -30,20 +30,21 @@ support = r'''
 typedef float vec_t;
 typedef float vec3_t[3];
 typedef unsigned char byte;
-typedef int snapshot_t;
+typedef struct {struct {int clientNum;} ps;} snapshot_t;
 typedef int snd_alias_list_t;
 typedef struct {struct {float value; int integer,enabled;} current;} dvar_t;
 typedef int qboolean;
 typedef struct {int clientNum;float fWeaponPosFrac,aimSpreadScale;} playerState_t;
-typedef struct {float fraction;} trace_t;
-typedef struct {int weapType,weapClass,shotCount;float fAdsSpread,fMinDamageRange;} WeaponDef;
+typedef struct {float fraction,normal[3];int surfaceFlags;unsigned short entityNum;unsigned char allsolid,startsolid;} trace_t;
+typedef struct {int weapType,weapClass,shotCount,bRifleBullet;float fAdsSpread,fMinDamageRange;} WeaponDef;
 typedef struct {void *viewModelDObj;} weaponInfo_t;
 typedef struct {int leType,endTime;float tracerClipDist;struct {int trType,trTime;float trBase[3],trDelta[3];} pos;} localEntity_t;
 #define LE_MOVING_TRACER 4
 #define TR_LINEAR 2
-static struct {struct {float vieworg[3],viewaxis[3][3],fov_x,fov_y;} refdef;int time,frametime;float gunPitch,gunYaw,viewModelAxis[3][3];} cgState,*cg=&cgState;
+static struct {struct {float vieworg[3],viewaxis[3][3],fov_x,fov_y;} refdef;int time,frametime;float gunPitch,gunYaw,viewModelAxis[3][3];
+ snapshot_t *nextSnap;int renderingThirdPerson;} cgState,*cg=&cgState;
 typedef struct {struct {int eType,clientNum;} nextState;int nextValid;float lerpOrigin[3];} centity_t;
-static centity_t entities[64],*cg_entities=entities;
+static centity_t entities[1024],*cg_entities=entities;
 static dvar_t chance,blood,speed;
 static dvar_t *cg_tracerChance=&chance,*cg_blood=&blood,*cg_tracerSpeed=&speed;
 static struct {struct {snd_alias_list_t *bulletHitSmallSound[23],*bulletHitLargeSound[23],*shotgunHitSound[23]; struct {void *table;} *fx; void *fxNoBloodFleshHit;}media;} cgsState,*cgs=&cgsState;
@@ -53,7 +54,9 @@ static localEntity_t immediateLe;
 static unsigned short tag;static void *s_barrelTags[]={&tag,&tag,&tag,&tag};
 static weaponInfo_t weapInfos[4];static weaponInfo_t *weapInfoPtr=weapInfos;static void *imp_cg_weapons=&weapInfoPtr;
 static WeaponDef testWeapon={.weapType=0,.weapClass=0,.shotCount=1,.fAdsSpread=0.5f,.fMinDamageRange=1500.f};
-static float traceFraction=0.25f,traceEnd[3];static int traceSkip,traceMask;
+static float traceFraction=0.25f,traceEnd[3];static int traceSkip,traceMask,traceSurface,traceEntity=1022;
+/* The impact each struck surface played: its sound's surface, and its size by the event. */
+static int impactSurface=-1;static snd_alias_list_t *impactAlias;
 static float g_webAdsDofFrac,g_webAdsViewmodelStart=6.f,g_webAdsViewmodelEnd=15.f,g_webAdsNearEnd=512.f;
 static int s_pendingLocalFireWeapon,s_pendingLocalFireBarrel,s_pendingLocalFireTime,s_localTracerSpawnedTime;
 typedef struct {float center[2],axes[2][2],presence,open,blur,dark,projection[2];} CgWwiiScopeLens;
@@ -70,10 +73,11 @@ static void CG_GunFovPoint(float *p){gunFovPoints++;for(int i=1;i<3;i++)p[i]=cg-
 static void AngleVectors(const float *ang,float *f,float *r,float *u){f[0]=1;f[1]=f[2]=0;r[0]=r[2]=0;r[1]=1;u[0]=u[1]=0;u[2]=1;}
 static void BG_GetSpreadForWeapon(const playerState_t *ps,int w,float *lo,float *hi){*lo=1.f;*hi=4.f;}
 static float randomf(void){return 0.5f;}
-static void CG_TraceCapsule(trace_t *tr,const float *s,const float *mn,const float *mx,const float *e,int skip,int mask){traces++;memcpy(traceEnd,e,12);traceSkip=skip;traceMask=mask;tr->fraction=traceFraction;}
+static void CG_TraceCapsule(trace_t *tr,const float *s,const float *mn,const float *mx,const float *e,int skip,int mask){traces++;memcpy(traceEnd,e,12);traceSkip=skip;traceMask=mask;
+ memset(tr,0,sizeof(*tr));tr->fraction=traceFraction;tr->normal[0]=-1;tr->surfaceFlags=traceSurface;tr->entityNum=(unsigned short)traceEntity;}
 static float Vec3Normalize(float *v){float len=sqrtf(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);if(len)for(int i=0;i<3;i++)v[i]/=len;return len;}
 static float Vec3Distance(const float *a,const float *b){float s=0;for(int i=0;i<3;i++)s+=(a[i]-b[i])*(a[i]-b[i]);return sqrtf(s);}
-static void CG_PlaySoundAlias(int ent,float *pos,snd_alias_list_t *alias){impacts++;}
+static void CG_PlaySoundAlias(int ent,float *pos,snd_alias_list_t *alias){impacts++;impactAlias=alias;}
 static int CG_CalcMuzzlePoint(int ent,float *out,unsigned tag){memset(out,0,12);return muzzleReady;}
 static void CG_WhizbySound(float *a,float *b){whizzes++;}
 static void CG_SpawnTracer(float *a,float *b){spawns++;}
@@ -95,8 +99,8 @@ spread_rule = ('#define WEAPCLASS_SPREAD 3\n' +
                              spread_source.index('/* The spread a shot leaves with.')] +
                function('src/PC/bgame/bg_weapons.c', 'BG_GetShotSpread'))
 code = spread_rule + ''.join(function(weapon, name) for name in (
-    'CG_BulletHitClientEvent', 'CG_BulletHitEvent', 'CG_SpawnTracerImmediate', 'CG_WebAdsNearEnd',
-    'CG_WebAdsDofApproach', 'CG_WebAdsNearestPlayer', 'CG_UpdateWebWeaponPresentation'))
+    'CG_BulletImpact', 'CG_BulletHitClientEvent', 'CG_BulletHitEvent', 'CG_SpawnTracerImmediate', 'CG_WebAdsNearEnd',
+    'CG_WebAdsDofApproach', 'CG_WebAdsNearestPlayer', 'CG_WebLocalImpact', 'CG_UpdateWebWeaponPresentation'))
 code += function('src/PC/gfx_d3d/r_scene.c', 'R_AddLightToScene')
 checks = r'''
 int main(void){
@@ -108,6 +112,18 @@ int main(void){
   assert(impacts==1 && whizzes==1 && spawns==enabled);
  }
  muzzleReady=0;whizzes=spawns=0;CG_BulletHitClientEvent(1,end,0,0xb9);assert(!whizzes&&!spawns);
+ muzzleReady=1;
+ // The server's copy of an impact by the shooter seen in first person comes a
+ // round trip late: that shooter struck it already. Anyone else's plays, and
+ // so does the shooter's own in third person.
+ snapshot_t snap={{1}};cg->nextSnap=&snap;chance.current.value=1;
+ whizzes=spawns=impacts=0;CG_BulletHitEvent(1,end,normal,normal,0,0xb5);assert(!impacts&&!whizzes&&!spawns);
+ CG_BulletHitEvent(2,end,normal,normal,0,0xb5);assert(impacts==1&&whizzes==1&&spawns==1);
+ cg->renderingThirdPerson=1;CG_BulletHitEvent(1,end,normal,normal,0,0xb5);assert(impacts==2);
+ cg->renderingThirdPerson=0;
+ // Blood stays the server's word.
+ CG_BulletHitClientEvent(1,end,0,0xb9);assert(impacts==3);
+ snap.ps.clientNum=0;
  rg.registered=1;rgp.world=&rgp;limit.current.integer=4;
  for(int frame=0;frame<100;frame++){
   scene.dlightCount=0;
@@ -129,6 +145,10 @@ int main(void){
   float v[7]={1,2,3,200,1,1,1};v[f]=NAN;R_AddLightToScene(v,v[3],v[4],v[5],v[6]);
   assert(scene.dlightCount==0);
  }
+ // Each surface's sound for each bullet, told apart.
+ static snd_alias_list_t sounds[3][23];
+ for(int i=0;i<23;i++){cgs->media.bulletHitSmallSound[i]=&sounds[0][i];cgs->media.bulletHitLargeSound[i]=&sounds[1][i];
+  cgs->media.shotgunHitSound[i]=&sounds[2][i];}
  speed.current.value=6500.f;chance.current.value=0.85f;
  cg->time=5000;cg->frametime=16;cg->viewModelAxis[0][0]=1.f;
  weapInfos[1].viewModelDObj=&testWeapon;
@@ -136,8 +156,12 @@ int main(void){
  traceFraction=0.125f;
  s_pendingLocalFireWeapon=1;s_pendingLocalFireBarrel=0;s_pendingLocalFireTime=5000;
  immediateSpawns=0;g_webAdsNearEnd=77.f;
+ impacts=0;
  CG_UpdateWebWeaponPresentation(&ps,1,1);
  assert(immediateSpawns==1 && s_localTracerSpawnedTime==5000);
+ // The round strikes the wall the moment it leaves, with the small bullet's
+ // sound for the surface, as the server's event would.
+ assert(impacts==1 && impactAlias==cgs->media.bulletHitSmallSound[0]);
  assert(immediateLe.pos.trTime==5000 && immediateLe.pos.trBase[0]==18.f);
  // It leaves where the view's projection draws the muzzle the weapon's own
  // projection shows (cg_gunfov_mp.c).
@@ -156,19 +180,36 @@ int main(void){
  // A round that rolls above the tracer chance draws nothing, and the late
  // server copy of the shot stays suppressed.
  chance.current.value=0.25f;cg->time=5032;s_pendingLocalFireWeapon=1;s_pendingLocalFireTime=5032;
- traces=0;immediateSpawns=0;CG_UpdateWebWeaponPresentation(&ps,1,1);
- assert(immediateSpawns==0 && traces==1 && s_localTracerSpawnedTime==5032);
+ traces=0;immediateSpawns=0;impacts=0;CG_UpdateWebWeaponPresentation(&ps,1,1);
+ assert(immediateSpawns==0 && traces==2 && s_localTracerSpawnedTime==5032);
+ // It still strikes: only the streak follows the tracer chance.
+ assert(impacts==1);
  chance.current.value=0.85f;
  testWeapon.weapClass=3;testWeapon.shotCount=8;
  cg->time=5050;s_pendingLocalFireWeapon=1;s_pendingLocalFireTime=5050;immediateSpawns=0;
+ impacts=0;traces=0;
  CG_UpdateWebWeaponPresentation(&ps,1,1);
- assert(immediateSpawns==3);
+ // Every pellet strikes; at most three streak.
+ assert(immediateSpawns==3 && impacts==8 && traces==9);
  // Through a WWII scope's window the shooter sees no tracer of their own,
  // and the server's copy of the shot stays suppressed all the same.
  scopeLens.presence=0.4f;cg->time=5066;s_pendingLocalFireWeapon=1;s_pendingLocalFireTime=5066;
- immediateSpawns=0;traces=0;CG_UpdateWebWeaponPresentation(&ps,1,1);
- assert(immediateSpawns==0 && traces==1 && s_localTracerSpawnedTime==5066);
+ immediateSpawns=0;traces=0;impacts=0;CG_UpdateWebWeaponPresentation(&ps,1,1);
+ assert(immediateSpawns==0 && traces==9 && s_localTracerSpawnedTime==5066 && impacts==8);
  scopeLens.presence=0.f;
+ // A rifle's bullet is the large one; the sky, a player (whose blood the
+ // server sends) and a miss strike nothing; a corpse is flesh.
+ testWeapon.weapClass=0;testWeapon.shotCount=1;testWeapon.bRifleBullet=1;
+ const struct {float fraction;int surface,entity;int strikes;snd_alias_list_t **alias;} rounds[]={
+  {0.125f,5<<20,1022,1,&cgs->media.bulletHitLargeSound[5]},{0.125f,4,1022,0,0},{0.125f,0,3,0,0},{1.f,0,1022,0,0},
+  {0.125f,0,200,1,&cgs->media.bulletHitLargeSound[7]}};
+ entities[200].nextState.eType=2;
+ for(int r=0;r<5;r++){
+  traceFraction=rounds[r].fraction;traceSurface=rounds[r].surface;traceEntity=rounds[r].entity;impacts=0;impactAlias=0;
+  cg->time=5070+r;s_pendingLocalFireWeapon=1;s_pendingLocalFireTime=cg->time;CG_UpdateWebWeaponPresentation(&ps,1,1);
+  assert(impacts==rounds[r].strikes && (!rounds[r].alias || impactAlias==*rounds[r].alias));
+ }
+ testWeapon.bRifleBullet=0;traceFraction=0.125f;traceSurface=0;traceEntity=1022;
  ps.fWeaponPosFrac=0.f;CG_UpdateWebWeaponPresentation(&ps,1,1);
  assert(g_webAdsDofFrac==0.f);
  // Only other live players around the view keep the near blur short of them.
@@ -205,7 +246,7 @@ int main(void){
  assert(CG_WebAdsNearEnd(20.f,1.0e30f)==1.f && CG_WebAdsNearEnd(NAN,NAN)==512.f);
  assert(CG_WebAdsDofApproach(100.f,100.4f,50.f,.016f)==100.4f && CG_WebAdsDofApproach(100.f,99.6f,50.f,.016f)==99.6f);
  assert(fabsf(CG_WebAdsDofApproach(0.f,1000.f,50.f,.016f)-16.f)<1e-3f && CG_WebAdsDofApproach(100.f,200.f,50.f,0.f)==100.f);
- puts("PASS: immediate first-person tracers at the tracer chance, CoD4 ADS focus from the crosshair trace and on-screen players eased once aimed in, audio independent of visuals, 100 light-selection frames, all 0-32 limits and nonfinite rejection");
+ puts("PASS: immediate first-person impacts for every round and pellet, by the bullet's size and the surface, none on the sky, players or misses, the server's late copy dropped for the shooter seen in first person; immediate first-person tracers at the tracer chance, at most three a blast, CoD4 ADS focus from the crosshair trace and on-screen players eased once aimed in, audio independent of visuals, 100 light-selection frames, all 0-32 limits and nonfinite rejection");
 }
 '''
 
