@@ -6,8 +6,10 @@ import importlib.util
 import json
 from pathlib import Path
 import resource
+import socket
 import tempfile
 import threading
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 root = Path(__file__).resolve().parent.parent
@@ -139,20 +141,25 @@ with patch.object(rooms.socket, 'socket', return_value=udp):
     info = rooms.info_for(room)
     assert info['players'] == 9 and info['bots'] == 8 and info['humans'] == 1
 
-# Discovery and the gateway's immediate post-creation upgrade survive one
-# delayed reply. Cached results cannot prolong the grace or revive a dead room.
+# A live room whose engine is too busy to answer getinfo in time keeps its last
+# confirmed info. Cached results cannot outlive INFO_STALE_SECONDS or revive a
+# dead room.
 with patch.object(rooms.socket, 'socket', return_value=udp), \
      patch.object(rooms.time, 'monotonic', return_value=100):
     fresh = rooms.info_for(room)
     assert fresh and room['last_info'][0] == 100
-    udp.recv.side_effect = rooms.socket.timeout('spawn in progress')
-    for now in (100.4, 101, 102):
+    udp.recv.side_effect = rooms.socket.timeout('engine busy')
+    for now in (100.4, 102.001, 130, 100 + rooms.INFO_STALE_SECONDS):
         with patch.object(rooms.time, 'monotonic', return_value=now):
             fallback = rooms.info_for(room)
-            assert fallback and fallback['info'] == fresh['info']
+            assert fallback and fallback['info'] == fresh['info'], now
             assert 'ownerToken' not in fallback and room['last_info'][0] == 100
-    with patch.object(rooms.time, 'monotonic', return_value=102.001):
+    with patch.object(rooms.time, 'monotonic', return_value=100 + rooms.INFO_STALE_SECONDS + 0.001):
         assert rooms.info_for(room) is None
+    with patch.object(rooms.time, 'monotonic', return_value=130):
+        process.poll.side_effect = [None, 1]
+        assert rooms.info_for(room) is None, 'an engine stopping while it is asked leaves the list'
+        process.poll.side_effect = None
     process.poll.return_value = 1
     assert rooms.info_for(room) is None
     process.poll.return_value = None
@@ -275,6 +282,40 @@ try:
             assert delete({'id':0,'ownerToken':token})[0] == 403
             assert stop.call_count == 1
 
+    # Join Game and the gateway's socket upgrade both read this list: a room
+    # whose engine stops answering in time stays in it while its process lives.
+    created_rooms = dict(rooms.rooms)
+    rooms.rooms.clear()
+    clock = [100.0]
+    engine = Mock()
+    engine.poll.return_value = None
+    rooms.rooms[1] = {'id': 1, 'port': rooms.BASE_PORT + 1, 'process': engine, 'last_used': 0,
+                      'ownerToken': 'c' * 64, 'instance': 'd' * 32, 'botCount': 16, 'botDifficulty': 'hard'}
+    busy = Mock()
+    busy.__enter__ = Mock(return_value=busy)
+    busy.__exit__ = Mock(return_value=False)
+    busy.recv.return_value = (b'\xff\xff\xff\xffinfoResponse\n'
+                              b'\\hostname\\Busy\\mapname\\mp_carentan\\gametype\\tdm\\clients\\17\\bots\\16')
+    udp_module = SimpleNamespace(socket=Mock(return_value=busy), AF_INET=socket.AF_INET,
+                                 SOCK_DGRAM=socket.SOCK_DGRAM, timeout=socket.timeout)
+    listed = lambda: [(room['id'], room['info'], room['players'], room['humans'], room['instance'])
+                      for room in discovery()['rooms']]
+    with patch.object(rooms, 'socket', udp_module), \
+         patch.object(rooms, 'time', SimpleNamespace(monotonic=lambda: clock[0])):
+        confirmed = listed()
+        assert len(confirmed) == 1 and confirmed[0][0] == 1 and confirmed[0][2:] == (17, 1, 'd' * 32)
+        busy.recv.side_effect = socket.timeout('engine busy')
+        for clock[0] in (103.0, 130.0, 100 + rooms.INFO_STALE_SECONDS):
+            assert listed() == confirmed, clock[0]
+        clock[0] = 100 + rooms.INFO_STALE_SECONDS + 1
+        assert listed() == [], 'an engine silent for a minute leaves the list'
+        busy.recv.side_effect = None
+        assert listed() == confirmed, 'an answer brings it back'
+        engine.poll.return_value = 0
+        assert listed() == [], 'a stopped engine leaves the list at once'
+    rooms.rooms.clear()
+    rooms.rooms.update(created_rooms)
+
 finally:
     server.shutdown()
     server.server_close()
@@ -290,4 +331,5 @@ with patch.object(rooms.stopping, 'wait', side_effect=[False, True]), \
     assert sorted(call.args[0]['id'] for call in stop.call_args_list) == [0, 2]
     assert set(rooms.rooms) == {1}
 rooms.rooms.clear()
-print('PASS: empty startup, three user slots, idle cleanup, eight maps/five modes, rotation, discovery and HTTP allowlist')
+print('PASS: empty startup, three user slots, idle cleanup, eight maps/five modes, rotation, discovery, busy rooms '
+      'kept listed and HTTP allowlist')

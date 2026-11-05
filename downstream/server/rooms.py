@@ -18,7 +18,10 @@ import time
 MAX_ROOMS = 3
 BASE_PORT = 28960
 IDLE_SECONDS = 300
-INFO_GRACE_SECONDS = 2
+# A busy host holds getinfo past its timeout: bots spawning, a map loading, a
+# Pi running every room's engine under QEMU. A live room keeps its last
+# confirmed info this long rather than leave Join Game and refuse its joins.
+INFO_STALE_SECONDS = 60
 SUPPORTED_MAPS = ('mp_toujane', 'mp_carentan', 'mp_dawnville', 'mp_burgundy', 'mp_railyard', 'mp_brecourt',
                   'mp_matmata', 'mp_leningrad')
 SUPPORTED_GAMETYPES = ('dm', 'tdm', 'ctf', 'hq', 'sd')
@@ -66,12 +69,9 @@ def info_for(room):
         room['last_info'] = (time.monotonic(), result.copy())
         return result
     except OSError:
-        # A cold bot spawn or round transition can briefly delay getinfo.
-        # Keep a recently confirmed live room available for its socket upgrade;
-        # a timeout must not make a just-created server appear to be deleted.
         previous = room.get('last_info')
         if (previous and room['process'].poll() is None and
-                time.monotonic() - previous[0] <= INFO_GRACE_SECONDS):
+                time.monotonic() - previous[0] <= INFO_STALE_SECONDS):
             return {**previous[1], 'ping': max(previous[1]['ping'],
                     round((time.monotonic() - started) * 1000))}
         return None

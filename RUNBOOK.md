@@ -6887,3 +6887,29 @@ memory; six deliberate breaks each fail it), `test-web-net-errors.cjs`,
 `test-web-effects.py` (32 mutants), `test-web-point-lights.cjs`,
 `test-emscripten-gl.cjs`. Not measured: the Pi's server under real load,
 Safari and Firefox. The full static suite was not run.
+
+## Busy rooms stay in Join Game and take joins — 2026-11-05
+
+The owner reported that after creating a server and leaving for the main menu,
+Join Game no longer showed it and other players' servers could not be joined.
+On a local copy of the Pi stack (the `pi-c97faa0e` release's ARM64 images, the
+same private assets, Chrome on the worker transport, with and without an Nginx
+password in front) creating, leaving, listing and joining another room all
+worked. They failed once the room engines could not keep up: with the server
+container held to 0.3 CPU and two rooms of 16 Hard bots beside a light one,
+getinfo took 0.4–1.8 s or went unanswered, `/servers` listed 0 or 1 of the 3
+rooms in each of 20 polls over 40 s, and joining the busiest room ended in
+"This game is no longer available". The supervisor listed a room only after an
+answer within 0.4 s or for 2 s after one, and the gateway admits a socket only
+to a listed room; the join that follows a room's creation falls in that window.
+
+`rooms.py` keeps a live room's last confirmed info for 60 s
+(`INFO_STALE_SECONDS`) while its engine does not answer in time. A stopped
+process leaves the list at once, and an engine silent for a minute leaves it.
+Under the same load all 3 rooms stayed listed in every poll and the browser
+joined the busiest room, its connect response 15 s after the join while the
+host was saturated.
+
+Validation: `test-room-maps.py` (the window through the real `GET /rooms`
+handler, an engine stopping while it is asked; the old 2 s window and a
+dropped process check each fail it). Not measured: the Pi itself.
