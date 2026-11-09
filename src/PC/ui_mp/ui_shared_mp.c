@@ -4820,10 +4820,12 @@ qboolean Item_TextField_HandleKey(displayContextDef_t *dc, itemDef_t *item, int 
         return 1;
 
     case 0x9d:
+    case 0xbb:
         Item_SetCursorPos(item, Item_GetCursorPosOffset(item, buff, 1));
         goto scroll_update;
 
     case 0x9c:
+    case 0xb9:
         Item_SetCursorPos(item, Item_GetCursorPosOffset(item, buff, -1));
     scroll_update:
         editPtr = Item_GetEditFieldDef(item);

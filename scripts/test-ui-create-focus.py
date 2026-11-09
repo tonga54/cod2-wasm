@@ -173,6 +173,9 @@ int main(void){int cases=0;
    click(&dc,280,148);assert(g_editingField&&g_editItem==&name);
    type(&dc,"Custom Room QA");assert(!strcmp(hostname,"Custom Room QA"));
    Item_TextField_Paint(&dc,&name);assert(paintedCursor==14&&paintedMax==15);
+   /* The keypad's arrows move the caret as the others do. */
+   Menu_HandleKey(&dc,focused(&dc),0xb9,1);assert(name.cursorPos[0]==13);
+   Menu_HandleKey(&dc,focused(&dc),0xbb,1);assert(name.cursorPos[0]==14);
    int previousMode=selectedMode;click(&dc,280,124);
    assert(!g_editingField&&!g_editItem&&selectedMode==(previousMode+1)%5);
    /* A map click commits the name and selects immediately, without Enter. */
