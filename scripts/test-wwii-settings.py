@@ -226,7 +226,7 @@ static float GetRealWidthFromVirtualWidth(float width) { return width * unitPx()
 
 /* Dvars by name. */
 static struct { char name[48]; char value[64]; } dvars[64];
-static int dvarCount, dvarSets;
+static int dvarCount, dvarSets, nameSets;
 static char lastSet[48], lastValue[64];
 static const char *dvarGet(const char *name) {
     for (int i = 0; i < dvarCount; i++)
@@ -243,6 +243,7 @@ static void dvarPut(const char *name, const char *value) {
 static const char *Dvar_GetVariantString(const char *name) { return dvarGet(name); }
 static void Dvar_SetFromStringByName(const char *name, const char *value) {
     dvarSets++;
+    if (!strcasecmp(name, "name")) nameSets++;
     snprintf(lastSet, sizeof(lastSet), "%s", name);
     snprintf(lastValue, sizeof(lastValue), "%s", value);
     dvarPut(name, value);
@@ -345,6 +346,13 @@ static qboolean Item_TextField_HandleKey(displayContextDef_t *dc, itemDef_t *ite
     (void)dc;
     fieldCalls++; fieldKey = key;
     assert(item == editItem);
+    if (key & 0x400) {
+        /* As the menus' field does: the key lands in the dvar the item binds. */
+        char value[64];
+        snprintf(value, sizeof(value), "%s%c", dvarGet(item->dvar), (char)(key & ~0x400));
+        Dvar_SetFromStringByName(item->dvar, value);
+        return 1;
+    }
     return key != 0x0d && key != 0x1b;
 }
 static struct { itemDef_t *item; char script[128]; } scripts[64];
@@ -1021,14 +1029,34 @@ int main(void) {
     assert(findText("GAMETAG") && findText("Chapu54"));
     key(GAME, 0x9b);
     assert(key(GAME, 0x0d) == 1 && editBegins == 1 && editItem == nameEdit);
+    assert(!strcmp(nameEdit->dvar, "ui_nameDraft") && !strcmp(dvarGet("ui_nameDraft"), "Chapu54"));
     paint(GAME);
     assert(!strcmp(promptText, "ENTER Done|"));
-    assert(UI_WWIISettings_KeyEvent(&uiDc, &menus[GAME], 'q' | 0x400, 1) == 1 && fieldKey == ('q' | 0x400) && editItem);
+    {
+        int sets = nameSets;
+        assert(UI_WWIISettings_KeyEvent(&uiDc, &menus[GAME], 'q' | 0x400, 1) == 1 &&
+               fieldKey == ('q' | 0x400) && editItem);
+        /* Typed text stays in the draft: the gametag the server relays is still
+         * the one the player began with. */
+        assert(nameSets == sets && !strcmp(dvarGet("name"), "Chapu54") &&
+               !strcmp(dvarGet("ui_nameDraft"), "Chapu54q"));
+    }
     closes = 0;
-    assert(UI_WWIISettings_KeyEvent(&uiDc, &menus[GAME], 0x1b, 1) == 1 && !editItem && closes == 0);
+    {
+        int sets = nameSets;
+        assert(UI_WWIISettings_KeyEvent(&uiDc, &menus[GAME], 0x1b, 1) == 1 && !editItem && closes == 0);
+        /* Leaving the field applies it once. */
+        assert(nameSets == sets + 1 && !strcasecmp(lastSet, "name") && !strcmp(lastValue, "Chapu54q"));
+        assert(!strcmp(dvarGet("name"), "Chapu54q") && !strcmp(nameEdit->dvar, "name"));
+    }
     key(GAME, 0x0d);
+    assert(!strcmp(dvarGet("ui_nameDraft"), "Chapu54q"));
     fieldCalls = 0;
-    assert(key(GAME, 0x9a) == 1 && !editItem && fieldCalls == 0);
+    {
+        int sets = nameSets;
+        assert(key(GAME, 0x9a) == 1 && !editItem && fieldCalls == 0);
+        assert(nameSets == sets + 1 && !strcmp(dvarGet("name"), "Chapu54q"));
+    }
     cases += 3;
 
     /* The controller page lists every tab; its Back button takes Escape, and
@@ -1162,7 +1190,9 @@ mutants = [
     [('    item->window.dynamicFlags[0] |= SET_WINDOW_HASFOCUS;\n', '')],
     [('    if (handled && item->action)', '    if (item->action)')],
     [('        if (!s_settings.bindItem)\n            return 0;\n', '')],
-    [('            Item_EditField_End();\n        } else {', '        } else {')],
+    [('            Settings_EndField();\n        } else {', '        } else {')],
+    [('        Settings_NameEdit(control);\n', '')],
+    [('    Dvar_SetFromStringByName(SET_NAME_DVAR, Dvar_GetVariantString(SET_NAME_DRAFT_DVAR));\n', '')],
     [('    if (at >= page->scroll + SET_ROWS_SHOWN)\n        page->scroll = at - SET_ROWS_SHOWN + 1;\n', '')],
     [('        if (s_settings.hoverRow >= 0 && s_settings.dragRow < 0 &&', '        if (s_settings.hoverRow >= 0 &&')],
     [('    } else if (page->back && Settings_Shown(page->back) && page->back->action) {',
