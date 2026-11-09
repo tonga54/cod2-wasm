@@ -1053,9 +1053,10 @@ int main(void) {
     assert(!strcmp(dvarGet("ui_nameDraft"), "Chapu54q"));
     fieldCalls = 0;
     {
+        /* Leaving without a change sends nothing. */
         int sets = nameSets;
         assert(key(GAME, 0x9a) == 1 && !editItem && fieldCalls == 0);
-        assert(nameSets == sets + 1 && !strcmp(dvarGet("name"), "Chapu54q"));
+        assert(nameSets == sets && !strcmp(dvarGet("name"), "Chapu54q"));
     }
     cases += 3;
 
@@ -1192,7 +1193,7 @@ mutants = [
     [('        if (!s_settings.bindItem)\n            return 0;\n', '')],
     [('            Settings_EndField();\n        } else {', '        } else {')],
     [('        Settings_NameEdit(control);\n', '')],
-    [('    Dvar_SetFromStringByName(SET_NAME_DVAR, Dvar_GetVariantString(SET_NAME_DRAFT_DVAR));\n', '')],
+    [('    if (strcmp(draft, Dvar_GetVariantString(SET_NAME_DVAR)))\n        Dvar_SetFromStringByName(SET_NAME_DVAR, draft);\n', '')],
     [('    if (at >= page->scroll + SET_ROWS_SHOWN)\n        page->scroll = at - SET_ROWS_SHOWN + 1;\n', '')],
     [('        if (s_settings.hoverRow >= 0 && s_settings.dragRow < 0 &&', '        if (s_settings.hoverRow >= 0 &&')],
     [('    } else if (page->back && Settings_Shown(page->back) && page->back->action) {',

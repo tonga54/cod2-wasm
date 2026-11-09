@@ -994,10 +994,14 @@ static void Settings_NameEdit(itemDef_t *item)
 
 static void Settings_NameCommit(void)
 {
+    const char *draft;
+
     if (!s_nameField)
         return;
     s_nameField->dvar = s_nameFieldDvar;
-    Dvar_SetFromStringByName(SET_NAME_DVAR, Dvar_GetVariantString(SET_NAME_DRAFT_DVAR));
+    draft = Dvar_GetVariantString(SET_NAME_DRAFT_DVAR);
+    if (strcmp(draft, Dvar_GetVariantString(SET_NAME_DVAR)))
+        Dvar_SetFromStringByName(SET_NAME_DVAR, draft);
     s_nameField = NULL;
     s_nameFieldDvar = NULL;
 }
@@ -1644,7 +1648,10 @@ void UI_WWIISettings_Reset(const displayContextDef_t *dc)
 {
     if (s_settings.dc && dc != s_settings.dc)
         return;
-    Settings_NameCommit();
+    /* Menu setup is rebuilding the items: a draft still open belongs to the
+     * old ones, and its item may already be gone. */
+    s_nameField = NULL;
+    s_nameFieldDvar = NULL;
     memset(&s_settings, 0, sizeof(s_settings));
     s_settings.generation = R_GetHudImageGeneration();
     s_settings.hoverRow = -1;
