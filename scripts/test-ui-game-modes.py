@@ -44,8 +44,10 @@ int main(void){
  for(int i=0;i<5;i++){assert(selectMode(0xd)==1);assert(gt.current.integer==(i+1)%5);assert(!strcmp(selectedName,modes[(i+1)%5]));}
  assert(selectMode(0xc9)==1 && gt.current.integer==4);
  assert(selectMode(0xc8)==1 && gt.current.integer==0);
+ assert(selectMode(0x9d)==1 && gt.current.integer==1);
+ assert(selectMode(0x9c)==1 && gt.current.integer==0);
  assert(selectMode('a')==0 && gt.current.integer==0);
- assert(visibilityCalls==7 && selectionCalls==7 && map.current.integer==1);
+ assert(visibilityCalls==9 && selectionCalls==9 && map.current.integer==1);
  for(int i=0;i<5;i++)for(int m=0;m<2;m++){gt.current.integer=i;map.current.integer=m;createRoom();assert(createdMap==sharedUiInfo.mapList[m].mapLoadName);assert(createdType==modes[i]);}
  assert(creates==10);
  for(botCount=0;botCount<=32;botCount++)for(botDifficulty=0;botDifficulty<3;botDifficulty++)createRoom();

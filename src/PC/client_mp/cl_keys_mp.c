@@ -96,6 +96,7 @@ enum {
     K_DOWNARROW = 0x9b,
     K_RIGHTARROW = 0x9d,
     K_LEFTARROW = 0x9c,
+    K_ALT = 0x9e,
     K_CTRL = 0x9f,
     K_SHIFT = 0xa0,
     K_INS = 0xa1,
@@ -111,6 +112,7 @@ enum {
 };
 
 qboolean Key_GetOverstrikeMode(void);
+qboolean CL_KeyIsDown(int key);
 void Field_AdjustScroll(field_t *edit);
 void Key_SetOverstrikeMode(qboolean state);
 static void FindMatches(const char *s);
@@ -756,6 +758,11 @@ static qboolean Key_IsDown(int key)
     return keys && key >= 0 && key < 256 && keys[key].down;
 }
 
+qboolean CL_KeyIsDown(int key)
+{
+    return Key_IsDown(key);
+}
+
 static inline __attribute__((always_inline))
 qboolean
 Field_IsWordChar(int ch)
@@ -795,7 +802,7 @@ void Field_KeyDownEvent(field_t *edit, int key)
         if (edit->cursor < len)
             edit->cursor++;
 
-        if (Key_IsDown(K_CTRL)) {
+        if (Key_IsDown(K_CTRL) || Key_IsDown(K_ALT)) {
             while (edit->cursor < len && Field_IsWordChar(edit->buffer[edit->cursor]))
                 edit->cursor++;
             while (edit->cursor < len && !Field_IsWordChar(edit->buffer[edit->cursor]))
@@ -809,7 +816,7 @@ void Field_KeyDownEvent(field_t *edit, int key)
         if (edit->cursor > 0)
             edit->cursor--;
 
-        if (Key_IsDown(K_CTRL)) {
+        if (Key_IsDown(K_CTRL) || Key_IsDown(K_ALT)) {
             while (edit->cursor > 0 && Field_IsWordChar(edit->buffer[edit->cursor - 1]))
                 edit->cursor--;
             while (edit->cursor > 0 && !Field_IsWordChar(edit->buffer[edit->cursor - 1]))

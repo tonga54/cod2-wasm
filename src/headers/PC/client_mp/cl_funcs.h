@@ -202,6 +202,7 @@ void CL_Input(void);
 void CL_SendCmd(void);
 
 qboolean Key_GetOverstrikeMode(void);
+qboolean CL_KeyIsDown(int key);
 void Field_AdjustScroll(field_t *edit);
 void Key_SetOverstrikeMode(qboolean state);
 void FindMatches(const char *s);

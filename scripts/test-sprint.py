@@ -80,7 +80,7 @@ int main(void) {
     for(int key=0;key<256;key++) assert(UI_CheckExecKey(key));
     joinMenuFocused=0;
     assert(!UI_CheckExecKey('j')&&!UI_CheckExecKey(0xa0));
-    assert(UI_CheckExecKey(0x0d)&&UI_CheckExecKey(0xc8));
+    assert(UI_CheckExecKey(0x0d)&&UI_CheckExecKey(0xc8)&&UI_CheckExecKey(0xa5)&&UI_CheckExecKey(0xa6));
     playerState_t p={.groundEntityNum=1022,.speed=190};
     pml_t ground={.walking=1};pmove_t pm={.ps=&p,.cmd={.buttons=BUTTON_SPRINT|0x8000,.forwardmove=127}};
     PM_UpdateSprint(&pm,&ground);assert(p.pm_flags&PMF_SPRINT);
