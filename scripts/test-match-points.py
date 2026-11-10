@@ -23,7 +23,8 @@ def function(source, signature):
 
 
 def definition(source, name):
-    lines = [line for line in source.splitlines() if re.match(r'(static )?[a-z][\w ]*\*?\s*' + re.escape(name) + r'\(', line)
+    lines = [line for line in source.splitlines()
+             if re.match(r'(static )?[a-z][\w ]*\*?\s*(?<![A-Za-z0-9_])' + re.escape(name) + r'\(', line)
              and not line.rstrip().endswith(';')]
     assert len(lines) == 1, (name, lines)
     return function(source, lines[0] + '\n{')
@@ -79,6 +80,7 @@ enum { TEAM_FREE = 0, TEAM_AXIS = 1, TEAM_ALLIES = 2, TEAM_SPECTATOR = 3 };
 enum { CON_DISCONNECTED = 0, CON_CONNECTING = 1, CON_CONNECTED = 2 };
 enum { SV_CMD_CAN_IGNORE = 0, SV_CMD_RELIABLE = 1 };
 enum { GCMDS_MAX_CLIENTS = 64, GCMDS_SCORES_LIMIT = ''' + scores_limit + r''' };
+typedef int qboolean;
 typedef struct { int team; char name[32]; } clientState_t;
 typedef struct { int score; int deaths; int status_icon; int connected; int localClient; clientState_t cs; } clientSession_t;
 typedef struct gclient_s { clientSession_t sess; } gclient_t;
@@ -121,6 +123,8 @@ void SV_GameSendServerCommand(int clientNum, int type, const char *text) {
 }
 static int pings[64];
 int SV_GetClientPing(int clientNum) { return pings[clientNum]; }
+static int anonymousClient = -1;
+int G_ClientIsAnonymous(int clientNum) { return clientNum == anonymousClient; }
 '''
 
 checks = r'''
@@ -551,6 +555,28 @@ int main(void) {
         leave(14);
     }
 
+    /* A name the server lent an anonymous client is nobody's too, though it no
+     * longer reads as the placeholder: it keeps nothing and takes nothing. */
+    anonymousClient = 16;
+    join(16, "Player 2", 990, 0);
+    give(16, 100, 1, 0, 0, 1, 1);
+    leave(16);
+    anonymousClient = -1;
+    join(16, "Player 2", 991, 0);
+    tally(16, 0, 0, 0, 0, 0, 0);
+    leave(16);
+    join(17, "Player 3", 992, 0);
+    give(17, 100, 1, 0, 0, 1, 1);
+    leave(17);
+    anonymousClient = 17;
+    join(17, "Player 3", 993, 0);
+    tally(17, 0, 0, 0, 0, 0, 0);
+    leave(17);
+    anonymousClient = -1;
+    join(17, "Player 3", 994, 0);
+    tally(17, 100, 1, 0, 0, 1, 1);
+    leave(17);
+
     /* Two sessions under one gametag add up. */
     join(1, "Cat", 960, 0);
     give(1, 100, 1, 2, 3, 4, 5);
@@ -738,8 +764,10 @@ module_mutants = [
     ('    return length > 0;', '    return 1;'),
     # Keeping a person's tallies when they leave.
     ('    G_PointsKeep(clientNum);\n', ''),
-    ('    if (client->sess.localClient || !G_PointsNameKey(client->sess.cs.name, key))\n        return;\n    if (!slot',
-     '    if (!G_PointsNameKey(client->sess.cs.name, key))\n        return;\n    if (!slot'),
+    ('    if (client->sess.localClient || G_ClientIsAnonymous(clientNum) ||\n        !G_PointsNameKey(client->sess.cs.name, key))\n        return;\n    if (!slot',
+     '    if (G_ClientIsAnonymous(clientNum) ||\n        !G_PointsNameKey(client->sess.cs.name, key))\n        return;\n    if (!slot'),
+    ('    if (client->sess.localClient || G_ClientIsAnonymous(clientNum) ||\n        !G_PointsNameKey(client->sess.cs.name, key))\n        return;\n    if (!slot',
+     '    if (client->sess.localClient ||\n        !G_PointsNameKey(client->sess.cs.name, key))\n        return;\n    if (!slot'),
     ('    if (!slot->points && !slot->kills && !slot->assists && !slot->headshots && !client->sess.score &&\n'
      '        !client->sess.deaths)\n        return;\n', ''),
     ('!client->sess.score &&\n', '1 &&\n'),
@@ -756,8 +784,10 @@ module_mutants = [
     # Taking them back joining.
     ('    if (joining)\n        G_PointsTakeBack(clientNum);\n', ''),
     ('    if (joining)\n        G_PointsTakeBack(clientNum);\n', '    G_PointsTakeBack(clientNum);\n'),
-    ('    if (client->sess.localClient || !G_PointsNameKey(client->sess.cs.name, key))\n        return;\n    kept',
-     '    if (!G_PointsNameKey(client->sess.cs.name, key))\n        return;\n    kept'),
+    ('    if (client->sess.localClient || G_ClientIsAnonymous(clientNum) ||\n        !G_PointsNameKey(client->sess.cs.name, key))\n        return;\n    kept',
+     '    if (G_ClientIsAnonymous(clientNum) ||\n        !G_PointsNameKey(client->sess.cs.name, key))\n        return;\n    kept'),
+    ('    if (client->sess.localClient || G_ClientIsAnonymous(clientNum) ||\n        !G_PointsNameKey(client->sess.cs.name, key))\n        return;\n    kept',
+     '    if (client->sess.localClient ||\n        !G_PointsNameKey(client->sess.cs.name, key))\n        return;\n    kept'),
     ('    slot->points = kept->points;\n', ''),
     ('    slot->kills = kept->kills;\n', ''),
     ('    slot->assists = kept->assists;\n', ''),
