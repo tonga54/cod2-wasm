@@ -211,6 +211,24 @@ int main(void){int cases=0;
    altDown=0;
    Menu_HandleKey(&dc,focused(&dc),0x9c,1);assert(name.cursorPos[0]==6);
    Menu_HandleKey(&dc,focused(&dc),0x9d,1);assert(name.cursorPos[0]==7);
+   /* Ctrl or Option delete a word at a time. */
+   type(&dc,"Custom Room QA");
+   ctrlDown=1;
+   Menu_HandleKey(&dc,focused(&dc),8|0x400,1);assert(!strcmp(hostname,"Custom Room ")&&name.cursorPos[0]==12);
+   Menu_HandleKey(&dc,focused(&dc),8|0x400,1);assert(!strcmp(hostname,"Custom ")&&name.cursorPos[0]==7);
+   Menu_HandleKey(&dc,focused(&dc),8|0x400,1);assert(!strcmp(hostname,"")&&name.cursorPos[0]==0);
+   ctrlDown=0;
+   type(&dc,"Custom Room QA");
+   Menu_HandleKey(&dc,focused(&dc),0xa5,1);
+   ctrlDown=1;
+   Menu_HandleKey(&dc,focused(&dc),0xa2,1);assert(!strcmp(hostname," Room QA")&&name.cursorPos[0]==0);
+   Menu_HandleKey(&dc,focused(&dc),0xa2,1);assert(!strcmp(hostname," QA")&&name.cursorPos[0]==0);
+   ctrlDown=0;
+   Menu_HandleKey(&dc,focused(&dc),0xa2,1);assert(!strcmp(hostname,"QA")&&name.cursorPos[0]==0);
+   Menu_HandleKey(&dc,focused(&dc),0xa6,1);
+   altDown=1;
+   Menu_HandleKey(&dc,focused(&dc),8|0x400,1);assert(!strcmp(hostname,"")&&name.cursorPos[0]==0);
+   altDown=0;
    /* Down leaves the field for the value row and ends the edit. */
    Menu_HandleKey(&dc,focused(&dc),0xa6,1);
    Menu_HandleKey(&dc,focused(&dc),0x9b,1);

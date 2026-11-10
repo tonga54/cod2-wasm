@@ -4770,11 +4770,13 @@ qboolean Item_TextField_HandleKey(displayContextDef_t *dc, itemDef_t *item, int 
 
         if (key == 8) {
             cursorPos = ((itemDef_t *)it)->cursorPos[0];
-            if (cursorPos > 0)
-                memmove(buff + cursorPos - 1, buff + cursorPos, len - cursorPos + 1);
-            Dvar_SetFromStringByName(((itemDef_t *)it)->dvar, buff);
-            I_strncpyz(buff, Dvar_GetVariantString(((itemDef_t *)it)->dvar), 0x400);
-            Item_SetCursorPos(item, Item_GetCursorPosOffset(item, buff, -1));
+            if (cursorPos > 0) {
+                int start = Item_TextField_WordKey() ? Item_TextField_PrevWord(buff, cursorPos) : cursorPos - 1;
+                memmove(buff + start, buff + cursorPos, len - cursorPos + 1);
+                Dvar_SetFromStringByName(((itemDef_t *)it)->dvar, buff);
+                I_strncpyz(buff, Dvar_GetVariantString(((itemDef_t *)it)->dvar), 0x400);
+                Item_SetCursorPos(item, start);
+            }
             goto scroll_update;
         }
 
@@ -4866,7 +4868,8 @@ qboolean Item_TextField_HandleKey(displayContextDef_t *dc, itemDef_t *item, int 
     case 0xa2:
         cursorPos = ((itemDef_t *)it)->cursorPos[0];
         if (len > cursorPos) {
-            memmove(buff + cursorPos, buff + cursorPos + 1, len - cursorPos);
+            int end = Item_TextField_WordKey() ? Item_TextField_NextWord(buff, len, cursorPos) : cursorPos + 1;
+            memmove(buff + cursorPos, buff + end, len - end + 1);
             Dvar_SetFromStringByName(((itemDef_t *)it)->dvar, buff);
         }
         return 1;

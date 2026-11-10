@@ -87,6 +87,7 @@ static const char *completionString;
 static Bool hasExactMatch;
 static char shortestMatch[1024];
 static int matchCount;
+static qboolean fieldPasting;
 
 enum {
     K_ENTER = 0x0d,
@@ -128,7 +129,9 @@ void Field_Draw(field_t *edit, int x, int y, int horzAlign, int vertAlign, qbool
 void Key_Unbind_f(void);
 void Key_Unbindall_f(void);
 void Key_Bind_f(void);
+static qboolean Key_IsDown(int key);
 void Field_CharEvent(field_t *edit, int ch);
+static qboolean Field_IsWordChar(int ch);
 void CL_CharEvent(int key);
 void Field_KeyDownEvent(field_t *edit, int key);
 void Message_Key(int key);
@@ -655,10 +658,12 @@ static inline __attribute__((always_inline)) void Field_PasteClipboard(field_t *
     if (!cbd)
         return;
 
+    fieldPasting = 1;
     len = (int)strlen(cbd);
     for (i = 0; i < len; ++i) {
         Field_CharEvent(edit, cbd[i]);
     }
+    fieldPasting = 0;
 
     Z_FreeInternal(cbd);
 }
@@ -680,7 +685,19 @@ void Field_CharEvent(field_t *edit, int ch)
     }
 
     if (ch == 8) {
-        if (edit->cursor > 0) {
+        if (!fieldPasting && (Key_IsDown(K_CTRL) || Key_IsDown(K_ALT))) {
+            int start = edit->cursor;
+            while (start > 0 && !Field_IsWordChar(edit->buffer[start - 1]))
+                start--;
+            while (start > 0 && Field_IsWordChar(edit->buffer[start - 1]))
+                start--;
+            if (start < edit->cursor) {
+                memmove(edit->buffer + start,
+                        edit->buffer + edit->cursor,
+                        (size_t)(len - edit->cursor + 1));
+                edit->cursor = start;
+            }
+        } else if (edit->cursor > 0) {
             memmove(edit->buffer + edit->cursor - 1,
                     edit->buffer + edit->cursor,
                     (size_t)(len - edit->cursor + 1));
@@ -790,9 +807,16 @@ void Field_KeyDownEvent(field_t *edit, int key)
 
     if (key == K_DEL) {
         if (edit->cursor < len) {
+            int end = edit->cursor + 1;
+            if (Key_IsDown(K_CTRL) || Key_IsDown(K_ALT)) {
+                while (end < len && !Field_IsWordChar(edit->buffer[end]))
+                    end++;
+                while (end < len && Field_IsWordChar(edit->buffer[end]))
+                    end++;
+            }
             memmove(edit->buffer + edit->cursor,
-                    edit->buffer + edit->cursor + 1,
-                    (size_t)(len - edit->cursor));
+                    edit->buffer + end,
+                    (size_t)(len - end + 1));
         }
         Field_AdjustScrollForKey(edit);
         return;
