@@ -4691,6 +4691,7 @@ extern int ___toupper(int c);
 
 #define UI_KEY_ALT 0x9e
 #define UI_KEY_CTRL 0x9f
+#define UI_KEY_SHIFT 0xa0
 
 /* Ctrl on Windows and Linux, Option on macOS: the word motion the console and
  * the chat already give their fields. */
@@ -4918,6 +4919,9 @@ qboolean Item_TextField_HandleKey(displayContextDef_t *dc, itemDef_t *item, int 
         return 1;
 
     case 9:
+        Item_TextField_MoveFocus(dc, item, CL_KeyIsDown(UI_KEY_SHIFT) ? -1 : 1);
+        return 1;
+
     case 0x9b:
         Item_TextField_MoveFocus(dc, item, 1);
         return 1;
@@ -5055,7 +5059,15 @@ void Menu_HandleKey(displayContextDef_t *dc, menuDef_t *menu, int key, qboolean 
         return;
     }
 
-    if (key == 9 || key == 0x9b || key == 0x9d) {
+    if (key == 9) {
+        if (CL_KeyIsDown(UI_KEY_SHIFT))
+            Menu_SetPrevCursorItem(dc, menu);
+        else
+            Menu_SetNextCursorItem(dc, menu);
+        return;
+    }
+
+    if (key == 0x9b || key == 0x9d) {
         Menu_SetNextCursorItem(dc, menu);
         return;
     }

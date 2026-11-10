@@ -92,8 +92,9 @@ static int Key_GetOverstrikeMode(void){return overstrike;}
 static void Key_SetOverstrikeMode(int v){overstrike=v;}
 #define UI_KEY_ALT 0x9e
 #define UI_KEY_CTRL 0x9f
-static int ctrlDown,altDown;
-static int CL_KeyIsDown(int k){return (k==UI_KEY_CTRL&&ctrlDown)||(k==UI_KEY_ALT&&altDown);}
+#define UI_KEY_SHIFT 0xa0
+static int ctrlDown,altDown,shiftDown;
+static int CL_KeyIsDown(int k){return (k==UI_KEY_CTRL&&ctrlDown)||(k==UI_KEY_ALT&&altDown)||(k==UI_KEY_SHIFT&&shiftDown);}
 static int I_isforfilename(int k){return isalnum(k);}
 static int I_isdigit(int k){return isdigit(k);}
 static char Com_GetDecimalDelimiter(void){return '.';}
@@ -229,6 +230,17 @@ int main(void){int cases=0;
    altDown=1;
    Menu_HandleKey(&dc,focused(&dc),8|0x400,1);assert(!strcmp(hostname,"")&&name.cursorPos[0]==0);
    altDown=0;
+   /* Shift+Tab goes back, both between fields and between menu rows. */
+   shiftDown=1;
+   Menu_HandleKey(&dc,focused(&dc),9,1);
+   assert(!g_editingField&&!g_editItem&&(mode.window.dynamicFlags[0]&2));
+   shiftDown=0;
+   Menu_HandleKey(&dc,focused(&dc),9,1);assert(name.window.dynamicFlags[0]&2);
+   shiftDown=1;
+   Menu_HandleKey(&dc,focused(&dc),9,1);assert(mode.window.dynamicFlags[0]&2);
+   shiftDown=0;
+   Menu_HandleKey(&dc,focused(&dc),9,1);assert(name.window.dynamicFlags[0]&2);
+   Menu_HandleKey(&dc,focused(&dc),13,1);assert(g_editingField&&g_editItem==&name);
    /* Down leaves the field for the value row and ends the edit. */
    Menu_HandleKey(&dc,focused(&dc),0xa6,1);
    Menu_HandleKey(&dc,focused(&dc),0x9b,1);

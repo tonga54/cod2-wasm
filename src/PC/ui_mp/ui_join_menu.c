@@ -20,6 +20,7 @@ extern int I_stricmp(const char *s0, const char *s1);
 extern const char *Info_ValueForKey(const char *s, const char *key);
 extern void LAN_GetServerAddressString(int source, int index, char *addr, int addrSize);
 extern void LAN_GetServerInfo(int source, int index, char *info, int infoSize);
+extern qboolean CL_KeyIsDown(int key);
 extern int UI_PlayLocalSoundAliasByName(const char *name);
 extern void UI_RunMenuScript(const char **args);
 #ifdef __EMSCRIPTEN__
@@ -39,6 +40,7 @@ extern void Web_DeleteServer(const char *address);
 #define JOIN_KEY_BACKSPACE 0x7f
 #define JOIN_KEY_UP 0x9a
 #define JOIN_KEY_DOWN 0x9b
+#define JOIN_KEY_SHIFT 0xa0
 #define JOIN_KEY_DEL 0xa2
 #define JOIN_KEY_KP_ENTER 0xbf
 #define JOIN_KEY_MOUSE1 0xc8
@@ -313,8 +315,10 @@ int UI_JoinMenu_KeyEvent(displayContextDef_t *dc, menuDef_t *menu, int key, int 
         break;
     case JOIN_KEY_DOWN:
     case JOIN_KEY_WHEEL_DOWN:
-    case JOIN_KEY_TAB:
         Join_Move(1);
+        break;
+    case JOIN_KEY_TAB:
+        Join_Move(CL_KeyIsDown(JOIN_KEY_SHIFT) ? -1 : 1);
         break;
     case JOIN_KEY_BACKSPACE:
     case JOIN_KEY_DEL:

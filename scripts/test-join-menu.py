@@ -60,6 +60,8 @@ support = r'''
 #include <string.h>
 #include <strings.h>
 #define __EMSCRIPTEN__ 1
+typedef int qboolean;
+static int CL_KeyIsDown(int key) { (void)key; return 0; }
 typedef float vec_t;
 typedef vec_t vec4_t[4];
 typedef struct Material { const char *name; } Material;

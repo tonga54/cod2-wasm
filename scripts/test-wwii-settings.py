@@ -183,6 +183,7 @@ typedef unsigned char byte;
 typedef float vec_t;
 typedef vec_t vec4_t[4];
 typedef int qboolean;
+static int CL_KeyIsDown(int key) { (void)key; return 0; }
 typedef struct Material { const char *name; } Material;
 typedef Material *MaterialHandle;
 typedef struct rectDef_s { float x, y, w, h; int horzAlign, vertAlign; } rectDef_t;
