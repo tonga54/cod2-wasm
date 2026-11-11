@@ -9,6 +9,7 @@ vec3_t playerMaxs = { 15.0f, 15.0f, 70.0f };
 extern level_locals_t level;
 
 extern void Com_Printf(const char *fmt, ...);
+extern const char *va(const char *fmt, ...);
 extern void AngleVectors(const vec_t *angles, vec_t *forward, vec_t *right, vec_t *up);
 extern float AngleDelta(float a1, float a2);
 extern float AngleNormalize180(float angle);
@@ -76,6 +77,8 @@ void ClientSpawn(gentity_t *ent, const vec_t *spawn_origin, const vec_t *spawn_a
 void G_GetPlayerViewOrigin(const gentity_t *ent, vec_t *origin);
 void ClientUserinfoChanged(int clientNum);
 char *ClientConnect(int clientNum, int scriptPersId);
+void G_AnonymousClientDisconnect(int clientNum);
+qboolean G_ClientIsAnonymous(int clientNum);
 
 #define GENTITY_STRIDE sizeof(gentity_s)
 #define CLIENT_STRIDE sizeof(gclient_s)
@@ -157,6 +160,7 @@ void ClientDisconnect(int clientNum)
     G_FreeEntity(ent);
 
     G_PointsClientDisconnect(clientNum);
+    G_AnonymousClientDisconnect(clientNum);
     client->sess.connected = 0;
     memset(&client->sess.cs, 0, sizeof(clientState_t));
 
@@ -680,6 +684,89 @@ static void CleanName(const char *in, char *out, int outSize)
     }
 }
 
+enum { ANONYMOUS_MAX_CLIENTS = 64, ANONYMOUS_NAME_SIZE = 32 };
+
+/* The display name the server lent an anonymous client, by slot. It lasts
+ * while the server runs and frees with the slot. */
+static char s_anonymousName[ANONYMOUS_MAX_CLIENTS][ANONYMOUS_NAME_SIZE];
+
+/* The placeholder names nobody chose: the browser's, the engine's and a blank
+ * one, as the points and classes keys see them. */
+static int G_AnonymousPlaceholder(const char *name)
+{
+    char key[ANONYMOUS_NAME_SIZE];
+    int length = 0;
+
+    for (; *name; ++name) {
+        if (name[0] == '^' && name[1] >= '0' && name[1] <= '9')
+            ++name;
+        else if ((length || *name != ' ') && length < ANONYMOUS_NAME_SIZE - 1)
+            key[length++] = *name;
+    }
+    while (length && key[length - 1] == ' ')
+        --length;
+    key[length] = '\0';
+    return !length || !I_stricmp(key, "Player") || !I_stricmp(key, "Unknown Soldier") ||
+           !I_stricmp(key, "UnnamedPlayer");
+}
+
+static int G_AnonymousNameTaken(const char *name, int clientNum)
+{
+    int i;
+
+    for (i = 0; i < level.maxclients && i < ANONYMOUS_MAX_CLIENTS; i++) {
+        if (i == clientNum || level.clients[i].sess.connected == 0)
+            continue;
+        if (!I_stricmp(level.clients[i].sess.cs.name, name))
+            return 1;
+    }
+    return 0;
+}
+
+/* An anonymous client shows as Player, Player 2 and so on: the lowest name no
+ * connected client holds, in arrival order. */
+static void G_AnonymousName(int clientNum, const char *rawName)
+{
+    char candidate[ANONYMOUS_NAME_SIZE];
+    gclient_s *client;
+    int number;
+
+    if (clientNum < 0 || clientNum >= level.maxclients || clientNum >= ANONYMOUS_MAX_CLIENTS)
+        return;
+    client = &level.clients[clientNum];
+    if (!G_AnonymousPlaceholder(rawName)) {
+        s_anonymousName[clientNum][0] = '\0';
+        return;
+    }
+    if (!s_anonymousName[clientNum][0]) {
+        for (number = 1; number < 1000; number++) {
+            if (number == 1)
+                I_strncpyz(candidate, "Player", sizeof(candidate));
+            else
+                I_strncpyz(candidate, va("Player %d", number), sizeof(candidate));
+            if (!G_AnonymousNameTaken(candidate, clientNum)) {
+                I_strncpyz(s_anonymousName[clientNum], candidate, sizeof(s_anonymousName[clientNum]));
+                break;
+            }
+        }
+    }
+    if (!s_anonymousName[clientNum][0])
+        I_strncpyz(s_anonymousName[clientNum], "Player", sizeof(s_anonymousName[clientNum]));
+    I_strncpyz(client->sess.cs.name, s_anonymousName[clientNum], sizeof(client->sess.cs.name));
+    I_strncpyz(client->sess.newnetname, s_anonymousName[clientNum], sizeof(client->sess.newnetname));
+}
+
+qboolean G_ClientIsAnonymous(int clientNum)
+{
+    return clientNum >= 0 && clientNum < ANONYMOUS_MAX_CLIENTS && s_anonymousName[clientNum][0] != '\0';
+}
+
+void G_AnonymousClientDisconnect(int clientNum)
+{
+    if (clientNum >= 0 && clientNum < ANONYMOUS_MAX_CLIENTS)
+        s_anonymousName[clientNum][0] = '\0';
+}
+
 void ClientUserinfoChanged(int clientNum)
 {
     gentity_s *ent;
@@ -833,6 +920,8 @@ void ClientUserinfoChanged(int clientNum)
         I_strncpyz(client->sess.newnetname, longName, 0x20);
 
     do_score_update:
+
+        G_AnonymousName(clientNum, Info_ValueForKey(userinfo, "name"));
 
         {
             clientInfo_t *ci = &level_bgs.clientinfo[clientNum];
