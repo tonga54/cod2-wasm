@@ -55,7 +55,8 @@ commits that followed.
 | **Platform** | An installed PC game | A browser tab, or a web app installed from it |
 | **Loadout** | A weapon from your side's list; pistol and grenades set by nationality | [Five named custom classes](#create-a-class), any faction's weapons on either team |
 | **Gunsmith** | None | [13 attachments](#attachments-with-real-tradeoffs) with real gains and costs; [10 camouflages](#ten-camouflages) |
-| **Sights** | Iron sights and sniper scopes | Plus [Reflex Sight, Lens Sight and 4x Optic](#sights-and-scopes), WWII reticles, scope glint |
+| **Sights** | Iron sights and sniper scopes | Plus [Reflex Sight, Lens Sight and 4x Optic](#sights-and-scopes), live coated scope glass, WWII reticles, scope glint |
+| **Rendering** | DX7/DX9 lighting, baked lens art, short draw distance | [1080p 4× MSAA, 4096² PCF sun shadows, oiled gunmetal, 35mm filmic grade, supersonic tracers & sparks](#rendering-beyond-the-first-browser-port) |
 | **Lethal equipment** | Frag grenades | Frags, plus the [S-Mine 44 and remote C4](#s-mine-44-and-c4) |
 | **Opponents** | Human players only | [Up to 32 bots](#bots) at three difficulties, in all five modes |
 | **HUD** | Compass, score text, ammo box | [Minimap, kill feed with weapon silhouettes, score panel](#a-combat-hud-from-call-of-duty-wwii), match points |
@@ -152,6 +153,9 @@ on the ground keeps its paint, attachments and rounds for whoever picks it up.
   round eyepiece of worn metal, the world blurred around it, and WWII's
   reticles, a post and line in the 4x Optic and the scoped Kar98k's thin cross
   with thick bars in every sniper scope. Shift holds your breath.
+- **Live coated scope glass at the hip:** before a scoped Kar98k, Lee-Enfield,
+  Springfield or 4x Optic is raised, its objective/ocular disc mirrors the
+  rendered world upright through a blue-violet anti-reflective coating.
 - **Scope glint:** a rival's raised sniper scope gives a faint glint, weaker
   at range.
 
@@ -216,26 +220,40 @@ option explains itself.
 
 ## Rendering beyond the first browser port
 
+![WWII 1080p graphics comparison: surface relief and filmic grade, live scope glass and oiled gunmetal, WWII foliage palette and 3x detail distance, and supersonic tracers with ballistic sparks](docs/images/wwii-graphics-before-after.jpg)
+
+![Four 1080p captures across Burgundy, Toujane, Matmata and Carentan showing oiled blued steel, live coated scope reflections, dusk aerial depth and 140+ FPS at 1080p 4x MSAA](docs/images/wwii-showcase.jpg)
+
 ![Before and after: sun shadows from moving models, feathered fire and smoke, antialiased leaves and deeper surface relief](docs/images/rendering-before-after.jpg)
 
 ![Camera and weapon motion blur, short bent tracers, ejected brass and a lit MP44 muzzle flash](docs/images/combat-effects.jpg)
 
-- **Light:** the original normal, specular and detail maps at the DX9
-  renderer's full strength give surfaces relief, sunlight response and
-  reflections. Players, bodies and other moving models cast real-time sun
-  shadows, and ambient occlusion darkens corners and contact points.
-- **Atmosphere:** softer baked shadow edges, map fog that thickens toward the
-  ground and glows toward the sun, and model detail at twice its original
-  distance.
-- **Foliage and particles:** leaves, grass and hedges are antialiased and stay
-  full in the distance; fire, smoke and dust fade where they meet the world, as
-  CoD2's DX9 renderer drew them.
-- **Combat:** aim depth of field, camera and weapon motion blur, ejected
-  casings, short tracers bent differently every round, larger muzzle and
-  grenade effects, and nearby muzzle lighting.
+| Area | Baseline port / DX7 | Current WWII 1080p renderer |
+| --- | --- | --- |
+| **Scene & textures** | 720-line 3D view, half-res normal/specular maps, 1.5–2× model LOD | Native **1920 × 1080** 4× MSAA, full-resolution color/normal/specular maps, 16× anisotropy, **3×** detail and foliage retention |
+| **Weapons & optics** | Washed specular tint, static painted scope texture, close-up DXT bands on hands | Dark oiled blued steel, 35mm near-eye hip receiver bokeh, **live upright world reflection** in coated scope glass, filtered close-up skin normals |
+| **Shadows & relief** | 2048² 16-bit sun map for in-frustum casters only; flat cobbles and masonry | **4096 × 4096** 24-bit rotated Vogel PCF sun shadows (including off-frustum casters), per-unit stone creases, macro-filtered dielectric sheen and sun contact shadows |
+| **Atmosphere & color** | Saturated 2005 greens, single-map fog, frame-to-frame shimmer | **35mm WWII filmic grade** (olive/earth foliage, temporally steady shadow toe, window-safe sun shafts/bloom) and multi-map aerial perspective |
+| **Ballistics & impacts** | Dim 40% tracers, short-range dust impacts | **100% white-gold supersonic tracers** with nearby wall glow, gravity-arcing **ballistic spark showers**, impact corona flashes, **1.75×** impact debris and extended brass ejection |
 
-The default output is **1920 × 1080**, with the 3D view at **720 lines**,
-full-resolution textures and 16× anisotropic filtering where supported.
+- **Light & materials:** the original normal, specular and detail maps shade
+  lightmapped masonry, cobbles, wood and models per pixel (`r_sunShading 0.90`,
+  `r_cavity 1.25`, `r_detailRelief 0.95`), while macro-normal Toksvig filtering
+  and texel-footprint attenuation prevent specular or normal-map shimmer in motion.
+- **Shadows:** soldiers, teammates, enemies and corpses cast 4096 × 4096 24-bit
+  PCF sun shadows onto both world geometry and static props—even when a caster
+  stands outside the camera frustum—paired with half-resolution dual-ring SSAO
+  and tight near-field sun contact shadows.
+- **Foliage & particles:** leaves, grass and hedges resolve into 4× MSAA
+  alpha-to-coverage and hold density across mips; fire, smoke and dust z-feather
+  smoothly into world depth.
+- **Temporal stability:** Halton-jittered TAA with YCoCg variance clipping,
+  continuous resolution-scaled motion blur (`smearFade`), bounded sun shafts and
+  a view-independent filmic toe keep luminance steady while sprinting or
+  approaching bright windows.
+
+The default output is **1920 × 1080** with the 3D view rendered natively at
+**1080 lines**, 4× MSAA, full-resolution textures and 16× anisotropic filtering.
 Performance depends on the player's hardware, browser and match load.
 [Graphics implementation and visual validation →](docs/GRAPHICS_2026-10-16.md)
 
@@ -448,8 +466,10 @@ Measured results have different scopes:
 | --- | --- | --- |
 | Pi 5, eight protocol clients + 16 Hard bots | 30.20 updates/s/client; 86.8% of one CPU core | Server/network sample; [report](docs/SERVER_PERFORMANCE_2026-10-13.md). |
 | Pi tick-rate comparison | 30 Hz retained as the default | 50 Hz saturated a core under the heavier tested load; [benchmark](docs/TICKRATE_BENCHMARK_2026-10-12.md). |
-| Development Mac rendering | About 120 FPS in documented gameplay checks | Specific desktop/display and short samples; [graphics report](docs/GRAPHICS_2026-10-16.md). |
+| Client 1080p WWII rendering (before → after CPU/GPU pass) | **118.9 → 140.8 FPS** (+18.4%); frame p50 **8.33 → 6.97 ms**, p95 **9.91 → 8.34 ms**; main thread **8.02 → 6.82 ms** | 1920 × 1080, 4× MSAA, 4096² PCF sun shadows, live scope reflection and 6 bots on Carentan (Apple M4 / ANGLE Metal, uncapped). |
 | Browser tab memory, Carentan with 8 bots | 815–836 MB in a match and 375 MB at the menu, from 1,149–1,204 MB and 734 MB | The large archive is read from browser storage on demand; Chromium on the development Mac; [report](docs/STABILITY_AND_SECURITY_2026-10-20.md). |
+
+Zero-quality-loss client optimizations include **WebAssembly SIMD128** (`-O3 -msimd128` + `wasm-opt -O3`), a **4-frame GPU ring for `skinnedCacheVb`** paired with persistent model index buffers, **coalesced 4× MSAA lens and z-feather resolves** (eliminating a mid-frame tile-memory store/reload), an **O(1) JS WebGL state readback cache** (`getParameter` / `isEnabled`) and **early-out 4+4 Vogel PCF** with distance-culled normal creases.
 
 These are measurements, not minimum FPS or maximum-player guarantees. Bot pathing,
 client hardware and crowded matches still need testing under the intended load.

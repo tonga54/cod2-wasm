@@ -27,6 +27,8 @@ them.
 | `bots.jpg` | Bot setup and a bot match | `12-bot-setup.png`, `cl-view.png` |
 | `match-flow.jpg` | Countdown, killcam, victory, scoreboard | `j1.png`, `kc-12.png`, `ew2-157.jpg`, `ew2-168.jpg` |
 | `menus.jpg` | Nine menu screens | `01-main-menu.png`, `13-match-summary.png`, `10-map-select.png`, `11-game-rules.png`, `16-pause.png`, `17-overview.png`, `18-settings.png`, `19-graphics.png`, `21-controller.png` |
+| `wwii-graphics-before-after.jpg` | Four 1080p WWII renderer comparisons (surface relief & filmic grade, live scope glass & oiled gunmetal, foliage palette & 3× detail distance, supersonic tracers & ballistic sparks) | Live 1920 × 1080 captures on `mp_carentan` and `mp_toujane` comparing baseline DX7 settings against the WWII 1080p renderer |
+| `wwii-showcase.jpg` | Four 1080p captures across Burgundy, Toujane, Matmata and Carentan (including `?perfDebug=1` at 140+ FPS) | Live 1920 × 1080 match captures on commit `eb1f997` |
 | `rendering-before-after.jpg` | Four renderer comparisons | `out/gfx-qa/final/shadow-a-off.png` and `shadow-a-on.png` (`r_sunShadows` 0 and 1); `out/visual-qa/shots/base-*.png` and `cand-*.png` for fire, leaves and relief (commit `887353d` and the change committed as `334f8d0`) |
 | `combat-effects.jpg` | Motion blur, tracers, brass, muzzle flash | `f-1.png`, `bv-3.png`, `fx-6.png`, `mp44-132-*.jpg` |
 | `maps.jpg` | The six maps in play | `p-1.png`, `roof-0.png`, `t-after-kill.png`, `sv-8.png`, `dx-2.png`, `bv-3.png` |
