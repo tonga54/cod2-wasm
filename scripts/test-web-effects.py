@@ -225,8 +225,8 @@ int main(void)
      * bare rifles, other scopes and anything else name none. */
     {
         const struct { const char *name; float disc[4]; } lenses[] = {
-            {"mtl_weapon_kar98_scope", {0.1719f, 0.7070f, 0.1426f, 0.2852f}},
-            {"mtl_weapon_enfield_scope", {0.1602f, 0.6875f, 0.1504f, 0.3008f}},
+            {"mtl_weapon_kar98_scope", {0.1581f, 0.6844f, 0.1520f, 0.3040f}},
+            {"mtl_weapon_enfield_scope", {0.1594f, 0.6830f, 0.1568f, 0.3090f}},
             {"mtl_weapon_springfield", {0.6289f, 0.2051f, 0.1289f, 0.1289f}}};
         for (int i = 0; i < 3; ++i) {
             Material m = {{lenses[i].name}, 0, NULL};
@@ -327,7 +327,7 @@ mutants = [
      '    WebEffects_Draw(draw.coverage, draw.feather, draw.heat, worldNearClip, (const float[4]){0});'),
     # Scope glass: exact names, each disc, only in the hands, the whole disc.
     ('        if (!strcmp(name, s_webLenses[i].name))', '        if (!strncmp(name, s_webLenses[i].name, 16))'),
-    ('{0.1719f, 0.7070f, 0.1426f, 0.2852f}', '{0.1719f, 0.2930f, 0.1426f, 0.2852f}'),
+    ('{0.1581f, 0.6844f, 0.1520f, 0.3040f}', '{0.1581f, 0.3156f, 0.1520f, 0.3040f}'),
     ('    if (!state->fullDepthRange) {\n        const float *disc', '    if (1) {\n        const float *disc'),
     ('            memcpy(draw->lens, disc, sizeof(draw->lens));', '            memcpy(draw->lens, disc, sizeof(draw->lens) / 2);'),
 ]

@@ -161,12 +161,23 @@ assert.equal(lights.shadowDrawCount, 0);
 const modelShader = generate.call({usedTexUnitList:[0]}, {useTextureMatrix:false,TexEnvJIT:{getTexUnitType:()=>0x0DE1}}, {lightingEnabled:true}, 'gl_FragColor = texture2D(u_texUnit0, v_texCoord0.xy) * v_color;');
 assert(!modelShader.pointDefs.includes('u_cod2WeaponBlur'), 'ADS does not add a texture-blur uniform');
 assert.equal(modelShader.fsTexEnvPass,
-  'vec4 cod2BaseTexel = texture2D(u_texUnit0, v_texCoord0.xy, u_cod2Detail.w);\nfloat cod2Paint = 0.0;\n' +
+  'vec4 cod2BaseTexel = texture2D(u_texUnit0, v_texCoord0.xy, u_cod2Detail.w);\n' +
+  'if (u_cod2Relief.w > 0.0) {\n' +
+  '  highp vec2 cod2Texels = v_texCoord0.xy * vec2(textureSize(u_texUnit0, 0));\n' +
+  '  highp float cod2Span = sqrt(max(dot(dFdx(cod2Texels), dFdx(cod2Texels)), dot(dFdy(cod2Texels), dFdy(cod2Texels))));\n' +
+  '  float cod2Sharpen = (u_cod2Model.y > 0.5 ? 0.16 * smoothstep(0.38, 0.85, cod2Span) : 0.22) * u_cod2Relief.w * (1.0 - smoothstep(1.0, 2.5, cod2Span));\n' +
+  '  if (cod2Sharpen > 0.0) {\n' +
+  '    vec3 cod2Soft = textureLod(u_texUnit0, v_texCoord0.xy, max(log2(max(cod2Span, 1e-4)) + u_cod2Detail.w, 0.0) + 1.5).rgb;\n' +
+  '    cod2BaseTexel.rgb = max(cod2BaseTexel.rgb + cod2Sharpen * (cod2BaseTexel.rgb - cod2Soft), vec3(0.0));\n' +
+  '  }\n}\n' +
+  'float cod2Paint = 0.0;\n' +
   'if (u_cod2Camo.x > 0.5) cod2BaseTexel.rgb = cod2Camouflage(cod2BaseTexel.rgb, v_texCoord0.xy, cod2Paint);\n' +
   'gl_FragColor = cod2BaseTexel * v_color;',
-  'weapons keep the original texture footprint and vertex lighting; a camouflaged gun paints its texel before both');
+  'weapons sharpen magnified color maps before painting camouflage and applying vertex lighting');
 assert.equal((modelShader.fsTexEnvPass.match(/texture(?:2D)?\(/g) || []).length, 1,
-  'weapons and flashes share one sample without extra passes; its bias is the scaled scene\'s, never positive');
+  'weapons and flashes share one base sample; its bias is the scaled scene\'s, never positive');
+assert.equal((modelShader.fsTexEnvPass.match(/textureLod\(/g) || []).length, 1,
+  'near-texture sharpening adds one reference sample only while magnified');
 // The pattern repeats over the gun's own UVs where the mask paints, as bright
 // as the texel under it against the painted median; paint dulls highlights.
 assert(modelShader.pointDefs.includes('uniform sampler2D u_cod2CamoMap; uniform sampler2D u_cod2CamoMask; uniform vec4 u_cod2Camo;\n'));
@@ -174,7 +185,7 @@ assert(modelShader.pointDefs.includes('vec3 cod2Camouflage(vec3 base, highp vec2
   '  paint = texture2D(u_cod2CamoMask, uv).r;\n  vec3 camo = texture2D(u_cod2CamoMap, uv * u_cod2Camo.y).rgb;\n' +
   '  float wear = clamp(dot(base, vec3(0.299, 0.587, 0.114)) / u_cod2Camo.z, 0.5, 1.5);\n' +
   '  return mix(base, camo * (1.0 + 0.4 * (wear - 1.0)), paint);\n}\n'));
-const specularLine = 'vec4 cod2S = u_cod2Surface.y > 0.5 ? texture2D(u_cod2SpecMap, v_texCoord0.xy) : vec4(0.0);\n';
+const specularLine = 'vec4 cod2S = u_cod2Surface.y > 0.5 ? texture2D(u_cod2SpecMap, v_texCoord0.xy, u_cod2Detail.w) : vec4(0.0);\n';
 assert(modelShader.pointPass.includes(specularLine + 'cod2S.rgb *= 1.0 - 0.5 * cod2Paint;\n'));
 const worldShader = generate.call({usedTexUnitList:[0]}, {useTextureMatrix:false,TexEnvJIT:{getTexUnitType:()=>0x0DE1}}, {lightingEnabled:false}, 'gl_FragColor = texture2D(u_texUnit0, v_texCoord0.xy) * v_color;');
 for (const code of [worldShader.pointDefs + worldShader.fsTexEnvPass + worldShader.pointPass,
@@ -563,12 +574,12 @@ for (const matrix of [false, true]) {
     '    sqrt(dot(dp2, dp2) / max(dot(t2, t2), 1e-12)));\n'), 'folds are per world unit, whatever the map\'s resolution');
   assert(world.pointDefs.includes('  vec2 mu = texture2D(u_cod2NormalMap, uv + vec2(span / size.x, 0.0)).ag;\n' +
     '  vec2 mv = texture2D(u_cod2NormalMap, uv + vec2(0.0, span / size.y)).ag;\n'), 'one footprint along +u and +v');
-  assert(world.pointDefs.includes('  return 2.0 * (mu.x - m.x + mv.y - m.y) / max(units, 1e-6) *\n' +
-    '    (1.0 - smoothstep(0.75, 2.25, 0.5 * (length(dp1) + length(dp2))));\n'), 'folds fade out as pixels grow');
+  assert(world.pointDefs.includes('  return 2.0 * (mu.x - m.x + mv.y - m.y) / max(units, 0.25) *\n' +
+    '    (1.0 - smoothstep(0.75, 2.25, 0.5 * (length(dp1) + length(dp2))));\n'), 'folds fade out as pixels grow and clamp sub-quarter-unit close-up footprints');
   const crease = world.pointPass.indexOf('if (u_cod2Surface.x > 0.5 && u_cod2Relief.x > 0.0) {\n' +
     `float cod2Fold = cod2Crease(${uv(0)});\n` +
-    'cod2Lit *= (1.0 - 0.22 * u_cod2Relief.x * smoothstep(0.2, 1.0, -cod2Fold)) *\n' +
-    '  (1.0 + 0.06 * u_cod2Relief.x * smoothstep(0.2, 1.0, cod2Fold));\n}\n');
+    'cod2Lit *= (1.0 - 0.34 * u_cod2Relief.x * smoothstep(0.2, 1.0, -cod2Fold)) *\n' +
+    '  (1.0 + 0.09 * u_cod2Relief.x * smoothstep(0.2, 1.0, cod2Fold));\n}\n');
   assert(crease > world.pointPass.indexOf('  cod2SunPart * cod2Incidence;\n') &&
     crease < world.pointPass.indexOf('gl_FragColor.rgb *= max(cod2Lit, vec3(0.0)) / max(cod2L.rgb, vec3(0.004));'),
     'folds shade the relit light before the bake divides out');
@@ -577,13 +588,19 @@ for (const matrix of [false, true]) {
   // light after the sun's highlight, behind r_reflections in the sky's w.
   assert(world.pointDefs.includes('uniform highp vec4 u_cod2SkyEye;'));
   const reflection = world.pointPass.indexOf('if (u_cod2Surface.y > 0.5 && u_cod2SkyEye.w > 0.0) {');
-  assert(reflection > world.pointPass.indexOf('cod2Phong(cod2B, u_cod2SunEye, cod2P)') &&
+  assert(reflection > world.pointPass.indexOf('cod2Phong(cod2MacroB, u_cod2SunEye, cod2P)') &&
     reflection < world.pointPass.indexOf('} else if (u_cod2SunShadow.x > 0.0) {'), 'the world mirrors after its highlight');
   assert(world.pointPass.includes('vec3 cod2Env = cod2Indirect * 2.0 * mix(0.35, 1.0, smoothstep(-0.3, 0.7, cod2Up));'));
-  assert(world.pointPass.includes('float cod2Fresnel = 0.2 + 0.8 * cod2Gloss * pow(1.0 - max(dot(cod2B, cod2V), 0.0), 5.0);'),
+  assert(world.pointPass.includes('float cod2Fresnel = 0.2 + 0.8 * cod2Gloss * pow(1.0 - max(dot(cod2MacroB, cod2V), 0.0), 5.0);'),
     'rough maps keep little of the grazing gain');
   assert(world.pointPass.includes('* (cod2Fresnel * cod2Gloss * u_cod2Surface.w);'));
   assert.equal(world.pointPass.match(/texture2D\(u_cod2SpecMap/g).length, 1, 'one specular lookup');
+  assert(world.pointDefs.includes('  float bias = u_cod2Detail.w + (px < 0.08 ? 0.9 * (1.0 - px * 12.5) : 0.0);\n' +
+    '  float atten = min(clamp(1.6 - 0.38 * texels, 0.2, 1.0), clamp(1.35 - 0.22 * px, 0.2, 1.0));\n' +
+    '  vec2 t = (texture2D(u_cod2NormalMap, uv, bias).ag * 2.0 - 1.0) * (strength * atten);\n'),
+    'normal relief fades by both texel minification and world pixel size while filtering sub-inch close-up DXT blocks');
+  assert(world.pointDefs.includes('  return max(power / (1.0 + 0.5 * power * var), 1.0);\n'),
+    'normal variance broadens specular lobes against distant sparkle');
   // COD2_SURFACE_VARIATION: two octaves of value noise over the color map's own
   // coordinates vary the tone after the detail map and before the light, the
   // ground more than walls; the paler patches turn drier and warmer and the
@@ -645,12 +662,15 @@ for (const matrix of [false, true]) {
   assert.deepEqual(model.pointPass.match(/cod2Spec \+= u_lightDiffuse\d/g),
     ['cod2Spec += u_lightDiffuse0', 'cod2Spec += u_lightDiffuse3'], 'highlights from the strongest grid light and the sun');
   assert(model.pointPass.includes(`cod2Bump(cod2N, ${uv(0)}, 1.0)`));
+  assert(model.pointPass.includes('float cod2ModelShadow = cod2SunShadow(u_cod2Model.x);\n'));
   assert(model.pointPass.includes('cod2Bumped += (cod2Ambient - cod2Sun) * (cod2Sky(cod2B) / cod2Sky(cod2N) * cod2Cavity(cod2B, cod2N, u_cod2Model.x)) +\n' +
-    '  cod2Sun * cod2Incidence;\n'));
+    '  cod2Sun * (cod2ModelShadow * cod2Incidence);\n'));
   assert(!model.pointPass.includes('cod2LightmapTexel') && !world.pointPass.includes('u_cod2Model'));
-  assert(!model.pointPass.includes('cod2Crease('), 'models keep their relief as it was');
-  assert(!/cod2Noise|cod2DetailBump|cod2Sharpen|cod2Blend|u_cod2Relief\.[yzw]/.test(model.pointDefs + model.pointPass + model.fsTexEnvPass),
-    'models keep their tone, grain, sharpness and alpha');
+  assert(model.pointPass.includes(`float cod2Fold = cod2Crease(${uv(0)});\n`), 'mapped models shade their micro-folds');
+  assert(!/cod2Noise|cod2DetailBump|cod2Blend|u_cod2Relief\.[yz]/.test(model.pointDefs + model.pointPass + model.fsTexEnvPass),
+    'models keep their tone, grain and alpha');
+  assert(model.fsTexEnvPass.includes('float cod2Sharpen = (u_cod2Model.y > 0.5 ? 0.16 * smoothstep(0.38, 0.85, cod2Span) : 0.22) * u_cod2Relief.w * (1.0 - smoothstep(1.0, 2.5, cod2Span));'),
+    'models sharpen magnified color maps while sparing close-up viewmodel skin');
   assert(model.pointPass.includes('if (u_cod2Surface.y > 0.5 && u_cod2SkyEye.w > 0.0) {'), 'r_reflections turns the models\' reflection off too');
   assert.equal(model.pointPass.match(/texture2D\(u_cod2SpecMap/g).length, 1);
   // COD2_VIEWMODEL_LIGHT: the arms and weapon take the material pass without
@@ -663,7 +683,7 @@ for (const matrix of [false, true]) {
     'gl_FragColor.rgb *= mix(0.68, 1.28, smoothstep(-0.5, 0.9, dot(cod2B, cod2Shoulder)));\n' +
     'cod2Spec += cod2Flat * 0.6 * cod2Phong(cod2B, cod2Shoulder, cod2P);\n}\n');
   assert(shoulder > model.pointPass.indexOf('gl_FragColor.rgb *= max(cod2Bumped, vec3(0.0)) / max(cod2Flat, vec3(0.004));') &&
-    shoulder < model.pointPass.indexOf('cod2Spec += cod2Sun * cod2Phong(cod2B, u_cod2SunEye, cod2P);'),
+    shoulder < model.pointPass.indexOf('cod2Spec += cod2Sun * cod2ModelShadow * cod2Phong(cod2B, u_cod2SunEye, cod2P);'),
     'the shoulder light shades the relit model before its highlights');
   assert(Math.abs(Math.hypot(-0.454, 0.655, 0.605) - 1) < 2e-3, 'the shoulder light is a direction');
   assert(!model.pointPass.includes('gl_FragColor.a'));
@@ -753,7 +773,9 @@ console.log('PASS: lightmapped world and lit model material passes, with and wit
     'uniform mediump sampler2DShadow u_cod2SunShadowMap;\n'));
   assert(world.pointDefs.includes('  if (u_cod2SunShadow.x <= 0.0 || visible <= 0.004) return 1.0;\n'));
   assert(world.pointDefs.includes('  if (any(lessThan(p.xy, u_cod2SunShadowRect.xy)) || any(greaterThan(p.xy, u_cod2SunShadowRect.zw))) return 1.0;\n'));
-  assert.equal(world.pointDefs.match(/textureLod\(u_cod2SunShadowMap/g).length, 4);
+  assert(world.pointDefs.includes('  for (int i = 0; i < 8; ++i) {\n'));
+  assert.equal(world.pointDefs.match(/textureLod\(u_cod2SunShadowMap/g).length, 1);
+  assert(world.pointDefs.includes('return 1.0 - u_cod2SunShadow.x * fade * (1.0 - 0.125 * lit);'));
   const lit = world.pointPass;
   assert(lit.indexOf('vec3 cod2Indirect = max(cod2L.rgb - cod2SunPart, vec3(0.0));\ncod2SunPart *= cod2SunShadow(cod2L.a);\n') > 0,
     'the bake\'s full sun share comes off first, then only the shadowed share returns');
@@ -764,7 +786,7 @@ console.log('PASS: lightmapped world and lit model material passes, with and wit
   const model = generate.call({usedTexUnitList: [0]}, {...twoD, useTextureMatrix: false},
     {lightingEnabled: true, MAX_LIGHTS: 8, lightEnabled: [true, false, false, false, false, false, false, false]},
     'gl_FragColor = texture2D(u_texUnit0, v_texCoord0.xy) * v_color;');
-  assert(!/cod2SunShadow/.test(model.pointDefs + model.pointPass));
+  assert(model.pointDefs.includes('sampler2DShadow u_cod2SunShadowMap') && model.pointPass.includes('cod2SunShadow(u_cod2Model.x)'));
   assert(!/cod2SunShadow/.test(noSample.pointDefs + noSample.pointPass));
 }
 console.log('PASS: the sun\'s depth map in 3 views\' eye space for world draws only, cached per frame and view, uploaded per program and value, and compared only where the bake sees the sun');
@@ -815,7 +837,7 @@ console.log('PASS: the sun\'s depth map in 3 views\' eye space for world draws o
       assert(pass.startsWith('if (u_cod2Effect.x > 0.5) {\n'));
       assert(pass.includes(`  highp vec2 cod2Texels = ${uv} * vec2(textureSize(u_texUnit0, 0));\n`));
       assert(pass.includes('  float cod2Mip = max(0.5 * log2(max(max(dot(cod2Dx, cod2Dx), dot(cod2Dy, cod2Dy)), 1e-8)) + u_cod2Detail.w, 0.0);\n' +
-        '  gl_FragColor.a *= 1.0 + 0.25 * cod2Mip;\n'), 'a quarter more alpha per mip level, after the scaled scene\'s bias');
+        '  gl_FragColor.a *= 1.0 + 0.30 * min(cod2Mip, 4.0);\n'), '30% more alpha per mip level up to four mips, after the scaled scene\'s bias');
       assert(pass.includes('  gl_FragColor.a = (gl_FragColor.a - u_alphaTestRef) / max(fwidth(gl_FragColor.a), 0.0001) + 0.5;\n' +
         '  if (gl_FragColor.a <= 0.0) discard;\n  gl_FragColor.a = min(gl_FragColor.a, 1.0);\n'));
       assert(pass.endsWith('} else {\n' + test + '\n}\n'), 'the original test without coverage');

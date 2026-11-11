@@ -75,6 +75,7 @@ target_include_directories(cod2_client_objects PRIVATE
   "${CMAKE_CURRENT_LIST_DIR}")
 target_compile_options(cod2_client_objects PRIVATE
   "SHELL:-s USE_SDL=2"
+  -O3 -msimd128
   -fno-common -fno-strict-aliasing -fwrapv -fno-strict-overflow
   -Wno-implicit-function-declaration -Wno-incompatible-pointer-types
   -Wno-int-conversion -Wno-return-type -Wno-deprecated-non-prototype
@@ -85,6 +86,7 @@ target_compile_options(cod2_client_objects PRIVATE
 # checksum diagnostic or by permissive linker flags.
 add_executable(cod2_client EXCLUDE_FROM_ALL $<TARGET_OBJECTS:cod2_client_objects>)
 target_link_options(cod2_client PRIVATE
+  -O3 -msimd128
   -g2
   "SHELL:-s USE_SDL=2"
   "SHELL:-s USE_ZLIB=1"

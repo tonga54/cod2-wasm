@@ -27,10 +27,14 @@
   const profileStorageKey = 'cod2-wasm-profile-v1';
   // Saved profiles hold the old 1280x720 default; each takes the new one once.
   const displayStorageKey = 'cod2-wasm-display-v2';
-  // Likewise for the old full-resolution normal and specular maps.
-  const materialMapsStorageKey = 'cod2-wasm-material-maps-v1';
-  // And for the old 1.5x model detail and grass distance.
-  const drawDistanceStorageKey = 'cod2-wasm-draw-distance-v1';
+  // Likewise for the old half-resolution normal and specular maps.
+  const materialMapsStorageKey = 'cod2-wasm-material-maps-v2';
+  // And for the old 1.5x or 2x model detail and grass distance.
+  const drawDistanceStorageKey = 'cod2-wasm-draw-distance-v2';
+  // And for the old 720-line 3D scene height.
+  const sceneHeightStorageKey = 'cod2-wasm-scene-height-v1';
+  // And for the earlier 0.65 sun shading and 1.0 relief defaults.
+  const lightingStorageKey = 'cod2-wasm-lighting-v1';
   let browserVersion = 'Browser dev';
   function prepareProfile(context, fs) {
     let saved = '';
@@ -44,14 +48,25 @@
         localStorage.setItem(displayStorageKey, '1');
       }
       if (!localStorage.getItem(materialMapsStorageKey)) {
-        saved = saved.replace(/^seta r_picmip_(?:bump|spec) "0"\r?$/gm, '');
+        saved = saved.replace(/^seta r_picmip_(?:bump|spec) "1"\r?$/gm, '');
         localStorage.setItem(profileStorageKey, saved);
         localStorage.setItem(materialMapsStorageKey, '1');
       }
       if (!localStorage.getItem(drawDistanceStorageKey)) {
-        saved = saved.replace(/^seta r_lodDistanceScale "1\.5"\r?$/gm, '');
+        saved = saved.replace(/^seta r_lodDistanceScale "(?:1\.5|2(?:\.0+)?)"\r?$/gm, '');
         localStorage.setItem(profileStorageKey, saved);
         localStorage.setItem(drawDistanceStorageKey, '1');
+      }
+      if (!localStorage.getItem(sceneHeightStorageKey)) {
+        saved = saved.replace(/^seta r_sceneHeight "720"\r?$/gm, '');
+        localStorage.setItem(profileStorageKey, saved);
+        localStorage.setItem(sceneHeightStorageKey, '1');
+      }
+      if (!localStorage.getItem(lightingStorageKey)) {
+        saved = saved.replace(/^seta r_sunShading "0\.65"\r?$/gm, '')
+          .replace(/^seta r_(?:cavity|detailRelief) "1(?:\.0+)?"\r?$/gm, '');
+        localStorage.setItem(profileStorageKey, saved);
+        localStorage.setItem(lightingStorageKey, '1');
       }
     } catch { /* Storage can be disabled; settings still work for this visit. */ }
     gametag = validGametag(legacyName) || validGametag(context.preferences?.values().playerName) || 'Player';
@@ -59,8 +74,8 @@
       // The canvas and HUD at 1080 lines; the 3D view renders at r_sceneHeight.
       name: gametag, r_gpuSync: 'off', com_maxfps: '0', r_mode: '1920x1080',
       r_textureMode: 'anisotropic', r_anisotropy: '16', r_aaSamples: '4',
-      // Normal and specular maps at half resolution: a quarter of their memory.
-      r_picmip_manual: '1', r_picmip: '0', r_picmip_bump: '1', r_picmip_spec: '1', cl_maxpackets: '60', rate: '25000',
+      // Full-resolution color, normal and specular maps.
+      r_picmip_manual: '1', r_picmip: '0', r_picmip_bump: '0', r_picmip_spec: '0', cl_maxpackets: '60', rate: '25000',
       snaps: '30', g_gametype: 'tdm', ui_mapname: 'mp_toujane', ui_netSource: '0',
       ui_browserShowEmpty: '1', ui_browserShowFull: '1', ui_browserShowPure: '0',
       ui_browserMod: '-1', ui_browserFriendlyfire: '-1', ui_browserKillcam: '-1'
@@ -442,16 +457,19 @@
     let samplers = new WeakMap(), matrices = new WeakMap(), vectors = new WeakMap();
     let scalars = new WeakMap(), locations = new WeakMap();
     let pipeline = new Map(), enabled = new Map();
+    let currentVao = undefined, currentArrayBuffer = undefined;
+    let drawFbo = undefined, readFbo = undefined;
     const reset = () => {
       unit = gl.TEXTURE0; bindings = new Map();
       unitBindings = new Map(); bindings.set(unit, unitBindings);
       samplers = new WeakMap(); matrices = new WeakMap(); vectors = new WeakMap();
       scalars = new WeakMap(); locations = new WeakMap();
       pipeline = new Map(); enabled = new Map();
+      currentVao = currentArrayBuffer = drawFbo = readFbo = undefined;
     };
     canvas.addEventListener('webglcontextrestored', reset);
     const capabilities = new Set(['BLEND','CULL_FACE','DEPTH_TEST','DITHER',
-      'POLYGON_OFFSET_FILL','SAMPLE_ALPHA_TO_COVERAGE','SAMPLE_COVERAGE','SCISSOR_TEST']
+      'POLYGON_OFFSET_FILL','SAMPLE_ALPHA_TO_COVERAGE','SAMPLE_COVERAGE','SCISSOR_TEST','STENCIL_TEST']
       .map(name => gl[name]).filter(value => value !== undefined));
     for (const method of ['enable','disable']) {
       const original = gl[method], value = method === 'enable';
@@ -459,6 +477,76 @@
         if (!capabilities.has(capability)) return original.call(this, capability);
         if (enabled.get(capability) === value) return;
         original.call(this, capability); enabled.set(capability, value);
+      };
+    }
+    if (typeof gl.isEnabled === 'function') {
+      const isEnabled = gl.isEnabled;
+      gl.isEnabled = function (capability) {
+        if (capabilities.has(capability)) {
+          if (enabled.has(capability)) return enabled.get(capability);
+          const state = Boolean(isEnabled.call(this, capability));
+          enabled.set(capability, state);
+          return state;
+        }
+        return isEnabled.call(this, capability);
+      };
+    }
+    if (typeof gl.bindVertexArray === 'function') {
+      const bindVertexArray = gl.bindVertexArray;
+      gl.bindVertexArray = function (vao) {
+        currentVao = vao ?? null;
+        return bindVertexArray.call(this, vao);
+      };
+    }
+    if (typeof gl.deleteVertexArray === 'function') {
+      const deleteVertexArray = gl.deleteVertexArray;
+      gl.deleteVertexArray = function (vao) {
+        if (vao && currentVao === vao) currentVao = null;
+        return deleteVertexArray.call(this, vao);
+      };
+    }
+    if (typeof gl.bindBuffer === 'function' && gl.ARRAY_BUFFER !== undefined) {
+      const bindBuffer = gl.bindBuffer;
+      gl.bindBuffer = function (target, buffer) {
+        if (target === gl.ARRAY_BUFFER) currentArrayBuffer = buffer ?? null;
+        return bindBuffer.call(this, target, buffer);
+      };
+    }
+    if (typeof gl.deleteBuffer === 'function') {
+      const deleteBuffer = gl.deleteBuffer;
+      gl.deleteBuffer = function (buffer) {
+        if (buffer && currentArrayBuffer === buffer) currentArrayBuffer = null;
+        return deleteBuffer.call(this, buffer);
+      };
+    }
+    if (typeof gl.bindFramebuffer === 'function' && gl.FRAMEBUFFER !== undefined) {
+      const bindFramebuffer = gl.bindFramebuffer;
+      gl.bindFramebuffer = function (target, fbo) {
+        const bound = fbo ?? null;
+        if (target === gl.FRAMEBUFFER) { drawFbo = bound; readFbo = bound; }
+        else if (target === gl.DRAW_FRAMEBUFFER) drawFbo = bound;
+        else if (target === gl.READ_FRAMEBUFFER) readFbo = bound;
+        return bindFramebuffer.call(this, target, fbo);
+      };
+    }
+    if (typeof gl.deleteFramebuffer === 'function') {
+      const deleteFramebuffer = gl.deleteFramebuffer;
+      gl.deleteFramebuffer = function (fbo) {
+        if (fbo && drawFbo === fbo) drawFbo = null;
+        if (fbo && readFbo === fbo) readFbo = null;
+        return deleteFramebuffer.call(this, fbo);
+      };
+    }
+    if (typeof gl.getParameter === 'function') {
+      const getParameter = gl.getParameter;
+      gl.getParameter = function (pname) {
+        if (pname === gl.ACTIVE_TEXTURE && unit !== undefined) return unit;
+        if (pname === gl.CURRENT_PROGRAM && pipeline.has('program')) return pipeline.get('program');
+        if (pname === gl.VERTEX_ARRAY_BINDING && currentVao !== undefined) return currentVao;
+        if (pname === gl.ARRAY_BUFFER_BINDING && currentArrayBuffer !== undefined) return currentArrayBuffer;
+        if (pname === gl.DRAW_FRAMEBUFFER_BINDING && drawFbo !== undefined) return drawFbo;
+        if (pname === gl.READ_FRAMEBUFFER_BINDING && readFbo !== undefined) return readFbo;
+        return getParameter.call(this, pname);
       };
     }
     const scalarStates = {

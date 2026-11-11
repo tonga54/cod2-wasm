@@ -67,6 +67,39 @@ static EffectTemplate *CG_MuzzleLightsOnly(const EffectTemplate *original)
     }
     return effect->mPrimitiveCount ? effect : NULL;
 }
+
+#ifdef __EMSCRIPTEN__
+/* CoD2's rifle.efx and pistol.efx stop spawning spent brass beyond 100 and 250
+ * units; raise their floor so nearby teammates and enemies eject brass too. */
+static EffectTemplate *CG_EnhanceShellEject(EffectTemplate *original)
+{
+    EffectTemplate *effect;
+    int i, changed = 0;
+
+    if (!original)
+        return NULL;
+    for (i = 0; i < original->mPrimitiveCount; ++i) {
+        const PrimitiveTemplate *source = original->mPrimitives[i];
+        if (source && source->mSpawnRange.mMax > 0.0f && source->mSpawnRange.mMax < 450.0f)
+            changed = 1;
+    }
+    if (!changed)
+        return original;
+    effect = Hunk_AllocAlignInternal(sizeof(*effect), 4);
+    memcpy(effect, original, sizeof(*effect));
+    for (i = 0; i < effect->mPrimitiveCount; ++i) {
+        const PrimitiveTemplate *source = original->mPrimitives[i];
+        PrimitiveTemplate *prim;
+        if (!source || source->mSpawnRange.mMax <= 0.0f || source->mSpawnRange.mMax >= 450.0f)
+            continue;
+        prim = Hunk_AllocAlignInternal(sizeof(*prim), 4);
+        memcpy(prim, source, sizeof(*prim));
+        prim->mSpawnRange.mMax = 450.0f;
+        effect->mPrimitives[i] = prim;
+    }
+    return effect;
+}
+#endif
 #include "headers/PC/cgame_mp/cg_local.h"
 #include "headers/PC/cgame_mp/cg_wwiiscope.h"
 #include "headers/PC/cgame_mp/cg_gunfov.h"
@@ -970,6 +1003,11 @@ void CG_RegisterWeapon(int weaponNum)
         weapInfo->lastShotEjectEffect = (struct EffectTemplate *)FX_RegisterEffect(weapDef->szLastShotEjectEffect);
     else
         weapInfo->lastShotEjectEffect = weapInfo->shellEjectEffect;
+#ifdef __EMSCRIPTEN__
+    weapInfo->shellEjectEffect = CG_EnhanceShellEject(weapInfo->shellEjectEffect);
+    weapInfo->lastShotEjectEffect = weapInfo->lastShotEjectEffect == weapInfo->shellEjectEffect ?
+        weapInfo->shellEjectEffect : CG_EnhanceShellEject(weapInfo->lastShotEjectEffect);
+#endif
 
     if (weapDef->szProjectileModel[0]) {
         weapInfo->missileSurfModel = CL_RegisterModel(weapDef->szProjectileModel);
@@ -1897,6 +1935,254 @@ void CG_AddViewWeapon(playerState_t *ps)
 #endif
 }
 
+#ifdef __EMSCRIPTEN__
+extern void CL_AddLightToScene(const vec_t *org, float radius, float r, float g, float b);
+
+#define CG_WEB_IMPACT_LIGHTS 12
+#define CG_WEB_IMPACT_LIGHT_MS 65
+#define CG_WEB_IMPACT_FLASHES 16
+#define CG_WEB_IMPACT_FLASH_MS 42
+#define CG_WEB_IMPACT_SPARKS 96
+
+typedef struct {
+    float origin[3];
+    float color[3];
+    float radius;
+    int time;
+} CgWebImpactLight;
+
+typedef struct {
+    float origin[3];
+    float radius;
+    int time;
+    int metal;
+} CgWebImpactFlash;
+
+typedef struct {
+    float origin[3];
+    float velocity[3];
+    float width;
+    int startTime;
+    int duration;
+    int metal;
+} CgWebImpactSpark;
+
+static CgWebImpactLight s_webImpactLights[CG_WEB_IMPACT_LIGHTS];
+static int s_webImpactLightNext;
+static CgWebImpactFlash s_webImpactFlashes[CG_WEB_IMPACT_FLASHES];
+static int s_webImpactFlashNext;
+static CgWebImpactSpark s_webImpactSparks[CG_WEB_IMPACT_SPARKS];
+static int s_webImpactSparkNext;
+static unsigned int s_webImpactRng = 0x9e3779b9u;
+
+static float CG_WebImpactRand01(void)
+{
+    s_webImpactRng ^= s_webImpactRng << 13;
+    s_webImpactRng ^= s_webImpactRng >> 17;
+    s_webImpactRng ^= s_webImpactRng << 5;
+    return (float)(s_webImpactRng & 0xffffffu) * (1.0f / 16777216.0f);
+}
+
+/* Ballistic spark shower, impact flash and brief illumination on metal (13),
+ * mineral/stone/plaster surfaces (default 0, brick 2, concrete 5, glass 10,
+ * gravel 11, plaster 16, rock 17, asphalt 22) and jacket glints on wood (21),
+ * dirt (6) and sand (18). */
+static void CG_RecordWebImpactLight(const vec_t *position, const vec_t *normal, const vec_t *reflected, int surfType,
+                                    int event)
+{
+    int metal = surfType == 13;
+    int hard = metal || surfType == 0 || surfType == 2 || surfType == 5 || surfType == 10 || surfType == 11 ||
+               surfType == 16 || surfType == 17 || surfType == 22;
+    int softSpark = surfType == 6 || surfType == 18 || surfType == 21;
+    int large = event == 0xb6 || event == 0xb7;
+    float tangentA[3], tangentB[3], bounce[3], refLen;
+    int sparkCount, i, s;
+
+    if ((!hard && !(softSpark && large)) || !position || !normal)
+        return;
+    for (i = 0; i < 3; ++i)
+        if (!isfinite(position[i]) || !isfinite(normal[i]))
+            return;
+
+    if (hard) {
+        CgWebImpactLight *light = &s_webImpactLights[s_webImpactLightNext];
+        CgWebImpactFlash *flash = &s_webImpactFlashes[s_webImpactFlashNext];
+        s_webImpactLightNext = (s_webImpactLightNext + 1) % CG_WEB_IMPACT_LIGHTS;
+        s_webImpactFlashNext = (s_webImpactFlashNext + 1) % CG_WEB_IMPACT_FLASHES;
+        for (i = 0; i < 3; ++i) {
+            light->origin[i] = position[i] + 4.0f * normal[i];
+            flash->origin[i] = position[i] + 2.2f * normal[i];
+        }
+        light->radius = metal ? (large ? 170.0f : 135.0f) : (large ? 140.0f : 110.0f);
+        light->color[0] = metal ? 1.45f : 1.05f;
+        light->color[1] = metal ? 1.02f : 0.66f;
+        light->color[2] = metal ? 0.50f : 0.26f;
+        light->time = cg->time;
+
+        flash->radius = (metal ? 3.8f : 2.8f) * (large ? 1.2f : 1.0f);
+        flash->time = cg->time;
+        flash->metal = metal;
+    }
+
+    /* Orthonormal basis around the surface normal + reflected bullet path. */
+    if (fabsf(normal[2]) < 0.9f) {
+        tangentA[0] = -normal[1];
+        tangentA[1] = normal[0];
+        tangentA[2] = 0.0f;
+    } else {
+        tangentA[0] = 0.0f;
+        tangentA[1] = -normal[2];
+        tangentA[2] = normal[1];
+    }
+    Vec3Normalize(tangentA);
+    Vec3Cross(normal, tangentA, tangentB);
+
+    for (i = 0; i < 3; ++i)
+        bounce[i] = (reflected && isfinite(reflected[i])) ? 0.55f * reflected[i] + 0.65f * normal[i] : normal[i];
+    refLen = Vec3Normalize(bounce);
+    if (refLen < 0.001f)
+        for (i = 0; i < 3; ++i)
+            bounce[i] = normal[i];
+
+    sparkCount = metal ? (large ? 9 : 7) : (hard ? (large ? 7 : 5) : 3);
+    for (s = 0; s < sparkCount; ++s) {
+        CgWebImpactSpark *spark = &s_webImpactSparks[s_webImpactSparkNext];
+        float angle = CG_WebImpactRand01() * 6.2831853f;
+        float spread = (metal ? 0.58f : 0.75f) * (0.20f + 0.80f * CG_WebImpactRand01());
+        float speed = (metal ? 340.0f : 260.0f) + CG_WebImpactRand01() * (large ? 320.0f : 240.0f);
+        float dir[3];
+
+        s_webImpactSparkNext = (s_webImpactSparkNext + 1) % CG_WEB_IMPACT_SPARKS;
+        for (i = 0; i < 3; ++i)
+            dir[i] = bounce[i] + spread * (cosf(angle) * tangentA[i] + sinf(angle) * tangentB[i]);
+        if (dir[0] * normal[0] + dir[1] * normal[1] + dir[2] * normal[2] < 0.12f)
+            for (i = 0; i < 3; ++i)
+                dir[i] += 0.35f * normal[i];
+        Vec3Normalize(dir);
+        for (i = 0; i < 3; ++i) {
+            spark->origin[i] = position[i] + 1.2f * normal[i];
+            spark->velocity[i] = dir[i] * speed;
+        }
+        spark->width = (metal ? 0.38f : 0.30f) * (large ? 1.15f : 1.0f);
+        spark->startTime = cg->time;
+        spark->duration = (int)((metal ? 140.0f : 105.0f) + 95.0f * CG_WebImpactRand01());
+        spark->metal = metal;
+    }
+}
+
+static void CG_SetImpactPolyVert(GfxWorldVertex *vert, const vec_t *origin, const vec_t *side, float halfWidth,
+                                 unsigned int color, float u, float v)
+{
+    vert->xyz[0] = origin[0] + side[0] * halfWidth;
+    vert->xyz[1] = origin[1] + side[1] * halfWidth;
+    vert->xyz[2] = origin[2] + side[2] * halfWidth;
+    vert->color.packed = color;
+    vert->texCoord[0] = u;
+    vert->texCoord[1] = v;
+    vert->lmapCoord[0] = u;
+    vert->lmapCoord[1] = v;
+}
+
+void CG_AddWebBulletLights(void)
+{
+    GfxWorldVertex verts[4];
+    int i;
+
+    for (i = 0; i < CG_WEB_IMPACT_LIGHTS; ++i) {
+        const CgWebImpactLight *light = &s_webImpactLights[i];
+        int elapsed = cg->time - light->time;
+        float fade;
+
+        if (!(light->radius > 0.0f) || elapsed < 0 || elapsed >= CG_WEB_IMPACT_LIGHT_MS)
+            continue;
+        fade = 1.0f - (float)elapsed / (float)CG_WEB_IMPACT_LIGHT_MS;
+        fade *= fade;
+        CL_AddLightToScene(light->origin, light->radius, light->color[0] * fade, light->color[1] * fade,
+                           light->color[2] * fade);
+    }
+
+    if (!cgs || !cgs->media.tracerMaterial)
+        return;
+
+    /* Brief hot corona flash right where the round struck. */
+    for (i = 0; i < CG_WEB_IMPACT_FLASHES; ++i) {
+        const CgWebImpactFlash *flash = &s_webImpactFlashes[i];
+        int elapsed = cg->time - flash->time;
+        float frac, fade, size;
+        unsigned int r, g, b, a, col;
+        vec3_t corner;
+
+        if (!(flash->radius > 0.0f) || elapsed < 0 || elapsed >= CG_WEB_IMPACT_FLASH_MS)
+            continue;
+        frac = (float)elapsed / (float)CG_WEB_IMPACT_FLASH_MS;
+        fade = (1.0f - frac) * (1.0f - frac);
+        size = flash->radius * (0.75f + 0.55f * frac);
+        r = (unsigned int)(255.0f * fade + 0.5f);
+        g = (unsigned int)((flash->metal ? 235.0f : 195.0f) * fade + 0.5f);
+        b = (unsigned int)((flash->metal ? 185.0f : 110.0f) * fade + 0.5f);
+        a = (unsigned int)(245.0f * fade + 0.5f);
+        col = r | (g << 8) | (b << 16) | (a << 24);
+        for (int k = 0; k < 3; ++k)
+            corner[k] = flash->origin[k] + cg->refdef.viewaxis[2][k] * size;
+        CG_SetImpactPolyVert(&verts[0], corner, cg->refdef.viewaxis[1], size, col, 1.0f, 0.0f);
+        CG_SetImpactPolyVert(&verts[1], corner, cg->refdef.viewaxis[1], -size, col, 0.0f, 0.0f);
+        for (int k = 0; k < 3; ++k)
+            corner[k] = flash->origin[k] - cg->refdef.viewaxis[2][k] * size;
+        CG_SetImpactPolyVert(&verts[2], corner, cg->refdef.viewaxis[1], -size, col, 0.0f, 1.0f);
+        CG_SetImpactPolyVert(&verts[3], corner, cg->refdef.viewaxis[1], size, col, 1.0f, 1.0f);
+        CL_DefaultVertexFrames(4, verts);
+        CL_AddPolyToScene(cgs->media.tracerMaterial, 0x1f, 4, verts);
+    }
+
+    /* Flying ballistic sparks arcing away under gravity. */
+    for (i = 0; i < CG_WEB_IMPACT_SPARKS; ++i) {
+        const CgWebImpactSpark *spark = &s_webImpactSparks[i];
+        int elapsed = cg->time - spark->startTime;
+        float t, tTail, life, heat, headW;
+        vec3_t head, tail, seg, toEye, side;
+        unsigned int headCol, tailCol;
+
+        if (spark->duration <= 0 || elapsed < 0 || elapsed >= spark->duration)
+            continue;
+        life = 1.0f - (float)elapsed / (float)spark->duration;
+        t = (float)elapsed * 0.001f;
+        tTail = t - 0.016f * (0.35f + 0.65f * life);
+        if (tTail < 0.0f)
+            tTail = 0.0f;
+        for (int k = 0; k < 3; ++k) {
+            head[k] = spark->origin[k] + spark->velocity[k] * t;
+            tail[k] = spark->origin[k] + spark->velocity[k] * tTail;
+        }
+        head[2] -= 0.5f * 620.0f * t * t;
+        tail[2] -= 0.5f * 620.0f * tTail * tTail;
+        for (int k = 0; k < 3; ++k) {
+            seg[k] = head[k] - tail[k];
+            toEye[k] = head[k] - cg->refdef.vieworg[k];
+        }
+        Vec3Cross(seg, toEye, side);
+        if (Vec3Normalize(side) < 0.0001f)
+            for (int k = 0; k < 3; ++k)
+                side[k] = cg->refdef.viewaxis[1][k];
+        heat = life * life;
+        headW = (spark->width + 0.0007f * Vec3Distance(head, cg->refdef.vieworg)) * (0.45f + 0.55f * life);
+        headCol = ((unsigned int)(255.0f * life + 0.5f)) |
+                  (((unsigned int)((165.0f + 90.0f * heat) * life + 0.5f)) << 8) |
+                  (((unsigned int)((spark->metal ? 205.0f : 140.0f) * heat * life + 0.5f)) << 16) |
+                  (((unsigned int)(255.0f * life + 0.5f)) << 24);
+        tailCol = ((unsigned int)(210.0f * heat + 0.5f)) |
+                  (((unsigned int)(85.0f * heat + 0.5f)) << 8) |
+                  (((unsigned int)(18.0f * heat + 0.5f)) << 16) |
+                  (((unsigned int)(140.0f * heat + 0.5f)) << 24);
+        CG_SetImpactPolyVert(&verts[0], head, side, headW, headCol, 0.5f, 1.0f);
+        CG_SetImpactPolyVert(&verts[1], head, side, -headW, headCol, 0.5f, 0.0f);
+        CG_SetImpactPolyVert(&verts[2], tail, side, -headW * 0.35f, tailCol, 0.5f, 0.0f);
+        CG_SetImpactPolyVert(&verts[3], tail, side, headW * 0.35f, tailCol, 0.5f, 1.0f);
+        CL_DefaultVertexFrames(4, verts);
+        CL_AddPolyToScene(cgs->media.tracerMaterial, 0x1f, 4, verts);
+    }
+}
+#endif
+
 /* A bullet's impact on a surface: its sound and effects, by the bullet's size
  * (event 0xb5 small, 0xb6 rifle, 0xb7 shotgun) and the surface. */
 static void CG_BulletImpact(int sourceEntityNum, vec_t *position, vec_t *normal, vec_t *reflected, int surfType,
@@ -1935,6 +2221,9 @@ static void CG_BulletImpact(int sourceEntityNum, vec_t *position, vec_t *normal,
                    fxNormal ? ((EffectTemplate *)fxNormal)->mEffectName : "none",
                    fxNormal ? ((EffectTemplate *)fxNormal)->mPrimitiveCount : 0);
     CG_PlaySoundAlias(0x3fe, position, alias);
+#ifdef __EMSCRIPTEN__
+    CG_RecordWebImpactLight(position, normal, reflected, surfType, event);
+#endif
 
     if (fxNormal)
         FX_PlayEffect(fxNormal, position, normal);
@@ -2069,6 +2358,20 @@ static float CG_TracerBend(unsigned int seed, float frac)
     return CG_TRACER_BEND * ((bow < 0.0f ? 0.4f * bow - 0.6f : 0.4f * bow + 0.6f) * sinf(pi * frac) +
                              0.5f * s * sinf(2.0f * pi * frac) + 0.25f * ripple * sinf(3.0f * pi * frac));
 }
+
+/* Packed RGBA along the round's wake: incandescent white-hot at the round
+ * (along = 1), staying bright white-gold right out of the muzzle (along = 0)
+ * so the additive tracer image blazes into the bloom along its entire streak. */
+static unsigned int CG_TracerColor(float along)
+{
+    float t = along < 0.0f ? 0.0f : (along > 1.0f ? 1.0f : along);
+    unsigned int r = (unsigned int)(252.0f + 3.0f * sqrtf(t) + 0.5f);
+    unsigned int g = (unsigned int)(215.0f + 40.0f * t + 0.5f);
+    unsigned int b = (unsigned int)(155.0f + 100.0f * t * t + 0.5f);
+    unsigned int a = (unsigned int)(240.0f + 15.0f * t + 0.5f);
+
+    return r | (g << 8) | (b << 16) | (a << 24);
+}
 #endif
 
 void CG_DrawTracer(vec_t *start, vec_t *finish, unsigned int seed)
@@ -2119,15 +2422,14 @@ void CG_DrawTracer(vec_t *start, vec_t *finish, unsigned int seed)
 
 #ifdef __EMSCRIPTEN__
     /* The additive tracer image is a white-hot radial blob. Its centre
-     * column gives the streak a hot core across its width, and a small glow
-     * marks the round itself. Like the COD4 beam, the streak stays white along
-     * its length: seen from the gun, most of the line on screen is the few
-     * units nearest the muzzle, so any fade there hides the shot leaving the
-     * barrel. */
+     * column gives the streak a hot core across its width, cooling from
+     * incandescent white-gold at the round to warm orange along its wake, and
+     * a warm corona marks the round itself. */
     {
         vec3_t points[CG_TRACER_SEGMENTS + 1];
         vec3_t sides[CG_TRACER_SEGMENTS + 1];
         float widths[CG_TRACER_SEGMENTS + 1];
+        unsigned int colors[CG_TRACER_SEGMENTS + 1];
         vec3_t toFinish, normal;
         const float startDist = Vec3Distance(start, viewOrg);
         const float finishDist = Vec3Distance(finish, viewOrg);
@@ -2157,6 +2459,7 @@ void CG_DrawTracer(vec_t *start, vec_t *finish, unsigned int seed)
             for (int i = 0; i < 3; ++i)
                 points[k][i] += offset * right[i];
             widths[k] = startWidth + along * (finishWidth - startWidth);
+            colors[k] = CG_TracerColor(along);
         }
         for (int k = 0; k <= CG_TRACER_SEGMENTS; ++k) {
             const vec_t *ahead = points[k < CG_TRACER_SEGMENTS ? k + 1 : k];
@@ -2173,26 +2476,27 @@ void CG_DrawTracer(vec_t *start, vec_t *finish, unsigned int seed)
                     sides[k][i] = right[i];
         }
         for (int k = 0; k < CG_TRACER_SEGMENTS; ++k) {
-            CG_SetTracerVertex(&verts[0], points[k + 1], sides[k + 1], widths[k + 1], 0xffffffff, 0.5f, 1.0f);
-            CG_SetTracerVertex(&verts[1], points[k + 1], sides[k + 1], -widths[k + 1], 0xffffffff, 0.5f, 0.0f);
-            CG_SetTracerVertex(&verts[2], points[k], sides[k], -widths[k], 0xffffffff, 0.5f, 0.0f);
-            CG_SetTracerVertex(&verts[3], points[k], sides[k], widths[k], 0xffffffff, 0.5f, 1.0f);
+            CG_SetTracerVertex(&verts[0], points[k + 1], sides[k + 1], widths[k + 1], colors[k + 1], 0.5f, 1.0f);
+            CG_SetTracerVertex(&verts[1], points[k + 1], sides[k + 1], -widths[k + 1], colors[k + 1], 0.5f, 0.0f);
+            CG_SetTracerVertex(&verts[2], points[k], sides[k], -widths[k], colors[k], 0.5f, 0.0f);
+            CG_SetTracerVertex(&verts[3], points[k], sides[k], widths[k], colors[k], 0.5f, 1.0f);
             CL_DefaultVertexFrames(4, verts);
             CL_AddPolyToScene(cgs->media.tracerMaterial, 0x1f, 4, verts);
         }
     }
 
     {
-        const float glow = finishWidth * 2.0f;
+        const float glow = finishWidth * 2.8f;
+        const unsigned int glowColor = 0xf2e8ffffu;
         vec3_t corner;
         for (int i = 0; i < 3; ++i)
             corner[i] = finish[i] + cg->refdef.viewaxis[2][i] * glow;
-        CG_SetTracerVertex(&verts[0], corner, cg->refdef.viewaxis[1], glow, 0xc0c0c0c0, 1.0f, 0.0f);
-        CG_SetTracerVertex(&verts[1], corner, cg->refdef.viewaxis[1], -glow, 0xc0c0c0c0, 0.0f, 0.0f);
+        CG_SetTracerVertex(&verts[0], corner, cg->refdef.viewaxis[1], glow, glowColor, 1.0f, 0.0f);
+        CG_SetTracerVertex(&verts[1], corner, cg->refdef.viewaxis[1], -glow, glowColor, 0.0f, 0.0f);
         for (int i = 0; i < 3; ++i)
             corner[i] = finish[i] - cg->refdef.viewaxis[2][i] * glow;
-        CG_SetTracerVertex(&verts[2], corner, cg->refdef.viewaxis[1], -glow, 0xc0c0c0c0, 0.0f, 1.0f);
-        CG_SetTracerVertex(&verts[3], corner, cg->refdef.viewaxis[1], glow, 0xc0c0c0c0, 1.0f, 1.0f);
+        CG_SetTracerVertex(&verts[2], corner, cg->refdef.viewaxis[1], -glow, glowColor, 0.0f, 1.0f);
+        CG_SetTracerVertex(&verts[3], corner, cg->refdef.viewaxis[1], glow, glowColor, 1.0f, 1.0f);
         CL_DefaultVertexFrames(4, verts);
         CL_AddPolyToScene(cgs->media.tracerMaterial, 0x1f, 4, verts);
     }

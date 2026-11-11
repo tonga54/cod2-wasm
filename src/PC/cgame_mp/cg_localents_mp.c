@@ -6,6 +6,10 @@ extern void BG_EvaluateTrajectory(void *traj, int time, float *result);
 extern const vec_t Vec3NormalizeTo(const vec_t *v, vec_t *out);
 extern void CG_DrawTracer(vec_t *start, vec_t *finish, unsigned int seed);
 extern unsigned int CG_TracerSeed(const trajectory_t *pos);
+#ifdef __EMSCRIPTEN__
+extern void CL_AddLightToScene(const vec_t *org, float radius, float r, float g, float b);
+extern void CG_AddWebBulletLights(void);
+#endif
 extern void Com_Error(int code, const char *fmt, ...);
 extern const dvar_t *cg_tracerLength;
 
@@ -79,6 +83,10 @@ void CG_AddMovingTracer(localEntity_t *le)
     end[2] = start[2] + dist * dir[2];
 
     CG_DrawTracer(start, end, CG_TracerSeed(&le->pos));
+#ifdef __EMSCRIPTEN__
+    /* A flying tracer casts a warm glow onto nearby bunker walls and ground. */
+    CL_AddLightToScene(end, 165.0f, 0.85f, 0.54f, 0.22f);
+#endif
 }
 
 static void __static_initialization_and_destruction_0(int initialize, int priority)
@@ -138,4 +146,7 @@ void CG_AddLocalEntities(void)
 
         le = next;
     }
+#ifdef __EMSCRIPTEN__
+    CG_AddWebBulletLights();
+#endif
 }

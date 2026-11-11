@@ -65,8 +65,8 @@ int WebEffects_IsFire(const Material *material)
 static const struct {
     const char *name;
     float disc[4];
-} s_webLenses[] = {{"mtl_weapon_kar98_scope", {0.1719f, 0.7070f, 0.1426f, 0.2852f}},
-                   {"mtl_weapon_enfield_scope", {0.1602f, 0.6875f, 0.1504f, 0.3008f}},
+} s_webLenses[] = {{"mtl_weapon_kar98_scope", {0.1581f, 0.6844f, 0.1520f, 0.3040f}},
+                   {"mtl_weapon_enfield_scope", {0.1594f, 0.6830f, 0.1568f, 0.3090f}},
                    {"mtl_weapon_springfield", {0.6289f, 0.2051f, 0.1289f, 0.1289f}}};
 
 const float *WebEffects_Lens(const Material *material)

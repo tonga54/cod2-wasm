@@ -105,6 +105,7 @@ try {
     const turn = (angle, scale = 1) => ({scale, move: [0, 0, 0],
       rotation: [Math.cos(angle), 0, -Math.sin(angle), 0, 1, 0, Math.sin(angle), 0, Math.cos(angle)]});
     const strafe = (units, scale = 1) => ({scale, move: [units, 0, 0], rotation: [1, 0, 0, 0, 1, 0, 0, 0, 1]});
+    const sprintForward = (units = 4.5) => ({scale: 1, move: [0, 0, -units], rotation: [1, 0, 0, 0, 1, 0, 0, 0, 1]});
     // The production viewmodel range for a muzzle 28 units out (a Thompson).
     function params(ads, {glow = 1, film = 1, nearEnd = 512, motion = null, backdrop = 0, gray = 0, vm = null} = {}) {
       HEAPF32.set([0.42 * glow, 0.30 * glow, 0.9, 0.75, 5, 12, ads, 4.55, 17.5, near, 3,
@@ -220,6 +221,9 @@ try {
     check(same(strafing, graded, [-0.95, 0.2, -0.6, 0.9]) && same(strafing, graded, centreWorld),
       'strafing leaves the distant world sharp');
     check(same(strafing, graded, receiver), 'strafing leaves the viewmodel sharp');
+    const sprinting = render(4, 0, {motion: sprintForward(4.5)});
+    check(same(sprinting, graded, centreWorld) && same(sprinting, graded, [-0.95, 0.2, -0.6, 0.9]),
+      'sprinting forward cuts no sharp-vs-smeared circle between screen centre and corners');
     const pixel = (px, x, y) => px[(y * W + x) * 4 + 1];
     // The square covers pixels 576-703 by 324-395 and the strip starts at 960.
     const smeared = render(4, 0, {glow: 0, film: 0, layout: squares, motion: turn(0.03)}); snapshot('turn-squares');
@@ -624,6 +628,24 @@ try {
       check(Math.abs(shade(large)) < 1, `the middle of a large window stays open: ${shade(large).toFixed(1)}`);
       check(shade(rim) > shade(small) + 2, `by the window's edge it shades more: -${shade(rim).toFixed(1)}`);
       check(same(shaded, open, [0.5, -0.9, 0.9, 0.9]), 'the nearer wall, in front, takes no shade');
+      // Screen-space sun contact shadow: a low cobblestone lip 1.5 units in
+      // front of a surface at z = 120 casts crisp shade on its leeward side
+      // under a grazing sun, and none on its sunward side or without a sun.
+      const contactLayout = () => {
+        rect(-1, -1, 1, 1, worldDepth(120), [0.6, 0.6, 0.6], 0);
+        rect(-0.02, -0.2, 0.02, 0.2, worldDepth(118.5), [0.6, 0.6, 0.6], 0);
+      };
+      aoAt(0.55);
+      const noSun = render(1, 0, {glow: 0, film: 0, layout: contactLayout});
+      HEAPF32.set([-0.96, 0, -0.28], 16 + 66);
+      HEAPF32.set([1, 0.95, 0.85], 16 + 77);
+      const withSun = render(1, 0, {glow: 0, film: 0, layout: contactLayout});
+      HEAPF32.fill(0, 16 + 66, 16 + 69);
+      HEAPF32.fill(0, 16 + 77, 16 + 80);
+      aoAt(0);
+      const leeward = region(noSun, 0.024, -0.1, 0.052, 0.1).mean - region(withSun, 0.024, -0.1, 0.052, 0.1).mean;
+      const sunward = Math.abs(region(noSun, -0.08, -0.1, -0.05, 0.1).mean - region(withSun, -0.08, -0.1, -0.05, 0.1).mean);
+      check(leeward > 8 && sunward < 2, `sun contact shadow darkens the leeward side (-${leeward.toFixed(1)}) and leaves the sunward side (${sunward.toFixed(1)})`);
     }
 
     // r_clarity: each pixel's light moves from its surroundings' (100). A small

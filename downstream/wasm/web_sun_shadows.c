@@ -15,22 +15,22 @@
 
 extern const dvar_t *r_sunShadows;
 
-#define SUN_SHADOW_MAX_VERTICES 65536
-#define SUN_SHADOW_MAX_TRIANGLES 98304
+#define SUN_SHADOW_MAX_VERTICES 131072
+#define SUN_SHADOW_MAX_TRIANGLES 196608
 /* Texels across the depth map. */
-#define SUN_SHADOW_SIZE 2048
+#define SUN_SHADOW_SIZE 4096
 /* The map spans this many units either side of its centre, across the sun's
- * rays: one unit per texel. The centre sits this far ahead of the eye. */
-#define SUN_SHADOW_RADIUS 1024.0f
-#define SUN_SHADOW_AHEAD 640.0f
+ * rays: 0.75 units per texel. The centre sits this far ahead of the eye. */
+#define SUN_SHADOW_RADIUS 1536.0f
+#define SUN_SHADOW_AHEAD 960.0f
 /* Its depth range along the rays, either side of the centre. */
 #define SUN_SHADOW_DEPTH 4096.0f
 /* Models further than this from the last frame's eye cast nothing. */
-#define SUN_SHADOW_CASTER_RANGE 2600.0f
+#define SUN_SHADOW_CASTER_RANGE 3600.0f
 /* The outer part of the map fades its shadow out: 1 / 8 of its width. */
 #define SUN_SHADOW_FADE 8.0f
 /* A receiver this many units behind a caster's depth is in its shadow. */
-#define SUN_SHADOW_BIAS 1.5f
+#define SUN_SHADOW_BIAS 1.1f
 /* A sun lower than this sine of its elevation, or dimmer than this share of
  * the lightmap's half scale, casts no shadow worth drawing. */
 #define SUN_SHADOW_MIN_ELEVATION 0.05f
@@ -109,6 +109,10 @@ EM_JS(int, WebSunShadows_Draw, (const float *positions, int vertexCount, const u
         gl.bindBuffer(gl.ARRAY_BUFFER, arrayBuffer);
     }
     if (s.failed || size <= 0) return 0;
+    if (gl.MAX_TEXTURE_SIZE !== undefined) {
+        var maxSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) | 0;
+        if (maxSize > 0 && size > maxSize) size = maxSize;
+    }
     var unit = gl.getParameter(gl.ACTIVE_TEXTURE);
     var drawFramebuffer = gl.getParameter(gl.DRAW_FRAMEBUFFER_BINDING);
     var readFramebuffer = gl.getParameter(gl.READ_FRAMEBUFFER_BINDING);
@@ -119,7 +123,7 @@ EM_JS(int, WebSunShadows_Draw, (const float *positions, int vertexCount, const u
         gl.activeTexture(gl.TEXTURE18);
         s.texture = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D, s.texture);
-        gl.texStorage2D(gl.TEXTURE_2D, 1, gl.DEPTH_COMPONENT16, size, size);
+        gl.texStorage2D(gl.TEXTURE_2D, 1, gl.DEPTH_COMPONENT24 || gl.DEPTH_COMPONENT16, size, size);
         /* Linear filtering with a comparison: four depth tests per lookup. */
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
@@ -376,6 +380,20 @@ void WebSunShadows_Rect(const float *texture, const float *mins, const float *ma
     }
 }
 
+/* Whether an unskinned cgame model at origin lies close enough to the view to
+ * cast a sun shadow into it. */
+int WebSunShadows_CasterInRange(const float *origin, const float *eye)
+{
+    float dx, dy, dz;
+
+    if (!s_capturing || !WebSunShadows_Finite3(origin) || !WebSunShadows_Finite3(eye))
+        return 0;
+    dx = origin[0] - eye[0];
+    dy = origin[1] - eye[1];
+    dz = origin[2] - eye[2];
+    return dx * dx + dy * dy + dz * dz <= SUN_SHADOW_CASTER_RANGE * SUN_SHADOW_CASTER_RANGE;
+}
+
 /* The frame's first full-screen view, before it draws the world. */
 void WebSunShadows_Render(void)
 {
@@ -392,7 +410,7 @@ void WebSunShadows_Render(void)
         params[SUN_SHADOW_TEXEL] = 1.0f / (float)SUN_SHADOW_SIZE;
         params[SUN_SHADOW_EDGE] = SUN_SHADOW_FADE;
         params[SUN_SHADOW_DEPTH_BIAS] = SUN_SHADOW_BIAS * 0.5f / SUN_SHADOW_DEPTH;
-        WebSunShadows_Rect(texture, s_mins, s_maxs, 4.0f / (float)SUN_SHADOW_SIZE, params + SUN_SHADOW_RECT);
+        WebSunShadows_Rect(texture, s_mins, s_maxs, 6.0f / (float)SUN_SHADOW_SIZE, params + SUN_SHADOW_RECT);
     }
     WebSunShadows_SetReceivers(texture, params);
 }

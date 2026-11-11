@@ -270,27 +270,35 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
               "uniform highp vec3 u_cod2SunEye; uniform highp vec4 u_cod2SkyEye; uniform vec4 u_cod2SunColor;\n" +
               // Tangent frame from screen derivatives: DX7 vertices have no tangents.
               // The map decodes as CoD2's DX9 shaders do, N + x T + y B, where the
-              // BSP's tangents follow +u and +v. Relief flattens as the map
-              // minifies: a pixel averaging several texels of it would otherwise
-              // sparkle in the sun.
+              // BSP's tangents follow +u and +v. Relief flattens by world pixel size
+              // so full- and half-resolution normal maps hold the same relief at 10 m.
               "highp vec3 cod2Bump(highp vec3 n, highp vec2 uv, float strength) {\n" +
               "  highp vec2 du1 = dFdx(uv), du2 = dFdy(uv);\n" +
               "  highp vec2 size = vec2(textureSize(u_cod2NormalMap, 0));\n" +
               "  highp float texels = sqrt(max(dot(du1 * size, du1 * size), dot(du2 * size, du2 * size)));\n" +
-              "  vec2 t = (texture2D(u_cod2NormalMap, uv).ag * 2.0 - 1.0) * (strength * clamp(1.5 - 0.5 * texels, 0.15, 1.0));\n" +
               "  highp vec3 dp1 = dFdx(v_cod2Eye), dp2 = dFdy(v_cod2Eye);\n" +
+              "  highp float px = 0.5 * (length(dp1) + length(dp2));\n" +
+              "  float bias = u_cod2Detail.w + (px < 0.08 ? 0.9 * (1.0 - px * 12.5) : 0.0);\n" +
+              "  float atten = min(clamp(1.6 - 0.38 * texels, 0.2, 1.0), clamp(1.35 - 0.22 * px, 0.2, 1.0));\n" +
+              "  vec2 t = (texture2D(u_cod2NormalMap, uv, bias).ag * 2.0 - 1.0) * (strength * atten);\n" +
               "  highp vec3 a = cross(dp2, n), b = cross(n, dp1);\n" +
               "  highp vec3 tu = a * du1.x + b * du2.x, tv = a * du1.y + b * du2.y;\n" +
               "  highp float s = inversesqrt(max(max(dot(tu, tu), dot(tv, tv)), 1e-30));\n" +
               "  highp vec3 r = mat3(tu * s, tv * s, n) * vec3(t, 1.0);\n" +
               "  return r * inversesqrt(max(dot(r, r), 1e-30));\n}\n" +
               // CoD2's specularity table: alpha picks one of 32 exponents. The
-              // narrowest cosines round to 1 at mediump.
-              "highp float cod2SpecPower(float a) {\n" +
+              // narrowest cosines round to 1 at mediump; normal variance across a
+              // pixel broadens the lobe so full-res maps never sparkle from afar.
+              "highp float cod2SpecPower(float a, highp vec3 b) {\n" +
               "  highp float p = floor(a * 31.0 + 0.5);\n" +
-              "  if (p > 30.5) return 30.0;\n" +
-              "  highp float c = min(cos((180.0 - 175.0 * p / 30.0) * 0.0043633231), 0.9999999);\n" +
-              "  return min(-2.3025851 / log(c), 2048.0);\n}\n" +
+              "  highp float power = 30.0;\n" +
+              "  if (p <= 30.5) {\n" +
+              "    highp float c = min(cos((180.0 - 175.0 * p / 30.0) * 0.0043633231), 0.9999999);\n" +
+              "    power = min(-2.3025851 / log(c), 2048.0);\n" +
+              "  }\n" +
+              "  highp vec3 dbx = dFdx(b), dby = dFdy(b);\n" +
+              "  highp float var = dot(dbx, dbx) + dot(dby, dby);\n" +
+              "  return max(power / (1.0 + 0.5 * power * var), 1.0);\n}\n" +
               // Indirect light comes mostly from the sky: a normal map shades it
               // relative to the surface's own normal.
               "float cod2Sky(highp vec3 n) { return 1.0 + 0.5 * dot(n, u_cod2SkyEye.xyz); }\n" +
@@ -308,16 +316,17 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
               // grow past a unit and a half of the world, 0.75 to 2.25.
               "float cod2Crease(highp vec2 uv) {\n" +
               "  highp vec2 du1 = dFdx(uv), du2 = dFdy(uv);\n" +
+              "  highp vec3 dp1 = dFdx(v_cod2Eye), dp2 = dFdy(v_cod2Eye);\n" +
+              "  if (0.5 * (length(dp1) + length(dp2)) >= 2.25) return 0.0;\n" +
               "  highp vec2 size = vec2(textureSize(u_cod2NormalMap, 0));\n" +
               "  highp vec2 t1 = du1 * size, t2 = du2 * size;\n" +
               "  highp float span = max(sqrt(max(dot(t1, t1), dot(t2, t2))), 1.0);\n" +
-              "  highp vec3 dp1 = dFdx(v_cod2Eye), dp2 = dFdy(v_cod2Eye);\n" +
               "  highp float units = 0.5 * span * (sqrt(dot(dp1, dp1) / max(dot(t1, t1), 1e-12)) +\n" +
               "    sqrt(dot(dp2, dp2) / max(dot(t2, t2), 1e-12)));\n" +
               "  vec2 m = texture2D(u_cod2NormalMap, uv).ag;\n" +
               "  vec2 mu = texture2D(u_cod2NormalMap, uv + vec2(span / size.x, 0.0)).ag;\n" +
               "  vec2 mv = texture2D(u_cod2NormalMap, uv + vec2(0.0, span / size.y)).ag;\n" +
-              "  return 2.0 * (mu.x - m.x + mv.y - m.y) / max(units, 1e-6) *\n" +
+              "  return 2.0 * (mu.x - m.x + mv.y - m.y) / max(units, 0.25) *\n" +
               "    (1.0 - smoothstep(0.75, 2.25, 0.5 * (length(dp1) + length(dp2))));\n}\n" +
               "float cod2Phong(highp vec3 n, highp vec3 l, highp float power) {\n" +
               "  highp vec3 v = -v_cod2Eye * inversesqrt(max(dot(v_cod2Eye, v_cod2Eye), 1e-30));\n" +
@@ -325,6 +334,50 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
               "  return pow(h, power) * step(0.0001, dot(n, l));\n}\n";
             var materialPass = "if (u_cod2Detail.z > 0.5)\n" +
               "  gl_FragColor.rgb *= texture2D(u_cod2DetailMap, " + pointUV + " * u_cod2Detail.xy).rgb * 2.0;\n";
+            if (pointNormal || materialLightmap) {
+              // COD2_SUN_SHADOW: moving models' shadow in the sun's depth map
+              // (web_sun_shadows.c, unit 18). Eight filtered comparisons on a
+              // per-pixel rotated Vogel disk soften its solar penumbra.
+              pointDefs += "uniform highp mat4 u_cod2SunShadowEye; uniform highp vec4 u_cod2SunShadow; uniform highp vec4 u_cod2SunShadowRect;\n" +
+                "uniform mediump sampler2DShadow u_cod2SunShadowMap;\n" +
+                "float cod2SunShadow(float visible) {\n" +
+                "  if (u_cod2SunShadow.x <= 0.0 || visible <= 0.004) return 1.0;\n" +
+                "  highp vec3 p = (u_cod2SunShadowEye * vec4(v_cod2Eye, 1.0)).xyz;\n" +
+                "  if (any(lessThan(p.xy, u_cod2SunShadowRect.xy)) || any(greaterThan(p.xy, u_cod2SunShadowRect.zw))) return 1.0;\n" +
+                "  highp vec2 edge = min(p.xy, 1.0 - p.xy);\n" +
+                "  float fade = clamp(min(edge.x, edge.y) * u_cod2SunShadow.z, 0.0, 1.0);\n" +
+                "  if (fade <= 0.0 || p.z >= 1.0) return 1.0;\n" +
+                "  highp float d = p.z - u_cod2SunShadow.w, t = u_cod2SunShadow.y * 2.0;\n" +
+                "  float a0 = 6.2831853 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));\n" +
+                "  const vec2 kVogel[8] = vec2[8](\n" +
+                "    vec2(-0.319251, 0.292528), vec2(0.402472, 0.524938), vec2(0.699672, -0.445005), vec2(-0.446348, -0.859212),\n" +
+                "    vec2(0.250000, 0.000000), vec2(0.048879, -0.556876), vec2(-0.738547, -0.130633), vec2(-0.234048, 0.870472));\n" +
+                "  float s0 = sin(a0), c0 = cos(a0);\n" +
+                "  mat2 rot = mat2(c0, s0, -s0, c0) * t;\n" +
+                "  float lit = 0.0;\n" +
+                "  for (int i = 0; i < 8; ++i) {\n" +
+                "    lit += textureLod(u_cod2SunShadowMap, vec3(p.xy + rot * kVogel[i], d), 0.0);\n" +
+                "    if (i == 3 && (lit <= 0.001 || lit >= 3.999)) { lit *= 2.0; break; }\n" +
+                "  }\n" +
+                "  return 1.0 - u_cod2SunShadow.x * fade * (1.0 - 0.125 * lit);\n}\n";
+              // COD2_TEXTURE_SHARPEN: a magnified color map against itself a mip
+              // and a half blurrier, on both lightmapped surfaces and lit models
+              // (weapons, hands, soldiers, props). Past 2.5 texels/px it turns off.
+              var baseLine = "vec4 cod2BaseTexel = texture2D(u_texUnit0, " + pointUV + ", u_cod2Detail.w);\n";
+              var sharpenGate = pointNormal ? "u_cod2Relief.w > 0.0" : "u_cod2Surface.z > 0.5 && u_cod2Relief.w > 0.0";
+              var sharpenScale = pointNormal ?
+                "(u_cod2Model.y > 0.5 ? 0.16 * smoothstep(0.38, 0.85, cod2Span) : 0.22)" : "0.5";
+              if (fsTexEnvPass.indexOf(baseLine) !== -1)
+                fsTexEnvPass = fsTexEnvPass.replace(baseLine, baseLine +
+                  "if (" + sharpenGate + ") {\n" +
+                  "  highp vec2 cod2Texels = " + pointUV + " * vec2(textureSize(u_texUnit0, 0));\n" +
+                  "  highp float cod2Span = sqrt(max(dot(dFdx(cod2Texels), dFdx(cod2Texels)), dot(dFdy(cod2Texels), dFdy(cod2Texels))));\n" +
+                  "  float cod2Sharpen = " + sharpenScale + " * u_cod2Relief.w * (1.0 - smoothstep(1.0, 2.5, cod2Span));\n" +
+                  "  if (cod2Sharpen > 0.0) {\n" +
+                  "    vec3 cod2Soft = textureLod(u_texUnit0, " + pointUV + ", max(log2(max(cod2Span, 1e-4)) + u_cod2Detail.w, 0.0) + 1.5).rgb;\n" +
+                  "    cod2BaseTexel.rgb = max(cod2BaseTexel.rgb + cod2Sharpen * (cod2BaseTexel.rgb - cod2Soft), vec3(0.0));\n" +
+                  "  }\n}\n");
+            }
             if (pointNormal) {
               var materialLights = [];
               for (var materialLight = 0; materialLight < GLEmulation.MAX_LIGHTS; ++materialLight)
@@ -340,10 +393,10 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "cod2N *= inversesqrt(max(dot(cod2N, cod2N), 1e-30));\n" +
                 "highp vec3 cod2B = cod2N;\n" +
                 "if (u_cod2Surface.x > 0.5) cod2B = cod2Bump(cod2N, " + pointUV + ", 1.0);\n" +
-                "vec4 cod2S = u_cod2Surface.y > 0.5 ? texture2D(u_cod2SpecMap, " + pointUV + ") : vec4(0.0);\n" +
+                "vec4 cod2S = u_cod2Surface.y > 0.5 ? texture2D(u_cod2SpecMap, " + pointUV + ", u_cod2Detail.w) : vec4(0.0);\n" +
                 // Paint is duller than the bare steel or varnish under it.
                 (camoPaint ? "cod2S.rgb *= 1.0 - 0.5 * cod2Paint;\n" : "") +
-                "highp float cod2P = cod2SpecPower(cod2S.a);\n" +
+                "highp float cod2P = cod2SpecPower(cod2S.a, cod2B);\n" +
                 // Relight the vertex color with the bumped normal: the ratio
                 // keeps the original grid lights, clamp and tint.
                 "vec3 cod2Ambient = u_lightModelAmbient.rgb, cod2Diffuse = vec3(0.0);\n" +
@@ -365,13 +418,21 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
               }
               // Most models get only the grid's average: the engine folds the
               // sun into that ambient at full strength, whatever the angle.
+              // Static and loose models also take moving models' sun shadow.
               materialPass += "cod2Ambient *= u_materialAmbient.rgb;\n" +
                 "vec3 cod2Sun = dot(cod2Diffuse, vec3(1.0)) < 0.0001 ? u_cod2SunColor.rgb * u_cod2Model.x * u_materialAmbient.rgb : vec3(0.0);\n" +
+                "float cod2ModelShadow = cod2SunShadow(u_cod2Model.x);\n" +
                 "float cod2NLG = max(dot(cod2N, u_cod2SunEye), 0.0), cod2NLB = max(dot(cod2B, u_cod2SunEye), 0.0);\n" +
                 "float cod2Incidence = mix(1.0 + cod2NLB - cod2NLG, cod2NLB, u_cod2SunColor.a);\n" +
                 "cod2Flat += cod2Ambient;\n" +
                 "cod2Bumped += (cod2Ambient - cod2Sun) * (cod2Sky(cod2B) / cod2Sky(cod2N) * cod2Cavity(cod2B, cod2N, u_cod2Model.x)) +\n" +
-                "  cod2Sun * cod2Incidence;\n" +
+                "  cod2Sun * (cod2ModelShadow * cod2Incidence);\n" +
+                "if (dot(cod2Diffuse, vec3(1.0)) >= 0.0001 && cod2ModelShadow < 1.0)\n" +
+                "  cod2Bumped = max(cod2Bumped - u_cod2SunColor.rgb * (u_cod2Model.x * (1.0 - cod2ModelShadow) * cod2NLB), vec3(0.0));\n" +
+                "if (u_cod2Surface.x > 0.5 && u_cod2Relief.x > 0.0 && u_cod2Model.y < 0.5) {\n" +
+                "float cod2Fold = cod2Crease(" + pointUV + ");\n" +
+                "cod2Bumped *= (1.0 - 0.22 * u_cod2Relief.x * smoothstep(0.2, 1.0, -cod2Fold)) *\n" +
+                "  (1.0 + 0.06 * u_cod2Relief.x * smoothstep(0.2, 1.0, cod2Fold));\n}\n" +
                 "gl_FragColor.rgb *= max(cod2Bumped, vec3(0.0)) / max(cod2Flat, vec3(0.004));\n" +
                 // COD2_VIEWMODEL_LIGHT: the arms and weapon, held under the open
                 // sky, take its light from above the left shoulder (eye space,
@@ -382,16 +443,29 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "const highp vec3 cod2Shoulder = vec3(-0.454, 0.655, 0.605);\n" +
                 "gl_FragColor.rgb *= mix(0.68, 1.28, smoothstep(-0.5, 0.9, dot(cod2B, cod2Shoulder)));\n" +
                 "cod2Spec += cod2Flat * 0.6 * cod2Phong(cod2B, cod2Shoulder, cod2P);\n}\n" +
-                "cod2Spec += cod2Sun * cod2Phong(cod2B, u_cod2SunEye, cod2P);\n" +
-                "gl_FragColor.rgb += cod2S.rgb * cod2Spec * (2.0 * u_cod2Surface.w);\n" +
+                "cod2Spec += cod2Sun * cod2ModelShadow * cod2Phong(cod2B, u_cod2SunEye, cod2P);\n" +
+                "vec3 cod2SpecTint = u_cod2Model.y > 0.5 ? mix(cod2S.rgb, vec3(dot(cod2S.rgb, vec3(0.299, 0.587, 0.114))), 0.68) : cod2S.rgb;\n" +
+                "gl_FragColor.rgb += cod2SpecTint * cod2Spec * (2.0 * u_cod2Surface.w);\n" +
+                // Physical dielectric sheen and sky rim on normal-mapped wood,
+                // cloth, soldiers and metal models that ship without a specular map.
+                "if (u_cod2Surface.x > 0.5 && u_cod2Surface.y < 0.5 && (u_cod2Model.y > 0.5 || u_cod2SunColor.a > 0.0)) {\n" +
+                "highp vec3 cod2DV = -v_cod2Eye * inversesqrt(max(dot(v_cod2Eye, v_cod2Eye), 1e-30));\n" +
+                "float cod2SkyWrap = clamp(dot(cod2B, u_cod2SkyEye.xyz) * 0.5 + 0.5, 0.0, 1.0);\n" +
+                "if (u_cod2Model.y < 0.5 && u_cod2Model.x > 0.0) gl_FragColor.rgb *= mix(0.90, 1.08, cod2SkyWrap);\n" +
+                "float cod2DFres = 0.035 + 0.24 * pow(1.0 - max(dot(cod2B, cod2DV), 0.0), 3.8);\n" +
+                "gl_FragColor.rgb += cod2Spec * (0.14 * u_cod2Surface.w) +\n" +
+                "  (cod2Ambient - cod2Sun) * (cod2DFres * cod2SkyWrap);\n}\n" +
                 // A broad reflection of the sky and ground, stronger at grazing
-                // angles: what keeps metal reading as metal in the shade.
+                // angles: keeps dark oiled blued steel rich on flat faces while
+                // rounded receiver caps, bolts and barrels catch WWII steel sheen.
                 "if (u_cod2Surface.y > 0.5 && u_cod2SkyEye.w > 0.0) {\n" +
                 "highp vec3 cod2V = -v_cod2Eye * inversesqrt(max(dot(v_cod2Eye, v_cod2Eye), 1e-30));\n" +
                 "float cod2Up = dot(reflect(-cod2V, cod2B), u_cod2SkyEye.xyz);\n" +
-                "float cod2Fresnel = 0.2 + 0.8 * pow(1.0 - max(dot(cod2B, cod2V), 0.0), 5.0);\n" +
+                "float cod2Fresnel = (u_cod2Model.y > 0.5 ? 0.14 : 0.2) + (u_cod2Model.y > 0.5 ? 0.86 : 0.8) * pow(1.0 - max(dot(cod2B, cod2V), 0.0), u_cod2Model.y > 0.5 ? 3.2 : 5.0);\n" +
                 "vec3 cod2Env = (cod2Ambient - cod2Sun) * 2.0 * mix(0.35, 1.0, smoothstep(-0.3, 0.7, cod2Up));\n" +
-                "gl_FragColor.rgb += cod2S.rgb * cod2Env * (cod2Fresnel * clamp(cod2P / 48.0, 0.25, 1.0) * u_cod2Surface.w);\n}\n}\n";
+                "if (u_cod2Model.y > 0.5)\n" +
+                "  cod2Env = max(cod2Env * 1.45, vec3(0.16, 0.165, 0.175) * mix(0.28, 1.15, smoothstep(-0.25, 0.72, cod2Up)));\n" +
+                "gl_FragColor.rgb += cod2SpecTint * cod2Env * (cod2Fresnel * clamp(cod2P / 48.0, 0.25, 1.0) * (u_cod2Model.y > 0.5 ? 1.35 : 1.0) * u_cod2Surface.w);\n}\n}\n";
               // COD2_SCOPE_GLASS: a scope's glass in the hands (web_effects.c
               // names its disc in the color map) mirrors the world drawn before
               // it, as a convex lens shows what faces it: upright, turned left
@@ -412,26 +486,26 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "highp float cod2LensPx = max(0.5 * (length(cod2LensI * vec2(u_cod2Lens.z, 0.0)) +\n" +
                 "  length(cod2LensI * vec2(0.0, u_cod2Lens.w))), 1.0);\n" +
                 "highp vec2 cod2LensM = vec2(-cod2LensO.x, cod2LensO.y) / cod2LensPx;\n" +
-                "cod2LensM *= 0.42 + 0.16 * dot(cod2LensM, cod2LensM);\n" +
-                "float cod2LensLod = log2(max(0.6 * float(textureSize(u_cod2LensScene, 0).x) / cod2LensPx, 1.0)) + 1.0;\n" +
+                "cod2LensM *= 0.40 + 0.18 * dot(cod2LensM, cod2LensM);\n" +
+                "float cod2LensLod = log2(max(0.55 * float(textureSize(u_cod2LensScene, 0).x) / cod2LensPx, 1.0)) + 0.45;\n" +
                 "vec3 cod2LensWorld = textureLod(u_cod2LensScene, clamp(vec2(0.5) + cod2LensM, 0.0, 1.0), cod2LensLod).rgb;\n" +
                 "highp vec3 cod2LensV = -v_cod2Eye * inversesqrt(max(dot(v_cod2Eye, v_cod2Eye), 1e-30));\n" +
                 "highp vec3 cod2LensN = v_cod2Normal * inversesqrt(max(dot(v_cod2Normal, v_cod2Normal), 1e-30));\n" +
                 // The glass faces the eye whichever way the model wound it.
                 "if (dot(cod2LensN, cod2LensV) < 0.0) cod2LensN = -cod2LensN;\n" +
-                "float cod2LensFresnel = mix(0.3, 0.8, pow(1.0 - dot(cod2LensN, cod2LensV), 4.0)) *\n" +
-                "  mix(0.85, 1.25, cod2LensR * cod2LensR);\n" +
+                "float cod2LensFresnel = mix(0.42, 0.92, pow(1.0 - dot(cod2LensN, cod2LensV), 3.5)) *\n" +
+                "  mix(0.90, 1.30, cod2LensR * cod2LensR);\n" +
                 // The coating cools the reflection, and turns violet toward the rim.
-                "vec3 cod2LensCoat = mix(vec3(0.66, 0.78, 0.95), vec3(0.85, 0.62, 1.0), smoothstep(0.55, 0.95, cod2LensR));\n" +
-                "vec3 cod2LensColor = vec3(0.008, 0.010, 0.014) + cod2LensWorld * cod2LensCoat * cod2LensFresnel;\n" +
+                "vec3 cod2LensCoat = mix(vec3(0.68, 0.82, 0.96), vec3(0.84, 0.64, 1.0), smoothstep(0.52, 0.95, cod2LensR));\n" +
+                "vec3 cod2LensColor = vec3(0.008, 0.011, 0.016) + cod2LensWorld * cod2LensCoat * cod2LensFresnel;\n" +
                 // The sun where it reaches the weapon, and the light it is held
                 // under, glint off the glass's curve.
                 "highp vec3 cod2LensCurve = normalize(cod2LensN + 0.5 * vec3(cod2LensO / cod2LensPx, 0.0));\n" +
                 "highp vec3 cod2LensR3 = reflect(-cod2LensV, cod2LensCurve);\n" +
-                "cod2LensColor += u_cod2SunColor.rgb * (1.5 * u_cod2Model.x * pow(max(dot(cod2LensR3, u_cod2SunEye), 0.0), 80.0)) +\n" +
-                "  vec3(0.12) * pow(max(dot(cod2LensR3, vec3(-0.454, 0.655, 0.605)), 0.0), 40.0);\n" +
-                "cod2LensColor *= 1.0 - 0.5 * smoothstep(0.75, 1.0, cod2LensR);\n" +
-                "gl_FragColor.rgb = mix(gl_FragColor.rgb, cod2LensColor, 1.0 - smoothstep(0.93, 1.0, cod2LensR));\n}\n}\n";
+                "cod2LensColor += u_cod2SunColor.rgb * (1.6 * u_cod2Model.x * pow(max(dot(cod2LensR3, u_cod2SunEye), 0.0), 80.0)) +\n" +
+                "  vec3(0.10) * pow(max(dot(cod2LensR3, vec3(-0.454, 0.655, 0.605)), 0.0), 48.0);\n" +
+                "cod2LensColor *= 1.0 - 0.52 * smoothstep(0.76, 1.0, cod2LensR);\n" +
+                "gl_FragColor.rgb = mix(gl_FragColor.rgb, cod2LensColor, 1.0 - smoothstep(0.92, 1.0, cod2LensR));\n}\n}\n";
             } else if (materialLightmap) {
               var lightmapUV = GLImmediate.useTextureMatrix ? "(u_textureMatrix1 * v_texCoord1).xy" : "v_texCoord1.xy";
               var lightmapSample = "texture2D(u_texUnit1, " + lightmapUV + ")";
@@ -441,26 +515,7 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                   fsTexEnvPass.split(lightmapSample).join("cod2LightmapTexel");
                 lightmapTexel = "cod2LightmapTexel";
               }
-              // COD2_SUN_SHADOW: moving models' shadow in the sun's depth map
-              // (web_sun_shadows.c, unit 18). It takes away the sun's share of
-              // the lightmap, so baked shade and interiors never darken. Four
-              // filtered comparisons on a rotated grid soften its edge.
-              pointDefs += "uniform highp mat4 u_cod2SunShadowEye; uniform highp vec4 u_cod2SunShadow; uniform highp vec4 u_cod2SunShadowRect;\n" +
-                "uniform mediump sampler2DShadow u_cod2SunShadowMap;\n" +
-                "float cod2SunShadow(float visible) {\n" +
-                "  if (u_cod2SunShadow.x <= 0.0 || visible <= 0.004) return 1.0;\n" +
-                "  highp vec3 p = (u_cod2SunShadowEye * vec4(v_cod2Eye, 1.0)).xyz;\n" +
-                // Only the casters' own rectangle of the map can hold a shadow.
-                "  if (any(lessThan(p.xy, u_cod2SunShadowRect.xy)) || any(greaterThan(p.xy, u_cod2SunShadowRect.zw))) return 1.0;\n" +
-                "  highp vec2 edge = min(p.xy, 1.0 - p.xy);\n" +
-                "  float fade = clamp(min(edge.x, edge.y) * u_cod2SunShadow.z, 0.0, 1.0);\n" +
-                "  if (fade <= 0.0 || p.z >= 1.0) return 1.0;\n" +
-                "  highp float d = p.z - u_cod2SunShadow.w, t = u_cod2SunShadow.y;\n" +
-                "  float lit = textureLod(u_cod2SunShadowMap, vec3(p.xy + vec2(-0.5, -1.5) * t, d), 0.0) +\n" +
-                "    textureLod(u_cod2SunShadowMap, vec3(p.xy + vec2(1.5, -0.5) * t, d), 0.0) +\n" +
-                "    textureLod(u_cod2SunShadowMap, vec3(p.xy + vec2(0.5, 1.5) * t, d), 0.0) +\n" +
-                "    textureLod(u_cod2SunShadowMap, vec3(p.xy + vec2(-1.5, 0.5) * t, d), 0.0);\n" +
-                "  return 1.0 - u_cod2SunShadow.x * fade * (1.0 - 0.25 * lit);\n}\n" +
+              pointDefs +=
                 // COD2_SURFACE_VARIATION: smooth value noise over the color map's
                 // own coordinates, so it holds still on the surface and repeats
                 // nowhere the map does.
@@ -491,20 +546,6 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "  highp float s = inversesqrt(max(max(dot(tu, tu), dot(tv, tv)), 1e-30));\n" +
                 "  highp vec3 r = b - (strength * fade) * ((hu - h) * tu + (hv - h) * tv) * s;\n" +
                 "  return r * inversesqrt(max(dot(r, r), 1e-30));\n}\n";
-              // COD2_TEXTURE_SHARPEN: a magnified color map against itself a mip
-              // and a half blurrier, so its stones, cracks and grain keep their
-              // edges. Past two and a half texels a pixel it would only sparkle.
-              var baseLine = "vec4 cod2BaseTexel = texture2D(u_texUnit0, " + pointUV + ", u_cod2Detail.w);\n";
-              if (fsTexEnvPass.indexOf(baseLine) !== -1)
-                fsTexEnvPass = fsTexEnvPass.replace(baseLine, baseLine +
-                  "if (u_cod2Surface.z > 0.5 && u_cod2Relief.w > 0.0) {\n" +
-                  "  highp vec2 cod2Texels = " + pointUV + " * vec2(textureSize(u_texUnit0, 0));\n" +
-                  "  highp float cod2Span = sqrt(max(dot(dFdx(cod2Texels), dFdx(cod2Texels)), dot(dFdy(cod2Texels), dFdy(cod2Texels))));\n" +
-                  "  float cod2Sharpen = 0.5 * u_cod2Relief.w * (1.0 - smoothstep(1.0, 2.5, cod2Span));\n" +
-                  "  if (cod2Sharpen > 0.0) {\n" +
-                  "    vec3 cod2Soft = textureLod(u_texUnit0, " + pointUV + ", max(log2(max(cod2Span, 1e-4)) + u_cod2Detail.w, 0.0) + 1.5).rgb;\n" +
-                  "    cod2BaseTexel.rgb = max(cod2BaseTexel.rgb + cod2Sharpen * (cod2BaseTexel.rgb - cod2Soft), vec3(0.0));\n" +
-                  "  }\n}\n");
               // COD2_TERRAIN_BLEND: a terrain layer blended by its vertices' alpha
               // takes over where its texture stands above its own average
               // brightness and gives way where it sinks below, most about the
@@ -538,12 +579,11 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "gl_FragColor.rgb *= 1.0 + 0.6 * min(u_cod2Relief.y, 1.5) * (cod2Var - 0.5) * vec3(0.05, -0.01, -0.16);\n}\n" +
                 "highp vec3 cod2B = cod2N;\n" +
                 "if (u_cod2Surface.x > 0.5) cod2B = cod2Bump(cod2N, " + pointUV + ", 1.0);\n" +
+                "highp vec3 cod2MacroB = cod2B;\n" +
                 // COD2_DETAIL_RELIEF: the detail map's grain lifts the surface it
                 // darkens and lightens, so the sun catches sand, stone and plaster.
                 "if (u_cod2Detail.z > 0.5 && u_cod2Relief.z > 0.0) cod2B = cod2DetailBump(cod2B, cod2N, " + pointUV +
                   " * u_cod2Detail.xy, 6.0 * u_cod2Relief.z);\n" +
-                "vec4 cod2S = u_cod2Surface.y > 0.5 ? texture2D(u_cod2SpecMap, " + pointUV + ") : vec4(0.0);\n" +
-                "highp float cod2P = cod2SpecPower(cod2S.a);\n" +
                 "vec4 cod2L = " + lightmapTexel + ";\n" +
                 "vec3 cod2SunPart = u_cod2SunColor.rgb * cod2L.a;\n" +
                 "float cod2NLG = max(dot(cod2N, u_cod2SunEye), 0.0), cod2NLB = max(dot(cod2B, u_cod2SunEye), 0.0);\n" +
@@ -552,6 +592,10 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "float cod2Incidence = mix(1.0 + cod2NLB - cod2NLG, cod2NLB, u_cod2SunColor.a);\n" +
                 "vec3 cod2Indirect = max(cod2L.rgb - cod2SunPart, vec3(0.0));\n" +
                 "cod2SunPart *= cod2SunShadow(cod2L.a);\n" +
+                "if (u_cod2SunShadow.x > 0.0 && cod2L.a > 0.01)\n" +
+                "  cod2Indirect *= mix(0.76, 1.0, clamp(dot(cod2SunPart, vec3(1.0)) / max(dot(u_cod2SunColor.rgb, vec3(1.0)) * cod2L.a, 0.001), 0.0, 1.0));\n" +
+                "if (u_cod2Surface.x > 0.5 && u_cod2SunColor.a > 0.0)\n" +
+                "  cod2Indirect *= mix(vec3(0.91, 0.89, 0.85), vec3(0.98, 1.00, 1.05), clamp(dot(cod2B, u_cod2SkyEye.xyz) * 0.5 + 0.5, 0.0, 1.0));\n" +
                 "vec3 cod2Lit = cod2Indirect * (cod2Sky(cod2B) / cod2Sky(cod2N) * cod2Cavity(cod2B, cod2N, cod2L.a)) +\n" +
                 "  cod2SunPart * cod2Incidence;\n" +
                 // COD2_RELIEF_CREASE: a joint or groove takes less of every light,
@@ -559,10 +603,13 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 // stone's own grain, take none.
                 "if (u_cod2Surface.x > 0.5 && u_cod2Relief.x > 0.0) {\n" +
                 "float cod2Fold = cod2Crease(" + pointUV + ");\n" +
-                "cod2Lit *= (1.0 - 0.22 * u_cod2Relief.x * smoothstep(0.2, 1.0, -cod2Fold)) *\n" +
-                "  (1.0 + 0.06 * u_cod2Relief.x * smoothstep(0.2, 1.0, cod2Fold));\n}\n" +
+                "cod2Lit *= (1.0 - 0.34 * u_cod2Relief.x * smoothstep(0.2, 1.0, -cod2Fold)) *\n" +
+                "  (1.0 + 0.09 * u_cod2Relief.x * smoothstep(0.2, 1.0, cod2Fold));\n}\n" +
                 "gl_FragColor.rgb *= max(cod2Lit, vec3(0.0)) / max(cod2L.rgb, vec3(0.004));\n" +
-                "gl_FragColor.rgb += cod2S.rgb * cod2SunPart * (2.0 * u_cod2Surface.w * cod2Phong(cod2B, u_cod2SunEye, cod2P));\n" +
+                "if (u_cod2Surface.y > 0.5) {\n" +
+                "vec4 cod2S = texture2D(u_cod2SpecMap, " + pointUV + ", u_cod2Detail.w);\n" +
+                "highp float cod2P = cod2SpecPower(cod2S.a, cod2MacroB);\n" +
+                "gl_FragColor.rgb += cod2S.rgb * cod2SunPart * (2.0 * u_cod2Surface.w * cod2Phong(cod2MacroB, u_cod2SunEye, cod2P));\n" +
                 // COD2_WORLD_REFLECTION: the light around the surface, the
                 // lightmap's indirect share, mirrored as models mirror their
                 // ambient: brighter toward the sky, more at grazing angles.
@@ -571,10 +618,22 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "if (u_cod2Surface.y > 0.5 && u_cod2SkyEye.w > 0.0) {\n" +
                 "highp vec3 cod2V = -v_cod2Eye * inversesqrt(max(dot(v_cod2Eye, v_cod2Eye), 1e-30));\n" +
                 "float cod2Gloss = clamp(cod2P / 48.0, 0.25, 1.0);\n" +
-                "float cod2Up = dot(reflect(-cod2V, cod2B), u_cod2SkyEye.xyz);\n" +
-                "float cod2Fresnel = 0.2 + 0.8 * cod2Gloss * pow(1.0 - max(dot(cod2B, cod2V), 0.0), 5.0);\n" +
+                "float cod2Up = dot(reflect(-cod2V, cod2MacroB), u_cod2SkyEye.xyz);\n" +
+                "float cod2Fresnel = 0.2 + 0.8 * cod2Gloss * pow(1.0 - max(dot(cod2MacroB, cod2V), 0.0), 5.0);\n" +
                 "vec3 cod2Env = cod2Indirect * 2.0 * mix(0.35, 1.0, smoothstep(-0.3, 0.7, cod2Up));\n" +
-                "gl_FragColor.rgb += cod2S.rgb * cod2Env * (cod2Fresnel * cod2Gloss * u_cod2Surface.w);\n}\n" +
+                "gl_FragColor.rgb += cod2S.rgb * cod2Env * (cod2Fresnel * cod2Gloss * u_cod2Surface.w);\n}\n}\n" +
+                // Physical dielectric micro-specular and grazing sky sheen on
+                // normal-mapped cobbles, stone, brick and wood without a spec map,
+                // evaluated on the macro normal so detail grain never shimmers.
+                "if (u_cod2Surface.x > 0.5 && u_cod2Surface.y < 0.5 && u_cod2SunColor.a > 0.0) {\n" +
+                "highp vec3 cod2DV = -v_cod2Eye * inversesqrt(max(dot(v_cod2Eye, v_cod2Eye), 1e-30));\n" +
+                "float cod2Luma = clamp(dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114)) * 1.35, 0.0, 1.0);\n" +
+                "float cod2Ground = mix(1.0, 1.35, clamp(dot(cod2N, u_cod2SkyEye.xyz), 0.0, 1.0));\n" +
+                "float cod2DFres = (0.025 + 0.18 * pow(1.0 - max(dot(cod2MacroB, cod2DV), 0.0), 4.0)) * cod2Luma * cod2Ground * u_cod2SunColor.a;\n" +
+                "highp float cod2DP = cod2SpecPower(0.18, cod2MacroB);\n" +
+                "gl_FragColor.rgb += cod2SunPart * (0.18 * cod2Luma * u_cod2SunColor.a * u_cod2Surface.w * cod2Phong(cod2MacroB, u_cod2SunEye, cod2DP));\n" +
+                "if (u_cod2SkyEye.w > 0.0)\n" +
+                "  gl_FragColor.rgb += max(cod2Indirect, vec3(0.05)) * (cod2DFres * mix(0.35, 1.0, smoothstep(-0.2, 0.72, dot(reflect(-cod2DV, cod2MacroB), u_cod2SkyEye.xyz))));\n}\n" +
                 // Without material lighting the lightmap's sun share goes alone.
                 "} else if (u_cod2SunShadow.x > 0.0) {\n" +
                 "vec4 cod2L = " + lightmapTexel + ";\n" +
@@ -627,7 +686,7 @@ COVERAGE_REPLACEMENT = r'''          // COD2_ALPHA_COVERAGE: an alpha-tested sur
               "  highp vec2 cod2Texels = " + pointUV + " * vec2(textureSize(u_texUnit0, 0));\n" +
               "  highp vec2 cod2Dx = dFdx(cod2Texels), cod2Dy = dFdy(cod2Texels);\n" +
               "  float cod2Mip = max(0.5 * log2(max(max(dot(cod2Dx, cod2Dx), dot(cod2Dy, cod2Dy)), 1e-8)) + u_cod2Detail.w, 0.0);\n" +
-              "  gl_FragColor.a *= 1.0 + 0.25 * cod2Mip;\n" +
+              "  gl_FragColor.a *= 1.0 + 0.30 * min(cod2Mip, 4.0);\n" +
               "  gl_FragColor.a = (gl_FragColor.a - u_alphaTestRef) / max(fwidth(gl_FragColor.a), 0.0001) + 0.5;\n" +
               "  if (gl_FragColor.a <= 0.0) discard;\n" +
               "  gl_FragColor.a = min(gl_FragColor.a, 1.0);\n" +

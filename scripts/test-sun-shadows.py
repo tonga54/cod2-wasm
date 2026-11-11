@@ -113,12 +113,13 @@ int main(void)
 
     /* The map's matrices: a world point along the sun's rays keeps its map
      * coordinates and gains depth away from the sun; the square is centred
-     * 640 units ahead of the eye, within a texel, and spans 2048 units. */
+     * 960 units ahead of the eye, within a texel, and spans 3072 units across
+     * 4096 texels (0.75 units per texel). */
     assert(WebSunShadows_Matrices(eye, forward, sun, sunColor, texture, clip));
     {
-        const float centre[3] = {eye[0] - 640, eye[1], eye[2]};
+        const float centre[3] = {eye[0] - 960, eye[1], eye[2]};
         map(texture, centre, p);
-        assert(fabsf(p[0] - 0.5f) <= 0.5f / 2048 + 1e-6f && fabsf(p[1] - 0.5f) <= 0.5f / 2048 + 1e-6f);
+        assert(fabsf(p[0] - 0.5f) <= 0.5f / 4096 + 1e-6f && fabsf(p[1] - 0.5f) <= 0.5f / 4096 + 1e-6f);
         assert(fabsf(p[2] - 0.5f) < 1e-6f);
         for (float t = -400; t <= 400; t += 100) {
             const float along[3] = {centre[0] + sun[0] * t, centre[1] + sun[1] * t, centre[2] + sun[2] * t};
@@ -126,9 +127,9 @@ int main(void)
             assert(fabsf(q[0] - p[0]) < 1e-5f && fabsf(q[1] - p[1]) < 1e-5f);
             assert(fabsf(q[2] - (0.5f - t / 8192.0f)) < 1e-5f);
         }
-        /* 1024 units across the rays reach the map's edge. */
+        /* 1536 units across the rays reach the map's edge. */
         float across[3] = {sun[1], -sun[0], 0}, length = sqrtf(across[0] * across[0] + across[1] * across[1]);
-        const float edge[3] = {centre[0] + across[0] / length * 1024, centre[1] + across[1] / length * 1024, centre[2]};
+        const float edge[3] = {centre[0] + across[0] / length * 1536, centre[1] + across[1] / length * 1536, centre[2]};
         map(texture, edge, q);
         assert(fabsf(hypotf(q[0] - p[0], q[1] - p[1]) - 0.5f) < 1e-3f);
     }
@@ -142,14 +143,14 @@ int main(void)
      * fraction of a texel leaves the matrix alone. */
     {
         float moved[16], movedClip[16];
-        const float nudged[3] = {eye[0] + 0.1f, eye[1] - 0.1f, eye[2]};
+        const float nudged[3] = {eye[0] - 0.08f, eye[1] - 0.03f, eye[2]};
         assert(WebSunShadows_Matrices(nudged, forward, sun, sunColor, moved, movedClip));
         assert(moved[12] == texture[12] && moved[13] == texture[13]);
-        const float far[3] = {eye[0] + 300, eye[1] - 300, eye[2]};
+        const float far[3] = {eye[0] + 300, eye[1] + 130, eye[2]};
         assert(WebSunShadows_Matrices(far, forward, sun, sunColor, moved, movedClip));
-        float texel = 1.0f / 2048;
+        float texel = 1.0f / 4096;
         float du = (moved[12] - texture[12]) / texel, dv = (moved[13] - texture[13]) / texel;
-        assert(fabsf(du - roundf(du)) < 1e-2f && fabsf(dv - roundf(dv)) < 1e-2f && (fabsf(du) > 1 || fabsf(dv) > 1));
+        assert(fabsf(du - roundf(du)) < 1e-2f && fabsf(dv - roundf(dv)) < 1e-2f && fabsf(du) > 1 && fabsf(dv) > 1);
     }
     /* Looking straight down, the square centres on the eye; a vertical sun
      * still makes a finite basis. */
@@ -157,7 +158,7 @@ int main(void)
         const float down[3] = {0, 0, -1}, overhead[3] = {0, 0, 1};
         assert(WebSunShadows_Matrices(eye, down, overhead, sunColor, texture, clip));
         map(texture, eye, p);
-        assert(fabsf(p[0] - 0.5f) <= 0.5f / 2048 + 1e-6f && fabsf(p[1] - 0.5f) <= 0.5f / 2048 + 1e-6f);
+        assert(fabsf(p[0] - 0.5f) <= 0.5f / 4096 + 1e-6f && fabsf(p[1] - 0.5f) <= 0.5f / 4096 + 1e-6f);
         for (int i = 0; i < 16; ++i)
             assert(isfinite(texture[i]) && isfinite(clip[i]));
     }
@@ -200,7 +201,7 @@ int main(void)
     WebSunShadows_EndCapture(eye, forward, sun, sunColor);
     draws = receivers = 0;
     WebSunShadows_Render();
-    assert(draws == 1 && receivers == 1 && drawVertices == 8 && drawIndices == 12 && drawSize == 2048);
+    assert(draws == 1 && receivers == 1 && drawVertices == 8 && drawIndices == 12 && drawSize == 4096);
     for (int v = 0; v < 4; ++v) {
         const float *got = drawPositions + v * 3;
         assert(fabsf(got[0] - (400 - 2 * quad[v][1])) < 1e-4f && fabsf(got[1] - (900 + 0)) < 1e-4f);
@@ -212,8 +213,8 @@ int main(void)
         assert(drawIndexArray[i] == twoTriangles[i] && drawIndexArray[6 + i] == 4u + twoTriangles[i]);
     assert(WebSunShadows_Matrices(eye, forward, sun, sunColor, texture, clip));
     assert(!memcmp(received, texture, sizeof(texture)) && !memcmp(drawClip, clip, sizeof(clip)));
-    assert(receivedParams[SUN_SHADOW_STRENGTH] == 1 && receivedParams[SUN_SHADOW_TEXEL] == 1.0f / 2048);
-    assert(receivedParams[SUN_SHADOW_EDGE] == 8 && fabsf(receivedParams[SUN_SHADOW_DEPTH_BIAS] - 1.5f / 8192) < 1e-9f);
+    assert(receivedParams[SUN_SHADOW_STRENGTH] == 1 && receivedParams[SUN_SHADOW_TEXEL] == 1.0f / 4096);
+    assert(receivedParams[SUN_SHADOW_EDGE] == 8 && fabsf(receivedParams[SUN_SHADOW_DEPTH_BIAS] - 1.1f / 8192) < 1e-9f);
     {
         /* The rectangle holds both models' every vertex. */
         const float *r = receivedParams + SUN_SHADOW_RECT;
@@ -255,12 +256,18 @@ int main(void)
     assert(draws == 1 && drawVertices == 4 && drawIndices == 3);
     assert(drawIndexArray[0] == 3 && drawIndexArray[1] == 2 && drawIndexArray[2] == 1);
 
-    /* Models far from the last frame's eye cast nothing. */
+    /* Models far from the last frame's eye cast nothing; WebSunShadows_CasterInRange
+     * checks unskinned off-frustum casters against the same 3600-unit range. */
     frame();
-    GfxEntity distant = player(eye[0] + 2700, eye[1], eye[2]), nearby = player(eye[0] + 2500, eye[1], eye[2]);
+    assert(WebSunShadows_CasterInRange((const float[]){eye[0] + 3500, eye[1], eye[2]}, eye));
+    assert(!WebSunShadows_CasterInRange((const float[]){eye[0] + 3700, eye[1], eye[2]}, eye));
+    assert(!WebSunShadows_CasterInRange((const float[]){NAN, eye[1], eye[2]}, eye));
+    assert(!WebSunShadows_CasterInRange(NULL, eye) && !WebSunShadows_CasterInRange(eye, NULL));
+    GfxEntity distant = player(eye[0] + 3700, eye[1], eye[2]), nearby = player(eye[0] + 3500, eye[1], eye[2]);
     add(&distant);
     add(&nearby);
     WebSunShadows_EndCapture(eye, forward, sun, sunColor);
+    assert(!WebSunShadows_CasterInRange(eye, eye));
     draws = 0;
     WebSunShadows_Render();
     assert(draws == 1 && drawVertices == 4);
@@ -379,6 +386,10 @@ mutants = [
      '        params[SUN_SHADOW_DEPTH_BIAS] = SUN_SHADOW_BIAS;'),
     ('    s_capturing = WebSunShadows_Enabled();', '    s_capturing = 1;'),
     ('    if (vertexCount > SUN_SHADOW_MAX_VERTICES - s_vertexCount ||', '    if (vertexCount > SUN_SHADOW_MAX_VERTICES ||'),
+    ('    if (!s_capturing || !WebSunShadows_Finite3(origin) || !WebSunShadows_Finite3(eye))',
+     '    if (!WebSunShadows_Finite3(origin) || !WebSunShadows_Finite3(eye))'),
+    ('    return dx * dx + dy * dy + dz * dz <= SUN_SHADOW_CASTER_RANGE * SUN_SHADOW_CASTER_RANGE;',
+     '    return 1;'),
 ]
 
 with tempfile.TemporaryDirectory(prefix='cod2-sun-shadows-') as tmp:

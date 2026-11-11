@@ -131,3 +131,50 @@ gl.useProgram(progB); assert.equal(count('useProgram'), 3);
 gl.uniform1i(uIntLoc, 3); assert.equal(count('uniform1i'), 3);
 gl.uniform1f(uFloatLoc, 0.25); assert.equal(count('uniform1f'), 3);
 console.log('PASS: 600 changing muzzle-light arrays preserve material caches; scalar/vector float32 equivalence, blend/program/scalar caches and shared samplers retain values');
+
+// Compositor and shadow passes save and restore bindings/capabilities without synchronous GPU readbacks.
+{
+  const qCalls = [];
+  let restore2;
+  const gl2 = {
+    TEXTURE0: 0x84C0, ACTIVE_TEXTURE: 0x84E0, CURRENT_PROGRAM: 0x8B8D,
+    VERTEX_ARRAY_BINDING: 0x85B5, ARRAY_BUFFER: 0x8892, ARRAY_BUFFER_BINDING: 0x8894,
+    FRAMEBUFFER: 0x8D40, DRAW_FRAMEBUFFER: 0x8CA9, READ_FRAMEBUFFER: 0x8CA8,
+    DRAW_FRAMEBUFFER_BINDING: 0x8CA6, READ_FRAMEBUFFER_BINDING: 0x8CAA,
+    STENCIL_TEST: 0x0B90, SCISSOR_TEST: 0x0C11, VIEWPORT: 0x0BA2
+  };
+  for (const name of ['activeTexture','useProgram','enable','disable','bindVertexArray','deleteVertexArray','bindBuffer','deleteBuffer','bindFramebuffer','deleteFramebuffer'])
+    gl2[name] = (...args) => qCalls.push([name, ...args]);
+  gl2.isEnabled = cap => { qCalls.push(['isEnabled', cap]); return false; };
+  gl2.getParameter = p => { qCalls.push(['getParameter', p]); return p === 0x0BA2 ? [0,0,1920,1080] : null; };
+  cache(gl2, {addEventListener(_, cb) { restore2 = cb; }});
+  const vao = {}, vbo = {}, fboA = {}, fboB = {}, prog = {};
+  gl2.useProgram(prog); gl2.activeTexture(0x84C2); gl2.bindVertexArray(vao);
+  gl2.bindBuffer(gl2.ARRAY_BUFFER, vbo); gl2.bindFramebuffer(gl2.FRAMEBUFFER, fboA);
+  gl2.enable(gl2.STENCIL_TEST);
+  assert.equal(gl2.isEnabled(gl2.SCISSOR_TEST), false); // 1st readback populates cache
+  const beforeReads = qCalls.filter(c => c[0] === 'getParameter' || c[0] === 'isEnabled').length;
+  for (let i = 0; i < 600; i++) {
+    assert.equal(gl2.getParameter(gl2.ACTIVE_TEXTURE), 0x84C2);
+    assert.equal(gl2.getParameter(gl2.CURRENT_PROGRAM), prog);
+    assert.equal(gl2.getParameter(gl2.VERTEX_ARRAY_BINDING), vao);
+    assert.equal(gl2.getParameter(gl2.ARRAY_BUFFER_BINDING), vbo);
+    assert.equal(gl2.getParameter(gl2.DRAW_FRAMEBUFFER_BINDING), fboA);
+    assert.equal(gl2.getParameter(gl2.READ_FRAMEBUFFER_BINDING), fboA);
+    assert.equal(gl2.isEnabled(gl2.STENCIL_TEST), true);
+    assert.equal(gl2.isEnabled(gl2.SCISSOR_TEST), false);
+  }
+  assert.equal(qCalls.filter(c => c[0] === 'getParameter' || c[0] === 'isEnabled').length, beforeReads);
+  gl2.bindFramebuffer(gl2.READ_FRAMEBUFFER, fboB);
+  assert.equal(gl2.getParameter(gl2.DRAW_FRAMEBUFFER_BINDING), fboA);
+  assert.equal(gl2.getParameter(gl2.READ_FRAMEBUFFER_BINDING), fboB);
+  gl2.deleteVertexArray(vao); gl2.deleteBuffer(vbo); gl2.deleteFramebuffer(fboA);
+  assert.equal(gl2.getParameter(gl2.VERTEX_ARRAY_BINDING), null);
+  assert.equal(gl2.getParameter(gl2.ARRAY_BUFFER_BINDING), null);
+  assert.equal(gl2.getParameter(gl2.DRAW_FRAMEBUFFER_BINDING), null);
+  assert.deepEqual(gl2.getParameter(gl2.VIEWPORT), [0,0,1920,1080]);
+  restore2();
+  gl2.getParameter(gl2.VERTEX_ARRAY_BINDING);
+  assert.equal(qCalls.filter(c => c[0] === 'getParameter').length, 2);
+  console.log('PASS: 600 compositor/shadow state saves and restores hit JS cache with zero driver readbacks');
+}
