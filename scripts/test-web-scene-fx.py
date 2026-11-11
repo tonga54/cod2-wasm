@@ -81,7 +81,7 @@ assert view_weapon < weapons.index('g_webAimFrac = playerState->fWeaponPosFrac;'
     weapons.index('return;', view_weapon)
 dvars = (root / 'src/PC/gfx_d3d/r_dvars.c').read_text()
 assert 'r_motionBlur = ri.Dvar_RegisterBool("r_motionBlur", 1, 0x2001);' in dvars
-assert 'r_sceneHeight = ri.Dvar_RegisterInt("r_sceneHeight", 720, 0, 2160, 0x2001);' in dvars
+assert 'r_sceneHeight = ri.Dvar_RegisterInt("r_sceneHeight", 1080, 0, 2160, 0x2001);' in dvars
 assert 'mtx[2][2] = c;' in (root / 'src/PC/universal/com_math.c').read_text()
 set2d = backend.index('static void RB_Set2D(void)')
 assert set2d < backend.index('WebSceneFx_EndView();', set2d) < backend.index('backEnd.projection2D = 1;', set2d)
@@ -118,6 +118,8 @@ assert ('dof || motion > 0 || vm || ao || haze || shafts || blast || taa ?\n'
         '                    (gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT) : gl.COLOR_BUFFER_BIT, gl.NEAREST);') in compositor
 assert 'gl.uniform4f(A.u_aoView, H[o + 15], 0.9995002746582031, H[o + 57], H[o + 58]);' in compositor
 assert 'gl.uniform4f(A.u_aoParams, H[o + 56], H[o + 55], w, h);' in compositor
+assert ('gl.uniform4f(A.u_aoSun, H[o + 66], H[o + 67], H[o + 68],\n'
+        '                    H[o + 77] + H[o + 78] + H[o + 79] > 0 ? 1 : 0);') in compositor
 assert 'fx.pass(A, t.aoFbo[0], t.hw, t.hh);' in compositor and 'fx.pass(P.aoBlur, t.aoFbo[1], t.hw, t.hh);' in compositor
 assert 'hw: Math.max(1, Math.ceil(w / 2)), hh: Math.max(1, Math.ceil(h / 2)),' in compositor
 assert 'gl.uniform4f(C.u_aoMix, ao ? 1 : 0, 0.5 / t.hw, 0.5 / t.hh, 0);' in compositor
@@ -126,16 +128,17 @@ assert ('["u_scene", "u_bloom", "u_depth", "u_dofMed", "u_dofLarge", "u_vmVeloci
         '                 "u_clarityMap"]') in compositor
 ao_shader = compositor[compositor.index('link("ao"'):compositor.index('link("aoBlur"')]
 assert '"  if (d < 0.2 || d >= 0.9999 || r < 1.5) return;\\n"' in ao_shader, 'the viewmodel and the sky stay open'
-assert ao_shader.count('"    if (dq < 0.2) continue;\\n"') == 2, 'the viewmodel hides nothing behind it, near or wide'
+assert ao_shader.count('"    if (dq < 0.2) continue;\\n"') == 2 and ao_shader.count('"      if (dq < 0.2) continue;\\n"') == 1, \
+    'the viewmodel hides nothing behind it, near, wide or in sun contact shade'
 # A second ring three times as wide, its samples within a fifth of the scene's
-# height, weighs 0.6 of the first.
+# height, weighs 0.6 of the first; contact shade marches toward the sun.
 assert '"  highp float rw = min(3.0 * r, 0.2 * u_aoParams.w);\\n"' in ao_shader
 assert ao_shader.index('"  highp float rw = min(3.0 * r, 0.2 * u_aoParams.w);\\n"') < \
     ao_shader.index('"  r = min(r, 0.1 * u_aoParams.w);\\n"'), 'the wide ring scales the unclamped radius'
 assert '"    ivec2 q = clamp(c + ivec2(vec2(cos(a), sin(a)) * (rw * (float(i) + 0.5) * 0.125)), ivec2(0), m);\\n"' in ao_shader
 assert ('"    wide += max(dot(v, n) * inversesqrt(max(vv, 1e-6)) - 0.15, 0.0) * '
         'max(1.0 - vv / (9.0 * r2), 0.0);\\n"') in ao_shader
-assert ao_shader.index('"  occlusion += 0.6 * wide;\\n"') < ao_shader.index('"  float fade = 1.0 - smoothstep(1400.0, 2600.0, z);\\n"')
+assert ao_shader.index('"  occlusion += 0.6 * wide;\\n"') < ao_shader.index('"  float fade = 1.0 - smoothstep(2200.0, 4200.0, z);\\n"')
 # Local contrast (r_clarity) reads its strength where the C side writes it
 # (100): the scene's light at a quarter of its size, spread by the aim blur's
 # kernel to a deviation of 5.3 pixels at 480 lines, is the tenth source, on
@@ -820,7 +823,7 @@ int main(void)
     assert(composes == 5 && composed[SCENE_FX_BACKDROP_GRAY] == 0 && composed[SCENE_FX_CONTRAST] == 0);
     assert(composed[SCENE_FX_TONE] == SCENE_FX_SHADE_LIFT && composed[SCENE_FX_SHARPEN] == 0.1f);
     /* Without the contrast curve the grade keeps its color by saturation. */
-    assert(composed[SCENE_FX_SATURATION] == 1.12f);
+    assert(composed[SCENE_FX_SATURATION] == 1.06f);
     /* At gray 0.6 the grade lifts 0.4 of the shade and takes 0.72 contrast. */
     WebSceneFx_SetGray(0.6f);
     frame(0, 1280, 0.1f);
@@ -1933,7 +1936,7 @@ mutants = [
     ('!scaled && s_grayFrac <= 0.0f && ', '!scaled && '),
     ('    if (s_grayFrac > params[SCENE_FX_BACKDROP_GRAY])\n        params[SCENE_FX_BACKDROP_GRAY] = s_grayFrac;\n', ''),
     ('params[SCENE_FX_CONTRAST] = 1.2f * s_grayFrac;', 'params[SCENE_FX_CONTRAST] = 0.0f * s_grayFrac;'),
-    ('params[SCENE_FX_SATURATION] = 1.12f;', 'params[SCENE_FX_SATURATION] = 0.96f;'),
+    ('params[SCENE_FX_SATURATION] = 1.06f;', 'params[SCENE_FX_SATURATION] = 0.96f;'),
     ('params[SCENE_FX_TONE] = film ? SCENE_FX_SHADE_LIFT * (1.0f - s_grayFrac) : 0.0f;',
      'params[SCENE_FX_TONE] = film ? SCENE_FX_SHADE_LIFT : 0.0f;'),
     ('params[SCENE_FX_TONE] = film ? SCENE_FX_SHADE_LIFT * (1.0f - s_grayFrac) : 0.0f;',

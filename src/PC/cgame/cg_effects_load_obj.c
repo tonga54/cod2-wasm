@@ -39,6 +39,62 @@ static const char *g_TypeName[11] = {
     "rocket_explode"
 };
 
+#ifdef __EMSCRIPTEN__
+/* CoD2's bullet impacts stop spawning dust, sparks and chunks past 500-1000
+ * units. Extend single-tier primitives to 2400 units (scaled again by
+ * r_lodDistanceScale) while keeping multi-tier near/far LOD handoffs intact,
+ * and scale dust, smoke and spark sizes up by 75% so hits read clearly at 1080p. */
+static EffectTemplate *CG_EnhanceBulletImpact(const EffectTemplate *original)
+{
+    EffectTemplate *effect;
+    int i, j;
+
+    if (!original)
+        return NULL;
+    effect = Hunk_AllocAlignInternal(sizeof(*effect), 4);
+    memcpy(effect, original, sizeof(*effect));
+    for (i = 0; i < effect->mPrimitiveCount; ++i) {
+        const PrimitiveTemplate *source = original->mPrimitives[i];
+        PrimitiveTemplate *prim;
+        int hasFarTier = 0;
+        int scaleSize;
+
+        if (!source)
+            continue;
+        for (j = 0; j < effect->mPrimitiveCount; ++j) {
+            const PrimitiveTemplate *other = original->mPrimitives[j];
+            if (other && source->mSpawnRange.mMax > 0.0f && other->mSpawnRange.mMin == source->mSpawnRange.mMax) {
+                hasFarTier = 1;
+                break;
+            }
+        }
+        scaleSize = source->mType == PT_PARTICLE || source->mType == PT_ORIENTEDPARTICLE ||
+                    source->mType == PT_TAIL || source->mType == PT_CLOUD;
+        if (!scaleSize && (hasFarTier || source->mSpawnRange.mMax == 0.0f || source->mSpawnRange.mMax >= 2400.0f))
+            continue;
+        prim = Hunk_AllocAlignInternal(sizeof(*prim), 4);
+        memcpy(prim, source, sizeof(*prim));
+        if (!hasFarTier && prim->mSpawnRange.mMin == 0.0f && prim->mSpawnRange.mMax > 0.0f &&
+            prim->mSpawnRange.mMax < 2400.0f)
+            prim->mSpawnRange.mMax = 2400.0f;
+        if (scaleSize) {
+            prim->mFxChannels[FXCHAN_SIZE].scaleRange.mMin *= 1.75f;
+            prim->mFxChannels[FXCHAN_SIZE].scaleRange.mMax *= 1.75f;
+            if (source->mType == PT_TAIL || source->mType == PT_CLOUD) {
+                prim->mFxChannels[FXCHAN_LENGTH].scaleRange.mMin *= 1.75f;
+                prim->mFxChannels[FXCHAN_LENGTH].scaleRange.mMax *= 1.75f;
+            } else if (source->mNonUniformScale) {
+                prim->mFxChannels[FXCHAN_SIZE2].scaleRange.mMin *= 1.75f;
+                prim->mFxChannels[FXCHAN_SIZE2].scaleRange.mMax *= 1.75f;
+            }
+            prim->spawnFrustumCullRadius *= 1.75f;
+        }
+        effect->mPrimitives[i] = prim;
+    }
+    return effect;
+}
+#endif
+
 static EffectTemplate *CG_EnlargeGrenadeExplosion(const EffectTemplate *original)
 {
     EffectTemplate *effect;
@@ -205,6 +261,11 @@ FxImpactTable *CG_RegisterImpactEffects(const char *mapname)
     const EffectTemplate *grenadeOriginals[23];
     EffectTemplate *grenadeVariants[23];
     int grenadeVariantCount = 0;
+#ifdef __EMSCRIPTEN__
+    const EffectTemplate *bulletOriginals[184];
+    EffectTemplate *bulletVariants[184];
+    int bulletVariantCount = 0;
+#endif
 
     for (typeIdx = 0; typeIdx < 11; typeIdx++) {
         FxImpactEntry *entries = (FxImpactEntry *)((byte *)fx->table + offset);
@@ -223,6 +284,20 @@ FxImpactTable *CG_RegisterImpactEffects(const char *mapname)
                 ((int *)entries)[surfIdx] = 0;
             } else {
                 EffectTemplate *effect = FX_RegisterEffect(effectFile);
+#ifdef __EMSCRIPTEN__
+                if (typeIdx < 8 && effect) {
+                    int variant;
+                    for (variant = 0; variant < bulletVariantCount; ++variant)
+                        if (bulletOriginals[variant] == effect)
+                            break;
+                    if (variant == bulletVariantCount) {
+                        bulletOriginals[variant] = effect;
+                        bulletVariants[variant] = CG_EnhanceBulletImpact(effect);
+                        ++bulletVariantCount;
+                    }
+                    effect = bulletVariants[variant];
+                } else
+#endif
                 if (typeIdx == 9 && effect) {
                     int variant;
                     for (variant = 0; variant < grenadeVariantCount; ++variant)

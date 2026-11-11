@@ -27,6 +27,9 @@ extern void Item_BindText(itemDef_t *item, char *text, int size);
 extern void Item_EditField_Begin(itemDef_t *item);
 extern itemDef_t *Item_EditField_Current(void);
 extern void Item_EditField_End(void);
+extern int Item_GetCursorPosOffset(const itemDef_t *item, const char *buff, int direction);
+extern void Item_SetCursorPos(itemDef_t *item, int cursorPos);
+extern void Key_SetOverstrikeMode(qboolean state);
 extern qboolean CL_KeyIsDown(int key);
 extern void CL_DrawStretchPic(float x, float y, float w, float h, int horzAlign, int vertAlign, float s1, float t1,
                               float s2, float t2, const vec_t *color, MaterialHandle material);
@@ -175,6 +178,10 @@ extern float GetRealWidthFromVirtualWidth(float width);
  * its tabs make one list. */
 #define SET_TAB_DVAR "ui_gamepadPage"
 #define SET_LIST_MENU "options_menu"
+/* The gametag is userinfo: written on every key, the server would relay each
+ * partial name. The field edits this draft, applied to name when it is left. */
+#define SET_NAME_DVAR "name"
+#define SET_NAME_DRAFT_DVAR "ui_nameDraft"
 
 enum { SET_KIND_BUTTON, SET_KIND_VALUE, SET_KIND_SLIDER, SET_KIND_BIND, SET_KIND_FIELD };
 enum { SET_PART_ROW, SET_PART_LEFT, SET_PART_RIGHT, SET_PART_BAR };
@@ -974,6 +981,112 @@ static void Settings_Change(displayContextDef_t *dc, SettingsPage *page, int key
         Settings_Retail(dc, page->menu, control, key);
 }
 
+/* The gametag reaches the server as userinfo, so a field bound to it would send
+ * every partial name. Point the field at a draft and keep the typed text there
+ * until the field is left. */
+static itemDef_t *s_nameField;
+static const char *s_nameFieldDvar;
+
+static void Settings_NameEdit(itemDef_t *item)
+{
+    if (!item || !item->dvar || I_stricmp(item->dvar, SET_NAME_DVAR))
+        return;
+    s_nameField = item;
+    s_nameFieldDvar = item->dvar;
+    Dvar_SetFromStringByName(SET_NAME_DRAFT_DVAR, Dvar_GetVariantString(SET_NAME_DVAR));
+    item->dvar = SET_NAME_DRAFT_DVAR;
+}
+
+static void Settings_NameCommit(void)
+{
+    const char *draft;
+
+    if (!s_nameField)
+        return;
+    s_nameField->dvar = s_nameFieldDvar;
+    draft = Dvar_GetVariantString(SET_NAME_DRAFT_DVAR);
+    if (strcmp(draft, Dvar_GetVariantString(SET_NAME_DVAR)))
+        Dvar_SetFromStringByName(SET_NAME_DVAR, draft);
+    s_nameField = NULL;
+    s_nameFieldDvar = NULL;
+}
+
+static void Settings_EndField(void)
+{
+    Settings_NameCommit();
+    Item_EditField_End();
+}
+
+static float Settings_Fit(const char *text, int bold, float cap, float tracking, float room);
+
+/* Keeps the caret inside the field's visible slice. */
+static void Settings_NameScroll(itemDef_t *item, int caret)
+{
+    editFieldDef_t *edit = Item_GetEditFieldDef(item);
+    const char *value = Dvar_GetVariantString(item->dvar);
+    int off;
+
+    if (!edit)
+        return;
+    if (caret < edit->paintOffset) {
+        edit->paintOffset = caret;
+    } else if (edit->maxPaintChars) {
+        off = Item_GetCursorPosOffset(item, value, -edit->maxPaintChars);
+        if (off > edit->paintOffset)
+            edit->paintOffset = off;
+    }
+}
+
+/* The gametag is typed onto, not over: the caret starts after the last
+ * character and keys insert. */
+static void Settings_NameStart(itemDef_t *item)
+{
+    int caret;
+
+    if (s_nameField != item)
+        return;
+    Key_SetOverstrikeMode(0);
+    caret = (int)strlen(Dvar_GetVariantString(item->dvar));
+    Item_SetCursorPos(item, caret);
+    Settings_NameScroll(item, caret);
+}
+
+/* A click inside the field puts the caret at the character under the pointer,
+ * over the same centered text the field paints. */
+static void Settings_NameCaret(displayContextDef_t *dc, itemDef_t *item)
+{
+    editFieldDef_t *edit = Item_GetEditFieldDef(item);
+    const char *value = Dvar_GetVariantString(item->dvar);
+    char visible[SET_TEXT_MAX], prefix[SET_TEXT_MAX];
+    int length = (int)strlen(value), offset, count, shown, i, caret;
+    float cx = (float)dc->cursorx, cap, start, width;
+
+    if (!edit)
+        return;
+    offset = edit->paintOffset < 0 ? 0 : (edit->paintOffset > length ? length : edit->paintOffset);
+    count = edit->maxPaintChars > 0 ? edit->maxPaintChars : SET_TEXT_MAX - 1;
+    if (count > SET_TEXT_MAX - 1)
+        count = SET_TEXT_MAX - 1;
+    shown = length - offset > count ? count : length - offset;
+    snprintf(visible, sizeof(visible), "%.*s", shown, value + offset);
+    cap = Settings_Fit(visible, 0, SET_VALUE_CAP, 0.0f, SET_VALUE_ROOM);
+    start = SET_VALUE_CENTER - 0.5f * UI_WWIIMenu_Width(visible, 0, cap, 0.0f);
+    CalcScreenX(&start, SET_ALIGN_LEFT);
+    CalcScreenX(&cx, SET_ALIGN_FULLSCREEN);
+    caret = offset;
+    for (i = 1; i <= shown; i++) {
+        snprintf(prefix, sizeof(prefix), "%.*s", i, visible);
+        width = GetRealWidthFromVirtualWidth(UI_WWIIMenu_Width(prefix, 0, cap, 0.0f));
+        if (start + width > cx)
+            break;
+        caret = offset + i;
+    }
+    if (caret > 0 && caret < length && value[caret - 1] == '^' && value[caret] > '/' && value[caret] <= '9')
+        caret--;
+    Item_SetCursorPos(item, caret);
+    Settings_NameScroll(item, caret);
+}
+
 static void Settings_Activate(displayContextDef_t *dc, SettingsPage *page)
 {
     itemDef_t *control = Settings_Focused(page);
@@ -993,7 +1106,9 @@ static void Settings_Activate(displayContextDef_t *dc, SettingsPage *page)
             s_settings.bindItem = control;
         break;
     case SET_KIND_FIELD:
+        Settings_NameEdit(control);
         Item_EditField_Begin(control);
+        Settings_NameStart(control);
         break;
     default:
         break;
@@ -1124,12 +1239,19 @@ int UI_WWIISettings_KeyEvent(displayContextDef_t *dc, menuDef_t *menu, int key, 
     }
     editing = Item_EditField_Current();
     if (editing && down) {
+        if (key == SET_KEY_MOUSE1 && editing == s_nameField) {
+            Settings_HoverNow(dc, page);
+            if (Settings_HoverValid(page) && Settings_Control(&page->rows[s_settings.hoverRow]) == editing) {
+                Settings_NameCaret(dc, editing);
+                return 1;
+            }
+        }
         if (key == SET_KEY_MOUSE1 || key == SET_KEY_MOUSE2 || key == SET_KEY_UP || key == SET_KEY_DOWN ||
             key == SET_KEY_TAB || key == SET_KEY_WHEEL_UP || key == SET_KEY_WHEEL_DOWN) {
-            Item_EditField_End();
+            Settings_EndField();
         } else {
             if (!Item_TextField_HandleKey(dc, editing, key))
-                Item_EditField_End();
+                Settings_EndField();
             return 1;
         }
     }
@@ -1611,6 +1733,10 @@ void UI_WWIISettings_Reset(const displayContextDef_t *dc)
 {
     if (s_settings.dc && dc != s_settings.dc)
         return;
+    /* Menu setup is rebuilding the items: a draft still open belongs to the
+     * old ones, and its item may already be gone. */
+    s_nameField = NULL;
+    s_nameFieldDvar = NULL;
     memset(&s_settings, 0, sizeof(s_settings));
     s_settings.generation = R_GetHudImageGeneration();
     s_settings.hoverRow = -1;
@@ -1642,9 +1768,14 @@ void UI_WWIISettings_Update(const displayContextDef_t *dc)
         s_settings.imagesBuilt = 0;
         s_settings.arrow = s_settings.roundel = NULL;
     }
+    /* A field ended by another path leaves the draft to apply; an edit still on
+     * the name keeps it. */
+    if (s_nameField && Item_EditField_Current() != s_nameField)
+        Settings_NameCommit();
     if (!s_settings.shown || Settings_Top(dc))
         return;
     /* Options closed: it opens again at its first category. */
+    Settings_NameCommit();
     s_settings.shown = NULL;
     s_settings.listShown = 0;
     s_settings.dragRow = -1;

@@ -8,6 +8,7 @@ extern int I_stricmp(const char *s1, const char *s2);
 extern int Com_sprintf(char *dest, int size, const char *fmt, ...);
 extern char *va(const char *fmt, ...);
 extern void SV_GameSendServerCommand(int clientNum, int type, const char *text);
+extern qboolean G_ClientIsAnonymous(int clientNum);
 
 enum {
     POINTS_MAX_CLIENTS = 64,
@@ -181,7 +182,8 @@ static void G_PointsKeep(int clientNum)
     G_PointsKept *kept;
     char key[POINTS_KEY_SIZE];
 
-    if (client->sess.localClient || !G_PointsNameKey(client->sess.cs.name, key))
+    if (client->sess.localClient || G_ClientIsAnonymous(clientNum) ||
+        !G_PointsNameKey(client->sess.cs.name, key))
         return;
     if (!slot->points && !slot->kills && !slot->assists && !slot->headshots && !client->sess.score &&
         !client->sess.deaths)
@@ -211,7 +213,8 @@ static void G_PointsTakeBack(int clientNum)
     G_PointsKept *kept;
     char key[POINTS_KEY_SIZE];
 
-    if (client->sess.localClient || !G_PointsNameKey(client->sess.cs.name, key))
+    if (client->sess.localClient || G_ClientIsAnonymous(clientNum) ||
+        !G_PointsNameKey(client->sess.cs.name, key))
         return;
     kept = G_PointsFindKept(key);
     if (!kept)

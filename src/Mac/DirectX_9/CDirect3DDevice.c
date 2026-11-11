@@ -226,6 +226,7 @@ static void *ps_stub_vtbl[] = {
 
 static IDirect3DVertexShader9 *g_activeVertexShader = NULL;
 static IDirect3DVertexDeclaration9 *g_activeVertexDeclaration = NULL;
+static unsigned s_vertexDeclRevision = 1;
 
 typedef struct {
     void **vtable;
@@ -1225,6 +1226,10 @@ ULONG CDirect3DDevice_Release(const CDirect3DDevice *_this)
     DeviceImpl *dev = (DeviceImpl *)_this;
     ULONG rc = --dev->refCount;
     if (!rc) {
+#ifdef __EMSCRIPTEN__
+        extern void CDirect3DDevice_ReleaseWebStream(void);
+        CDirect3DDevice_ReleaseWebStream();
+#endif
 
         void (*dtor)(void *) = (void (*)(void *))dev->vtable[120];
         dtor((void *)_this);
@@ -1771,6 +1776,72 @@ HRESULT CDirect3DDevice_Clear(const CDirect3DDevice *_this, DWORD Count, const D
     return 0;
 }
 
+#ifdef __EMSCRIPTEN__
+#define WEB_SKINNED_RING 4u
+static unsigned s_webSkinnedVbo[WEB_SKINNED_RING];
+static unsigned s_webSkinnedSlot;
+static const void *s_webSkinnedUploadedVb;
+static UINT s_webSkinnedUploadedBytes;
+
+void CDirect3DDevice_ReleaseWebStream(void)
+{
+    extern void glDeleteBuffers(int count, const unsigned *buffers);
+    if (s_webSkinnedVbo[0] || s_webSkinnedVbo[1] || s_webSkinnedVbo[2] || s_webSkinnedVbo[3])
+        glDeleteBuffers(WEB_SKINNED_RING, s_webSkinnedVbo);
+    memset(s_webSkinnedVbo, 0, sizeof(s_webSkinnedVbo));
+    s_webSkinnedSlot = 0;
+    s_webSkinnedUploadedVb = NULL;
+    s_webSkinnedUploadedBytes = 0;
+}
+
+static void CDirect3DDevice_NextWebStreamFrame(void)
+{
+    s_webSkinnedSlot = (s_webSkinnedSlot + 1u) & (WEB_SKINNED_RING - 1u);
+    s_webSkinnedUploadedVb = NULL;
+    s_webSkinnedUploadedBytes = 0;
+}
+
+/* Skinned character and viewmodel vertices for the whole frame are written
+ * before RB_ExecuteRenderCommands unlocks skinnedCacheVb. Upload that prefix
+ * once per frame into a 4-frame ring VBO so all submesh draws share one idle
+ * GPU buffer and pair with persistent static model index buffers. */
+static int CDirect3DDevice_BindSkinnedWebCache(const void *streamVb, const byte *vbData,
+    long long firstByte, UINT drawBytes, const byte **attributeBase)
+{
+    extern void glGenBuffers(int count, unsigned *buffers);
+    extern void glBindBuffer(unsigned target, unsigned buffer);
+    extern void glBufferData(unsigned target, ptrdiff_t size, const void *src, unsigned usage);
+    const DxGlobals *dx = (const DxGlobals *)imp_dx;
+    unsigned *buf = &s_webSkinnedVbo[s_webSkinnedSlot];
+    int poolIdx;
+
+    if (!dx || dx->skinnedCacheLockAddr || firstByte < 0 || !vbData || !drawBytes)
+        return 0;
+    for (poolIdx = 0; poolIdx < 2; ++poolIdx) {
+        const r_vb_state_t *pool = &dx->skinnedCacheVbPool[poolIdx];
+        UINT used = pool->used > 0 ? (UINT)pool->used : 0;
+        if ((const void *)pool->buffer != streamVb || !used)
+            continue;
+        if ((unsigned long long)firstByte + drawBytes > used)
+            return 0;
+        if (!*buf) {
+            glGenBuffers(1, buf);
+            if (!*buf)
+                return 0;
+        }
+        glBindBuffer(0x8892, *buf);
+        if (s_webSkinnedUploadedVb != streamVb || s_webSkinnedUploadedBytes != used) {
+            glBufferData(0x8892, (ptrdiff_t)used, vbData, 0x88E0);
+            s_webSkinnedUploadedVb = streamVb;
+            s_webSkinnedUploadedBytes = used;
+        }
+        *attributeBase = (const byte *)(uintptr_t)firstByte;
+        return 1;
+    }
+    return 0;
+}
+#endif
+
 HRESULT CDirect3DDevice_Present(const CDirect3DDevice *_this, const RECT *pSourceRect,
                                 const RECT *pDestRect, HWND hDestWindowOverride, const RGNDATA *pDirtyRegion)
 {
@@ -1784,6 +1855,9 @@ HRESULT CDirect3DDevice_Present(const CDirect3DDevice *_this, const RECT *pSourc
     if (sdl_gl_window) {
         SDL_GL_SwapWindowDirect();
     }
+#ifdef __EMSCRIPTEN__
+    CDirect3DDevice_NextWebStreamFrame();
+#endif
     return 0;
 }
 
@@ -1886,6 +1960,7 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
     int staticIndexRange = 0;
     int staticVertexBuffer = 0;
     int staticIndexBuffer = 0;
+    int staticIndexFromAsset = 0;
     int webColorOrder = 0;
 #define WEB_STATE_CHECK(stage) do { if (webCheck) fprintf(stdout, "[web-state] %s error=0x%x\n", stage, glGetError()); } while (0)
 #else
@@ -1908,43 +1983,66 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
     usesLightmap = !is2D && (stride == 0x44 || stride == 0x20);
     stage0Target = 0x0DE1;
 
-    positionOffset = 0;
-    positionComponents = 3;
-    colorOffset = stride == 0x44                       ? 0x18
-                  : stride == 0x40                     ? 0x1c
-                  : stride == 0x24                     ? 0x18
-                  : (stride == 0x18 || stride == 0x20) ? 0x0c
-                                                       : -1;
-    texOffset = stride == 0x44   ? 0x1c
-                : stride == 0x40 ? 0x20
-                : stride == 0x24 ? 0x1c
-                : (stride == 0x20 || stride == 0x18) ? 0x10
-                                 : -1;
-    lightmapOffset = stride == 0x44 ? 0x24 : stride == 0x20 ? 0x18 : -1;
-    normalOffset = stride == 0x44   ? 0x0c
-                   : stride == 0x40 ? 0x10
-                   : stride == 0x24 ? 0x0c
-                                    : -1;
+    {
+        static unsigned cachedDeclRev;
+        static UINT cachedStride;
+        static int cachedPosOffset, cachedPosComps, cachedColorOffset, cachedTexOffset, cachedLmapOffset, cachedNormOffset;
+        if (cachedDeclRev == s_vertexDeclRevision && cachedStride == stride) {
+            positionOffset = cachedPosOffset;
+            positionComponents = cachedPosComps;
+            colorOffset = cachedColorOffset;
+            texOffset = cachedTexOffset;
+            lightmapOffset = cachedLmapOffset;
+            normalOffset = cachedNormOffset;
+        } else {
+            positionOffset = 0;
+            positionComponents = 3;
+            colorOffset = stride == 0x44                       ? 0x18
+                          : stride == 0x40                     ? 0x1c
+                          : stride == 0x24                     ? 0x18
+                          : (stride == 0x18 || stride == 0x20) ? 0x0c
+                                                               : -1;
+            texOffset = stride == 0x44   ? 0x1c
+                        : stride == 0x40 ? 0x20
+                        : stride == 0x24 ? 0x1c
+                        : (stride == 0x20 || stride == 0x18) ? 0x10
+                                         : -1;
+            lightmapOffset = stride == 0x44 ? 0x24 : stride == 0x20 ? 0x18 : -1;
+            normalOffset = stride == 0x44   ? 0x0c
+                           : stride == 0x40 ? 0x10
+                           : stride == 0x24 ? 0x0c
+                                            : -1;
 
-    element = CDirect3DDevice_FindVertexElement(0, 0, 0);
-    if (!element)
-        element = CDirect3DDevice_FindVertexElement(0, 9, 0);
-    if (element) {
-        positionOffset = element->Offset;
-        positionComponents = element->Type == 3 ? 4 : 3;
+            element = CDirect3DDevice_FindVertexElement(0, 0, 0);
+            if (!element)
+                element = CDirect3DDevice_FindVertexElement(0, 9, 0);
+            if (element) {
+                positionOffset = element->Offset;
+                positionComponents = element->Type == 3 ? 4 : 3;
+            }
+            element = CDirect3DDevice_FindVertexElement(0, 10, 0);
+            if (element)
+                colorOffset = element->Offset;
+            element = CDirect3DDevice_FindVertexElement(0, 5, 0);
+            if (element)
+                texOffset = element->Offset;
+            element = CDirect3DDevice_FindVertexElement(0, 5, 1);
+            if (element)
+                lightmapOffset = element->Offset;
+            element = CDirect3DDevice_FindVertexElement(0, 3, 0);
+            if (element)
+                normalOffset = element->Offset;
+
+            cachedDeclRev = s_vertexDeclRevision;
+            cachedStride = stride;
+            cachedPosOffset = positionOffset;
+            cachedPosComps = positionComponents;
+            cachedColorOffset = colorOffset;
+            cachedTexOffset = texOffset;
+            cachedLmapOffset = lightmapOffset;
+            cachedNormOffset = normalOffset;
+        }
     }
-    element = CDirect3DDevice_FindVertexElement(0, 10, 0);
-    if (element)
-        colorOffset = element->Offset;
-    element = CDirect3DDevice_FindVertexElement(0, 5, 0);
-    if (element)
-        texOffset = element->Offset;
-    element = CDirect3DDevice_FindVertexElement(0, 5, 1);
-    if (element)
-        lightmapOffset = element->Offset;
-    element = CDirect3DDevice_FindVertexElement(0, 3, 0);
-    if (element)
-        normalOffset = element->Offset;
 
     colorByteOrder = CDirect3DDevice_ColorByteOrder(stride, positionComponents);
 
@@ -2342,10 +2440,16 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
             attributeBase = (const byte *)(uintptr_t)firstByte;
             staticVertexBuffer = 1;
         }
+        if (!staticVertexBuffer && !is2D && stage0Target == 0x0DE1 &&
+            (unsigned long long)drawVertexCount * stride <= 0x800000ull) {
+            staticVertexBuffer = CDirect3DDevice_BindSkinnedWebCache(
+                dev->streams[0], vbData, firstByte, drawVertexCount * stride, &attributeBase);
+        }
         if (staticIndexRange) {
             staticIndexBuffer = CDirect3DDevice_BindStaticWebIndices(
                 (const CDirect3DIndexBuffer *)dev->indexBuffer, staticVertexBuffer,
                 offset, BaseVertexIndex, stride, startIndex, &attributeBase, &drawIndices);
+            staticIndexFromAsset = staticIndexBuffer;
             if (!staticIndexBuffer) {
                 drawIndices = CDirect3DDevice_IndexRange(
                     (const unsigned short *)(ibData + startIndex * 2), indexCount,
@@ -2453,11 +2557,16 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
             int pointLight = !is2D && dev->zWriteEnable && !dev->alphaBlendEnable &&
                 stage0Target == 0x0DE1 && (usesLightmap || dev->lighting);
             /* Lightmapped layers blended over the world, such as terrain and
-             * decals, take the light and shadows of the surface under them. */
+             * decals, take the light and shadows of the surface under them;
+             * static and loose models (reType 1 and 2, never casters) take
+             * moving models' sun shadows as well. */
             int lightmappedBlend = !is2D && dev->alphaBlendEnable && stage0Target == 0x0DE1 &&
                 usesLightmap && stage1Bound == 1;
+            int staticShadow = !is2D && dev->zWriteEnable && !dev->alphaBlendEnable &&
+                stage0Target == 0x0DE1 && dev->lighting && backEndState && backEndState->currentEntity &&
+                (backEndState->currentEntity->reType == 1 || backEndState->currentEntity->reType == 2);
             int worldShadow = (!is2D && dev->zWriteEnable && !dev->alphaBlendEnable &&
-                stage0Target == 0x0DE1 && usesLightmap) || lightmappedBlend;
+                stage0Target == 0x0DE1 && usesLightmap) || lightmappedBlend || staticShadow;
             unsigned int normalMap = 0, specularMap = 0, detailMap = 0, camoMap = 0, camoMask = 0;
             float detailScale[2] = {0, 0}, camoTiles = 0, camoReference = 0;
             int materialLighting = (pointLight || lightmappedBlend) &&
@@ -2523,7 +2632,7 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
          * it does not scan the same index list again before uploading. */
         {
             extern void glDrawRangeElements(unsigned, unsigned, unsigned, int, unsigned, const void *);
-            UINT rangeStart = staticIndexBuffer ? firstVertex : 0;
+            UINT rangeStart = staticIndexFromAsset ? firstVertex : 0;
             glDrawRangeElements(0x0004, rangeStart, rangeStart + drawVertexCount - 1,
                 indexCount, 0x1403, drawIndices);
         }
@@ -3035,7 +3144,10 @@ HRESULT CDirect3DDevice_GetIndices(const CDirect3DDevice *_this, IDirect3DIndexB
 HRESULT CDirect3DDevice_SetVertexDeclaration(const CDirect3DDevice *_this, IDirect3DVertexDeclaration9 *pDecl)
 {
     (void)_this;
-    g_activeVertexDeclaration = pDecl;
+    if (g_activeVertexDeclaration != pDecl) {
+        g_activeVertexDeclaration = pDecl;
+        ++s_vertexDeclRevision;
+    }
     return 0;
 }
 

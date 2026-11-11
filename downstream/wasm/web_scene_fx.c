@@ -155,17 +155,17 @@ enum {
 #define SCENE_FX_SCOPE_FLOATS (SCENE_FX_SCOPE_END - SCENE_FX_SCOPE)
 
 /* r_ssao's darkening of an enclosed point, and the radius it measures. */
-#define SCENE_FX_AO_STRENGTH 0.55f
-#define SCENE_FX_AO_WORLD_RADIUS 22.0f
+#define SCENE_FX_AO_STRENGTH 0.86f
+#define SCENE_FX_AO_WORLD_RADIUS 26.0f
 
 /* r_atmosphere adds this share of the map's own fog density, at most the
  * thinnest map's whole fog (Dawnville's own is the thickest), thickest at
  * the eye's height and below and thinning above it over the scale height
  * in units; toward the sun the haze takes up to this share of its light. */
-#define SCENE_FX_HAZE_SHARE 0.6f
-#define SCENE_FX_HAZE_MAX_DENSITY 0.0001f
+#define SCENE_FX_HAZE_SHARE 0.85f
+#define SCENE_FX_HAZE_MAX_DENSITY 0.00016f
 #define SCENE_FX_HAZE_SCALE_HEIGHT 640.0f
-#define SCENE_FX_HAZE_SUN_GLOW 0.45f
+#define SCENE_FX_HAZE_SUN_GLOW 0.62f
 
 /* The shafts come in as the sun's cosine to the view's axis rises from the
  * first value to the second, so they fade before the sun leaves the screen's
@@ -181,8 +181,8 @@ enum {
  * from the high sun's to the low one's. */
 #define SCENE_FX_SHAFTS_HIGH_AIR 1.1547005f
 #define SCENE_FX_SHAFTS_LOW_AIR 2.9238044f
-#define SCENE_FX_SHAFTS_GAIN_HIGH 2.16f
-#define SCENE_FX_SHAFTS_GAIN_LOW 2.52f
+#define SCENE_FX_SHAFTS_GAIN_HIGH 1.45f
+#define SCENE_FX_SHAFTS_GAIN_LOW 1.75f
 
 /* A shockwave's front runs out to this multiple of its blast's radius over
  * its life in milliseconds, quickly and then slowing; it bends the view by
@@ -198,9 +198,8 @@ enum {
  * surroundings' further from them. */
 #define SCENE_FX_CLARITY_GAIN 0.28f
 
-/* The film grade lifts the shade, as WWII's filmic toe does, by this much of
- * x (1 - x)^2 for a channel x: 0.05 to 0.07, 0.2 to 0.26, 0.6 to 0.64. */
-#define SCENE_FX_SHADE_LIFT 0.45f
+/* The film grade lifts deep shade steadily without frame-to-frame exposure swings. */
+#define SCENE_FX_SHADE_LIFT 0.34f
 
 /* Temporal antialiasing keeps this share of each pixel from the frames
  * before; the view moves within its pixels through this many points of the
@@ -448,13 +447,20 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "    u_wideOffset.x, u_wideOffset.y, u_wideOffset.z);\n" +
                 "  float ww[7] = float[7](u_wideWeight.w, u_wideWeight.z, u_wideWeight.y, u_wideWeight.x,\n" +
                 "    u_wideWeight.y, u_wideWeight.z, u_wideWeight.w);\n" +
-                "  vec3 narrow = vec3(0.0), wide = vec3(0.0);\n" +
+                "  vec3 center = texture(u_src, v_uv).rgb;\n" +
+                "  vec3 narrow = center * (nw[1] * nw[1]), wide = center * (ww[3] * ww[3]);\n" +
                 "  for (int y = 0; y < 3; ++y)\n" +
-                "    for (int x = 0; x < 3; ++x)\n" +
+                "    for (int x = 0; x < 3; ++x) {\n" +
+                "      if (x == 1 && y == 1) continue;\n" +
                 "      narrow += texture(u_src, v_uv + vec2(no[x], no[y]) * u_texel).rgb * (nw[x] * nw[y]);\n" +
+                "    }\n" +
                 "  for (int y = 0; y < 7; ++y)\n" +
-                "    for (int x = 0; x < 7; ++x)\n" +
-                "      wide += texture(u_src, v_uv + vec2(wo[x], wo[y]) * u_texel).rgb * (ww[x] * ww[y]);\n" +
+                "    for (int x = 0; x < 7; ++x) {\n" +
+                "      if (x == 3 && y == 3) continue;\n" +
+                "      float w = ww[x] * ww[y];\n" +
+                "      if (w < 0.0015) continue;\n" +
+                "      wide += texture(u_src, v_uv + vec2(wo[x], wo[y]) * u_texel).rgb * w;\n" +
+                "    }\n" +
                 "  o = vec4(narrow * u_mix.x + wide * u_mix.y, 1.0);\n}\n",
                 ["u_src"], ["u_texel", "u_narrow", "u_wideOffset", "u_wideWeight", "u_mix"]);
             link("dofBlur", "uniform sampler2D u_src;\nuniform highp vec2 u_step;\n" +
@@ -583,6 +589,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
              * viewmodel and the sky stay open. R holds the result, G and B
              * the linear depth for the blur. */
             link("ao", "uniform highp sampler2D u_depth;\nuniform highp vec4 u_aoView;\nuniform highp vec4 u_aoParams;\n" +
+                "uniform highp vec4 u_aoSun;\n" +
                 "highp float aoZ(highp float d) { return u_aoView.x / max(u_aoView.y - d, 0.000001); }\n" +
                 "highp vec3 aoPos(ivec2 q, highp float z) {\n" +
                 "  highp vec2 ndc = (vec2(q) + 0.5) / u_aoParams.zw * 2.0 - 1.0;\n" +
@@ -592,7 +599,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "  ivec2 c = min(ivec2(gl_FragCoord.xy) * 2, m);\n" +
                 "  highp float d = texelFetch(u_depth, c, 0).r;\n" +
                 "  highp float z = aoZ(d);\n" +
-                "  highp float zn = clamp(z / 4096.0, 0.0, 1.0) * 255.0;\n" +
+                "  highp float zn = clamp(z / 6144.0, 0.0, 1.0) * 255.0;\n" +
                 "  o = vec4(1.0, floor(zn) / 255.0, fract(zn), 1.0);\n" +
                 "  highp float r = u_aoParams.x * u_aoView.w / z * 0.5 * u_aoParams.w;\n" +
                 "  if (d < 0.2 || d >= 0.9999 || r < 1.5) return;\n" +
@@ -609,7 +616,8 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "  n *= inversesqrt(max(dot(n, n), 1e-20));\n" +
                 "  if (dot(n, p) > 0.0) n = -n;\n" +
                 "  highp float r2 = u_aoParams.x * u_aoParams.x;\n" +
-                "  float a0 = 6.2831853 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));\n" +
+                "  float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));\n" +
+                "  float a0 = 6.2831853 * jitter;\n" +
                 "  float occlusion = 0.0;\n" +
                 "  for (int i = 0; i < 8; ++i) {\n" +
                 "    float a = a0 + float(i) * 2.3999632;\n" +
@@ -633,10 +641,31 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "    wide += max(dot(v, n) * inversesqrt(max(vv, 1e-6)) - 0.15, 0.0) * max(1.0 - vv / (9.0 * r2), 0.0);\n" +
                 "  }\n" +
                 "  occlusion += 0.6 * wide;\n" +
+                /* Screen-space directional sun contact shadow: cobbles, steps,
+                 * trim and sandbag lips cast crisp near-field shade with dense
+                 * steps so walls and window frames never shimmer in motion. */
+                "  float contact = 0.0;\n" +
+                "  if (u_aoSun.w > 0.0 && dot(n, u_aoSun.xyz) > 0.04 && z < 1600.0) {\n" +
+                "    for (int s = 0; s < 12; ++s) {\n" +
+                "      highp float stepDist = (0.75 + 0.25 * jitter) * (0.55 + 0.35 * float(s) + 0.11 * float(s * s));\n" +
+                "      highp vec3 ray = p + n * 0.2 + u_aoSun.xyz * stepDist;\n" +
+                "      if (ray.z <= 0.1) break;\n" +
+                "      highp vec2 uv = ray.xy * u_aoView.zw / ray.z * 0.5 + 0.5;\n" +
+                "      if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) break;\n" +
+                "      highp float dq = texelFetch(u_depth, clamp(ivec2(uv * u_aoParams.zw), ivec2(0), m), 0).r;\n" +
+                "      if (dq < 0.2) continue;\n" +
+                "      highp float gap = ray.z - aoZ(dq);\n" +
+                "      if (gap > 0.18 + 0.0015 * z && gap < 2.6 + 0.65 * stepDist + 0.005 * z) {\n" +
+                "        contact = 1.0 - float(s) * 0.06;\n" +
+                "        break;\n" +
+                "      }\n" +
+                "    }\n" +
+                "  }\n" +
                 /* Far surfaces fade out, where fog and texels blur. */
-                "  float fade = 1.0 - smoothstep(1400.0, 2600.0, z);\n" +
-                "  o.r = clamp(1.0 - u_aoParams.y * fade * occlusion * 0.25, 0.0, 1.0);\n}\n",
-                ["u_depth"], ["u_aoView", "u_aoParams"]);
+                "  float fade = 1.0 - smoothstep(2200.0, 4200.0, z);\n" +
+                "  float shade = clamp(1.0 - u_aoParams.y * fade * occlusion * 0.25, 0.0, 1.0);\n" +
+                "  o.r = shade * (1.0 - 0.36 * contact * (1.0 - smoothstep(900.0, 1600.0, z)));\n}\n",
+                ["u_depth"], ["u_aoView", "u_aoParams", "u_aoSun"]);
             /* A 4 x 4 box over the half-resolution occlusion that keeps to
              * samples near the centre's depth, so edges stay sharp. */
             link("aoBlur", "uniform sampler2D u_src;\n" +
@@ -784,8 +813,9 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                  * third of its radius wide. What lies well before the
                  * explosion, the viewmodel among it, stays as it is. */
                 "  highp vec2 uv = v_uv;\n" +
+                "  highp float pxDepth = texelFetch(u_depth, ivec2(gl_FragCoord.xy), 0).r;\n" +
                 "  if (u_blastDepth != vec4(0.0)) {\n" +
-                "    highp float bd = texelFetch(u_depth, ivec2(gl_FragCoord.xy), 0).r;\n" +
+                "    highp float bd = pxDepth;\n" +
                 "    highp float bz = bd < 0.2 ? 0.0 : u_near.x / max(u_dof.x - bd, 0.000001);\n" +
                 "    for (int i = 0; i < 4; ++i) {\n" +
                 "      if (u_blastDepth[i] <= 0.0 || bz < 0.5 * u_blastDepth[i]) continue;\n" +
@@ -798,6 +828,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "  vec3 c = texture(u_scene, uv).rgb;\n" +
                 "  vec3 col = c;\n" +
                 "  bool smeared = false;\n" +
+                "  float smearFade = 0.0;\n" +
                 /* Inside the scope's glass: 1 within its outline, which the
                  * stencil kept clear of the rifle, fading over a pixel. */
                 "  float lensIn = 0.0;\n" +
@@ -826,13 +857,13 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                  * smears a little, and a turn, which moves the near and the far
                  * alike, smears as it is. */
                 "  if (u_motion.x > 0.0) {\n" +
-                "    highp float depth = texelFetch(u_depth, ivec2(gl_FragCoord.xy), 0).r;\n" +
+                "    highp float depth = pxDepth;\n" +
                 "    highp vec2 ndc = v_uv * 2.0 - 1.0;\n" +
-                "    highp float z = clamp(u_near.x / max(u_dof.x - depth, 0.000001), 2048.0, 1000000.0);\n" +
+                "    highp float z = clamp(u_near.x / max(u_dof.x - depth, 0.000001), 2560.0, 1000000.0);\n" +
                 "    highp vec3 p = u_motionRotation * vec3(ndc * z / u_motion.yz, z) + u_motionMove;\n" +
                 "    highp vec2 v = (ndc - p.xy * u_motion.yz / max(p.z, 0.001)) * (0.5 * u_motion.x);\n" +
-                "    float len = length(v / u_px.xy);\n" +
-                "    if (depth >= 0.2 && p.z > 1.0 && len > 1.0) {\n" +
+                "    float len = length(v / u_px.xy), minSmear = max(1.0, 0.025 * u_motion.w);\n" +
+                "    if (depth >= 0.2 && p.z > 1.0 && len > minSmear) {\n" +
                 "      float n = min(len, u_motion.w);\n" +
                 "      highp vec2 path = v / u_px.xy * (n / len);\n" +
                 "      int taps = int(clamp(ceil(n * 0.25), 3.0, 16.0));\n" +
@@ -850,8 +881,9 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "        sum += texelFetch(u_scene, q, 0).rgb * w;\n" +
                 "        weight += w;\n" +
                 "      }\n" +
-                "      col = sum / weight;\n" +
-                "      smeared = true;\n" +
+                "      smearFade = smoothstep(minSmear, 2.5 * minSmear, len);\n" +
+                "      col = mix(col, sum / weight, smearFade);\n" +
+                "      smeared = smearFade >= 0.999;\n" +
                 "    }\n" +
                 "  }\n" +
                 /* The viewmodel smears along its own motion. Each pixel near it
@@ -867,7 +899,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "    highp vec2 reach = texelFetch(u_vmMesh, ivec2(tile & 1023, tile >> 10), 0).xy;\n" +
                 "    highp float span = length(reach);\n" +
                 "    if (span >= 0.5) {\n" +
-                "      highp float dX = texelFetch(u_depth, px, 0).r;\n" +
+                "      highp float dX = pxDepth;\n" +
                 "      highp float lenX = dX < 0.2 ? length(vmSmear(px)) : 0.0;\n" +
                 "      highp float zX = vmDistance(dX);\n" +
                 "      highp float self = 1.0 / max(lenX, 0.5);\n" +
@@ -903,8 +935,8 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "    vec3 w = texture(u_scene, uv - vec2(u_px.x, 0.0)).rgb;\n" +
                 "    vec3 lo = min(c, min(min(n, s), min(e, w)));\n" +
                 "    vec3 hi = max(c, max(max(n, s), max(e, w)));\n" +
-                "    vec3 wt = -u_film.x * sqrt(clamp(min(lo, 1.0 - hi) / max(hi, vec3(0.0001)), 0.0, 1.0));\n" +
-                "    col = clamp((c + (n + s + e + w) * wt) / (1.0 + 4.0 * wt), 0.0, 1.0);\n" +
+                "    vec3 wt = -(u_film.x * (1.0 - smearFade)) * sqrt(clamp(min(lo, 1.0 - hi) / max(hi, vec3(0.0001)), 0.0, 1.0));\n" +
+                "    col = mix(clamp((c + (n + s + e + w) * wt) / (1.0 + 4.0 * wt), 0.0, 1.0), col, smearFade);\n" +
                 "  }\n" +
                 /* Each pixel's light moves further from its surroundings', as a
                  * share of theirs bounded to 35%, so no edge rings, and least in
@@ -913,6 +945,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "  if (u_clarity.x > 0.0 && !smeared) {\n" +
                 "    float cl = dot(col, vec3(0.2126, 0.7152, 0.0722));\n" +
                 "    float cb = texture(u_clarityMap, uv).r;\n" +
+                "    cb = mix(cl, cb, 1.0 - smearFade);\n" +
                 "    col *= 1.0 + u_clarity.x * clamp((cl - cb) / max(cb, 0.05), -0.35, 0.35) * (1.0 - smoothstep(0.75, 1.0, cl));\n" +
                 "  }\n" +
                 /* The blurred occlusion, half a texel back where its 4 x 4
@@ -920,7 +953,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "  if (u_aoMix.x > 0.0 && texelFetch(u_depth, ivec2(gl_FragCoord.xy), 0).r >= 0.2)\n" +
                 "    col *= texture(u_ao, v_uv + u_aoMix.yz).r;\n" +
                 "  if (u_dof2.x > 0.0 || u_dof2.w > 0.0 || u_lens.z > 0.0) {\n" +
-                "    highp float depth = texelFetch(u_depth, ivec2(gl_FragCoord.xy), 0).r;\n" +
+                "    highp float depth = pxDepth;\n" +
                 "    vec4 large = texture(u_dofLarge, v_uv);\n" +
                 "    float k;\n" +
                 "    if (depth < 0.2) {\n" +
@@ -948,13 +981,36 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "        (k < u_tier.y ? mix(small, med, (k - u_tier.x) / (u_tier.y - u_tier.x)) :\n" +
                 "          mix(med, large.rgb, (k - u_tier.y) / (1.0 - u_tier.y)));\n" +
                 "    }\n" +
+                "  } else if (u_clarity.x > 0.0 && u_tone.x > 0.0) {\n" +
+                /* At the hip, the rear inches of the receiver closest to the eye
+                 * soften gently like a 35mm lens focused downrange (CoD WWII). */
+                "    highp float hipD = pxDepth;\n" +
+                "    if (hipD < 0.2) {\n" +
+                "      highp float hipZ = u_dof.y / max(u_dof.x - hipD * 5.0, 0.00001);\n" +
+                "      float hipK = smoothstep(6.6, 2.6, hipZ);\n" +
+                "      if (hipK > 0.01) {\n" +
+                "        const vec2 kHipDisk[8] = vec2[8](\n" +
+                "          vec2(0.250000, 0.000000), vec2(-0.319251, 0.292528), vec2(0.048879, -0.556876), vec2(0.402472, 0.524938),\n" +
+                "          vec2(-0.738547, -0.130633), vec2(0.699672, -0.445005), vec2(-0.234048, 0.870472), vec2(-0.446348, -0.859212));\n" +
+                "        vec2 stepUv = ((2.8 / 1080.0 / u_px.y) * hipK) * u_px.xy;\n" +
+                "        vec3 bSum = col;\n" +
+                "        float bW = 1.0;\n" +
+                "        for (int b = 0; b < 8; ++b) {\n" +
+                "          highp vec2 buv = clamp(v_uv + kHipDisk[b] * stepUv, 0.0, 1.0);\n" +
+                "          float w = step(texelFetch(u_depth, ivec2(buv / u_px.xy), 0).r, 0.2);\n" +
+                "          bSum += texture(u_scene, buv).rgb * w;\n" +
+                "          bW += w;\n" +
+                "        }\n" +
+                "        col = bSum / bW;\n" +
+                "      }\n" +
+                "    }\n" +
                 "  }\n" +
                 /* The air between the eye and the world, in the map's fog
                  * color: denser at the eye's height and below, thinner above
                  * it, integrated along the ray, and brighter toward the sun.
                  * The viewmodel and the sky keep their own. */
                 "  if (u_haze.a > 0.0) {\n" +
-                "    highp float hd = texelFetch(u_depth, ivec2(gl_FragCoord.xy), 0).r;\n" +
+                "    highp float hd = pxDepth;\n" +
                 "    if (hd >= 0.2 && hd < 0.99999) {\n" +
                 "      highp float hz = u_near.x / max(u_dof.x - hd, 0.000001);\n" +
                 "      highp vec3 hp = vec3((v_uv * 2.0 - 1.0) * hz / u_hazeProj.xy, hz);\n" +
@@ -962,8 +1018,13 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "      highp float hk = dot(hp, u_hazeUp) * u_hazeProj.z;\n" +
                 "      float hf = abs(hk) > 0.001 ? (1.0 - exp(-hk)) / hk : 1.0;\n" +
                 "      float haze = 1.0 - exp(-u_haze.a * hdist * clamp(hf, 0.25, 3.0));\n" +
+                "      vec3 hazeCol = u_haze.rgb;\n" +
+                "      if (u_film.w > 0.0 && u_tone.x > 0.0) {\n" +
+                "        haze = max(haze, 1.0 - exp(-0.000155 * max(hdist - 120.0, 0.0) * clamp(hf, 0.35, 2.2)));\n" +
+                "        hazeCol = mix(hazeCol, max(hazeCol, vec3(0.52, 0.55, 0.58)), 0.28);\n" +
+                "      }\n" +
                 "      float glow = pow(max(dot(hp / hdist, u_hazeSun), 0.0), 6.0);\n" +
-                "      col = mix(col, u_haze.rgb + u_hazeSunColor * glow, haze);\n" +
+                "      col = mix(col, hazeCol + u_hazeSunColor * glow, haze);\n" +
                 "    }\n" +
                 "  }\n" +
                 /* Until the scope is at the eye its glass shows a dim, curved
@@ -994,17 +1055,28 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                  * the sky and far walls take them, the near ground little and
                  * the viewmodel none. */
                 "  if (u_shaft.x > 0.0) {\n" +
-                "    highp float sd = texelFetch(u_depth, ivec2(gl_FragCoord.xy), 0).r;\n" +
+                "    highp float sd = pxDepth;\n" +
                 "    float air = sd >= 0.99999 ? 1.0 :\n" +
                 "      (sd < 0.2 ? 0.0 : 1.0 - exp(-u_near.x / max(u_dof.x - sd, 0.000001) / 900.0));\n" +
-                "    vec3 rays = min(texture(u_shafts, v_uv).rgb * u_shaft.yzw * (u_shaft.x * air), vec3(1.0));\n" +
+                "    vec3 rays = min(texture(u_shafts, v_uv).rgb * u_shaft.yzw * (u_shaft.x * air), vec3(0.90));\n" +
                 "    col = 1.0 - (1.0 - col) * (1.0 - rays);\n" +
                 "  }\n" +
                 "  if (u_film.w > 0.0) {\n" +
+                "    if (u_clarity.x > 0.0 && u_tone.x > 0.0) {\n" +
+                "      float excessG = max(col.g - max(col.r * 0.95, col.b * 1.06), 0.0);\n" +
+                "      col.g -= 0.24 * excessG;\n" +
+                "      col.r += 0.05 * excessG;\n" +
+                "    }\n" +
                 "    float l = dot(col, vec3(0.2126, 0.7152, 0.0722));\n" +
                 "    col = mix(vec3(l), col, u_film.y);\n" +
-                "    col = clamp(col * mix(vec3(0.975, 0.99, 1.03), vec3(1.025, 1.005, 0.965), smoothstep(0.05, 0.75, l)), 0.0, 1.0);\n" +
+                "    col = clamp(col * mix(vec3(0.955, 0.985, 1.045), vec3(1.035, 1.008, 0.955), smoothstep(0.05, 0.75, l)), 0.0, 1.0);\n" +
                 "    col += u_tone.x * col * (1.0 - col) * (1.0 - col);\n" +
+                "    col = clamp(col + 0.35 * u_tone.x * col * (1.0 - col) * (col - 0.36), 0.0, 1.0);\n" +
+                "    col = col / (1.0 + 0.12 * col) * 1.12;\n" +
+                "    if (u_tone.x > 0.0) {\n" +
+                "      vec2 vig = v_uv - 0.5;\n" +
+                "      col *= 1.0 - 0.11 * dot(vig, vig);\n" +
+                "    }\n" +
                 "    col += u_film.z * col * (1.0 - col) * (col - 0.35) * 1.5384615;\n" +
                 "  }\n" +
                 "  if (u_px.w > 0.0)\n" +
@@ -1291,7 +1363,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             if (!l) {
                 l = t.lens = { ok: false, ready: false };
                 var unit = gl.getParameter(gl.ACTIVE_TEXTURE);
-                var levels = Math.floor(Math.log2(Math.max(fx.width, fx.height))) + 1;
+                var levels = Math.min(Math.floor(Math.log2(Math.max(fx.width, fx.height))) + 1, 6);
                 l.color = gl.createTexture();
                 t.textures.push(l.color);
                 gl.activeTexture(gl.TEXTURE22);
@@ -1317,11 +1389,16 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 gl.bindFramebuffer(gl.READ_FRAMEBUFFER, t.ms || t.scene);
                 gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, l.fbo);
                 gl.blitFramebuffer(0, 0, fx.width, fx.height, 0, 0, fx.width, fx.height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
-                gl.bindFramebuffer(gl.FRAMEBUFFER, t.ms || t.scene);
+                if (t.feather && t.feather.ok && !t.feather.ready) {
+                    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, t.feather.fbo);
+                    gl.blitFramebuffer(0, 0, fx.width, fx.height, 0, 0, fx.width, fx.height, gl.DEPTH_BUFFER_BIT, gl.NEAREST);
+                    t.feather.ready = true;
+                }
                 gl.activeTexture(gl.TEXTURE22);
                 gl.bindTexture(gl.TEXTURE_2D, l.color);
                 gl.generateMipmap(gl.TEXTURE_2D);
                 gl.activeTexture(active);
+                gl.bindFramebuffer(gl.FRAMEBUFFER, t.ms || t.scene);
                 if (scissor) gl.enable(gl.SCISSOR_TEST);
                 l.ready = true;
             }
@@ -1428,6 +1505,8 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 gl.useProgram(A.program);
                 gl.uniform4f(A.u_aoView, H[o + 15], 0.9995002746582031, H[o + 57], H[o + 58]);
                 gl.uniform4f(A.u_aoParams, H[o + 56], H[o + 55], w, h);
+                gl.uniform4f(A.u_aoSun, H[o + 66], H[o + 67], H[o + 68],
+                    H[o + 77] + H[o + 78] + H[o + 79] > 0 ? 1 : 0);
                 fx.texture(0, t.depth);
                 fx.pass(A, t.aoFbo[0], t.hw, t.hh);
                 gl.useProgram(P.aoBlur.program);
@@ -2504,8 +2583,8 @@ static void WebSceneFx_FillParams(float *params)
     params[SCENE_FX_NEAR_BLUR] = 3.0f;
     /* Temporal antialiasing softens what it averages: sharpen its result more. */
     params[SCENE_FX_SHARPEN] = film ? (s_taaView ? 0.2f : 0.1f) : 0.0f;
-    /* The color the contrast curve used to give, without its darker shade. */
-    params[SCENE_FX_SATURATION] = 1.12f;
+    /* Grounded 35mm WWII film saturation. */
+    params[SCENE_FX_SATURATION] = 1.06f;
     params[SCENE_FX_CONTRAST] = 0.0f;
     params[SCENE_FX_FILM] = film ? 1.0f : 0.0f;
     params[SCENE_FX_TONE] = film ? SCENE_FX_SHADE_LIFT * (1.0f - s_grayFrac) : 0.0f;

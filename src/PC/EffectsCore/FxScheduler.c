@@ -396,6 +396,13 @@ void FxScheduler_PlayEffect(const FxScheduler *_this, const EffectTemplate *fx, 
 
             distSq = Vec3DistanceSq(or_.origin, helper->mCamera.vieworg);
             culldist = prim->mSpawnRange.mMin * helper->adsZoomFactor;
+#ifdef __EMSCRIPTEN__
+            {
+                extern const dvar_t *r_lodDistanceScale;
+                if (r_lodDistanceScale && r_lodDistanceScale->current.value > 1.0f)
+                    culldist *= r_lodDistanceScale->current.value;
+            }
+#endif
             if (distSq < culldist * culldist) {
                 continue;
             }
@@ -409,6 +416,13 @@ void FxScheduler_PlayEffect(const FxScheduler *_this, const EffectTemplate *fx, 
                 distSq = Vec3DistanceSq(or_.origin, helper->mCamera.vieworg);
             }
             culldist = prim->mSpawnRange.mMax * helper->adsZoomFactor;
+#ifdef __EMSCRIPTEN__
+            {
+                extern const dvar_t *r_lodDistanceScale;
+                if (r_lodDistanceScale && r_lodDistanceScale->current.value > 1.0f)
+                    culldist *= r_lodDistanceScale->current.value;
+            }
+#endif
             if (distSq > culldist * culldist) {
                 continue;
             }

@@ -47,7 +47,13 @@ typedef struct {struct {int eType,clientNum;} nextState;int nextValid;float lerp
 static centity_t entities[1024],*cg_entities=entities;
 static dvar_t chance,blood,speed;
 static dvar_t *cg_tracerChance=&chance,*cg_blood=&blood,*cg_tracerSpeed=&speed;
-static struct {struct {snd_alias_list_t *bulletHitSmallSound[23],*bulletHitLargeSound[23],*shotgunHitSound[23]; struct {void *table;} *fx; void *fxNoBloodFleshHit;}media;} cgsState,*cgs=&cgsState;
+static struct {struct {snd_alias_list_t *bulletHitSmallSound[23],*bulletHitLargeSound[23],*shotgunHitSound[23]; struct {void *table;} *fx; void *fxNoBloodFleshHit; void *tracerMaterial;}media;} cgsState,*cgs=&cgsState;
+typedef union {unsigned int packed; unsigned char array[4];} GfxColor;
+typedef struct {float xyz[3]; float binormalSign; GfxColor color; float texCoord[2]; float lmapCoord[2]; float normal[3]; float tangent[3];} GfxWorldVertex;
+static int impactPolys;
+static void Vec3Cross(const float *a,const float *b,float *c){c[0]=a[1]*b[2]-a[2]*b[1];c[1]=a[2]*b[0]-a[0]*b[2];c[2]=a[0]*b[1]-a[1]*b[0];}
+static void CL_DefaultVertexFrames(int n,GfxWorldVertex *v){(void)n;(void)v;}
+static void CL_AddPolyToScene(void *m,unsigned short l,unsigned short n,const GfxWorldVertex *v){(void)m;(void)l;(void)n;(void)v;impactPolys++;}
 typedef struct {char *mEffectName;int mPrimitiveCount;} EffectTemplate;
 static int whizzes,spawns,impacts,muzzleReady=1,immediateSpawns,traces;
 static localEntity_t immediateLe;
@@ -83,6 +89,11 @@ static void CG_WhizbySound(float *a,float *b){whizzes++;}
 static void CG_SpawnTracer(float *a,float *b){spawns++;}
 static void FX_PlayEffect(void *fx,float *pos,float *normal){}
 static void Com_Printf(const char *fmt,...){}
+static int bulletLights;static float lastBulletLight[4],lastBulletColor[3];
+static void CL_AddLightToScene(const float *org,float radius,float r,float g,float b){
+ bulletLights++;memcpy(lastBulletLight,org,12);lastBulletLight[3]=radius;
+ lastBulletColor[0]=r;lastBulletColor[1]=g;lastBulletColor[2]=b;
+}
 typedef struct {void *def;float position[4],color[3];} GfxLight;
 typedef struct {void *world,*dlightDef;} r_global_permanent_t;
 static r_global_permanent_t rgp;
@@ -98,7 +109,10 @@ spread_rule = ('#define WEAPCLASS_SPREAD 3\n' +
                spread_source[spread_source.index('#define BG_SIGHTS_UP_START'):
                              spread_source.index('/* The spread a shot leaves with.')] +
                function('src/PC/bgame/bg_weapons.c', 'BG_GetShotSpread'))
-code = spread_rule + ''.join(function(weapon, name) for name in (
+weapon_text = (ROOT / weapon).read_text()
+impact_lights = weapon_text[weapon_text.index('#define CG_WEB_IMPACT_LIGHTS'):
+                            weapon_text.index('#endif\n\n/* A bullet\'s impact on a surface:')]
+code = spread_rule + impact_lights + ''.join(function(weapon, name) for name in (
     'CG_BulletImpact', 'CG_BulletHitClientEvent', 'CG_BulletHitEvent', 'CG_SpawnTracerImmediate', 'CG_WebAdsNearEnd',
     'CG_WebAdsDofApproach', 'CG_WebAdsNearestPlayer', 'CG_WebLocalImpact', 'CG_UpdateWebWeaponPresentation'))
 code += function('src/PC/gfx_d3d/r_scene.c', 'R_AddLightToScene')
@@ -246,7 +260,44 @@ int main(void){
  assert(CG_WebAdsNearEnd(20.f,1.0e30f)==1.f && CG_WebAdsNearEnd(NAN,NAN)==512.f);
  assert(CG_WebAdsDofApproach(100.f,100.4f,50.f,.016f)==100.4f && CG_WebAdsDofApproach(100.f,99.6f,50.f,.016f)==99.6f);
  assert(fabsf(CG_WebAdsDofApproach(0.f,1000.f,50.f,.016f)-16.f)<1e-3f && CG_WebAdsDofApproach(100.f,200.f,50.f,0.f)==100.f);
- puts("PASS: immediate first-person impacts for every round and pellet, by the bullet's size and the surface, none on the sky, players or misses, the server's late copy dropped for the shooter seen in first person; immediate first-person tracers at the tracer chance, at most three a blast, CoD4 ADS focus from the crosshair trace and on-screen players eased once aimed in, audio independent of visuals, 100 light-selection frames, all 0-32 limits and nonfinite rejection");
+ // Hard-surface bullet impacts flash briefly off the struck normal and shower
+ // ballistic sparks: hotter and wider on metal (13) than on stone/brick/concrete/
+ // glass/plaster (0, 2, 5, 10, 11, 16, 17, 22), and silent on flesh, grass,
+ // mud, snow and water.
+ static int dummyMat;
+ cgs->media.tracerMaterial=&dummyMat;
+ memset(s_webImpactLights,0,sizeof(s_webImpactLights));
+ s_webImpactLightNext=0;
+ float hit[3]={100.f,200.f,50.f},hitN[3]={0.f,0.f,1.f};
+ cg->time=9000;
+ for(int s=0;s<23;s++){
+  memset(s_webImpactLights,0,sizeof(s_webImpactLights));
+  memset(s_webImpactFlashes,0,sizeof(s_webImpactFlashes));
+  memset(s_webImpactSparks,0,sizeof(s_webImpactSparks));
+  CG_BulletImpact(2,hit,hitN,hitN,s,0xb6);
+  bulletLights=0;impactPolys=0;CG_AddWebBulletLights();
+  int hard=(s==13||s==0||s==2||s==5||s==10||s==11||s==16||s==17||s==22);
+  int softSpark=(s==6||s==18||s==21);
+  assert(bulletLights==hard);
+  if(s==13){
+   assert(lastBulletLight[2]==54.f&&lastBulletLight[3]==170.f&&fabsf(lastBulletColor[0]-1.45f)<1e-6f);
+   assert(impactPolys==10);
+  }else if(hard){
+   assert(lastBulletLight[2]==54.f&&lastBulletLight[3]==140.f&&fabsf(lastBulletColor[0]-1.05f)<1e-6f);
+   assert(impactPolys==8);
+  }else if(softSpark){
+   assert(impactPolys==3);
+  }else{
+   assert(impactPolys==0);
+  }
+ }
+ // Quadratic decay over 65 ms, gone at 65 ms.
+ memset(s_webImpactLights,0,sizeof(s_webImpactLights));
+ cg->time=9100;CG_BulletImpact(2,hit,hitN,hitN,13,0xb5);
+ bulletLights=0;CG_AddWebBulletLights();assert(bulletLights==1&&lastBulletLight[3]==135.f&&fabsf(lastBulletColor[0]-1.45f)<1e-6f);
+ cg->time=9132;bulletLights=0;CG_AddWebBulletLights();assert(bulletLights==1&&lastBulletColor[0]>.3f&&lastBulletColor[0]<.42f);
+ cg->time=9165;bulletLights=0;CG_AddWebBulletLights();assert(bulletLights==0);
+ puts("PASS: immediate first-person impacts for every round and pellet, by the bullet's size and the surface, none on the sky, players or misses, the server's late copy dropped for the shooter seen in first person; hard-surface impact spark lights, flash quads and ballistic spark showers decaying over 65 ms; immediate first-person tracers at the tracer chance, at most three a blast, CoD4 ADS focus from the crosshair trace and on-screen players eased once aimed in, audio independent of visuals, 100 light-selection frames, all 0-32 limits and nonfinite rejection");
 }
 '''
 
@@ -283,6 +334,11 @@ static void BG_EvaluateTrajectory(const trajectory_t *tr,int time,float *out){
  assert(tr->trType==TR_LINEAR);for(int i=0;i<3;i++)out[i]=tr->trBase[i]+tr->trDelta[i]*(time-tr->trTime)*.001f;
 }
 static float drawnStart[3],drawnEnd[3];static unsigned drawnSeed;static int drawnCount;
+static int tracerLights;static float tracerLightPos[4],tracerLightRgb[3];
+static void CL_AddLightToScene(const float *org,float radius,float r,float g,float b){
+ tracerLights++;memcpy(tracerLightPos,org,12);tracerLightPos[3]=radius;
+ tracerLightRgb[0]=r;tracerLightRgb[1]=g;tracerLightRgb[2]=b;
+}
 static void CaptureTracer(vec_t *start,vec_t *finish,unsigned int seed){
  memcpy(drawnStart,start,12);memcpy(drawnEnd,finish,12);drawnSeed=seed;drawnCount++;
 }
@@ -291,7 +347,7 @@ weapon_source = (ROOT / weapon).read_text()
 tracer_code = ''.join(re.findall(r'#define CG_TRACER_\w+ [^\n]+\n', weapon_source))
 tracer_code += ''.join(function(weapon, name) for name in (
     'CG_TracerScaleForDistance', 'CG_TracerHash', 'CG_TracerSeed', 'CG_SetTracerVertex', 'CG_TracerRandom',
-    'CG_TracerBend', 'CG_DrawTracer'))
+    'CG_TracerBend', 'CG_TracerColor', 'CG_DrawTracer'))
 tracer_code += ('#define CG_DrawTracer CaptureTracer\n' + function('src/PC/cgame_mp/cg_localents_mp.c', 'CG_AddMovingTracer') +
                 '#undef CG_DrawTracer\n')
 tracer_checks = r'''
@@ -316,11 +372,19 @@ static void check_streak(const float *start,const float *end,unsigned seed,float
  }
  for(int k=1;k<8;k++)
   assert(Vec3Distance(polys[k][3].xyz,polys[k-1][0].xyz)<eps&&Vec3Distance(polys[k][2].xyz,polys[k-1][1].xyz)<eps);
- // A hot core along the whole streak, across the image's centre column.
- for(int k=0;k<8;k++)for(int v=0;v<4;v++){
-  assert(polys[k][v].color.packed==0xffffffff);
-  assert(polys[k][v].texCoord[0]==.5f&&polys[k][v].lmapCoord[0]==.5f);
-  assert(polys[k][v].texCoord[1]==(v==0||v==3)&&polys[k][v].lmapCoord[1]==polys[k][v].texCoord[1]);
+ // A hot incandescent core at the round head cooling into warm orange along the wake.
+ assert(polys[7][0].color.packed==0xffffffffu&&polys[7][1].color.packed==0xffffffffu);
+ assert(polys[0][2].color.packed==CG_TracerColor(0.f)&&polys[0][3].color.packed==CG_TracerColor(0.f));
+ for(int k=0;k<8;k++){
+  assert(polys[k][0].color.packed==polys[k][1].color.packed&&polys[k][2].color.packed==polys[k][3].color.packed);
+  if(k)assert(polys[k][2].color.packed==polys[k-1][0].color.packed);
+  assert((polys[k][0].color.packed&0xff)>=(polys[k][2].color.packed&0xff));
+  assert(((polys[k][0].color.packed>>8)&0xff)>=((polys[k][2].color.packed>>8)&0xff));
+  assert(((polys[k][0].color.packed>>16)&0xff)>=((polys[k][2].color.packed>>16)&0xff));
+  for(int v=0;v<4;v++){
+   assert(polys[k][v].texCoord[0]==.5f&&polys[k][v].lmapCoord[0]==.5f);
+   assert(polys[k][v].texCoord[1]==(v==0||v==3)&&polys[k][v].lmapCoord[1]==polys[k][v].texCoord[1]);
+  }
  }
  assert(Vec3Distance(centre[0],start)<eps&&Vec3Distance(centre[8],end)<eps);
  float toStart[3],toEnd[3],line[3],normal[3],previous[3];
@@ -344,15 +408,15 @@ static void check_streak(const float *start,const float *end,unsigned seed,float
   const float facing=2e-3f+eps/(2*half[k]);
   assert(fabsf(dot3(side[k],ray))<facing&&fabsf(dot3(side[k],tangent))<facing);
  }
- // The round itself: a screen-aligned glow centred on the head.
+ // The round itself: a screen-aligned warm-white corona centred on the head.
  const GfxWorldVertex *glow=polys[8];
  float middle[3]={0,0,0};
  for(int v=0;v<4;v++)for(int i=0;i<3;i++)middle[i]+=glow[v].xyz[i]*.25f;
  assert(Vec3Distance(middle,end)<eps);
- assert(fabsf(Vec3Distance(glow[0].xyz,glow[1].xyz)-4*headHalf)<eps&&fabsf(Vec3Distance(glow[1].xyz,glow[2].xyz)-4*headHalf)<eps);
+ assert(fabsf(Vec3Distance(glow[0].xyz,glow[1].xyz)-5.6f*headHalf)<eps&&fabsf(Vec3Distance(glow[1].xyz,glow[2].xyz)-5.6f*headHalf)<eps);
  for(int v=0;v<4;v++){
   float d[3];sub3(glow[v].xyz,end,d);
-  assert(fabsf(dot3(d,cg->refdef.viewaxis[0]))<eps&&glow[v].color.packed==0xc0c0c0c0);
+  assert(fabsf(dot3(d,cg->refdef.viewaxis[0]))<eps&&glow[v].color.packed==0xf2e8ffffu);
   assert((glow[v].texCoord[0]==0||glow[v].texCoord[0]==1)&&(glow[v].texCoord[1]==0||glow[v].texCoord[1]==1));
  }
  assert(glow[0].texCoord[0]!=glow[1].texCoord[0]&&glow[1].texCoord[1]!=glow[2].texCoord[1]);
@@ -453,16 +517,18 @@ int main(void){
  assert(right>4500&&right<5500);
 
  // Each frame a round's streak runs from its place on the trajectory, at most
- // cg_tracerlength long and never past the hit, with one seed all its flight.
- length.current.value=100;
- localEntity_t round={.pos={TR_LINEAR,5000,0,{10,20,30},{6500,0,0}},.tracerClipDist=1000};
+ // cg_tracerlength long and never past the hit, with one seed all its flight
+ // and a warm dynamic light at its round head.
+ length.current.value=155;
+ localEntity_t round={.pos={TR_LINEAR,5000,0,{10,20,30},{6200,0,0}},.tracerClipDist=1000};
  int frames=0;
- for(int t=5000;t<5000+1000000/6500;t++,frames++){
-  cg->time=t;drawnCount=0;CG_AddMovingTracer(&round);
-  assert(drawnCount==1&&drawnSeed==CG_TracerSeed(&round.pos));
-  const float travelled=6.5f*(t-5000);
+ for(int t=5000;t<5000+1000000/6200;t++,frames++){
+  cg->time=t;drawnCount=0;tracerLights=0;CG_AddMovingTracer(&round);
+  assert(drawnCount==1&&drawnSeed==CG_TracerSeed(&round.pos)&&tracerLights==1);
+  const float travelled=6.2f*(t-5000);
   assert(fabsf(drawnStart[0]-10-travelled)<2e-3f&&drawnStart[1]==20&&drawnStart[2]==30);
-  assert(fabsf(drawnEnd[0]-drawnStart[0]-fminf(100,1000-travelled))<2e-3f&&drawnEnd[1]==20&&drawnEnd[2]==30);
+  assert(fabsf(drawnEnd[0]-drawnStart[0]-fminf(155,1000-travelled))<2e-3f&&drawnEnd[1]==20&&drawnEnd[2]==30);
+  assert(Vec3Distance(tracerLightPos,drawnEnd)<1e-4f&&tracerLightPos[3]==165.f&&fabsf(tracerLightRgb[0]-.85f)<1e-6f);
  }
  localEntity_t next=round;next.pos.trTime+=50;cg->time=5100;CG_AddMovingTracer(&next);
  assert(drawnSeed!=CG_TracerSeed(&round.pos));
@@ -471,11 +537,12 @@ int main(void){
 }
 '''
 
-# The browser's streak is 100 units long; other builds keep the original 160.
+# The browser's streak is 155 units long at 6,200 units/s; other builds keep 160.
 main_source = (ROOT / 'src/PC/cgame_mp/cg_main_mp.c').read_text()
 web_dvars, native_dvars = re.search(r'#ifdef __EMSCRIPTEN__\n(    cg_tracerChance = .*?)#else\n(.*?)#endif',
                                     main_source, re.S).groups()
-assert 'Dvar_RegisterFloat("cg_tracerlength", 100.0f, 0.0f, FLT_MAX, 0x1080);' in web_dvars, web_dvars
+assert 'Dvar_RegisterFloat("cg_tracerlength", 155.0f, 0.0f, FLT_MAX, 0x1080);' in web_dvars, web_dvars
+assert 'Dvar_RegisterFloat("cg_tracerSpeed", 6200.0f, 0.0f, FLT_MAX, 0x1080);' in web_dvars, web_dvars
 assert 'Dvar_RegisterFloat("cg_tracerlength", 160.0f, 0.0f, FLT_MAX, 0x1080);' in native_dvars, native_dvars
 
 tracer_mutants = [
@@ -505,6 +572,8 @@ tracer_mutants = [
     ('    startWidth *= 0.35f;', '    startWidth *= 0.5f;'),
     ('CG_DrawTracer(start, end, CG_TracerSeed(&le->pos));', 'CG_DrawTracer(start, end, 0);'),
     ('    if (dist > cg_tracerLength->current.value)\n        dist = cg_tracerLength->current.value;\n', ''),
+    ('colors[k] = CG_TracerColor(along);', 'colors[k] = 0xffffffffu;'),
+    ('    CL_AddLightToScene(end, 165.0f, 0.85f, 0.54f, 0.22f);\n', ''),
 ]
 
 

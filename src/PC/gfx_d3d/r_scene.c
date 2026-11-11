@@ -273,6 +273,48 @@ void qsortDrawSurfs(GfxDrawSurf *drawSurfs, int drawSurfCount)
     }
 }
 
+#ifdef __EMSCRIPTEN__
+extern const float *WebEffects_Lens(const Material *material);
+
+/* Opaque draws sort by material alone, which placed viewmodel scope materials
+ * ahead of most lightmapped world surfaces (so fx.lensScene copied sky and fog
+ * before walls and ground existed, or after the rifle's own barrel). Keep all
+ * opaque world and character draws in their material order first, then draw
+ * any viewmodel scope-glass surface before the rest of the viewmodel. */
+static void R_OrderWebViewmodelDrawSurfs(GfxDrawSurf *drawSurfs, int drawSurfCount)
+{
+    GfxDrawSurf lensSurfs[32];
+    GfxDrawSurf vmSurfs[128];
+    int lensCount = 0, vmCount = 0, writeIdx = 0, i;
+
+    if (!drawSurfs || drawSurfCount <= 1)
+        return;
+    for (i = 0; i < drawSurfCount && (int)drawSurfs[i].sort >= 0; ++i) {
+        unsigned int sort = drawSurfs[i].sort;
+        int ent = (sort >> 4) & 0xfff;
+        if (ent < 0x7fe && (scene.def.entities[ent].renderFxFlags & 0x18) == 8) {
+            const Material *mat = rgp.sortedMaterials[(sort >> 21) & 0x3ff];
+            if (mat && WebEffects_Lens(mat) && lensCount < (int)(sizeof(lensSurfs) / sizeof(lensSurfs[0]))) {
+                lensSurfs[lensCount++] = drawSurfs[i];
+                continue;
+            }
+            if (vmCount < (int)(sizeof(vmSurfs) / sizeof(vmSurfs[0]))) {
+                vmSurfs[vmCount++] = drawSurfs[i];
+                continue;
+            }
+        }
+        drawSurfs[writeIdx++] = drawSurfs[i];
+    }
+    if (lensCount > 0) {
+        memcpy(&drawSurfs[writeIdx], lensSurfs, (size_t)lensCount * sizeof(GfxDrawSurf));
+        writeIdx += lensCount;
+    }
+    if (vmCount > 0) {
+        memcpy(&drawSurfs[writeIdx], vmSurfs, (size_t)vmCount * sizeof(GfxDrawSurf));
+    }
+}
+#endif
+
 void R_AddXModelSurfaces(int entIndex)
 {
     GfxSceneEntity *sceneEnt;
@@ -821,8 +863,25 @@ void R_RenderScene(const refdef_t *refdef)
         /* The main view's models are skinned: they are the sun's casters. */
         if (!refdef->x && !refdef->y && refdef->width == ((const vidConfig_t *)imp_vidConfig)->width &&
             refdef->height == ((const vidConfig_t *)imp_vidConfig)->height) {
+            extern void CG_CullIn(void *poseCtx);
+            extern void R_SkinSceneEnt(GfxSceneEntity *sceneEnt, GfxEntity *ent);
+            extern int WebSunShadows_CasterInRange(const float *origin, const float *eye);
             const float halfSun[3] = {s_world.sunLight.color[0] * 0.5f, s_world.sunLight.color[1] * 0.5f,
                                       s_world.sunLight.color[2] * 0.5f};
+            int casterIdx;
+
+            for (casterIdx = 0; casterIdx < scene.def.entityCount; ++casterIdx) {
+                GfxEntity *ent = &scene.def.entities[casterIdx];
+                GfxSceneEntity *sceneEnt = &scene.sceneEnts[casterIdx];
+
+                if (sceneEnt->cullState > 3 || ent->reType != 0 || (ent->renderFxFlags & 0x18) ||
+                    !WebSunShadows_CasterInRange(ent->origin, refdef->vieworg))
+                    continue;
+                R_UpdateXModelBounds(sceneEnt, ent);
+                if (sceneEnt->cent)
+                    CG_CullIn((void *)sceneEnt->cent);
+                R_SkinSceneEnt(sceneEnt, ent);
+            }
             WebSunShadows_EndCapture(refdef->vieworg, refdef->viewaxis[0], s_world.sunLight.position, halfSun);
         }
     }
@@ -838,6 +897,9 @@ void R_RenderScene(const refdef_t *refdef)
     drawSurfStart = (int)(intptr_t)scene.drawSurfs;
     drawSurfCount = scene.drawSurfCount;
     qsortDrawSurfs((GfxDrawSurf *)(intptr_t)drawSurfStart, drawSurfCount);
+#ifdef __EMSCRIPTEN__
+    R_OrderWebViewmodelDrawSurfs((GfxDrawSurf *)(intptr_t)drawSurfStart, drawSurfCount);
+#endif
 
     {
         int isDx7 = (r_rendererInUse->current.integer == 2);

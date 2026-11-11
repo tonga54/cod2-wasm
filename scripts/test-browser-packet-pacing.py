@@ -38,6 +38,7 @@ static int packets,lastSent,largestBatch;
 static int Sys_IsLANAddress(netadr_t a) {return 1;}
 static void Com_Printf(const char *s,...) {}
 static usercmd_t CL_CreateCmd(void) {return (usercmd_t){.serverTime=cls.realtime};}
+static void CL_KeepUserCmd(int cmdNumber, const usercmd_t *cmd) {(void)cmdNumber;(void)cmd;}
 static void CL_SampleShotView(const clientActive_t *cl) {(void)cl;}
 static void CL_WritePacket(void) {
     int count=client.cmdNumber-lastSent;

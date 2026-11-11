@@ -312,7 +312,7 @@ void R_RegisterDvars(void)
     /* Retain detail/vegetation farther away without removing authored LODs
      * or visibility culling. A separate archived dvar also reaches existing
      * browser profiles without replacing their saved graphics settings. */
-    r_lodDistanceScale = ri.Dvar_RegisterFloat("r_lodDistanceScale", 2.0f, 1.0f, 4.0f, 0x2001);
+    r_lodDistanceScale = ri.Dvar_RegisterFloat("r_lodDistanceScale", 3.0f, 1.0f, 6.0f, 0x2001);
 #endif
 
     r_znear = ri.Dvar_RegisterFloat("r_znear", 4.0f, 0.001f, 16.0f, 0x2080);
@@ -347,7 +347,11 @@ void R_RegisterDvars(void)
 
     r_specularMap = ri.Dvar_RegisterEnum("r_specularMap", colorMapNames, 0, 0x2080);
 
+#ifdef __EMSCRIPTEN__
+    r_specularColorScale = ri.Dvar_RegisterFloat("r_specularColorScale", 1.15f, 0.01f, 100.0f, 0x2080);
+#else
     r_specularColorScale = ri.Dvar_RegisterFloat("r_specularColorScale", 1.0f, 0.01f, 100.0f, 0x2080);
+#endif
 
     r_cosinePowerMapShift = ri.Dvar_RegisterFloat("r_cosinePowerMapShift", 0.0f, -1.0f, 1.0f, 0x2080);
 
@@ -535,11 +539,11 @@ void R_RegisterDvars(void)
     /* Lines the first full-screen 3D view renders at on a taller canvas,
      * which then draws the HUD at its own resolution; 0 renders it at the
      * canvas's. */
-    r_sceneHeight = ri.Dvar_RegisterInt("r_sceneHeight", 720, 0, 2160, 0x2001);
+    r_sceneHeight = ri.Dvar_RegisterInt("r_sceneHeight", 1080, 0, 2160, 0x2001);
     /* The material's original normal, specular and detail maps per pixel. */
     r_materialLighting = ri.Dvar_RegisterBool("r_materialLighting", 1, 0x2001);
     /* How much the sun's incidence shades lightmapped surfaces, 0 to 1. */
-    r_sunShading = ri.Dvar_RegisterFloat("r_sunShading", 0.65f, 0.0f, 1.0f, 0x2001);
+    r_sunShading = ri.Dvar_RegisterFloat("r_sunShading", 0.90f, 0.0f, 1.0f, 0x2001);
     /* Characters and other moving models cast the sun's shadow on the world
      * (downstream/wasm/web_sun_shadows.c). */
     r_sunShadows = ri.Dvar_RegisterBool("r_sunShadows", 1, 0x2001);
@@ -565,7 +569,7 @@ void R_RegisterDvars(void)
     r_shockwave = ri.Dvar_RegisterBool("r_shockwave", 1, 0x2001);
     /* How much the joints and grooves a lightmapped surface's normal map
      * folds into darken, and its edges lighten, 0 for none. */
-    r_cavity = ri.Dvar_RegisterFloat("r_cavity", 1.0f, 0.0f, 2.0f, 0x2001);
+    r_cavity = ri.Dvar_RegisterFloat("r_cavity", 1.25f, 0.0f, 2.0f, 0x2001);
     /* How far each pixel's light moves from its surroundings', 0 for none
      * (downstream/wasm/web_scene_fx.c). */
     r_clarity = ri.Dvar_RegisterFloat("r_clarity", 1.0f, 0.0f, 2.0f, 0x2001);
@@ -575,7 +579,7 @@ void R_RegisterDvars(void)
     r_surfaceVariation = ri.Dvar_RegisterFloat("r_surfaceVariation", 1.0f, 0.0f, 2.0f, 0x2001);
     /* How far a lightmapped surface's detail map tilts its lit normal, 0 for
      * none. */
-    r_detailRelief = ri.Dvar_RegisterFloat("r_detailRelief", 1.0f, 0.0f, 2.0f, 0x2001);
+    r_detailRelief = ri.Dvar_RegisterFloat("r_detailRelief", 0.95f, 0.0f, 2.0f, 0x2001);
     /* How much a lightmapped surface's color map is sharpened where it is
      * magnified, 0 for none. */
     r_textureSharpen = ri.Dvar_RegisterFloat("r_textureSharpen", 1.0f, 0.0f, 2.0f, 0x2001);
