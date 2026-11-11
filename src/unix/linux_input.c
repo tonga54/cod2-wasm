@@ -83,35 +83,36 @@ extern int Linux_PollInputEvent(LinuxInputEvent *event);
 
 #ifdef __EMSCRIPTEN__
 /* SDL's browser backend maps a keypad key by its position, so Numpad 4 is
- * KP_4 whether NumLock turns it into a digit or not. Only the browser knows
- * which it is, and only while a key event is being dispatched: keep its
- * answer from the last key. */
-EM_JS(int, IN_BrowserNumLock, (void), {
-    if (!globalThis.cod2NumLockTracked) {
-        globalThis.cod2NumLockTracked = true;
-        globalThis.cod2NumLock = false;
+ * KP_4 whether it types a digit or moves. Only the browser knows which, and
+ * only while a key event is being dispatched: keep its answer from the last
+ * keypad key. The key it reports says it; NumLock does not, since macOS has
+ * none and reports it off while the keypad types digits. Only the keys with
+ * two meanings answer, so another keypad key held meanwhile cannot change
+ * what a held one releases as. */
+EM_JS(int, IN_BrowserKeypadDigits, (void), {
+    if (!globalThis.cod2KeypadTracked) {
+        globalThis.cod2KeypadTracked = true;
+        globalThis.cod2KeypadDigits = false;
         addEventListener('keydown', function (event) {
-            try {
-                globalThis.cod2NumLock = event.getModifierState('NumLock');
-            } catch (e) {
-            }
+            if (/^Numpad([0-9]|Decimal)$/.test(event.code))
+                globalThis.cod2KeypadDigits = /^[0-9.,]$/.test(event.key);
         }, true);
     }
-    return globalThis.cod2NumLock ? 1 : 0;
+    return globalThis.cod2KeypadDigits ? 1 : 0;
 });
 
-static int IN_NumLockActive(void)
+static int IN_KeypadTypesDigits(void)
 {
-    return IN_BrowserNumLock();
+    return IN_BrowserKeypadDigits();
 }
 #endif
 
-/* A keypad key is the arrow or editing key beside it when NumLock is off, and
- * the digit it carries when it is on. Elsewhere it keeps its own code. */
+/* A keypad key is the digit it carries when the keypad types digits, and the
+ * arrow or editing key beside it otherwise. Elsewhere it keeps its own code. */
 static int IN_KeypadKey(int navigates, int keypad, int digit)
 {
 #ifdef __EMSCRIPTEN__
-    return IN_NumLockActive() ? digit : navigates;
+    return IN_KeypadTypesDigits() ? digit : navigates;
 #else
     (void)navigates;
     (void)digit;
@@ -263,8 +264,8 @@ int SDL_PumpInputEvents(void)
     }
 
 #ifdef __EMSCRIPTEN__
-    /* Install the NumLock listener before the first keypad key arrives. */
-    (void)IN_NumLockActive();
+    /* Install the keypad listener before the first keypad key arrives. */
+    (void)IN_KeypadTypesDigits();
 #endif
 
     for (eventCount = 0; eventCount < 256 && SDL_PollEvent(&ev); ++eventCount) {

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Run the browser keypad translation on SDL's key codes: arrows and editing
-keys with NumLock off, their digits with it on, and every other key unchanged."""
+keys while the keypad moves, their digits while it types them, and every other
+key unchanged. The browser listener decides which from the key a keypad event
+reports, so macOS, where NumLock always reads off, still types digits."""
 from pathlib import Path
 import re
 import subprocess
@@ -18,7 +20,7 @@ keypad = function('static int IN_KeypadKey(int navigates, int keypad, int digit)
 translate = function('static int sdl_to_keynum(SDL_Keycode sym)')
 defines = '\n'.join(re.findall(r'^#define K_[A-Z0-9_]+[ \t]+0x[0-9a-fA-F]+$', source, re.M))
 symbols = sorted(set(re.findall(r'\bSDLK_[A-Z0-9_]+', keypad + translate)))
-assert 'IN_NumLockActive()' in keypad
+assert 'IN_KeypadTypesDigits()' in keypad
 assert 'SDLK_KP_4' in translate and 'SDLK_KP_7' in translate
 
 support = r'''
@@ -27,7 +29,7 @@ support = r'''
 typedef int SDL_Keycode;
 ''' + 'enum {\n' + ',\n'.join(f'    {s} = 0x{0x1000 + i:x}' for i, s in enumerate(symbols)) + '\n};\n' + r'''
 static int numlock;
-static int IN_NumLockActive(void) { return numlock; }
+static int IN_KeypadTypesDigits(void) { return numlock; }
 '''
 
 checks = r'''
@@ -86,8 +88,8 @@ def mutate(text, old, new):
 
 
 mutants = [
-    ('    return IN_NumLockActive() ? digit : navigates;', '    return navigates;'),
-    ('    return IN_NumLockActive() ? digit : navigates;', '    return digit;'),
+    ('    return IN_KeypadTypesDigits() ? digit : navigates;', '    return navigates;'),
+    ('    return IN_KeypadTypesDigits() ? digit : navigates;', '    return digit;'),
     ("    case SDLK_KP_4:         return IN_KeypadKey(K_LEFTARROW, K_KP_LEFTARROW, '4');",
      '    case SDLK_KP_4:         return K_KP_LEFTARROW;'),
     ("    case SDLK_KP_PERIOD:    return IN_KeypadKey(K_DEL, K_KP_DEL, '.');",
@@ -109,4 +111,63 @@ with tempfile.TemporaryDirectory(prefix='cod2-keypad-') as directory:
                         '-Wall', '-Werror' if mutant is None else '-w', str(path), '-o', str(binary)], check=True)
         result = subprocess.run([str(binary)], capture_output=True, text=True)
         assert (result.returncode == 0) == (mutant is None), (mutant, result.stderr[-1500:])
-print(f'PASS: {len(symbols)} SDL key codes; NumLock on/off split and {len(mutants)} failing regression mutants')
+
+listener_start = source.index('EM_JS(int, IN_BrowserKeypadDigits, (void), {')
+listener = source[source.index('{', listener_start) + 1:source.index('\n});\n', listener_start)]
+
+listener_checks = r'''
+const vm = require('node:vm');
+const assert = require('node:assert/strict');
+const listeners = [];
+const context = { addEventListener: (type, fn, capture) => listeners.push({ type, fn, capture }) };
+const ask = new vm.Script('(function () {' + process.argv[1] + '})()');
+const digits = () => ask.runInContext(context);
+const press = (code, key, numLock) => {
+    const event = { code, key, getModifierState: (name) => name === 'NumLock' && numLock };
+    for (const l of listeners)
+        if (l.type === 'keydown')
+            l.fn(event);
+    return digits();
+};
+vm.createContext(context);
+assert.equal(digits(), 0);
+assert.equal(listeners.length, 1);
+assert.equal(listeners[0].capture, true);
+digits();
+assert.equal(listeners.length, 1);
+/* Windows and Linux: NumLock on types digits, off moves. */
+assert.equal(press('Numpad8', '8', true), 1);
+assert.equal(press('Numpad8', 'ArrowUp', false), 0);
+assert.equal(press('NumpadDecimal', '.', true), 1);
+assert.equal(press('NumpadDecimal', 'Delete', false), 0);
+/* macOS reports NumLock off while the keypad types digits. */
+assert.equal(press('Numpad4', '4', false), 1);
+/* A locale whose keypad separator is a comma. */
+press('Numpad8', 'ArrowUp', false);
+assert.equal(press('NumpadDecimal', ',', false), 1);
+/* Keys with one meaning leave a held keypad key as it went down. */
+assert.equal(press('NumpadAdd', '+', false), 1);
+assert.equal(press('NumpadEnter', 'Enter', false), 1);
+assert.equal(press('KeyA', 'a', false), 1);
+press('Numpad2', 'ArrowDown', false);
+assert.equal(press('Digit5', '5', false), 0);
+'''
+
+listener_mutants = [
+    ('/^[0-9.,]$/.test(event.key)', "event.getModifierState('NumLock')"),
+    ('/^Numpad([0-9]|Decimal)$/.test(event.code)', 'true'),
+    ('[0-9.,]', '[0-9.]'),
+]
+
+
+def run_listener(body):
+    return subprocess.run(['node', '-e', listener_checks, body], capture_output=True, text=True)
+
+
+result = run_listener(listener)
+assert result.returncode == 0, result.stderr[-1500:]
+for old, new in listener_mutants:
+    assert run_listener(mutate(listener, old, new)).returncode != 0, (old, new)
+
+print(f'PASS: {len(symbols)} SDL key codes; digits/moves split and {len(mutants)} failing regression mutants; '
+      f'the browser listener reads the key, macOS included, and {len(listener_mutants)} failing listener mutants')
