@@ -8,6 +8,7 @@
 #include "headers/PC/ui_mp/ui_wwii_menu.h"
 #include "headers/PC/ui_mp/ui_wwii_settings.h"
 
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -214,6 +215,7 @@ editFieldDef_t *Item_GetEditFieldDef(itemDef_t *item);
 const char *Dvar_GetVariantString(const char *dvarName);
 void I_strncpyz(char *dest, const char *src, int destsize);
 int Key_GetOverstrikeMode(void);
+qboolean CL_KeyIsDown(int key);
 FontHandle UI_GetFontHandle(int fontEnum, float scale);
 void UI_DrawText(const char *text, int maxChars, FontHandle font, float x, float y, int horzAlign, int vertAlign, float scale, const vec_t *color, int style);
 void UI_DrawTextWithCursor(const char *text, int maxChars, FontHandle font, float x, float y, int horzAlign, int vertAlign, float scale, const vec_t *color, int style, int cursorPos, int cursor);
@@ -4686,6 +4688,58 @@ qboolean Menu_HandleMouseMove(displayContextDef_t *dc, menuDef_t *menu, float x,
 }
 
 extern int ___toupper(int c);
+
+#define UI_KEY_ALT 0x9e
+#define UI_KEY_CTRL 0x9f
+#define UI_KEY_SHIFT 0xa0
+
+/* Ctrl on Windows and Linux, Option on macOS: the word motion the console and
+ * the chat already give their fields. */
+static qboolean Item_TextField_WordKey(void)
+{
+    return CL_KeyIsDown(UI_KEY_CTRL) || CL_KeyIsDown(UI_KEY_ALT);
+}
+
+static qboolean Item_TextField_WordChar(char c)
+{
+    return isalnum((unsigned char)c) != 0;
+}
+
+static int Item_TextField_NextWord(const char *text, int length, int cursor)
+{
+    while (cursor < length && !Item_TextField_WordChar(text[cursor]))
+        cursor++;
+    while (cursor < length && Item_TextField_WordChar(text[cursor]))
+        cursor++;
+    return cursor;
+}
+
+static int Item_TextField_PrevWord(const char *text, int cursor)
+{
+    while (cursor > 0 && !Item_TextField_WordChar(text[cursor - 1]))
+        cursor--;
+    while (cursor > 0 && Item_TextField_WordChar(text[cursor - 1]))
+        cursor--;
+    return cursor;
+}
+
+/* Up, down and Tab leave the field for the next item. When that item cannot
+ * take text the edit ends there; otherwise the keystrokes keep going to the
+ * field that has the focus. */
+static void Item_TextField_MoveFocus(displayContextDef_t *dc, itemDef_t *item, int direction)
+{
+    itemDef_t *next = direction > 0 ? Menu_SetNextCursorItem(dc, item->parent) : Menu_SetPrevCursorItem(dc, item->parent);
+
+    if (!next)
+        return;
+    if ((unsigned int)next->type <= 0x12 && ((1 << next->type) & 0x70210)) {
+        g_editItem = next;
+        return;
+    }
+    g_editingField = 0;
+    g_editItem = NULL;
+}
+
 qboolean Item_TextField_HandleKey(displayContextDef_t *dc, itemDef_t *item, int key)
 {
     byte *it = (byte *)item;
@@ -4717,11 +4771,13 @@ qboolean Item_TextField_HandleKey(displayContextDef_t *dc, itemDef_t *item, int 
 
         if (key == 8) {
             cursorPos = ((itemDef_t *)it)->cursorPos[0];
-            if (cursorPos > 0)
-                memmove(buff + cursorPos - 1, buff + cursorPos, len - cursorPos + 1);
-            Dvar_SetFromStringByName(((itemDef_t *)it)->dvar, buff);
-            I_strncpyz(buff, Dvar_GetVariantString(((itemDef_t *)it)->dvar), 0x400);
-            Item_SetCursorPos(item, Item_GetCursorPosOffset(item, buff, -1));
+            if (cursorPos > 0) {
+                int start = Item_TextField_WordKey() ? Item_TextField_PrevWord(buff, cursorPos) : cursorPos - 1;
+                memmove(buff + start, buff + cursorPos, len - cursorPos + 1);
+                Dvar_SetFromStringByName(((itemDef_t *)it)->dvar, buff);
+                I_strncpyz(buff, Dvar_GetVariantString(((itemDef_t *)it)->dvar), 0x400);
+                Item_SetCursorPos(item, start);
+            }
             goto scroll_update;
         }
 
@@ -4760,10 +4816,9 @@ qboolean Item_TextField_HandleKey(displayContextDef_t *dc, itemDef_t *item, int 
             if (maxChars && maxChars <= ((itemDef_t *)it)->cursorPos[0]) {
                 if (editPtr->maxCharsGotoNext == 0)
                     return 1;
-                itemDef_t *nextItem = Menu_SetNextCursorItem(dc, ((itemDef_t *)it)->parent);
-                if (nextItem && (unsigned int)((itemDef_s *)nextItem)->type <= 0x12 &&
-                    ((1 << ((itemDef_s *)nextItem)->type) & 0x70210))
-                    g_editItem = nextItem;
+                Item_TextField_MoveFocus(dc, item, 1);
+                if (g_editItem && g_editItem != item)
+                    Item_SetCursorPos(g_editItem, 0);
                 return 1;
             }
             goto write_char;
@@ -4814,17 +4869,26 @@ qboolean Item_TextField_HandleKey(displayContextDef_t *dc, itemDef_t *item, int 
     case 0xa2:
         cursorPos = ((itemDef_t *)it)->cursorPos[0];
         if (len > cursorPos) {
-            memmove(buff + cursorPos, buff + cursorPos + 1, len - cursorPos);
+            int end = Item_TextField_WordKey() ? Item_TextField_NextWord(buff, len, cursorPos) : cursorPos + 1;
+            memmove(buff + cursorPos, buff + end, len - end + 1);
             Dvar_SetFromStringByName(((itemDef_t *)it)->dvar, buff);
         }
         return 1;
 
     case 0x9d:
-        Item_SetCursorPos(item, Item_GetCursorPosOffset(item, buff, 1));
+    case 0xbb:
+        if (Item_TextField_WordKey())
+            Item_SetCursorPos(item, Item_TextField_NextWord(buff, len, ((itemDef_t *)it)->cursorPos[0]));
+        else
+            Item_SetCursorPos(item, Item_GetCursorPosOffset(item, buff, 1));
         goto scroll_update;
 
     case 0x9c:
-        Item_SetCursorPos(item, Item_GetCursorPosOffset(item, buff, -1));
+    case 0xb9:
+        if (Item_TextField_WordKey())
+            Item_SetCursorPos(item, Item_TextField_PrevWord(buff, ((itemDef_t *)it)->cursorPos[0]));
+        else
+            Item_SetCursorPos(item, Item_GetCursorPosOffset(item, buff, -1));
     scroll_update:
         editPtr = Item_GetEditFieldDef(item);
         cursorPos = ((itemDef_t *)it)->cursorPos[0];
@@ -4855,22 +4919,15 @@ qboolean Item_TextField_HandleKey(displayContextDef_t *dc, itemDef_t *item, int 
         return 1;
 
     case 9:
+        Item_TextField_MoveFocus(dc, item, CL_KeyIsDown(UI_KEY_SHIFT) ? -1 : 1);
+        return 1;
+
     case 0x9b:
-    {
-        itemDef_t *nextItem = Menu_SetNextCursorItem(dc, ((itemDef_t *)it)->parent);
-        if (nextItem && (unsigned int)((itemDef_s *)nextItem)->type <= 0x12 &&
-            ((1 << ((itemDef_s *)nextItem)->type) & 0x70210))
-            g_editItem = nextItem;
-    }
+        Item_TextField_MoveFocus(dc, item, 1);
         return 1;
 
     case 0x9a:
-    {
-        itemDef_t *prevItem = Menu_SetPrevCursorItem(dc, ((itemDef_t *)it)->parent);
-        if (prevItem && (unsigned int)((itemDef_s *)prevItem)->type <= 0x12 &&
-            ((1 << ((itemDef_s *)prevItem)->type) & 0x70210))
-            g_editItem = prevItem;
-    }
+        Item_TextField_MoveFocus(dc, item, -1);
         return 1;
 
     case 0xd:
@@ -5002,7 +5059,15 @@ void Menu_HandleKey(displayContextDef_t *dc, menuDef_t *menu, int key, qboolean 
         return;
     }
 
-    if (key == 9 || key == 0x9b || key == 0x9d) {
+    if (key == 9) {
+        if (CL_KeyIsDown(UI_KEY_SHIFT))
+            Menu_SetPrevCursorItem(dc, menu);
+        else
+            Menu_SetNextCursorItem(dc, menu);
+        return;
+    }
+
+    if (key == 0x9b || key == 0x9d) {
         Menu_SetNextCursorItem(dc, menu);
         return;
     }

@@ -747,7 +747,8 @@ qboolean UI_CheckExecKey(int key)
         key == 0x0d || key == 0xbf ||
         key == 0x09 ||
         (key >= 0x9a && key <= 0x9d) ||
-        key == 0xa3 || key == 0xa4) {
+        key == 0xa3 || key == 0xa4 ||
+        key == 0xa5 || key == 0xa6) {
         return 1;
     }
 
@@ -2314,14 +2315,14 @@ qboolean UI_OwnerDrawHandleKey(int ownerDraw, int flags, float *special, int key
 
     switch (ownerDraw) {
     case 0xcd:
-        if (!UI_IsActionKey(key))
+        if (!UI_IsActionKey(key) && key != 0x9c && key != 0x9d)
             return 0;
         {
             int listIndex = (ui_netGameType)->current.integer;
             int oldVisCount = UI_UpdateMapVisibility(listIndex);
             int newGT, newVisCount;
 
-            if (key == 0xc9) {
+            if (key == 0xc9 || key == 0x9c) {
 
                 newGT = (ui_gametype)->current.integer - 1;
                 if (newGT == 2)
@@ -2392,11 +2393,11 @@ qboolean UI_OwnerDrawHandleKey(int ownerDraw, int flags, float *special, int key
         return 0;
 
     case 0xf5:
-        if (!UI_IsActionKey(key))
+        if (!UI_IsActionKey(key) && key != 0x9c && key != 0x9d)
             return 0;
         {
             int newVal;
-            if (key == 0xc9) {
+            if (key == 0xc9 || key == 0x9c) {
 
                 int cur = (ui_netGameType)->current.integer;
                 newVal = (cur == 0) ? sharedUiInfo.numGameTypes : cur;
@@ -2417,11 +2418,11 @@ qboolean UI_OwnerDrawHandleKey(int ownerDraw, int flags, float *special, int key
         return 1;
 
     case 0xfd:
-        if (!UI_IsActionKey(key))
+        if (!UI_IsActionKey(key) && key != 0x9c && key != 0x9d)
             return 0;
         {
             int newVal;
-            if (key == 0xc9) {
+            if (key == 0xc9 || key == 0x9c) {
 
                 int cur = (ui_joinGameType)->current.integer;
                 newVal = (cur == 0) ? sharedUiInfo.numJoinGameTypes : cur;

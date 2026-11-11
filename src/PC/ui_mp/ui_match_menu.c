@@ -22,6 +22,7 @@ extern char *I_CleanStr(char *string);
 extern void I_strncpyz(char *dest, const char *src, int destsize);
 extern int I_stricmp(const char *s0, const char *s1);
 extern int I_strnicmp(const char *s0, const char *s1, size_t n);
+extern qboolean CL_KeyIsDown(int key);
 extern void Menus_CloseByName(displayContextDef_t *dc, const char *name);
 extern int UI_PlayLocalSoundAliasByName(const char *name);
 extern void UI_RunMenuScript(const char **args);
@@ -38,6 +39,7 @@ extern void UI_RunMenuScript(const char **args);
 #define MATCH_KEY_DOWN 0x9b
 #define MATCH_KEY_LEFT 0x9c
 #define MATCH_KEY_RIGHT 0x9d
+#define MATCH_KEY_SHIFT 0xa0
 #define MATCH_KEY_KP_ENTER 0xbf
 #define MATCH_KEY_MOUSE1 0xc8
 #define MATCH_KEY_MOUSE2 0xc9
@@ -681,8 +683,10 @@ int UI_MatchMenu_KeyEvent(displayContextDef_t *dc, menuDef_t *menu, int key, int
         break;
     case MATCH_KEY_DOWN:
     case MATCH_KEY_WHEEL_DOWN:
-    case MATCH_KEY_TAB:
         Match_Move(1);
+        break;
+    case MATCH_KEY_TAB:
+        Match_Move(CL_KeyIsDown(MATCH_KEY_SHIFT) ? -1 : 1);
         break;
     case MATCH_KEY_LEFT:
     case MATCH_KEY_RIGHT:

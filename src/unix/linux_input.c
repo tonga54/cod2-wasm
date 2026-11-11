@@ -9,6 +9,10 @@
 
 #include "cod2_feature_config.h"
 
+#ifdef __EMSCRIPTEN__
+#    include <emscripten.h>
+#endif
+
 #if COD2_FEATURE_GAMEPAD
 
 extern void CL_Gamepad_Frame(void);
@@ -77,6 +81,45 @@ extern int Linux_PollInputEvent(LinuxInputEvent *event);
 #define K_KP_EQUALS  0xc7
 #define K_MOUSE1     0xc8
 
+#ifdef __EMSCRIPTEN__
+/* SDL's browser backend maps a keypad key by its position, so Numpad 4 is
+ * KP_4 whether it types a digit or moves. Only the browser knows which, and
+ * only while a key event is being dispatched: keep its answer from the last
+ * keypad key. The key it reports says it; NumLock does not, since macOS has
+ * none and reports it off while the keypad types digits. Only the keys with
+ * two meanings answer, so another keypad key held meanwhile cannot change
+ * what a held one releases as. */
+EM_JS(int, IN_BrowserKeypadDigits, (void), {
+    if (!globalThis.cod2KeypadTracked) {
+        globalThis.cod2KeypadTracked = true;
+        globalThis.cod2KeypadDigits = false;
+        addEventListener('keydown', function (event) {
+            if (/^Numpad([0-9]|Decimal)$/.test(event.code))
+                globalThis.cod2KeypadDigits = /^[0-9.,]$/.test(event.key);
+        }, true);
+    }
+    return globalThis.cod2KeypadDigits ? 1 : 0;
+});
+
+static int IN_KeypadTypesDigits(void)
+{
+    return IN_BrowserKeypadDigits();
+}
+#endif
+
+/* A keypad key is the digit it carries when the keypad types digits, and the
+ * arrow or editing key beside it otherwise. Elsewhere it keeps its own code. */
+static int IN_KeypadKey(int navigates, int keypad, int digit)
+{
+#ifdef __EMSCRIPTEN__
+    return IN_KeypadTypesDigits() ? digit : navigates;
+#else
+    (void)navigates;
+    (void)digit;
+    return keypad;
+#endif
+}
+
 static int sdl_to_keynum(SDL_Keycode sym)
 {
     switch (sym) {
@@ -120,17 +163,17 @@ static int sdl_to_keynum(SDL_Keycode sym)
     case SDLK_F13: return K_F1 + 12;  case SDLK_F14: return K_F1 + 13;
     case SDLK_F15: return K_F1 + 14;
 
-    case SDLK_KP_7:         return K_KP_HOME;
-    case SDLK_KP_8:         return K_KP_UPARROW;
-    case SDLK_KP_9:         return K_KP_PGUP;
-    case SDLK_KP_4:         return K_KP_LEFTARROW;
-    case SDLK_KP_5:         return K_KP_5;
-    case SDLK_KP_6:         return K_KP_RIGHTARROW;
-    case SDLK_KP_1:         return K_KP_END;
-    case SDLK_KP_2:         return K_KP_DOWNARROW;
-    case SDLK_KP_3:         return K_KP_PGDN;
-    case SDLK_KP_0:         return K_KP_INS;
-    case SDLK_KP_PERIOD:    return K_KP_DEL;
+    case SDLK_KP_7:         return IN_KeypadKey(K_HOME, K_KP_HOME, '7');
+    case SDLK_KP_8:         return IN_KeypadKey(K_UPARROW, K_KP_UPARROW, '8');
+    case SDLK_KP_9:         return IN_KeypadKey(K_PGUP, K_KP_PGUP, '9');
+    case SDLK_KP_4:         return IN_KeypadKey(K_LEFTARROW, K_KP_LEFTARROW, '4');
+    case SDLK_KP_5:         return IN_KeypadKey(K_KP_5, K_KP_5, '5');
+    case SDLK_KP_6:         return IN_KeypadKey(K_RIGHTARROW, K_KP_RIGHTARROW, '6');
+    case SDLK_KP_1:         return IN_KeypadKey(K_END, K_KP_END, '1');
+    case SDLK_KP_2:         return IN_KeypadKey(K_DOWNARROW, K_KP_DOWNARROW, '2');
+    case SDLK_KP_3:         return IN_KeypadKey(K_PGDN, K_KP_PGDN, '3');
+    case SDLK_KP_0:         return IN_KeypadKey(K_INS, K_KP_INS, '0');
+    case SDLK_KP_PERIOD:    return IN_KeypadKey(K_DEL, K_KP_DEL, '.');
     case SDLK_KP_ENTER:     return K_KP_ENTER;
     case SDLK_KP_DIVIDE:    return K_KP_SLASH;
     case SDLK_KP_MINUS:     return K_KP_MINUS;
@@ -219,6 +262,11 @@ int SDL_PumpInputEvents(void)
         SDL_StartTextInput();
         textInputStarted = 1;
     }
+
+#ifdef __EMSCRIPTEN__
+    /* Install the keypad listener before the first keypad key arrives. */
+    (void)IN_KeypadTypesDigits();
+#endif
 
     for (eventCount = 0; eventCount < 256 && SDL_PollEvent(&ev); ++eventCount) {
         switch (ev.type) {

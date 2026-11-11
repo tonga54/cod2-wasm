@@ -90,12 +90,30 @@ static int Item_GetCursorPosOffset(itemDef_t *i,const char *text,int offset){
  int n=i->cursorPos[0]+offset,len=strlen(text);return n<0?0:(n>len?len:n);}
 static int Key_GetOverstrikeMode(void){return overstrike;}
 static void Key_SetOverstrikeMode(int v){overstrike=v;}
+#define UI_KEY_ALT 0x9e
+#define UI_KEY_CTRL 0x9f
+#define UI_KEY_SHIFT 0xa0
+static int ctrlDown,altDown,shiftDown;
+static int CL_KeyIsDown(int k){return (k==UI_KEY_CTRL&&ctrlDown)||(k==UI_KEY_ALT&&altDown)||(k==UI_KEY_SHIFT&&shiftDown);}
 static int I_isforfilename(int k){return isalnum(k);}
 static int I_isdigit(int k){return isdigit(k);}
 static char Com_GetDecimalDelimiter(void){return '.';}
 int ___toupper(int k){return toupper(k);}
-static itemDef_t *Menu_SetNextCursorItem(displayContextDef_t *d,menuDef_t *m){(void)d;(void)m;return NULL;}
-static itemDef_t *Menu_SetPrevCursorItem(displayContextDef_t *d,menuDef_t *m){(void)d;(void)m;return NULL;}
+static itemDef_t *menuStep(menuDef_t *m,int direction){
+ int current=-1;
+ for(int i=0;i<m->itemCount;i++)if(m->items[i]->window.dynamicFlags[0]&2){current=i;break;}
+ for(int step=1;step<=m->itemCount;step++){
+  int i=(current+direction*step)%m->itemCount;if(i<0)i+=m->itemCount;
+  itemDef_t *it=m->items[i];
+  if(it->window.dynamicFlags[0]&4){
+   for(int j=0;j<m->itemCount;j++)m->items[j]->window.dynamicFlags[0]&=~2;
+   it->window.dynamicFlags[0]|=2;
+   return it;}
+ }
+ return NULL;
+}
+static itemDef_t *Menu_SetNextCursorItem(displayContextDef_t *d,menuDef_t *m){(void)d;return menuStep(m,1);}
+static itemDef_t *Menu_SetPrevCursorItem(displayContextDef_t *d,menuDef_t *m){(void)d;return menuStep(m,-1);}
 static qboolean Item_Bind_HandleKey(displayContextDef_t *d,itemDef_t *i,int k,qboolean b){(void)d;(void)i;(void)k;(void)b;return 0;}
 static int Menu_CheckOnKey(displayContextDef_t *d,menuDef_t *m,int k){(void)d;(void)m;(void)k;return 0;}
 static int Dvar_GetInt(const char *s){(void)s;return 0;}
@@ -129,6 +147,11 @@ static qboolean Item_HandleKey(displayContextDef_t *d,itemDef_t *i,int k,qboolea
 body = ''.join(function(signature) for signature in (
     'void Item_TextField_Paint(displayContextDef_t *dc, itemDef_t *item)',
     'qboolean Item_ListBox_HandleKey(displayContextDef_t *dc, itemDef_t *item, int key, qboolean down, qboolean force)',
+    'static qboolean Item_TextField_WordKey(void)',
+    'static qboolean Item_TextField_WordChar(char c)',
+    'static int Item_TextField_NextWord(const char *text, int length, int cursor)',
+    'static int Item_TextField_PrevWord(const char *text, int cursor)',
+    'static void Item_TextField_MoveFocus(displayContextDef_t *dc, itemDef_t *item, int direction)',
     'qboolean Item_TextField_HandleKey(displayContextDef_t *dc, itemDef_t *item, int key)',
     'void Menu_HandleKey(displayContextDef_t *dc, menuDef_t *menu, int key, qboolean down)',
     'void Menus_HandleOOBClick(displayContextDef_t *dc, menuDef_t *menu, int key, qboolean down)',
@@ -173,6 +196,57 @@ int main(void){int cases=0;
    click(&dc,280,148);assert(g_editingField&&g_editItem==&name);
    type(&dc,"Custom Room QA");assert(!strcmp(hostname,"Custom Room QA"));
    Item_TextField_Paint(&dc,&name);assert(paintedCursor==14&&paintedMax==15);
+   /* The keypad's arrows move the caret as the others do. */
+   Menu_HandleKey(&dc,focused(&dc),0xb9,1);assert(name.cursorPos[0]==13);
+   Menu_HandleKey(&dc,focused(&dc),0xbb,1);assert(name.cursorPos[0]==14);
+   /* Ctrl and Option jump a word at a time; plain arrows move one character. */
+   Menu_HandleKey(&dc,focused(&dc),0xa6,1);
+   ctrlDown=1;
+   Menu_HandleKey(&dc,focused(&dc),0x9c,1);assert(name.cursorPos[0]==12);
+   Menu_HandleKey(&dc,focused(&dc),0x9c,1);assert(name.cursorPos[0]==7);
+   Menu_HandleKey(&dc,focused(&dc),0x9c,1);assert(name.cursorPos[0]==0);
+   Menu_HandleKey(&dc,focused(&dc),0x9d,1);assert(name.cursorPos[0]==6);
+   ctrlDown=0;altDown=1;
+   Menu_HandleKey(&dc,focused(&dc),0x9d,1);assert(name.cursorPos[0]==11);
+   Menu_HandleKey(&dc,focused(&dc),0x9c,1);assert(name.cursorPos[0]==7);
+   altDown=0;
+   Menu_HandleKey(&dc,focused(&dc),0x9c,1);assert(name.cursorPos[0]==6);
+   Menu_HandleKey(&dc,focused(&dc),0x9d,1);assert(name.cursorPos[0]==7);
+   /* Ctrl or Option delete a word at a time. */
+   type(&dc,"Custom Room QA");
+   ctrlDown=1;
+   Menu_HandleKey(&dc,focused(&dc),8|0x400,1);assert(!strcmp(hostname,"Custom Room ")&&name.cursorPos[0]==12);
+   Menu_HandleKey(&dc,focused(&dc),8|0x400,1);assert(!strcmp(hostname,"Custom ")&&name.cursorPos[0]==7);
+   Menu_HandleKey(&dc,focused(&dc),8|0x400,1);assert(!strcmp(hostname,"")&&name.cursorPos[0]==0);
+   ctrlDown=0;
+   type(&dc,"Custom Room QA");
+   Menu_HandleKey(&dc,focused(&dc),0xa5,1);
+   ctrlDown=1;
+   Menu_HandleKey(&dc,focused(&dc),0xa2,1);assert(!strcmp(hostname," Room QA")&&name.cursorPos[0]==0);
+   Menu_HandleKey(&dc,focused(&dc),0xa2,1);assert(!strcmp(hostname," QA")&&name.cursorPos[0]==0);
+   ctrlDown=0;
+   Menu_HandleKey(&dc,focused(&dc),0xa2,1);assert(!strcmp(hostname,"QA")&&name.cursorPos[0]==0);
+   Menu_HandleKey(&dc,focused(&dc),0xa6,1);
+   altDown=1;
+   Menu_HandleKey(&dc,focused(&dc),8|0x400,1);assert(!strcmp(hostname,"")&&name.cursorPos[0]==0);
+   altDown=0;
+   /* Shift+Tab goes back, both between fields and between menu rows. */
+   shiftDown=1;
+   Menu_HandleKey(&dc,focused(&dc),9,1);
+   assert(!g_editingField&&!g_editItem&&(mode.window.dynamicFlags[0]&2));
+   shiftDown=0;
+   Menu_HandleKey(&dc,focused(&dc),9,1);assert(name.window.dynamicFlags[0]&2);
+   shiftDown=1;
+   Menu_HandleKey(&dc,focused(&dc),9,1);assert(mode.window.dynamicFlags[0]&2);
+   shiftDown=0;
+   Menu_HandleKey(&dc,focused(&dc),9,1);assert(name.window.dynamicFlags[0]&2);
+   Menu_HandleKey(&dc,focused(&dc),13,1);assert(g_editingField&&g_editItem==&name);
+   /* Down leaves the field for the value row and ends the edit. */
+   Menu_HandleKey(&dc,focused(&dc),0xa6,1);
+   Menu_HandleKey(&dc,focused(&dc),0x9b,1);
+   assert(!g_editingField&&!g_editItem&&(mode.window.dynamicFlags[0]&2));
+   Menu_HandleKey(&dc,focused(&dc),0x9a,1);assert(name.window.dynamicFlags[0]&2);
+   Menu_HandleKey(&dc,focused(&dc),13,1);assert(g_editingField&&g_editItem==&name);
    int previousMode=selectedMode;click(&dc,280,124);
    assert(!g_editingField&&!g_editItem&&selectedMode==(previousMode+1)%5);
    /* A map click commits the name and selects immediately, without Enter. */

@@ -30,6 +30,7 @@ extern void Item_EditField_End(void);
 extern int Item_GetCursorPosOffset(const itemDef_t *item, const char *buff, int direction);
 extern void Item_SetCursorPos(itemDef_t *item, int cursorPos);
 extern void Key_SetOverstrikeMode(qboolean state);
+extern qboolean CL_KeyIsDown(int key);
 extern void CL_DrawStretchPic(float x, float y, float w, float h, int horzAlign, int vertAlign, float s1, float t1,
                               float s2, float t2, const vec_t *color, MaterialHandle material);
 extern void CalcScreenPlacement(float *x, float *y, float *w, float *h, int horzAlign, int vertAlign);
@@ -65,6 +66,7 @@ extern float GetRealWidthFromVirtualWidth(float width);
 #define SET_KEY_TAB 0x09
 #define SET_KEY_ENTER 0x0d
 #define SET_KEY_ESCAPE 0x1b
+#define SET_KEY_SHIFT 0xa0
 #define SET_KEY_UP 0x9a
 #define SET_KEY_DOWN 0x9b
 #define SET_KEY_LEFT 0x9c
@@ -1266,9 +1268,11 @@ int UI_WWIISettings_KeyEvent(displayContextDef_t *dc, menuDef_t *menu, int key, 
         Settings_Step(dc, page, -1);
         break;
     case SET_KEY_DOWN:
-    case SET_KEY_TAB:
     case SET_KEY_WHEEL_DOWN:
         Settings_Step(dc, page, 1);
+        break;
+    case SET_KEY_TAB:
+        Settings_Step(dc, page, CL_KeyIsDown(SET_KEY_SHIFT) ? -1 : 1);
         break;
     case SET_KEY_LEFT:
     case SET_KEY_RIGHT:

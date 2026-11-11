@@ -24,6 +24,7 @@ extern char *va(const char *format, ...);
 extern void Menus_CloseByName(displayContextDef_t *dc, const char *name);
 extern qboolean Menus_OpenByName(displayContextDef_t *dc, const char *name);
 extern int I_stricmp(const char *s0, const char *s1);
+extern qboolean CL_KeyIsDown(int key);
 extern int UI_PlayLocalSoundAliasByName(const char *aliasname);
 extern const char *UI_SafeTranslateString(const char *reference);
 #if COD2_FEATURE_GAMEPAD
@@ -43,6 +44,7 @@ extern int CL_Gamepad_IsActiveDevice(void);
 #define PAUSE_KEY_DOWN 0x9b
 #define PAUSE_KEY_LEFT 0x9c
 #define PAUSE_KEY_RIGHT 0x9d
+#define PAUSE_KEY_SHIFT 0xa0
 #define PAUSE_KEY_F1 0xa7
 #define PAUSE_KEY_KP_ENTER 0xbf
 #define PAUSE_KEY_MOUSE1 0xc8
@@ -860,8 +862,10 @@ int UI_PauseMenu_KeyEvent(displayContextDef_t *dc, menuDef_t *menu, int key, int
         break;
     case 'e':
     case PAUSE_KEY_RSHLDR:
-    case PAUSE_KEY_TAB:
         Pause_StepTab(1);
+        break;
+    case PAUSE_KEY_TAB:
+        Pause_StepTab(CL_KeyIsDown(PAUSE_KEY_SHIFT) ? -1 : 1);
         break;
     case PAUSE_KEY_F1:
         if (s_pause.tab == PAUSE_TAB_CLASS && !s_pause.standard)
