@@ -101,11 +101,11 @@ extern void Web_ClassesSave(const char *player, const char *lines, int generatio
 #define CAC_STAT_TOP 300.0f
 #define CAC_STAT_ROW 17.0f
 #define CAC_STAT_BAR 104.0f
-/* The equipment rows' icons, 30 square, 38 apart, six to a row: four
- * grenades, the S-Mine and C4. */
+/* The equipment rows' icons, 30 square, 38 apart, five to a row: four
+ * grenades and the S-Mine. */
 #define CAC_ICON_SIZE 30.0f
 #define CAC_ICON_STEP 38.0f
-#define CAC_EQUIP_COLUMNS 6
+#define CAC_EQUIP_COLUMNS 5
 #define CAC_RETAIL_IMAGE_ASPECT (199.0f / 112.0f)
 /* Camouflage, as WWII's: swatches 30 square and 3 apart, four a row from the
  * list's top, the focused pattern's name beside them; under each gun's tile
@@ -280,7 +280,7 @@ static struct {
 
 static const char *const s_cacGroups[] = {
     "Submachine Gun", "Rifle", "Automatic Rifle", "Sniper Rifle", "Shotgun", "Pistol",
-    "Lethal Fragmentation Grenade", "Tactical Smoke Grenade", "Lethal Proximity Mine", "Lethal Remote Charge",
+    "Lethal Fragmentation Grenade", "Tactical Smoke Grenade", "Lethal Proximity Mine",
 };
 /* The guns' kinds on the weapon list's tabs. */
 static const char *const s_cacGroupTabs[] = {
@@ -2079,12 +2079,10 @@ static void Cac_PaintEquipment(displayContextDef_t *dc)
         return;
     below = Cac_Detail(focusWeapon, CAC_LEFT + CAC_EQUIP_COLUMNS * CAC_ICON_STEP + 12.0f, 135.0f, CAC_ALIGN_LEFT,
                        CAC_DETAIL_WIDTH);
-    /* The default binds. Every frag cooks in the hand (BG_GrenadeCanCook); smoke, the
-     * mine and C4 do not. */
+    /* The default binds. Every frag cooks in the hand (BG_GrenadeCanCook); smoke and the
+     * mine do not. */
     if (g_classWeapons[focusWeapon].group == CLASS_GROUP_MINE)
         snprintf(hint, sizeof(hint), "%s", "Press G to set it at your feet; hold F over it to take it back.");
-    else if (g_classWeapons[focusWeapon].group == CLASS_GROUP_CHARGE)
-        snprintf(hint, sizeof(hint), "%s", "Press G to take it out: fire throws it, aim sets them off.");
     else if (s_cac.pickSlot == CLASS_SLOT_LETHAL && s_cac.stats[focusWeapon].fuse > 0.0f)
         snprintf(hint, sizeof(hint), "Hold G to cook it: the %g-second fuse starts with the pin.",
                  (double)s_cac.stats[focusWeapon].fuse);

@@ -171,7 +171,7 @@ try:
         "SVT40_mp", "PPS42_mp", "ppsh_mp", "mosin_nagant_sniper_mp",
     )
     pending.extend("weapons/mp/" + weapon for weapon in weapons)
-    # The land mine and C4 are generated below from these originals.
+    # The land mine is generated below from these originals.
     pending.extend(EXPLOSIVE_DEPENDENCIES)
     renderer = {}
     while pending:

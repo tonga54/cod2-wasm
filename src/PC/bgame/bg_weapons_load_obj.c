@@ -337,26 +337,13 @@ static qboolean BG_ParseWeaponDefSpecificFieldType(byte *pStruct, const char *pV
     }
 }
 
-/* Placed explosives: CoD4's hasDetonator, stickiness and detonateSound, and a
- * mine's proximity keys, in seconds as fuseTime is; and the view model's own
- * offset. Retail files have none. */
+/* Placed mines: proximity keys, in seconds as fuseTime is, their sounds, and
+ * the view model's own offset. Retail files have none. */
 static void BG_ParsePlacedExplosiveKeys(WeaponDef *weapDef, const char *info)
 {
-    static const char *const stickinessNames[] = { "none", "all", "ground" };
-    const char *value;
-    int i;
-
-    weapDef->hasDetonator = atoi(Info_ValueForKey(info, "hasDetonator")) != 0;
-    weapDef->stickiness = WEAPSTICKINESS_NONE;
-    value = Info_ValueForKey(info, "stickiness");
-    for (i = 0; i < 3; i++) {
-        if (!stricmp(value, stickinessNames[i]))
-            weapDef->stickiness = i;
-    }
     weapDef->proximityRadius = (float)atof(Info_ValueForKey(info, "proximityRadius"));
     weapDef->iProximityArmTime = (int)(atof(Info_ValueForKey(info, "proximityArmTime")) * 1000.0 + 0.5);
     weapDef->iProximityDelay = (int)(atof(Info_ValueForKey(info, "proximityDelay")) * 1000.0 + 0.5);
-    SetConfigString_core(&weapDef->szDetonateSound, Info_ValueForKey(info, "detonateSound"));
     SetConfigString_core(&weapDef->szBounceSound, Info_ValueForKey(info, "bounceSound"));
     SetConfigString_core(&weapDef->szArmSound, Info_ValueForKey(info, "armSound"));
     SetConfigString_core(&weapDef->szTriggerSound, Info_ValueForKey(info, "triggerSound"));

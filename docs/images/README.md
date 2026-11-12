@@ -23,7 +23,7 @@ them.
 | `attachments.jpg` | Four attachment screens | `04-attach-suppressor.png`, `04-attach-reflex.png`, `04-attach-optic4x.png`, `04-attach-list.png` |
 | `camouflage.jpg` | Eleven finishes and Ember in play | `c-camo-0.png` to `c-camo-10.png`, `b-tank1.png` |
 | `optics.jpg` | Reflex, Lens, 4x Optic, sniper scope, scope glint | `ads-reflex-2.png`, `ads-lens-1.png`, `o4n-b.png`, `sc-1.png`, `out/scope-glint-fade-qa/m700c-new-5.png` (glint cropped at 2×, ringed) |
-| `explosives.jpg` | S-Mine 44 and C4, three steps each | `sm-frame.png`, `sm-emb-a.png`, `sm-view1.png`, `c4-stuck.png`, `c4-boom-1.png`, `c4-boom-3.png` |
+| `explosives.jpg` | S-Mine 44 in three steps | `sm-frame.png`, `sm-emb-a.png`, `sm-view1.png` |
 | `bots.jpg` | Bot setup and a bot match | `12-bot-setup.png`, `cl-view.png` |
 | `match-flow.jpg` | Countdown, killcam, victory, scoreboard | `j1.png`, `kc-12.png`, `ew2-157.jpg`, `ew2-168.jpg` |
 | `menus.jpg` | Nine menu screens | `01-main-menu.png`, `13-match-summary.png`, `10-map-select.png`, `11-game-rules.png`, `16-pause.png`, `17-overview.png`, `18-settings.png`, `19-graphics.png`, `21-controller.png` |

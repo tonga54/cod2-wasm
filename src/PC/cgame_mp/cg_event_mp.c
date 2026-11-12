@@ -28,7 +28,7 @@ static const WeaponDef *CG_EventWeaponDef(int weapon)
 }
 #ifdef __EMSCRIPTEN__
 /* The compositor's shockwave (downstream/wasm/web_scene_fx.c): a grenade,
- * S-Mine, C4 or rocket going off, as far as its blast reaches; smoke, which
+ * S-Mine or rocket going off, as far as its blast reaches; smoke, which
  * deals no damage, has no radius. */
 extern void WebSceneFx_AddExplosion(const float *origin, float radius);
 extern int BG_GetNumWeapons(void);
@@ -478,7 +478,7 @@ void CG_EntityEvent(centity_t *cent, int event)
 
     {
         int jmpIdx = event - 0x8b;
-        if ((unsigned int)jmpIdx > EV_DETONATE - 0x8b) {
+        if ((unsigned int)jmpIdx > 0x3b) {
 
             char **eventNames = CG_EventNames();
 
@@ -812,19 +812,9 @@ void CG_EntityEvent(centity_t *cent, int event)
             if (es->number != *(int *)(snap + SNAP_PS_CLIENTNUM))
                 return;
 
-            /* With every charge thrown the detonator stays in hand, as CoD4's. */
-            if (w && CG_EventWeaponDef(w)->hasDetonator)
-                return;
             CG_OutOfAmmoChange();
             return;
         }
-
-        case EV_DETONATE:
-            if (weapon && CG_EventWeaponDef(weapon)->szDetonateSound &&
-                CG_EventWeaponDef(weapon)->szDetonateSound[0])
-                CG_PlaySoundAliasByName(es->number, (const vec_t *)position,
-                                        CG_EventWeaponDef(weapon)->szDetonateSound);
-            return;
 
         case 0x94:
         {

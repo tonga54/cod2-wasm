@@ -41,8 +41,8 @@ fields = {
     'hipSpreadFireAdd': 'fHipSpreadFireAdd',
 }
 with zipfile.ZipFile(root / 'data/browser/main/cod2_browser_renderer.iwd') as archive:
-    # The land mine and C4 have no original; check-private-assets.py compares
-    # them with their generator, browser_explosives.py.
+    # The land mine has no original; check-private-assets.py compares
+    # it with its generator, browser_explosives.py.
     generated = {'weapons/mp/' + weapon for weapon in EXPLOSIVE_WEAPONS}
     for name in sorted(n for n in archive.namelist() if n.startswith('weapons/mp/') and n not in generated):
         data = archive.read(name)
@@ -95,7 +95,7 @@ typedef struct {
      iReloadStartTime,iReloadStartAddTime,iReloadEndTime,iReloadAmmoAdd,
      iReloadStartAdd,bSegmentedReload,bNoPartialReload,iAmmoIndex,iClipIndex,
      weapType,offhandClass,bCookOffHold,bClipOnly,bADSFire,iHoldFireTime,iFuseTime,
-     adsGunKickReducedKickBullets,hipGunKickReducedKickBullets,hasDetonator;
+     adsGunKickReducedKickBullets,hipGunKickReducedKickBullets;
  float fHipSpreadFireAdd,fOOPosAnimLength[2],proximityRadius;
 } WeaponDef;
 typedef struct {int buttons,weapon,serverTime; signed char forwardmove,rightmove;} usercmd_t;
@@ -139,7 +139,7 @@ names = ('PM_WeaponSetAnim', 'PM_WeaponClearAnim', 'PM_WeaponSetIdle',
          'PM_UpdateWeaponTimers', 'PM_StartRechamber', 'PM_FinishRechamber',
          'PM_AddFireSpread', 'PM_TryTakeEmptyClipOnlyWeapon', 'PM_ConsumeFireAmmo',
          'PM_StartFireTimers', 'PM_TryStartGrenadeFire', 'PM_TryFireWeapon',
-         'PM_FinishFire', 'PM_RunReloadState', 'PM_ResetWeaponState', 'PM_TryDetonate', 'PM_Weapon')
+         'PM_FinishFire', 'PM_RunReloadState', 'PM_ResetWeaponState', 'PM_Weapon')
 grenade_header = '#define OFFHAND_CLASS_FRAG_GRENADE 1\n' + (root/'src/headers/cod2_grenade.h').read_text()
 body = ''.join(function(n) for n in names)
 checks = r'''
@@ -287,11 +287,10 @@ int main(void) {
    cases++;
   }
  }
- /* A charge thrown from the hand after a fire delay leaves it once a click;
-  * with none left the clip-only detonator stays in hand and aim sets them off. */
+ /* A grenade thrown from the hand after a fire delay leaves it once a click. */
  {
-  WeaponDef c={.weapType=WEAPTYPE_GRENADE,.bClipOnly=1,.iClipSize=2,.iFireTime=300,.iFireDelay=100,
-   .iHoldFireTime=350,.hasDetonator=1};
+  WeaponDef c={.weapType=WEAPTYPE_GRENADE,.iClipSize=2,.iFireTime=300,.iFireDelay=100,
+   .iHoldFireTime=350};
   playerState_t ps;pmove_t pm;reset(&pm,&ps,&c,0,2);ps.ammo[1]=0;
   for(int t=0;t<128;t+=16)tick(&pm,16,1);
   for(int t=0;t<1504;t+=16)tick(&pm,16,0);
@@ -299,10 +298,8 @@ int main(void) {
   for(int t=0;t<128;t+=16)tick(&pm,16,1);
   for(int t=0;t<1504;t+=16)tick(&pm,16,0);
   assert(shots==2&&ps.ammoclip[1]==0&&ps.weapon==1&&ps.weaponstate==WEAPON_READY);
-  eventCount=0;tick(&pm,16,PM_WEAPON_BUTTON_ADS);
-  assert(eventCount==1&&events[0]==EV_DETONATE);
  }
- printf("PASS: %d guns, %d configurations including %d rapid-click schedules; unbuffered semi-auto presses, original cadence and ammo conservation; a thrown charge leaves the hand once a click and the empty detonator stays to set them off\n",
+ printf("PASS: %d guns, %d configurations including %d rapid-click schedules; unbuffered semi-auto presses, original cadence and ammo conservation; a delayed grenade throw leaves the hand once a click\n",
         (int)(sizeof(guns)/sizeof(guns[0])),cases,cases*12);
 }
 '''
@@ -318,8 +315,7 @@ with tempfile.TemporaryDirectory(prefix='cod2-fire-modes-') as directory:
                 buffered,
                 body.replace('if (!delayedAction && (ps->weaponTime || ps->weaponDelay))', 'if (0)'),
                 body.replace('one fire delay later. */\n    if (ps->weaponstate != WEAPON_FIRING || !delayedAction)\n',
-                             'one fire delay later. */\n    if (1)\n'),
-                body.replace('if (!weapDef->bClipOnly || weapDef->hasDetonator)', 'if (!weapDef->bClipOnly)')]
+                             'one fire delay later. */\n    if (1)\n')]
     assert all(v != body for v in variants[1:])
     for index, variant in enumerate(variants):
         (d / 'test.c').write_text(defines + '\n' + support + grenade_header + variant + checks)
@@ -330,4 +326,4 @@ with tempfile.TemporaryDirectory(prefix='cod2-fire-modes-') as directory:
         if index == 0:
             print(result.stdout.strip())
 (root / 'out/weapon-fire-modes-audit.json').write_text(json.dumps({'weapons': report}, indent=2) + '\n')
-print(f'PASS: all {len(report)} packaged definitions audited; missing semi-auto, extra READY-frame, buffered-press, missing recovery-guard, repeated delayed-throw and taken-detonator mutants fail')
+print(f'PASS: all {len(report)} packaged definitions audited; missing semi-auto, extra READY-frame, buffered-press, missing recovery-guard and repeated delayed-throw mutants fail')

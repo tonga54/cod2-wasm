@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Run the S-Mine's and C4's production code: setting the mine down at its
-owner's feet, arming and the enemy's step, an enemy shooting it, the owner
-taking it back, sticking, the detonator, owners and limits, who is sent one
-through walls, weapon file keys, the HUD's pulsing squad emblems and G
-toggle."""
+"""Run the S-Mine's production code: setting the mine down at its owner's
+feet, arming and the enemy's step, an enemy shooting it, the owner taking it
+back, owners and limits, who is sent one through walls, weapon file keys, and
+the HUD's pulsing squad emblems."""
 from pathlib import Path
 import re
 import subprocess
@@ -48,10 +47,10 @@ typedef int qboolean;typedef int Bool;typedef unsigned char byte;typedef float v
 #define OFFHAND_CLASS_FRAG_GRENADE 1
 typedef struct {int weapType,offhandClass,bCookOffHold,iFuseTime,damage,iExplosionRadius,iExplosionOuterDamage,
  iExplosionInnerDamage,weapClass,projExplosion,iClipIndex,iClipSize,iHoldFireTime,iMaxAmmo,quickDropTime,iProjectileSpeed,
- hasDetonator,stickiness,iProximityArmTime,iProximityDelay,iAltWeaponIndex;float proximityRadius;
+ iProximityArmTime,iProximityDelay,iAltWeaponIndex;float proximityRadius;
  float parallelBounce[32],perpendicularBounce[32],fAdsAimPitch,destabilizeDistance,destabilizationTimeReductionRatio,
  destabilizationBaseTime;const char *szProjExplosionEffect,*killIcon,*szInternalName;
- char *szBounceSound,*szArmSound,*szTriggerSound,*szDetonateSound,*szPickupSound;vec3_t vGunOfs;}WeaponDef;
+ char *szBounceSound,*szArmSound,*szTriggerSound,*szPickupSound;vec3_t vGunOfs;}WeaponDef;
 '''
 
 # The server: g_missile_mp.c's placed explosives with the missile code around
@@ -164,13 +163,13 @@ server_body = function(team, 'OnSameTeam').replace('qboolean OnSameTeam', 'stati
         'VectorCopy', 'VectorSubtract', 'VectorAdd', 'VectorScale', 'VectorClear', 'VectorLength', 'DotProduct',
         'VectorMA', 'SnapFloat', 'SnapVector', 'LerpPosition', 'G_GetHeldGrenade', 'G_CanPickUpGrenade',
         'G_FindNearbyGrenade', 'G_PlacedTeam', 'G_PlacedSound', 'G_PlacedOwner', 'G_SetDownMine',
-        'G_PlaceExplosive', 'G_StickMissile', 'G_LaunchMine', 'G_RunPlacedExplosive', 'G_DetonateExplosives',
+        'G_PlaceExplosive', 'G_LaunchMine', 'G_RunPlacedExplosive',
         'G_CanTakeMine',
         'G_ListMines', 'G_FindOwnMine', 'G_UpdateMinePickup', 'G_BulletHitsMines', 'G_PlacedExplosiveSentTo',
         'G_ExplodeMissile',
         'fire_grenade', 'G_BounceMissile', 'G_RunMissile'))
 server_checks = r'''
-enum {MINE=1,CHARGE=2,FRAG=3,WORLD=1022};
+enum {MINE=1,OTHER_MINE=2,FRAG=3,WORLD=1022};
 static gentity_t *player(int n,int side){gentity_t *p=&g_entities[n];memset(p,0,sizeof(*p));p->s.number=n;p->r.inuse=1;
  p->health=100;p->client=&clients[n];memset(p->client,0,sizeof(gclient_t));p->client->sess.connected=2;
  p->client->sess.cs.team=side;p->client->lastSpawnTime=700+n;return p;}
@@ -188,9 +187,8 @@ static void reset(void){
  defs[MINE].iExplosionRadius=192;defs[MINE].iExplosionInnerDamage=300;defs[MINE].iExplosionOuterDamage=60;
  defs[MINE].szArmSound="arm";defs[MINE].szTriggerSound="click";defs[MINE].szBounceSound="land";
  defs[MINE].szPickupSound="pickup";defs[MINE].iClipIndex=5;defs[MINE].iClipSize=2;
- defs[CHARGE].hasDetonator=1;defs[CHARGE].stickiness=WEAPSTICKINESS_ALL;defs[CHARGE].offhandClass=0;
- defs[CHARGE].iExplosionRadius=256;defs[CHARGE].iExplosionInnerDamage=330;defs[CHARGE].iExplosionOuterDamage=70;
- defs[CHARGE].szBounceSound="stick";defs[FRAG].iFuseTime=3500;defs[FRAG].iExplosionRadius=256;
+ defs[OTHER_MINE]=defs[MINE];
+ defs[FRAG].iFuseTime=3500;defs[FRAG].iExplosionRadius=256;
  defs[FRAG].iExplosionInnerDamage=200;entityHandlers[7].methodOfDeath=3;entityHandlers[7].splashMethodOfDeath=4;
 }
 static gentity_t *place(gentity_t *owner,int weapon){vec3_t start={0,0,0},dir={200,0,0};
@@ -200,12 +198,6 @@ static void frame(gentity_t *m,int ms){level.previousTime=level.time;level.time+
 static gentity_t *armedMine(gentity_t *owner){for(int i=0;i<8;i++)at(&g_entities[i],5000+100*i,5000,0);
  gentity_t *m=place(owner,MINE);rest(m,0,0);frame(m,50);
  for(int t=0;t<1300;t+=50)frame(m,50);return m;}
-/* Q3's AngleVectors: forward, left (axis[1]) and up. */
-static void axes(const vec_t *a,vec_t *f,vec_t *l,vec_t *u){
- float p=a[0]*.0174532925f,y=a[1]*.0174532925f,r=a[2]*.0174532925f,sp=sinf(p),cp=cosf(p),sy=sinf(y),cy=cosf(y),
- sr=sinf(r),cr=cosf(r);
- f[0]=cp*cy;f[1]=cp*sy;f[2]=-sp;l[0]=sr*sp*cy-cr*sy;l[1]=sr*sp*sy+cr*cy;l[2]=sr*cp;u[0]=cr*sp*cy+sr*sy;
- u[1]=cr*sp*sy-sr*cy;u[2]=cr*cp;}
 int main(void){
  int cases=0;
  /* Placed: no fuse, the owner and side recorded, a mine set down unspun. */
@@ -271,7 +263,7 @@ int main(void){
  /* Gone with its owner, when the owner changes sides, spawns again or watches
   * as a spectator; there through the owner's death and its killcam. */
  for(int loss=0;loss<5;loss++){
-  reset();owner=player(0,2);m=place(owner,loss&1?CHARGE:MINE);rest(m,0,0);frame(m,50);assert(m->r.inuse);
+  reset();owner=player(0,2);m=place(owner,MINE);rest(m,0,0);frame(m,50);assert(m->r.inuse);
   if(loss==0)owner->client->sess.connected=0;
   if(loss==1)owner->client->sess.cs.team=1;
   if(loss==2)owner->client->lastSpawnTime=level.time;
@@ -282,45 +274,12 @@ int main(void){
  }
  /* Two of a kind each: a third replaces the oldest, apart from other kinds and players. */
  reset();owner=player(0,2);enemy=player(1,1);
- gentity_t *first=place(owner,MINE),*second=place(owner,MINE),*charge=place(owner,CHARGE),*theirs=place(enemy,MINE);
+ gentity_t *first=place(owner,MINE),*second=place(owner,MINE),*otherKind=place(owner,OTHER_MINE),*theirs=place(enemy,MINE);
  gentity_t *third=place(owner,MINE);
- assert(!first->r.inuse&&second->r.inuse&&third->r.inuse&&charge->r.inuse&&theirs->r.inuse);cases++;
- /* C4 stays where it first hits a wall or floor, its flat side (-y) on it and
-  * its top up the wall or along the throw; no bounce. */
- vec3_t normals[]={{-1,0,0},{0,1,0},{0,0,1},{0,0,-1},{.6f,0,.8f},{0,-.8f,.6f}};
- gentity_t *c;
- for(int n=0;n<6;n++){
-  reset();owner=player(0,2);c=place(owner,CHARGE);
-  hit=(trace_t){.fraction=.5f,.entityNum=WORLD};memcpy(hit.normal,normals[n],sizeof(vec3_t));
-  frame(c,50);assert((c->spawnflags&1)&&c->s.pos.trType==0&&!bounces&&sounds==1&&c->s.groundEntityNum==WORLD);
-  vec3_t f,l,u,spot;memcpy(spot,c->r.currentOrigin,sizeof(spot));axes(c->r.currentAngles,f,l,u);
-  for(int k=0;k<3;k++)assert(fabsf(l[k]+normals[n][k])<1e-3f);
-  assert(fabsf(u[0]*normals[n][0]+u[1]*normals[n][1]+u[2]*normals[n][2])<1e-3f);
-  if(fabsf(normals[n][2])<.9f)assert(u[2]>0);else assert(fabsf(u[0]-1)<1e-3f);
-  hit=(trace_t){.fraction=1,.entityNum=1023};
-  for(int t=0;t<40;t++)frame(c,50);
-  assert(!memcmp(spot,c->r.currentOrigin,sizeof(spot))&&!explosions&&c->r.inuse);cases++;
- }
- /* Stuck to a mover or door it stays put too, though nothing is under it. */
- reset();owner=player(0,2);c=place(owner,CHARGE);hit=(trace_t){.fraction=.5f,.entityNum=500};hit.normal[0]=-1;
- frame(c,50);assert((c->spawnflags&1)&&c->s.groundEntityNum==500);vec3_t still;memcpy(still,c->r.currentOrigin,sizeof(still));
- hit=(trace_t){.fraction=1,.entityNum=1023};for(int t=0;t<10;t++)frame(c,50);
- assert(!memcmp(still,c->r.currentOrigin,sizeof(still)));cases++;
- /* A player it hits bounces it off, as any grenade. */
- reset();owner=player(0,2);enemy=player(1,1);c=place(owner,CHARGE);
- hit=(trace_t){.fraction=.5f,.entityNum=1};hit.normal[0]=-1;frame(c,50);assert(!(c->spawnflags&1));cases++;
- /* The detonator sets off its owner's charges only, anywhere; not mines. */
- reset();owner=player(0,2);enemy=player(1,1);
- gentity_t *a=place(owner,CHARGE),*b=place(owner,CHARGE),*e=place(enemy,CHARGE),*mm=place(owner,MINE);
- hit=(trace_t){.fraction=.5f,.entityNum=WORLD};hit.normal[2]=1;frame(a,50);frame(b,50);frame(e,50);
- b->r.currentOrigin[0]=b->s.pos.trBase[0]=90000;rest(mm,0,0);
- G_DetonateExplosives(owner);assert(a->nextthink==level.time&&b->nextthink==level.time&&!e->nextthink&&!mm->nextthink);
- frame(a,0);frame(b,0);frame(e,0);assert(explosions==2&&lastAttacker==owner&&e->r.inuse);cases++;
- /* A charge thrown and set off before it lands goes off in the air. */
- reset();owner=player(0,2);c=place(owner,CHARGE);G_DetonateExplosives(owner);frame(c,50);assert(explosions==1);cases++;
- /* Placed explosives are never picked up and thrown back; frags still are. */
+ assert(!first->r.inuse&&second->r.inuse&&third->r.inuse&&otherKind->r.inuse&&theirs->r.inuse);cases++;
+ /* Placed mines are never picked up and thrown back; frags still are. */
  reset();owner=player(0,2);gentity_t *receiver=player(1,1);at(receiver,0,0,0);receiver->client->ps.viewHeightCurrent=60;
- m=place(owner,MINE);rest(m,0,0);m->nextthink=level.time+100;c=place(owner,CHARGE);c->nextthink=level.time+100;
+ m=place(owner,MINE);rest(m,0,0);m->nextthink=level.time+100;m->s.eFlags|=GMISSILE_EF_GRENADE_BOUNCE;
  assert(!G_FindNearbyGrenade(receiver));gentity_t *f=place(owner,FRAG);assert(f->nextthink>level.time&&G_FindNearbyGrenade(receiver)==f);
  cases++;
  /* The S-Mine is set down upright a step ahead of the feet, on the ground,
@@ -367,7 +326,7 @@ int main(void){
  /* A full kit, or a kit without the mine, takes it back too, without going
   * past the clip. */
  for(int c=0;c<2;c++){
-  reset();owner=player(0,2);owner->client->ps.weapons[0]=c?1<<CHARGE:1<<MINE;owner->client->ps.ammoclip[5]=c?0:2;
+  reset();owner=player(0,2);owner->client->ps.weapons[0]=c?1<<FRAG:1<<MINE;owner->client->ps.ammoclip[5]=c?0:2;
   owner->client->buttons=USE;m=place(owner,MINE);rest(m,20,0);
   level.time+=50;owner->client->ps.cursorHint=0;G_UpdateMinePickup(owner);
   assert(owner->client->ps.cursorHint==PLACED_PICKUP_HINT&&owner->client->ps.cursorHintString==MINE&&m->r.inuse);
@@ -377,12 +336,12 @@ int main(void){
  }
  /* Nobody else, nor out of reach, too far above or below, once it has
   * clicked, still falling, out of sight, dead, where another hint is
-  * offered, or a charge. */
+  * offered, or a frag. */
  for(int c=0;c<10;c++){
   reset();owner=player(0,2);mate=player(1,2);enemy=player(2,1);
-  for(int k=0;k<3;k++){g_entities[k].client->ps.weapons[0]=1<<MINE|1<<CHARGE;g_entities[k].client->buttons=USE;}
+  for(int k=0;k<3;k++){g_entities[k].client->ps.weapons[0]=1<<MINE|1<<FRAG;g_entities[k].client->buttons=USE;}
   gentity_t *who=c==0?mate:c==1?enemy:owner;
-  m=place(owner,c==9?CHARGE:MINE);rest(m,20,0);
+  m=place(owner,c==9?FRAG:MINE);rest(m,20,0);
   if(c==2)at(owner,-40,0,0);if(c==3)at(owner,0,0,-50);if(c==4)m->spawnflags|=2;if(c==5)m->s.pos.trType=5;
   if(c==6)blockSight=1;if(c==7)owner->health=0;
   for(int k=0;k<24;k++){level.time+=50;who->client->ps.cursorHint=c==8?7:0;G_UpdateMinePickup(who);
@@ -394,16 +353,14 @@ int main(void){
  gentity_t *near=place(owner,MINE),*far=place(owner,MINE);rest(near,10,0);rest(far,40,0);
  for(int k=0;k<11;k++){level.time+=50;owner->client->ps.cursorHint=0;G_UpdateMinePickup(owner);}
  assert(!near->r.inuse&&far->r.inuse);cases++;
- /* Sent wherever it lies within 1600 units of the eyes: a resting mine or
-  * charge to its owner and teammates; never to enemies or spectators, nor a
-  * frag, one still moving, one farther off, or one with no owner or weapon. */
+ /* Sent wherever it lies within 1600 units of the eyes: a resting mine to its
+  * owner and teammates; never to enemies or spectators, nor a frag, one still
+  * moving, one farther off, or one with no owner or weapon. */
  reset();owner=player(0,2);mate=player(1,2);enemy=player(2,1);player(3,3);
- m=place(owner,MINE);rest(m,0,0);c=place(owner,CHARGE);rest(c,0,0);f=place(owner,FRAG);rest(f,0,0);
+ m=place(owner,MINE);rest(m,0,0);f=place(owner,FRAG);rest(f,0,0);
  f->s.otherEntityNum=0;vec3_t within={1500,500,60},beyond={1600,0,60};
- assert(G_PlacedExplosiveSentTo(&m->s,within,0)&&G_PlacedExplosiveSentTo(&m->s,within,1)&&
-  G_PlacedExplosiveSentTo(&c->s,within,1));
- assert(!G_PlacedExplosiveSentTo(&m->s,within,2)&&!G_PlacedExplosiveSentTo(&c->s,within,2)&&
-  !G_PlacedExplosiveSentTo(&m->s,within,3));
+ assert(G_PlacedExplosiveSentTo(&m->s,within,0)&&G_PlacedExplosiveSentTo(&m->s,within,1));
+ assert(!G_PlacedExplosiveSentTo(&m->s,within,2)&&!G_PlacedExplosiveSentTo(&m->s,within,3));
  assert(!G_PlacedExplosiveSentTo(&f->s,within,0)&&!G_PlacedExplosiveSentTo(&m->s,beyond,0));
  m->s.pos.trType=5;assert(!G_PlacedExplosiveSentTo(&m->s,within,0));m->s.pos.trType=0;
  m->s.otherEntityNum=64;assert(!G_PlacedExplosiveSentTo(&m->s,within,0));m->s.otherEntityNum=0;
@@ -441,11 +398,11 @@ int main(void){
    m=place(owner,MINE);rest(m,0,0);at(owner,500,0,0);at(enemy,-500,0,0);at(mate,0,500,0);frame(m,50);
    G_BulletHitsMines(&g_entities[shooters[i].who],from,to);frame(m,50);assert(explosions==shooters[i].fires);cases++;
   }
-  /* Not C4, nor a mine still falling, nor one that has clicked: that one
+  /* Not a frag, nor a mine still falling, nor one that has clicked: that one
    * goes off when it would, its owner's. */
   reset();owner=player(0,2);enemy=player(1,1);at(owner,500,0,0);at(enemy,-500,0,0);
-  c=place(owner,CHARGE);rest(c,0,0);frame(c,50);G_BulletHitsMines(enemy,from,to);frame(c,50);
-  assert(!explosions&&c->r.inuse&&c->s.eType==4);
+  f=place(owner,FRAG);rest(f,0,0);G_BulletHitsMines(enemy,from,to);assert(!s_mineShotBy[f->s.number]);
+  reset();owner=player(0,2);enemy=player(1,1);at(owner,500,0,0);at(enemy,-500,0,0);
   m=place(owner,MINE);rest(m,0,0);m->s.pos.trType=5;G_BulletHitsMines(enemy,from,to);assert(!s_mineShotBy[m->s.number]);
   reset();owner=player(0,2);enemy=player(1,1);gentity_t *gunner=player(3,1);m=armedMine(owner);
   at(enemy,10,0,0);frame(m,50);assert(m->spawnflags&2);at(enemy,-500,0,0);at(gunner,-500,0,0);
@@ -472,67 +429,22 @@ int main(void){
   reset();owner=player(0,2);at(owner,500,0,0);s_mineShotBy[level.num_entities]=2;m=place(owner,MINE);rest(m,0,0);
   frame(m,50);frame(m,50);assert(!explosions&&m->s.eType==4&&m->r.inuse);cases++;
  }
- printf("PASS: %d server cases: a mine arms 1.2 s after it lies still, clicks under an enemy's feet within %g units and 24 below to 48 above, for one walking or sprinting by 50 units off but not 64, springs up 300 ms later, turning and through players, and goes off at its top 44 units up for its owner, once, never for teammates, its owner, the dead, spectators or the disconnected; anyone in free-for-all; C4 sticks flat to walls, floors, ceilings and slopes, bounces off players, and goes off only by its owner's detonator, anywhere, in flight too; two of each kind per owner; both go with an owner who leaves or changes sides; neither is thrown back; the S-Mine is set down upright a step ahead of its owner's feet, short of walls, down steps, falling over drops and steep slopes; only its owner takes it back, holding Use half a second within reach, in sight, where no other hint is offered, the nearer first, with a full kit or none too, refunded only into room in a kit that carries it; a resting one is sent to its owner and teammates within 1600 units wherever it lies, never to enemies, spectators or others in free-for-all; an enemy's bullet within 5 units of a resting mine's can, along its own path, sets the nearer of two off on the mine's next frame, armed or arming, never a teammate's or its owner's, nor C4, a falling or clicked mine, the first shooter's blast unless they left\n",cases,(double)MINE_RADIUS);
+ printf("PASS: %d server cases: a mine arms 1.2 s after it lies still, clicks under an enemy's feet within %g units and 24 below to 48 above, for one walking or sprinting by 50 units off but not 64, springs up 300 ms later, turning and through players, and goes off at its top 44 units up for its owner, once, never for teammates, its owner, the dead, spectators or the disconnected; anyone in free-for-all; two per owner, gone with an owner who leaves, changes sides, spawns again or spectates; never thrown back; set down upright a step ahead of its owner's feet, short of walls, down steps, falling over drops and steep slopes; only its owner takes it back, holding Use half a second within reach, in sight, where no other hint is offered, the nearer first, with a full kit or none too, refunded only into room in a kit that carries it; a resting one is sent to its owner and teammates within 1600 units wherever it lies, never to enemies, spectators or others in free-for-all; an enemy's bullet within 5 units of a resting mine's can, along its own path, sets the nearer of two off on the mine's next frame, armed or arming, never a teammate's or its owner's, nor a falling or clicked mine, the first shooter's blast unless they left\n",cases,(double)MINE_RADIUS);
  return 0;
 }
 '''
 
-# Pmove: the detonator on the aim button, G's quiet fallback, no cooking.
-pmove_support = common + r'''
-#define OFFHAND_CLASS_NONE 0
-#define OFFHAND_CLASS_SMOKE_GRENADE 2
-#define BM_NOINLINE
-#define BM_ALWAYS_INLINE inline
-#define __attribute_regparm__(n)
-typedef struct {int weapon,weaponstate,weaponTime,weaponDelay,weapAnim,pm_flags,eFlags,offHandIndex,cursorHint,
- weapons[4],eventSequence,events[4],eventParms[4];signed char weaponslots[3];} playerState_t;
-typedef struct {int buttons,weapon,serverTime;} usercmd_t;
-typedef struct {playerState_t *ps;usercmd_t cmd,oldcmd;} pmove_t;
-static WeaponDef defs[4],*bg_weaponDefs[4]={0,&defs[1],&defs[2],&defs[3]};static int bg_iNumWeapons=3;
-static int firstOffhand,prepared;
-static void BG_AddPredictableEventToPlayerstate(int e,int p,playerState_t *ps){int i=ps->eventSequence++&3;ps->events[i]=e;ps->eventParms[i]=p;}
-static void PM_AddEvent(playerState_t *ps,int e){BG_AddPredictableEventToPlayerstate(e,0,ps);}
-static void PM_WeaponSetAnim(playerState_t *ps,int a){ps->weapAnim=a;}
-static int BG_GetFirstAvailableOffhand(playerState_t *ps,int offhandClass){return firstOffhand;}
-static void PM_StartOffhandPrepare(playerState_t *ps){prepared++;}
-static void PM_SetProneMovementOverride(playerState_t *ps){}
-static void Com_Error(int code,const char *fmt,...){assert(0);}
-static int PM_WeaponStateBlocksChange(int state){return 0;}
-static int PM_WeaponStateIsBinoculars(int state){return 0;}
-'''
-pmove_constants = weapons[weapons.index('#define WEAPON_READY'):weapons.index('static qboolean PM_WeaponHasInventoryWeapon')]
-pmove_body = ''.join(function(weapons, name) for name in (
-    'BG_IsWeaponValid', 'BG_PlayerDetonatorWeapon', 'PM_OffhandClassForButtons', 'PM_TryStartOffhand',
-    'PM_TryDetonate'))
+# Pmove: mines never cook; frags do.
+pmove_support = common
+pmove_constants = ''
+pmove_body = ''
 pmove_checks = r'''
-enum {GUN=1,CHARGE=2,MINE=3};
-static int detonations(const playerState_t *ps){int n=0;for(int i=0;i<4&&i<ps->eventSequence;i++)n+=ps->events[i]==EV_DETONATE;return n;}
 int main(void){
- defs[GUN].weapType=0;defs[CHARGE].weapType=WEAPTYPE_GRENADE;defs[CHARGE].hasDetonator=1;defs[CHARGE].iHoldFireTime=350;
- defs[MINE].weapType=WEAPTYPE_GRENADE;defs[MINE].offhandClass=1;defs[MINE].proximityRadius=40;
- /* A press of aim with the detonator out sets it off once, with the hand's press. */
- playerState_t ps={.weapon=CHARGE,.weapons={1<<CHARGE|1<<GUN}};pmove_t pm={.ps=&ps};
- pm.cmd.buttons=PM_WEAPON_BUTTON_ADS;assert(PM_TryDetonate(&pm)&&detonations(&ps)==1);
- assert(ps.weaponstate==WEAPON_RAISING&&ps.weaponTime==350&&ps.weapAnim==0x13);
- ps.weaponstate=WEAPON_READY;ps.weaponTime=0;pm.oldcmd=pm.cmd;assert(!PM_TryDetonate(&pm)&&detonations(&ps)==1);
- pm.oldcmd.buttons=0;ps.weaponTime=10;assert(!PM_TryDetonate(&pm));ps.weaponTime=0;ps.weaponstate=WEAPON_FIRING;
- assert(!PM_TryDetonate(&pm));ps.weaponstate=WEAPON_READY;ps.weapon=GUN;assert(!PM_TryDetonate(&pm));
- pm.cmd.buttons=PM_WEAPON_BUTTON_ATTACK;ps.weapon=CHARGE;assert(!PM_TryDetonate(&pm));
- /* G with C4 and no frags: no empty-offhand notice; without C4 the notice. */
- playerState_t g={.weapon=GUN,.weapons={1<<CHARGE|1<<GUN}};pmove_t gm={.ps=&g,.cmd={.buttons=PM_WEAPON_BUTTON_FRAG}};
- firstOffhand=0;assert(!PM_TryStartOffhand(&gm)&&g.eventSequence==0);
- g.weapons[0]=1<<GUN;assert(!PM_TryStartOffhand(&gm)&&g.eventSequence==1&&g.events[0]==0x94);
- assert(BG_PlayerDetonatorWeapon(&g)==0);g.weapons[0]|=1<<CHARGE;assert(BG_PlayerDetonatorWeapon(&g)==CHARGE);
- /* The server takes a command naming the carried detonator, which has no slot;
-    any other slotless weapon still names the current one. */
- playerState_t v={.weapon=GUN,.weapons={1<<CHARGE}};assert(BG_IsWeaponValid(&v,CHARGE)&&!BG_IsWeaponValid(&v,GUN));
- v.weapons[0]=1<<GUN;assert(!BG_IsWeaponValid(&v,CHARGE)&&!BG_IsWeaponValid(&v,GUN));v.weaponslots[1]=GUN;
- assert(BG_IsWeaponValid(&v,GUN));
- /* Neither cooks in the hand; a frag does. */
+ WeaponDef mine={.weapType=WEAPTYPE_GRENADE,.offhandClass=1,.proximityRadius=40};
  WeaponDef frag={.weapType=WEAPTYPE_GRENADE,.offhandClass=1};
- assert(BG_GrenadeCanCook(&frag)&&!BG_GrenadeCanCook(&defs[MINE])&&!BG_GrenadeCanCook(&defs[CHARGE]));
- assert(BG_IsPlacedExplosive(&defs[MINE])&&BG_IsPlacedExplosive(&defs[CHARGE])&&!BG_IsPlacedExplosive(&frag));
- puts("PASS: a fresh aim press with the detonator out sets it off once, with the hand's press, and nothing else does; G without frags takes no empty-offhand notice when C4 is carried; the server takes the carried detonator as the current weapon; mines and C4 never cook");
+ assert(BG_GrenadeCanCook(&frag)&&!BG_GrenadeCanCook(&mine));
+ assert(BG_IsPlacedExplosive(&mine)&&!BG_IsPlacedExplosive(&frag));
+ puts("PASS: mines never cook; frags do");
  return 0;
 }
 '''
@@ -541,7 +453,6 @@ int main(void){
 loader_support = common + r'''
 static void Com_Error(int code,const char *fmt,...){assert(0);}
 static void *Hunk_AllocLowAlignInternal(int size,int align){return malloc(size);}
-static int stricmp(const char *a,const char *b){return strcasecmp(a,b);}
 static int valueindex;static char value1[2][8192];
 '''
 loader_body = (function(shared, 'I_strnicmp_core') + function(shared, 'Info_ValueForKey') +
@@ -549,26 +460,23 @@ loader_body = (function(shared, 'I_strnicmp_core') + function(shared, 'Info_Valu
 loader_checks = r'''
 int main(void){
  WeaponDef d;memset(&d,0,sizeof(d));
- BG_ParsePlacedExplosiveKeys(&d,"\\damage\\0\\hasDetonator\\1\\stickiness\\All\\detonateSound\\weap_c4_detonate\\bounceSound\\weap_c4_land");
- assert(d.hasDetonator==1&&d.stickiness==WEAPSTICKINESS_ALL&&d.proximityRadius==0&&!strcmp(d.szDetonateSound,"weap_c4_detonate"));
- assert(!strcmp(d.szBounceSound,"weap_c4_land")&&!strcmp(d.szArmSound,"")&&!strcmp(d.szTriggerSound,""));
- BG_ParsePlacedExplosiveKeys(&d,"\\proximityRadius\\40\\proximityArmTime\\1.2\\proximityDelay\\0.15\\stickiness\\ground\\armSound\\arm\\triggerSound\\minefield_click");
- assert(!d.hasDetonator&&d.stickiness==WEAPSTICKINESS_GROUND&&d.proximityRadius==40&&d.iProximityArmTime==1200&&d.iProximityDelay==150);
- assert(!strcmp(d.szArmSound,"arm")&&!strcmp(d.szTriggerSound,"minefield_click")&&!strcmp(d.szDetonateSound,""));
+ BG_ParsePlacedExplosiveKeys(&d,"\\proximityRadius\\40\\proximityArmTime\\1.2\\proximityDelay\\0.15\\bounceSound\\weap_mine_land\\armSound\\arm\\triggerSound\\minefield_click");
+ assert(d.proximityRadius==40&&d.iProximityArmTime==1200&&d.iProximityDelay==150);
+ assert(!strcmp(d.szBounceSound,"weap_mine_land")&&!strcmp(d.szArmSound,"arm")&&!strcmp(d.szTriggerSound,"minefield_click"));
  /* The view model's own offset, forward, right and up. */
  BG_ParsePlacedExplosiveKeys(&d,"\\gunOfsF\\1\\gunOfsR\\3.5\\gunOfsU\\-8.5");
  assert(d.vGunOfs[0]==1&&d.vGunOfs[1]==3.5f&&d.vGunOfs[2]==-8.5f);
  /* A retail file has none of the keys. */
- BG_ParsePlacedExplosiveKeys(&d,"\\displayName\\WEAPON_M2FRAGGRENADE\\stickiness\\sometimes\\fuseTime\\3.5");
- assert(!d.hasDetonator&&!d.stickiness&&!d.proximityRadius&&!d.iProximityArmTime&&!d.iProximityDelay);
+ BG_ParsePlacedExplosiveKeys(&d,"\\displayName\\WEAPON_M2FRAGGRENADE\\fuseTime\\3.5");
+ assert(!d.proximityRadius&&!d.iProximityArmTime&&!d.iProximityDelay);
  assert(!d.vGunOfs[0]&&!d.vGunOfs[1]&&!d.vGunOfs[2]);
- puts("PASS: hasDetonator, stickiness by CoD4's names in any case, the mine's radius and its arm and click delays in seconds, and their sounds, and the view offset; none in a retail file");
+ puts("PASS: the mine's radius and its arm and click delays in seconds, their sounds, and the view offset; none in a retail file");
  return 0;
 }
 '''
 
-# The HUD: who sees which emblems, where, how large and how bright, the
-# emblems' shapes, and G's detonator toggle.
+# The HUD: who sees which emblems, where, how large and how bright, and the
+# emblems' shapes.
 hud_support = common + r"""
 typedef struct Material *MaterialHandle;
 static char emblemMaterial;
@@ -581,16 +489,14 @@ typedef struct {int numEntities;entityState_t entities[256];} snapshot_t;
 typedef struct {int team;} clientInfo_t;
 typedef struct {snapshot_t *snap,*nextSnap;playerState_t predictedPlayerState;int renderingThirdPerson,weaponSelect,time;
  struct {float fov_x,fov_y;int width,height;vec3_t vieworg,viewaxis[3];} refdef;struct {clientInfo_t clientinfo[64];} bgs;} cg_t;
-typedef struct {int buttons;} usercmd_t;
 #define R_HUD_IMAGE_SQUAD_EMBLEMS 15
 static cg_t cgState,*cg=&cgState;static centity_t entities[1024],*cg_entities=entities;static snapshot_t snap;
-static WeaponDef defs[4],*bg_weaponDefs[4]={0,&defs[1],&defs[2],&defs[3]};static int bg_iNumWeapons=3;
-static dvar_t iconsDvar={{1}};static int hidden,firstOffhand,heldButtons,draws,selected,builds,builtWidth,builtHeight;
+static WeaponDef defs[3];
+static dvar_t iconsDvar={{1}};static int hidden,draws,builds,builtWidth,builtHeight;
 static float drawX,drawY,drawW,drawH,drawAlpha,drawS1,drawS2;static byte built[128*2*128*4];
 static const dvar_t *Dvar_RegisterBool_mac(const char *n,int v,int f){return &iconsDvar;}
-static WeaponDef *BG_GetWeaponDef(int w){return w>0&&w<4?&defs[w]:NULL;}
-static int BG_GetNumWeapons(void){return 3;}
-static int BG_GetFirstAvailableOffhand(const playerState_t *ps,int c){return firstOffhand;}
+static WeaponDef *BG_GetWeaponDef(int w){return w>0&&w<3?&defs[w]:NULL;}
+static int BG_GetNumWeapons(void){return 2;}
 static float GetVirtualWidthFromRealWidth(float w){return w*640.0f/1280.0f;}
 static float GetVirtualHeightFromRealHeight(float h){return h*480.0f/720.0f;}
 static float GetRealHeightFromVirtualHeight(float h){return h*720.0f/480.0f;}
@@ -600,15 +506,11 @@ static MaterialHandle R_CreateHudImageMaterial(int slot,const byte *bgra,int w,i
 static void CL_DrawStretchPic(float x,float y,float w,float h,int ha,int va,float s1,float t1,float s2,float t2,const vec_t *c,MaterialHandle m){
  assert(ha==7&&va==7&&m==EMBLEMS&&t1==0&&t2==1&&c[0]==1&&c[1]==1&&c[2]==1);draws++;
  drawX=x+w*.5f;drawY=y+h*.5f;drawW=w;drawH=h;drawAlpha=c[3];drawS1=s1;drawS2=s2;}
-static int CL_GetCurrentCmdNumber(void){return 5;}
-static qboolean CL_GetUserCmd(int n,usercmd_t *c){c->buttons=heldButtons;return 1;}
 static Bool CG_AreHudMenusHidden(void){return hidden;}
-static void CG_SelectWeaponIndex(int w){selected=w;cg->weaponSelect=w;}
 """
-hud_body = (function(weapons, 'BG_PlayerDetonatorWeapon') + hud[hud.index('#define EXPLOSIVE_EMBLEM_RANGE'):]
-            .replace('extern ', '// extern '))
+hud_body = hud[hud.index('#define EXPLOSIVE_EMBLEM_RANGE'):].replace('extern ', '// extern ')
 hud_checks = r"""
-enum {MINE=1,CHARGE=2,FRAG=3};
+enum {MINE=1,FRAG=2};
 static void view(void){
  memset(cg,0,sizeof(*cg));memset(entities,0,sizeof(entities));memset(&snap,0,sizeof(snap));
  cg->snap=cg->nextSnap=&snap;cg->refdef.fov_x=90;cg->refdef.fov_y=73.74f;cg->refdef.width=1280;cg->refdef.height=720;
@@ -625,8 +527,7 @@ static const byte *texel(int kind,float u,float v){
  return built+(y*size*2+kind*size+x)*4;}
 int main(void){
  CG_ExplosivesInit();
- defs[MINE].weapType=defs[CHARGE].weapType=defs[FRAG].weapType=WEAPTYPE_GRENADE;defs[MINE].proximityRadius=40;
- defs[CHARGE].hasDetonator=1;
+ defs[MINE].weapType=defs[FRAG].weapType=WEAPTYPE_GRENADE;defs[MINE].proximityRadius=40;
  /* The player's own and a teammate's, never an enemy's; a 16-unit disc 17
   * above it, scaled with distance: 100 ahead it spans 16 * 240 / (100 tan 36.87). */
  for(int owner=0;owner<3;owner++){view();lay(100,MINE,owner,100,0,-17);CG_DrawExplosiveIcons();
@@ -634,7 +535,7 @@ int main(void){
   if(draws)assert(fabsf(drawX)<1e-3f&&fabsf(drawY)<1e-3f&&fabsf(drawW-51.2f)<.01f&&drawW==drawH&&
    drawAlpha==EXPLOSIVE_EMBLEM_FULL&&drawS1==0&&drawS2==.5f);}
  assert(builds==1&&builtWidth==2*builtHeight&&builtHeight==128);
- view();lay(100,CHARGE,1,100,-100,0);CG_DrawExplosiveIcons();assert(draws==1&&drawX>0&&drawY<0);
+ view();lay(100,MINE,1,100,-100,0);CG_DrawExplosiveIcons();assert(draws==1&&drawX>0&&drawY<0);
  /* The Axis see their cross, the second cell. */
  view();cg->bgs.clientinfo[0].team=1;lay(100,MINE,0,100,0,0);CG_DrawExplosiveIcons();assert(draws==1&&drawS1==.5f&&drawS2==1);
  /* Never smaller than the least size far off, nor larger than the greatest up close. */
@@ -661,16 +562,7 @@ int main(void){
  assert(starMiddle[0]==255&&starMiddle[3]>200&&ring[0]==255&&ring[3]>200&&between[3]==0&&outside[3]==0);
  assert(gap[0]<80&&gap[3]>60&&gap[3]<160);
  assert(crossArm[0]==255&&crossArm[3]>200&&crossRing[0]==255&&crossRing[3]>200&&crossBetween[3]==0);
- /* G takes out the detonator when C4 stands in for frags, and puts it away. */
- playerState_t *ps=&cg->predictedPlayerState;
- view();ps->weapons[0]=1<<CHARGE|1<<FRAG|(1<<5);ps->weaponslots[1]=5;cg->weaponSelect=5;firstOffhand=0;ps->stats[0]=100;
- for(int i=0;i<3;i++){heldButtons=0x10000;CG_UpdateDetonatorSelect();}assert(cg->weaponSelect==CHARGE);
- heldButtons=0;CG_UpdateDetonatorSelect();heldButtons=0x10000;CG_UpdateDetonatorSelect();assert(cg->weaponSelect==5);
- /* Not with frags to throw, near a live frag, or dead. */
- for(int c=0;c<3;c++){heldButtons=0;CG_UpdateDetonatorSelect();selected=0;firstOffhand=c==0;
-  ps->cursorHint=c==1?GRENADE_THROWBACK_HINT:0;ps->stats[0]=c==2?0:100;heldButtons=0x10000;CG_UpdateDetonatorSelect();
-  assert(!selected&&cg->weaponSelect==5);}
- puts("PASS: the player's own and teammates' mines and charges at rest carry the squad emblem, the Allies' star or the Axis' cross, a 16-unit disc 17 above them between 22 and 96 virtual units, pulsing every 1.8 s from 0.3 to 0.95, through walls, fading over the last 400 of 1600 units; never enemies' or others' in free-for-all, nor behind, moving, exploded, frags or with the HUD hidden; the emblems are white with dark gaps and edges; G takes out the detonator and puts it away only with C4 for frags, alive and away from a live frag");
+ puts("PASS: the player's own and teammates' mines at rest carry the squad emblem, the Allies' star or the Axis' cross, a 16-unit disc 17 above them between 22 and 96 virtual units, pulsing every 1.8 s from 0.3 to 0.95, through walls, fading over the last 400 of 1600 units; never enemies' or others' in free-for-all, nor behind, moving, exploded, frags or with the HUD hidden; the emblems are white with dark gaps and edges");
  return 0;
 }
 """
@@ -739,25 +631,16 @@ mutants = [
     ('server', 'if (!other->r.inuse || !other->client || other == owner ||', 'if (!other->r.inuse || !other->client ||'),
     ('server', '(weapDef->iProximityArmTime > 0 ? weapDef->iProximityArmTime : 1)', '1'),
     ('server', 'delta[2] < -GMISSILE_PROXIMITY_BELOW || delta[2] > GMISSILE_PROXIMITY_ABOVE', '0'),
-    ('server', '    if (ent->spawnflags & GMISSILE_PLACED_STUCK) {\n        G_RunThink(ent);\n        return 1;\n    }\n', ''),
     ('server', '        G_PlacedTeam(owner) != ent->team ||', '        0 ||'),
     ('server', ' || owner->client->sess.sessionState == SESS_STATE_SPECTATOR ||', ' ||'),
     ('server', '        owner->client->lastSpawnTime != s_placedSpawnTime[ent->s.number & 1023])', '        0)'),
     ('server', '    s_placedSpawnTime[ent->s.number & 1023] = owner->client ? owner->client->lastSpawnTime : 0;\n', ''),
     ('server', '        if (count < limit || !oldest)', '        if (count <= limit || !oldest)'),
-    ('server', ' || COD2_GEntityFromHandle(ent->parent) != player)', ')'),
-    ('server', 'weapDef->stickiness == WEAPSTICKINESS_ALL && !(_ENT(other)->client)', 'weapDef->stickiness == WEAPSTICKINESS_ALL'),
-    ('server', '    VectorScale(trace->normal, -1.0f, left);', '    VectorScale(trace->normal, 1.0f, left);'),
     ('server', '    ent->nextthink = 0;\n    ent->s.otherEntityNum = owner->s.number;', '    ent->s.otherEntityNum = owner->s.number;'),
     ('server', 'BG_IsPlacedExplosive(BG_GetWeaponDef(missile->s.weapon)))', '0)'),
-    ('pmove', ' ||\n        (pm->oldcmd.buttons & PM_WEAPON_BUTTON_ADS))', ')'),
-    ('pmove', 'if (offhandClass == OFFHAND_CLASS_FRAG_GRENADE && BG_PlayerDetonatorWeapon(ps))', 'if (0)'),
-    ('pmove', '    if (weapDef->hasDetonator)\n        return owned;\n', ''),
     ('loader', '(int)(atof(Info_ValueForKey(info, "proximityArmTime")) * 1000.0 + 0.5)',
      '(int)atof(Info_ValueForKey(info, "proximityArmTime"))'),
-    ('loader', '        if (!stricmp(value, stickinessNames[i]))', '        if (!strcmp(value, stickinessNames[i]))'),
     ('hud', ' || cg->bgs.clientinfo[owner].team != team))', '))'),
-    ('hud', '    if (!detonator || BG_GetFirstAvailableOffhand(ps, OFFHAND_CLASS_FRAG_GRENADE))', '    if (!detonator)'),
     ('hud', '        color[3] = (color[3] > 1.0f ? 1.0f : color[3]) * pulse;', '        color[3] = color[3] > 1.0f ? 1.0f : color[3];'),
     ('hud', 'size = size < EXPLOSIVE_EMBLEM_MIN ? EXPLOSIVE_EMBLEM_MIN : size', 'size = size'),
     ('hud', ' || cent->nextState.pos.trType != 0)', ')'),
@@ -813,8 +696,8 @@ mutants = [
     ('server', '            ent->parent = COD2_GEntityHandle(shooter);\n', ''),
     ('server', 'if (shooter->r.inuse && shooter->client && shooter->client->sess.connected == 2)', 'if (1)'),
     ('server', '    s_mineShotBy[ent->s.number & 1023] = 0;\n    ent->count = 0;', '    ent->count = 0;'),
-    ('server', '        G_ExplodeMissile(ent);\n        return 1;\n    }\n    if (ent->spawnflags & GMISSILE_PLACED_STUCK) {',
-     '        return 1;\n    }\n    if (ent->spawnflags & GMISSILE_PLACED_STUCK) {'),
+    ('server', '        ent->nextthink = 0;\n        G_ExplodeMissile(ent);\n        return 1;\n    }',
+     '        ent->nextthink = 0;\n        return 1;\n    }'),
     ('server', '    center[2] += GMISSILE_MINE_HIT_RISE;', ''),
 ]
 header_mutants = [

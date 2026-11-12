@@ -87,14 +87,10 @@ extern void SnapVectorTowards(vec_t *v, vec_t *to);
 extern void G_GetPlayerViewOrigin(gentity_t *ent, vec_t *origin);
 extern qboolean OnSameTeam(gentity_t *ent1, gentity_t *ent2);
 extern SoundAlias G_SoundAliasIndex(const char *name);
-extern float atan2f(float y, float x);
-extern float asinf(float x);
 extern float cosf(float x);
 extern float sinf(float x);
 
-/* A placed explosive's spawnflags: a charge stuck where it hit, a mine that
- * has sensed its enemy. */
-#define GMISSILE_PLACED_STUCK 1
+/* A placed mine's spawnflag once it has sensed its enemy. */
 #define GMISSILE_PLACED_TRIGGERED 2
 /* How far above or below a mine an enemy's feet may be. */
 #define GMISSILE_PROXIMITY_BELOW 24.0f
@@ -497,46 +493,6 @@ static void G_PlaceExplosive(gentity_t *owner, gentity_t *ent, const WeaponDef *
     }
 }
 
-/* CoD4's stickiness "all": the charge stays where it first hits anything but
- * a player, its flat side to the surface (-y along the normal) and its top
- * up the wall, or along the throw on a floor or ceiling. */
-static void G_StickMissile(gentity_t *ent, const trace_t *trace, const vec_t *endpos)
-{
-    vec3_t left, up, forward, origin, angles;
-    float along;
-
-    VectorScale(trace->normal, -1.0f, left);
-    up[0] = up[1] = 0.0f;
-    up[2] = 1.0f;
-    along = DotProduct(up, trace->normal);
-    VectorMA(up, -along, trace->normal, up);
-    if (VectorLength(up) < 0.1f) {
-        VectorCopy(ent->s.pos.trDelta, up);
-        along = DotProduct(up, trace->normal);
-        VectorMA(up, -along, trace->normal, up);
-        if (VectorLength(up) < 0.1f) {
-            up[0] = 1.0f;
-            up[1] = up[2] = 0.0f;
-        }
-    }
-    Vec3Normalize(up);
-    forward[0] = left[1] * up[2] - left[2] * up[1];
-    forward[1] = left[2] * up[0] - left[0] * up[2];
-    forward[2] = left[0] * up[1] - left[1] * up[0];
-    /* AngleVectors' axes: forward (cp cy, cp sy, -sp), left's z sr cp, up's z cr cp. */
-    angles[0] = -asinf(forward[2] > 1.0f ? 1.0f : forward[2] < -1.0f ? -1.0f : forward[2]) * 57.2957795f;
-    angles[1] = atan2f(forward[1], forward[0]) * 57.2957795f;
-    angles[2] = atan2f(left[2], up[2]) * 57.2957795f;
-    VectorMA(endpos, 0.25f, trace->normal, origin);
-    G_SetOrigin(ent, origin);
-    G_SetAngle(ent, angles);
-    ent->s.groundEntityNum = trace->entityNum;
-    ent->s.eFlags &= ~GMISSILE_EF_GRENADE_BOUNCE;
-    ent->spawnflags |= GMISSILE_PLACED_STUCK;
-    G_PlacedSound(ent, BG_GetWeaponDef(ent->s.weapon)->szBounceSound);
-    SV_LinkEntity(ent);
-}
-
 /* Straight up from where it lies, slowing under gravity, to go off at the
  * top; the missile code flies it from here. */
 static void G_LaunchMine(gentity_t *ent)
@@ -584,10 +540,6 @@ static qboolean G_RunPlacedExplosive(gentity_t *ent, const WeaponDef *weapDef)
         G_ExplodeMissile(ent);
         return 1;
     }
-    if (ent->spawnflags & GMISSILE_PLACED_STUCK) {
-        G_RunThink(ent);
-        return 1;
-    }
     if (weapDef->proximityRadius <= 0.0f || ent->s.pos.trType != 0 || ent->s.groundEntityNum == 1023)
         return 0;
     if (!ent->count) {
@@ -622,22 +574,6 @@ static qboolean G_RunPlacedExplosive(gentity_t *ent, const WeaponDef *weapDef)
         break;
     }
     return 0;
-}
-
-/* The player's detonator: every charge of theirs goes off on its next frame,
- * near or far, still in flight or stuck. */
-void G_DetonateExplosives(gentity_t *player)
-{
-    int i;
-
-    for (i = 64; i < level.num_entities; i++) {
-        gentity_t *ent = &g_entities[i];
-
-        if (!ent->r.inuse || ent->s.eType != 4 || ent->handler != 7 ||
-            !BG_GetWeaponDef(ent->s.weapon)->hasDetonator || COD2_GEntityFromHandle(ent->parent) != player)
-            continue;
-        ent->nextthink = LEVEL_TIME;
-    }
 }
 
 static qboolean G_CanTakeMine(const gentity_t *player)
@@ -695,7 +631,7 @@ static gentity_t *G_FindOwnMine(gentity_t *player)
             (mine->spawnflags & GMISSILE_PLACED_TRIGGERED))
             continue;
         weapDef = BG_GetWeaponDef(mine->s.weapon);
-        if (weapDef->proximityRadius <= 0.0f || weapDef->hasDetonator)
+        if (weapDef->proximityRadius <= 0.0f)
             continue;
         VectorSubtract(mine->r.currentOrigin, player->r.currentOrigin, delta);
         distance = delta[0] * delta[0] + delta[1] * delta[1];
@@ -1463,11 +1399,6 @@ after_trace:
         gentity_t *other = G_ENTITY(tr.entityNum);
 
         (_ENT(ent)->s.surfType) = (tr.surfaceFlags & 0x1F00000) >> 20;
-
-        if (weapDef->stickiness == WEAPSTICKINESS_ALL && !(_ENT(other)->client) && !tr.startsolid) {
-            G_StickMissile(ent, &tr, endpos);
-            goto run_think;
-        }
 
         /* Use the same bounce flag set by fire_grenade. The FX lifetime flag
          * (0x10000) does not identify a bouncing projectile. Without this,

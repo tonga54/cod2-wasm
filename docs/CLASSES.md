@@ -3,7 +3,7 @@
 Players build up to five named classes in the browser and pick one in any
 match, on either team. A class sets the primary weapon and up to three of its
 attachments, the secondary pistol and one of its attachments, the lethal item (a
-frag, the S-Mine 44 or C4) and the tactical grenade (smoke): CoD2's two offhand
+frag or the S-Mine 44) and the tactical grenade (smoke): CoD2's two offhand
 slots. The screens follow the Create a Class flow of the Call of Duty: WWII
 capture the owner supplied, drawn with CoD2's own images and the Barlow fonts
 the menus already use, or with [pictures the owner keeps](#pictures).
@@ -72,7 +72,7 @@ the menus already use, or with [pictures the owner keeps](#pictures).
 
 The 21 primaries are those of the four factions' retail weapon menus. The
 secondaries are the Colt .45, Webley, TT-30 and Luger. The lethal items are the
-four frags, the S-Mine 44 and C4; the tactical items are the four smokes (see
+four frags and the S-Mine 44; the tactical items are the four smokes (see
 [placed explosives](#placed-explosives)). Every new gametag starts with these
 classes; the primaries' attachments are the Prima guide's suggestions for their
 WWII counterparts:
@@ -318,7 +318,7 @@ attachments its gun still takes; the others are dropped.
 
 Every room loads `browser_classes.gsc` before the level finishes initializing:
 
-- It precaches the 35 class weapons and the class menu.
+- It precaches the 34 class weapons and the class menu.
 - It points both teams' weapon menus at the class menu, and the menu the
   connect callbacks open first for a player without a team, the server
   information, too.
@@ -348,7 +348,7 @@ At each spawn the class gives:
   ammunition, an Extended Mag's included;
 - one smoke grenade, when smoke is allowed;
 - the frag count retail gives for that primary (`getWeaponBasedGrenadeCount`),
-  or two S-Mines or two C4 charges, when frags are allowed;
+  or two S-Mines, when frags are allowed;
 - binoculars.
 
 When S&D swaps weapons in place before a round, the whole class applies at
@@ -446,9 +446,9 @@ rating does.
 
 ## Placed explosives
 
-The S-Mine 44 and C4 are generated from the owner's files when the private
+The S-Mine 44 is generated from the owner's files when the private
 archives are prepared (`scripts/browser_explosives.py`,
-`scripts/browser_smine.py`); the repository holds none of their data.
+`scripts/browser_smine.py`); the repository holds none of its data.
 
 - **S-Mine 44**, as Call of Duty: WWII shows it. G lowers the gun; the right
   hand brings up a green canister with a yellow band and its igniter, the left
@@ -471,20 +471,16 @@ archives are prepared (`scripts/browser_explosives.py`,
   the owner if the shooter has left. The owner's and teammates' bullets pass
   it by, as they do a mine that has already clicked. In free-for-all anyone
   but the owner can shoot it.
-- **C4**, CoD4's charge with CoD2's sticky bomb. G takes out the detonator,
-  fire throws a charge that sticks where it lands, and aim sets off every
-  charge the player placed, wherever they are.
 - The blasts fall off evenly to their edge. A frag deals 200 to 50 over 256
   units and kills within 171; the S-Mine 300 to 60 over 192, killing within
-  160; C4 250 to 60 over 256, killing within 202. Every class carries two
-  charges, so C4 reaches a little further than a frag, not much.
-- Both show the **squad emblem** above them, pulsing slowly between faint and
+  160.
+- It shows the **squad emblem** above it, pulsing slowly between faint and
   nearly full every 1.8 s: the Allies' star in its ring, or the Axis' iron
   cross in the same ring. The owner and teammates see it through walls up to
   1600 units away; enemies never do. It is a 16-unit disc 17 units above the
-  explosive, drawn between 22 and 96 virtual units across. `cg_hudExplosiveIcons
+  mine, drawn between 22 and 96 virtual units across. `cg_hudExplosiveIcons
   0` hides it.
-- Each player keeps two of each kind; a third replaces the oldest. Both go
+- Each player keeps two; a third replaces the oldest. Mines go
   away when their owner leaves or changes sides, and, as in WWII, when their
   owner spawns again or watches as a spectator: they stay through the owner's
   death and its killcam, so they can still score after it.
@@ -493,12 +489,9 @@ archives are prepared (`scripts/browser_explosives.py`,
 
 The Soviet weapons now ship with every map. They add 3.87 MB to the renderer
 archive and 1.60 MB to the audio archive, taking the four prepared archives
-from 324.1 MB to 329.6 MB. The S-Mine 44 and C4 add 0.41 MB to the renderer
-archive and 2.90 MB to the audio archive, nearly all of it the development
-host's 22 owner sounds for them, for 332.9 MB. The development host's 106
-class pictures add 9.73 MB to the renderer archive, the 34 weapons' 6.16 MB
-of it, and the 73 attachment models with their six finishes 1.58 MB, for
-344.2 MB.
+from 324.1 MB to 329.6 MB. The S-Mine 44 and its owner sounds, the development host's 106
+class pictures (9.73 MB in the renderer archive, the 34 weapons' 6.16 MB
+of it) and the 73 attachment models with their six finishes (1.58 MB) ship beside them.
 
 Toujane TDM was measured in Chrome at 1280×800, two runs each with the same
 build, against a room whose class script was empty:
@@ -585,8 +578,8 @@ its finish. The whole is framed as one picture. `attachment__<attachment>.png`
 is that attachment's icon, drawn in Modify Attachment's grid and the editor's
 attachment boxes; an attachment without one shows its name.
 
-The development host's pictures cover 34 of the 35 class weapons, all but the
-C4, with 59 attachment layers and the 13 attachments' icons:
+The development host's pictures cover all 34 class weapons, with 59 attachment
+layers and the 13 attachments' icons:
 
 | Weapons | Picture |
 | --- | --- |

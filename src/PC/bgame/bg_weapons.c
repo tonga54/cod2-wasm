@@ -403,18 +403,6 @@ Bool BG_DoesWeaponNeedSlot(int weapIndex)
     return 1;
 }
 
-/* The detonator weapon the player carries (CoD4's C4), or 0. */
-int BG_PlayerDetonatorWeapon(const playerState_t *ps)
-{
-    int weapon;
-
-    for (weapon = 1; weapon <= bg_iNumWeapons; weapon++) {
-        if (((ps->weapons[weapon >> 5] >> (weapon & 0x1f)) & 1) && bg_weaponDefs[weapon]->hasDetonator)
-            return weapon;
-    }
-    return 0;
-}
-
 int BG_GetEmptySlotForWeapon(const playerState_t *pPS, int iWeaponIndex)
 {
     const WeaponDef *weapDef = bg_weaponDefs[iWeaponIndex];
@@ -1090,9 +1078,6 @@ Bool BG_IsWeaponValid(const playerState_t *ps, int weaponIndex)
 
     weapDef = bg_weaponDefs[weaponIndex];
     if (weapDef->offhandClass)
-        return owned;
-    /* A detonator is an item with no slot, raised as the current weapon. */
-    if (weapDef->hasDetonator)
         return owned;
     if ((int)ps->weaponslots[1] == weaponIndex)
         return owned;
@@ -1852,10 +1837,6 @@ static qboolean PM_TryStartOffhand(pmove_t *pm)
 
     offhandIndex = BG_GetFirstAvailableOffhand(ps, offhandClass);
     if (!offhandIndex) {
-        /* A charge carried in place of frags: G takes out its detonator
-         * (cg_explosives_mp.c), with no empty-offhand notice. */
-        if (offhandClass == OFFHAND_CLASS_FRAG_GRENADE && BG_PlayerDetonatorWeapon(ps))
-            return 0;
         PM_AddEvent(ps, 0x94);
         return 0;
     }
@@ -2114,8 +2095,7 @@ static void PM_TryTakeEmptyClipOnlyWeapon(playerState_t *ps, WeaponDef *weapDef)
     int clipIndex;
     int weapon;
 
-    /* With every charge thrown the detonator stays in hand, as CoD4's. */
-    if (!weapDef->bClipOnly || weapDef->hasDetonator)
+    if (!weapDef->bClipOnly)
         return;
 
     ammoIndex = weapDef->iAmmoIndex;
@@ -2433,28 +2413,6 @@ static void PM_RunBinocularState(playerState_t *ps)
     }
 }
 
-/* CoD4's detonator on the aim button: a press sets off every charge of the
- * holder's, wherever they are, as the hand closes on it. */
-static qboolean PM_TryDetonate(pmove_t *pm)
-{
-    playerState_t *ps = pm->ps;
-    WeaponDef *weapDef;
-
-    if (!ps->weapon || ps->weaponstate != WEAPON_READY || ps->weaponTime || ps->weaponDelay)
-        return 0;
-    weapDef = bg_weaponDefs[ps->weapon];
-    if (!weapDef->hasDetonator || !(pm->cmd.buttons & PM_WEAPON_BUTTON_ADS) ||
-        (pm->oldcmd.buttons & PM_WEAPON_BUTTON_ADS))
-        return 0;
-    /* Raising returns to idle once the press has played. */
-    ps->weaponstate = WEAPON_RAISING;
-    ps->weaponTime = weapDef->iHoldFireTime;
-    ps->weaponDelay = 0;
-    PM_WeaponSetAnim(ps, 0x13);
-    PM_AddEvent(ps, EV_DETONATE);
-    return 1;
-}
-
 void PM_Weapon(pmove_t *pm, pml_t *pml)
 {
     playerState_t *ps = pm->ps;
@@ -2507,9 +2465,6 @@ void PM_Weapon(pmove_t *pm, pml_t *pml)
         return;
 
     PM_CheckReloadStart(pm, delayedAction);
-
-    if (PM_TryDetonate(pm))
-        return;
 
     if (!delayedAction && (ps->weaponTime || ps->weaponDelay))
         return;
@@ -2629,8 +2584,7 @@ int BG_SetupWeaponDef(WeaponDef *weapDef, void (*regWeap)(int))
 
     if (weapDef->offhandClass != OFFHAND_CLASS_NONE && weapDef->weapType != WEAPTYPE_GRENADE) {
         Com_Printf("[%s] Only grenades are currently supported for off hand use\n", weapDef->szInternalName);
-    } else if (weapDef->weapType == WEAPTYPE_GRENADE && weapDef->offhandClass == OFFHAND_CLASS_NONE &&
-               !weapDef->hasDetonator) {
+    } else if (weapDef->weapType == WEAPTYPE_GRENADE && weapDef->offhandClass == OFFHAND_CLASS_NONE) {
         Com_Printf("[%s] No offhand class set\n", weapDef->szInternalName);
     }
 

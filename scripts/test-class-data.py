@@ -71,15 +71,14 @@ assert gsc.count(unpainted) == 2
 for kept in (0, 1):
     first = gsc.index(unpainted) if kept == 0 else gsc.index(unpainted, gsc.index(unpainted) + 1)
     assert not clears_before_keeping(gsc[:first] + '\t\treturn;\n' + gsc[first + len(unpainted):]), kept
-# The S-Mine's and C4's icons and strings are the generated ones
+# The S-Mine's icon and strings are the generated ones
 # (browser_explosives.py); every other image is a retail menu image or HUD icon.
 import sys
 sys.path.insert(0, str(root / 'scripts'))
 import browser_explosives
-explosives = re.findall(r'\{ "(mine_mp|c4_mp)", CLASS_SLOT_LETHAL, CLASS_GROUP_[A-Z]+, CLASS_NATION_NONE,\s+"([A-Z0-9_]+)",\s+"([A-Z0-9_]+)",\s+"([a-z0-9_]+)" \}',
+explosives = re.findall(r'\{ "(mine_mp)", CLASS_SLOT_LETHAL, CLASS_GROUP_[A-Z]+, CLASS_NATION_NONE,\s+"([A-Z0-9_]+)",\s+"([A-Z0-9_]+)",\s+"([a-z0-9_]+)" \}',
                         source.read_text())
-assert [(weapon, image) for weapon, _, _, image in explosives] == [('mine_mp', browser_explosives.MINE_ICON),
-                                                                 ('c4_mp', browser_explosives.C4_ICON)], explosives
+assert [(weapon, image) for weapon, _, _, image in explosives] == [('mine_mp', browser_explosives.MINE_ICON)], explosives
 for _, name, description, _ in explosives:
     for reference in (name, description):
         assert reference.startswith('BROWSER_') and f'REFERENCE           {reference[8:]}\r\n'.encode() in browser_explosives.STRING_TEXT, reference
@@ -133,7 +132,7 @@ int main(void)
     int indexes[64];
     assert(ClassData_SlotWeapons(CLASS_SLOT_PRIMARY, indexes, 64) == 21);
     assert(ClassData_SlotWeapons(CLASS_SLOT_SECONDARY, indexes, 64) == 4 && slotOf("luger_mp") == CLASS_SLOT_SECONDARY);
-    assert(ClassData_SlotWeapons(CLASS_SLOT_LETHAL, indexes, 64) == 6 && slotOf("c4_mp") == CLASS_SLOT_LETHAL);
+    assert(ClassData_SlotWeapons(CLASS_SLOT_LETHAL, indexes, 64) == 5 && slotOf("mine_mp") == CLASS_SLOT_LETHAL);
     assert(ClassData_SlotWeapons(CLASS_SLOT_TACTICAL, indexes, 64) == 4);
     assert(ClassData_SlotWeapons(CLASS_SLOT_PRIMARY, indexes, 3) == 3);
     assert(ClassData_Find("tt30_mp") < 0 && ClassData_Find(NULL) < 0 && ClassData_Find("TT30_mp") >= 0);
@@ -510,7 +509,7 @@ int main(void)
     assert(fabsf(ClassData_AttachedRating(62.5f, 0.0f, 35.0f, 90.0f) - 5.0f) < 1e-5f);
     /* The gun's own rating is capped before the change moves it. */
     assert(fabsf(ClassData_AttachedRating(120.0f, 60.0f, 35.0f, 90.0f) - (8.0f + 10.0f * logf(0.5f))) < 1e-4f);
-    puts("PASS: 35 weapons in four slots, two camouflages and the guns' attachments per class, attachments "
+    puts("PASS: 34 weapons in four slots, two camouflages and the guns' attachments per class, attachments "
          "edited by WWII's rules, storage lines round-trip with per-field defaults, host name rules, bounded "
          "rename, the comma response with camouflage and attachments only when set, and stats with "
          "attachments");

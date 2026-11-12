@@ -59,7 +59,6 @@ typedef struct {
     int armorPiercing;
     weapOverlayReticle_t overlayReticle;
     float overlayWidth, overlayHeight, fOOPosAnimLength[2];
-    int hasDetonator;
     int damage, minDamage, bSemiAuto;
 } WeaponDef;
 typedef struct { int legsAnim, torsoAnim; } entityState_t;

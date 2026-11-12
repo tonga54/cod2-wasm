@@ -6394,14 +6394,10 @@ struct WeaponDef {
     float locationDamageMultipliers[19];
     char *fireRumble;
     char *meleeImpactRumble;
-    /* Placed explosives, from optional weapon file keys with CoD4's names
-     * where it has them (bg_weapons_load_obj.c). */
-    int hasDetonator;
-    int stickiness;
+    /* Placed mines, from optional weapon file keys (bg_weapons_load_obj.c). */
     float proximityRadius;
     int iProximityArmTime;
     int iProximityDelay;
-    char *szDetonateSound;
     char *szBounceSound;
     char *szArmSound;
     char *szTriggerSound;

@@ -53,7 +53,7 @@ assert bridge.count('Module.cod2CreateHaptics()') == 1 and script.count("Module[
 assert view.count('        CG_UpdateRumble();\n') == 1 and consolecmds.count('        CG_InitRumble();\n') == 1
 for source in (event, weapons, playerstate):
     assert source.count('#include "headers/PC/cgame_mp/cg_rumble.h"\n') == 1
-# Grenades, S-Mines and C4 go off as 0xbc and rockets as 0xbd/0xbe, each with
+# Grenades and S-Mines go off as 0xbc and rockets as 0xbd/0xbe, each with
 # its weapon; smoke (0xbf), a landing (0xbb) and the held grenade's own event
 # (0xc5, followed by the grenade's 0xbc) stay still.
 for label in ('0xbc', '0xbd', '0xbe'):
@@ -80,7 +80,7 @@ assert function(playerstate, 'void CG_TransitionPlayerState(playerState_t *ps, p
     '    if (ps->damageEvent != ops->damageEvent) {\n') == 1
 assert playerstate.count('CG_Rumble') == 2
 print('PASS: the browser build links the Gamepad API bridge; every fire event, the hits taken, melee swings and '
-      'impacts, grenade/S-Mine/C4/rocket blasts and earthquake() feed the mixer, which runs every frame; smoke, '
+      'impacts, grenade/S-Mine/rocket blasts and earthquake() feed the mixer, which runs every frame; smoke, '
       'landings and the held grenade\'s own event stay still')
 
 # The browser's package carries every graph the cgame can play, both motors,

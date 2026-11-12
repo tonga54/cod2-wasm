@@ -476,12 +476,11 @@ int main(void) {
     cases += 2;
 
     /* Modify Equipment still goes along a slot's row: right from the German
-     * frag to the S-Mine, C4 and around. */
+     * frag to the S-Mine and around. */
     assert(key(0x1b) && s_cac.screen == CAC_SCREEN_EDIT);
     s_cac.slotFocus = CLASS_SLOT_LETHAL;
     assert(key(0x0d) && s_cac.screen == CAC_SCREEN_EQUIPMENT && focused("frag_grenade_german_mp"));
-    assert(key(0x9d) && focused("mine_mp") && key(0x9d) && focused("c4_mp") && key(0x9d) &&
-           focused("frag_grenade_american_mp"));
+    assert(key(0x9d) && focused("mine_mp") && key(0x9d) && focused("frag_grenade_american_mp"));
     cases++;
 
     printf("%d\n", cases);

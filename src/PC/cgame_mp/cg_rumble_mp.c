@@ -530,7 +530,7 @@ void CG_RumbleFireEvent(const entityState_t *es)
     }
 }
 
-/* A grenade, S-Mine, C4 or rocket going off near the view; smoke, which
+/* A grenade, S-Mine or rocket going off near the view; smoke, which
  * deals no damage, has no radius and stays still. */
 void CG_RumbleExplosion(const vec_t *origin, int weapon)
 {

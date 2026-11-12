@@ -1421,7 +1421,6 @@ void CG_DrawActive(void)
 
     CG_SetUserCmdAim();
 
-    CG_UpdateDetonatorSelect();
     CL_SetUserCmdValue(cg->weaponSelect, cg->equippedOffHand, sensitivity);
 
     CL_RenderScene(&cg->refdef);

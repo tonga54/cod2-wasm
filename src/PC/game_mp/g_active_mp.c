@@ -61,7 +61,6 @@ extern void G_UpdateGrenadeHint(gentity_t *ent);
 extern void G_BeginGrenadeInput(gentity_t *ent, const usercmd_t *cmd);
 extern void G_EndGrenadeInput(gentity_t *ent);
 extern void G_GrenadeCookOff(gentity_t *ent);
-extern void G_DetonateExplosives(gentity_t *player);
 extern void G_UpdateMinePickup(gentity_t *player);
 extern void G_GetPlayerViewOrigin(const gentity_t *ent, vec_t *origin);
 extern int G_GetNonPVSFriendlyInfo(gentity_t *pSelf, vec_t *vPosition, int iLastUpdateEnt);
@@ -548,7 +547,7 @@ void ClientEvents(gentity_t *ent, int oldEventSequence)
             continue;
         }
 
-        if ((unsigned)(event - 0x9e) > EV_DETONATE - 0x9e) {
+        if ((unsigned)(event - 0x9e) > 0x27) {
             continue;
         }
 
@@ -587,9 +586,6 @@ void ClientEvents(gentity_t *ent, int oldEventSequence)
         case 0xc5: /* EV_GRENADE_SUICIDE */
             if (ent->client)
                 G_GrenadeCookOff(ent);
-            break;
-        case EV_DETONATE:
-            G_DetonateExplosives(ent);
             break;
         default:
             break;

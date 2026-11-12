@@ -1,13 +1,13 @@
-"""The browser's placed explosives, CoD WWII's S-Mine 44 and CoD4's C4.
+"""The browser's placed explosive, CoD WWII's S-Mine 44.
 
-They are generated from the owner's original files when the private archives
+It is generated from the owner's original files when the private archives
 are prepared; the repository holds none of that data:
-- weapons/mp/mine_mp and c4_mp edit the American frag's file;
-- their viewmodels keep the Mk 2 grenade's skeleton and hand: C4 holds CoD2's
-  sticky bomb, the S-Mine an original model (browser_smine.py) whose pin the
-  Mk 2's pull-pin animation draws before the hand sets it down;
+- weapons/mp/mine_mp edits the American frag's file;
+- its viewmodel keeps the Mk 2 grenade's skeleton and hand, holding an
+  original model (browser_smine.py) whose pin the Mk 2's pull-pin animation
+  draws before the hand sets it down;
 - the S-Mine's world model, texture and HUD icon are original too;
-- their new sounds start from retail aliases, which the owner's sound pack
+- its new sounds start from retail aliases, which the owner's sound pack
   may replace like the originals.
 """
 import math
@@ -20,24 +20,16 @@ MK2_MODEL = 'xmodel/viewmodel_mk2'
 MK2_PARTS = 'xmodelparts/viewmodel_mk22'
 MK2_PULLPIN = 'xanim/viewmodel_mk2_pullpin'
 MK2_MATERIAL = 'materials/mtl_weapon_mk2fraggrenade_high'
-STICKY_MODEL = 'xmodel/weapon_stickybomb'
-STICKY_SURFS = 'xmodelsurfs/weapon_sticky_bomb0'
 STICKY_PARTS = 'xmodelparts/weapon_sticky_bomb0'
-# The binoculars' hold at the eyes moves the same j_gun: lowered by the C4's
-# gunOfs keys, it shows the charge in the right hand below the crosshair.
-HOLD_ANIM = 'viewmodel_binoculars_idle'
 ICON_TEMPLATE = 'materials/inventory_stickybomb'
-MATERIAL = 'mtl_sticky_bomb'
 SMINE_MATERIAL = 'mtl_browser_smine'
 SMINE_IMAGE = 'browser_smine'
 SMINE_PULLPIN = 'viewmodel_smine_pullpin'
 SMINE_PLANT = 'viewmodel_smine_plant'
 MINE_ICON = 'browser_mine_icon'
-C4_ICON = 'inventory_stickybomb'
-WEAPONS = ('mine_mp', 'c4_mp')
-# Original files the asset closure must carry for them.
-DEPENDENCIES = (STICKY_MODEL, ICON_TEMPLATE, 'materials/' + MATERIAL, MK2_MODEL, 'xanim/' + HOLD_ANIM,
-                MK2_PULLPIN, MK2_MATERIAL)
+WEAPONS = ('mine_mp',)
+# Original files the asset closure must carry for it.
+DEPENDENCIES = (MK2_MODEL, MK2_PULLPIN, MK2_MATERIAL)
 
 # Each new alias starts from the rows of the retail alias it names, with any
 # columns of its own from ALIAS_COLUMNS.
@@ -47,10 +39,6 @@ ALIASES = {
     'weap_mine_land': 'grenade_bounce_default',
     'weap_mine_arm': 'weap_fraggrenade_pin',
     'weap_mine_click': 'minefield_click',
-    'weap_c4_pullout': 'weap_fraggrenade_pin',
-    'weap_c4_throw': 'weap_fraggrenade_fire',
-    'weap_c4_land': 'grenade_bounce_default',
-    'weap_c4_detonate': 'weap_fraggrenade_pin',
 }
 # The retail minefields' click leaves dist_max empty, which the engine makes
 # five times dist_min: full volume to 500 units and heard to 2500, across most
@@ -71,13 +59,6 @@ STRING_TEXT = (
     'REFERENCE           LANDMINE_DESCRIPTION\r\n'
     'LANG_ENGLISH        "Set down at your feet, it arms and goes off when an enemy steps near. Your squad '
     'sees its emblem over it; hold Use over yours to take it back."\r\n'
-    '\r\n'
-    'REFERENCE           C4\r\n'
-    'LANG_ENGLISH        "C4"\r\n'
-    '\r\n'
-    'REFERENCE           C4_DESCRIPTION\r\n'
-    'LANG_ENGLISH        "Fire throws a charge that sticks where it lands. Aim sets off every charge you '
-    'placed, wherever you are."\r\n'
     '\r\n'
     'ENDMARKER\r\n'
 ).encode('ascii')
@@ -100,9 +81,6 @@ def _bounces(parallel, perpendicular):
 # springs up and it goes off at a standing player's chest (g_missile_mp.c),
 # with the retail minefields' blast over a grenade's. The hand
 # takes 0.85 s to bring it up and draw its pin, and sets it down 0.3 s after.
-# CoD4's C4 sticks where it first hits and waits for its detonator. Every class
-# carries two, so its blast kills within about 200 units of 256, a little
-# beyond a frag's 171.
 MINE = {
     'displayName': 'BROWSER_LANDMINE', 'gunModel': 'viewmodel_smine',
     'worldModel': 'xmodel/weapon_smine', 'projectileModel': 'xmodel/weapon_smine',
@@ -119,19 +97,6 @@ MINE_KEYS = {
     'proximityRadius': '56', 'proximityArmTime': '1.2', 'proximityDelay': '0.3',
     'bounceSound': 'weap_mine_land', 'armSound': 'weap_mine_arm', 'triggerSound': 'weap_mine_click',
 }
-C4 = {
-    'displayName': 'BROWSER_C4', 'weaponClass': 'item', 'offhandClass': 'None', 'gunModel': 'viewmodel_c4',
-    'worldModel': STICKY_MODEL, 'projectileModel': STICKY_MODEL, 'hudIcon': C4_ICON, 'killIcon': C4_ICON,
-    'pullbackSound': 'weap_c4_pullout', 'fireSound': 'weap_c4_throw', 'ammoName': 'browser_c4',
-    'clipName': 'browser_c4', 'sharedAmmoCapName': 'BROWSER_C4', 'maxAmmo': '2', 'startAmmo': '2',
-    'clipSize': '2', 'sharedAmmoCap': '2', 'projectileSpeed': '520', 'projectileSpeedUp': '140',
-    'holdFireTime': '0.35', 'explosionRadius': '256', 'explosionInnerDamage': '250',
-    'explosionOuterDamage': '60', 'projExplosionSound': 'explo_mine', **_bounces('0', '0'),
-    # emptyIdleAnim stays the frag's: with no charge left the hand is out of sight.
-    **{key: HOLD_ANIM for key in ('idleAnim', 'meleeAnim', 'raiseAnim', 'dropAnim', 'altRaiseAnim', 'altDropAnim')},
-}
-C4_KEYS = {'hasDetonator': '1', 'stickiness': 'all', 'detonateSound': 'weap_c4_detonate', 'bounceSound': 'weap_c4_land',
-           'gunOfsF': '1', 'gunOfsR': '3.5', 'gunOfsU': '-8.5'}
 
 
 def weapon_pairs(data):
@@ -247,14 +212,6 @@ def write_rigid_surfaces(surfaces):
     return data
 
 
-def _transform(vertices, rotation, scale, offset):
-    def turn(vector):
-        return tuple(sum(rotation[row][column] * vector[column] for column in range(3)) for row in range(3))
-    return [(turn(normal), colour, uv, turn(binormal), turn(tangent),
-             tuple(scale * value + offset[axis] for axis, value in enumerate(turn(point))))
-            for normal, colour, uv, binormal, tangent, point in vertices]
-
-
 def _bounds(vertices):
     points = [vertex[5] for vertex in vertices]
     return (tuple(min(point[axis] for point in points) for axis in range(3)) +
@@ -263,12 +220,6 @@ def _bounds(vertices):
 
 def _radius(vertices):
     return math.ceil(max(math.sqrt(sum(value * value for value in vertex[5])) for vertex in vertices) * 1000) / 1000
-
-
-def _centred(vertices, rotation, scale):
-    box = _bounds(_transform(vertices, rotation, 1.0, (0.0, 0.0, 0.0)))
-    centre = tuple(-scale * (box[axis] + box[axis + 3]) * 0.5 for axis in range(3))
-    return _transform(vertices, rotation, scale, centre)
 
 
 def _parts_copy(parts):
@@ -384,12 +335,6 @@ def write_icon_material(template, name):
     return bytes(head) + strings
 
 
-# Viewmodel space: x away from the eye, y left, z up.
-_IDENTITY = ((1, 0, 0), (0, 1, 0), (0, 0, 1))
-# The sticky bomb's wide side toward the eye.
-_FACE_EYE = ((0, -1, 0), (1, 0, 0), (0, 0, 1))
-
-
 def explosive_assets(read):
     """Every generated entry, from read(name) giving an original file's bytes."""
     frag = read(FRAG)
@@ -397,19 +342,6 @@ def explosive_assets(read):
     mk2_parts = _parts_copy(read(MK2_PARTS))
     if mk2['lods'][0][1] != 'viewmodel_mk22' or len(mk2['bounds']) != bone_count(mk2_parts):
         raise ValueError('Unexpected Mk 2 viewmodel')
-    sticky = read_rigid_surfaces(read(STICKY_SURFS))
-    if len(sticky) != 1 or read_xmodel(read(STICKY_MODEL))['materials'][0] != [MATERIAL]:
-        raise ValueError('Unexpected sticky bomb')
-    _, sticky_vertices, sticky_triangles = sticky[0]
-
-    # The bag without its trailing cord (everything below x = -3).
-    kept = [i for i in range(0, len(sticky_triangles), 3)
-            if all(sticky_vertices[index][5][0] > -3.0 for index in sticky_triangles[i:i + 3])]
-    order = sorted({sticky_triangles[i + k] for i in kept for k in range(3)})
-    remap = {old: new for new, old in enumerate(order)}
-    bag = [sticky_vertices[index] for index in order]
-    bag_triangles = [remap[sticky_triangles[i + k]] for i in kept for k in range(3)]
-    c4_vertices = _centred(bag, _FACE_EYE, 0.55)
 
     def viewmodel(name, material, surfaces):
         bounds = list(mk2['bounds'])
@@ -429,7 +361,6 @@ def explosive_assets(read):
     held = smine_viewmodel_parts(browser_smine.read_xanim(read(MK2_PULLPIN)))
     assets = {
         'weapons/mp/mine_mp': edit_weapon(frag, MINE, MINE_KEYS),
-        'weapons/mp/c4_mp': edit_weapon(frag, C4, C4_KEYS),
         'xmodel/weapon_smine': write_xmodel('weapon_smine0', [SMINE_MATERIAL], [_bounds(mine.vertices)],
                                             _radius(mine.vertices)),
         'xmodelparts/weapon_smine0': sticky_parts,
@@ -443,7 +374,6 @@ def explosive_assets(read):
         'materials/' + MINE_ICON: write_icon_material(read(ICON_TEMPLATE), MINE_ICON),
         STRINGS: STRING_TEXT,
     }
-    assets.update(viewmodel('viewmodel_c4', MATERIAL, [(0, c4_vertices, bag_triangles)]))
     assets.update(viewmodel('viewmodel_smine', SMINE_MATERIAL, [(0, held['body'].vertices, held['body'].triangles),
                                                                  (1, held['pin'].vertices, held['pin'].triangles)]))
     return assets

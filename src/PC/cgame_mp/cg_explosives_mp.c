@@ -11,19 +11,14 @@
 extern const dvar_t *Dvar_RegisterBool_mac(const char *name, int value, int flags);
 extern WeaponDef *BG_GetWeaponDef(int iWeapon);
 extern int BG_GetNumWeapons(void);
-extern int BG_GetFirstAvailableOffhand(const playerState_t *ps, int offhandClass);
-extern int BG_PlayerDetonatorWeapon(const playerState_t *ps);
 extern float GetVirtualWidthFromRealWidth(float width);
 extern float GetVirtualHeightFromRealHeight(float height);
 extern float GetRealHeightFromVirtualHeight(float height);
 extern void CL_DrawStretchPic(float x, float y, float w, float h, int horzAlign, int vertAlign, float s1, float t1,
                               float s2, float t2, const vec_t *color, MaterialHandle material);
-extern int CL_GetCurrentCmdNumber(void);
-extern qboolean CL_GetUserCmd(int cmdNumber, usercmd_t *ucmd);
 extern Bool CG_AreHudMenusHidden(void);
-extern void CG_SelectWeaponIndex(int weaponIndex);
 
-/* CoD WWII's squad emblem over a placed mine or charge: a disc this wide in
+/* CoD WWII's squad emblem over a placed mine: a disc this wide in
  * the world, this high above it, never smaller on screen than the least size
  * (virtual units at 480 lines) nor larger than the greatest, pulsing slowly
  * from faint to nearly full, and fading out over the last quarter of the
@@ -37,7 +32,6 @@ extern void CG_SelectWeaponIndex(int weaponIndex);
 #define EXPLOSIVE_EMBLEM_PERIOD 1800
 #define EXPLOSIVE_EMBLEM_FAINT 0.3f
 #define EXPLOSIVE_EMBLEM_FULL 0.95f
-#define EXPLOSIVE_BUTTON_FRAG 0x10000
 /* The emblems' shapes in radii of the ring's outside, y down: the ring, the
  * Allies' five-pointed star or the Axis' cross reaching into it, the dark
  * gap that parts them, and a dark edge around everything. Each image cell
@@ -61,16 +55,12 @@ enum { EXPLOSIVE_EMBLEM_ALLIES, EXPLOSIVE_EMBLEM_AXIS, EXPLOSIVE_EMBLEM_COUNT };
 static const dvar_t *cg_hudExplosiveIcons;
 static MaterialHandle s_explosiveEmblems;
 static int s_explosiveEmblemsTried;
-static int s_detonatorReturn;
-static int s_fragDown;
 
 void CG_ExplosivesInit(void)
 {
     cg_hudExplosiveIcons = Dvar_RegisterBool_mac("cg_hudExplosiveIcons", 1, 0x1001);
     s_explosiveEmblems = NULL;
     s_explosiveEmblemsTried = 0;
-    s_detonatorReturn = 0;
-    s_fragDown = 0;
 }
 
 static float CG_EmblemSegmentDistance(float x, float y, float ax, float ay, float bx, float by)
@@ -253,7 +243,7 @@ static int CG_ExplosiveScreenPosition(const vec_t *point, float *x, float *y, fl
 }
 
 /* Through walls, as teammates' names are: the player's own and, in a team
- * mode, their teammates' mines and charges once they have come to rest. */
+ * mode, their teammates' mines once they have come to rest. */
 void CG_DrawExplosiveIcons(void)
 {
     const snapshot_t *snap = cg->nextSnap ? cg->nextSnap : cg->snap;
@@ -318,39 +308,4 @@ void CG_DrawExplosiveIcons(void)
         CL_DrawStretchPic(x - 0.5f * size, y - 0.5f * size, size, size, 7, 7, s0, 0.0f,
                           s0 + 1.0f / EXPLOSIVE_EMBLEM_COUNT, 1.0f, color, emblems);
     }
-}
-
-/* With a charge carried instead of frags, a press of G takes out its
- * detonator, and the next puts it away again (bg_weapons.c keeps that press
- * from showing the empty-offhand notice). A live frag nearby is picked up
- * instead. */
-void CG_UpdateDetonatorSelect(void)
-{
-    const playerState_t *ps = &cg->predictedPlayerState;
-    usercmd_t cmd;
-    int down, detonator, back;
-
-    if (!CL_GetUserCmd(CL_GetCurrentCmdNumber(), &cmd))
-        return;
-    down = (cmd.buttons & EXPLOSIVE_BUTTON_FRAG) != 0;
-    if (!down || s_fragDown) {
-        s_fragDown = down;
-        return;
-    }
-    s_fragDown = 1;
-    if (ps->pm_type > 1 || ps->stats[0] <= 0 || ps->cursorHint == GRENADE_THROWBACK_HINT)
-        return;
-    detonator = BG_PlayerDetonatorWeapon(ps);
-    if (!detonator || BG_GetFirstAvailableOffhand(ps, OFFHAND_CLASS_FRAG_GRENADE))
-        return;
-    if (cg->weaponSelect != detonator) {
-        s_detonatorReturn = cg->weaponSelect;
-        CG_SelectWeaponIndex(detonator);
-        return;
-    }
-    back = s_detonatorReturn;
-    if (!back || back == detonator || !((ps->weapons[back >> 5] >> (back & 0x1f)) & 1))
-        back = (signed char)ps->weaponslots[1] ? (signed char)ps->weaponslots[1] : (signed char)ps->weaponslots[2];
-    if (back)
-        CG_SelectWeaponIndex(back);
 }

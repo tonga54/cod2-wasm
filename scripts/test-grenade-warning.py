@@ -70,7 +70,7 @@ typedef struct { snapshot_t *snap, *nextSnap; playerState_t predictedPlayerState
                  vec3_t refdefViewAngles; struct { int width, height; } refdef; } cg_t;
 typedef struct { struct { MaterialHandle grenadeIcon, grenadePointer; } media; } cgs_t;
 typedef struct { int weapType, offhandClass, iExplosionRadius, iExplosionInnerDamage, iExplosionOuterDamage,
-                 overlayReticle, hasDetonator; float proximityRadius; } WeaponDef;
+                 overlayReticle; float proximityRadius; } WeaponDef;
 typedef struct { struct { float value, vector[4]; int enabled; } current; } dvar_t;
 ''' + threat_type + r'''
 static cg_t cgState, *cg = &cgState;

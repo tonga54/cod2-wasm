@@ -138,7 +138,7 @@ retail CoD2:
   rules and collision-based navigation.
 - **Custom classes:** **Create a Class** in the main menu keeps five named
   classes for your gametag, each with a primary from any faction, a pistol, a
-  lethal item (a frag, the S-Mine 44 or C4) and a smoke grenade. Either gun can
+  lethal item (a frag or the S-Mine 44) and a smoke grenade. Either gun can
   wear one of ten camouflage patterns, chosen from a WWII-style swatch grid (F2
   or a controller's Y on a gun's tile); the first-person gun and each player's
   gun in hand are painted with it. Joining a match opens **Select Class** first, laid
@@ -164,13 +164,12 @@ retail CoD2:
   Sights frame the world in their ring, as WWII's do, with nothing of the gun's
   iron sights inside it and the reticle glowing on the glass. See
   [attachments](CLASSES.md#attachments).
-- **Placed explosives:** CoD WWII's S-Mine 44, set down at your feet after
+- **S-Mine 44:** CoD WWII's S-Mine 44, set down at your feet after
   the left hand draws its pin, which clicks when an enemy steps on or beside it
-  and springs up to explode at chest height, and CoD4's C4, thrown to stick and
-  set off with aim from anywhere. Your squad's emblem, a star or an iron cross,
-  pulses over them for you and your teammates. Hold Use over your own S-Mine to
-  take it back; enemies can shoot it to set it off, and its blast is theirs. See
-  [placed explosives](CLASSES.md#placed-explosives).
+  and springs up to explode at chest height. Your squad's emblem, a star or an
+  iron cross, pulses over it for you and your teammates. Hold Use over your own
+  S-Mine to take it back; enemies can shoot it to set it off, and its blast is
+  theirs. See [placed explosives](CLASSES.md#placed-explosives).
 - **Rejoining keeps your stats:** a person who leaves a match and joins the
   same room's match again under the same gametag gets back their match points,
   kills, assists, headshots, deaths and retail score, in any slot and on
@@ -364,7 +363,7 @@ retail CoD2:
 - **Sun shafts and shockwaves:** the sky about the sun throws shafts of light
   past whatever stands against it, wider and longer when the sun is low, from
   two quarter-resolution passes (`r_sunShafts`, 0 to 2, archived, 1). Grenade,
-  S-Mine, C4 and rocket explosions bend the view about a spreading front for
+  S-Mine and rocket explosions bend the view about a spreading front for
   450 ms, never over the weapon (`r_shockwave`, archived, on). See
   [graphics validation and limits](GRAPHICS_2026-10-16.md).
 - **WWII sniper scopes:** the scoped Kar98k, Springfield, Lee-Enfield and
@@ -575,7 +574,7 @@ While the controller is the device in use it vibrates with the original
 console rumble: a kick for every round fired, held for 100 ms on single shots
 so pistols and rifles are felt, and on automatic a kick per bullet over a
 steady buzz that lasts the whole burst, until the gun stops firing or reloads;
-nearby grenade, S-Mine, C4 and rocket blasts fading with distance, hits taken,
+nearby grenade, S-Mine and rocket blasts fading with distance, hits taken,
 dying and melee impacts. **Options → Controller → Vibration** turns it off.
 Chrome and Edge drive both motors; other browsers may not vibrate.
 
@@ -599,7 +598,6 @@ sheet metal offer less protection than thick masonry or rock. See
 | Frag / smoke | G / 4 |
 | Cook or return a frag | Hold G, then release to throw |
 | Set down / take back an S-Mine | G / hold F over it |
-| C4: take out, throw, set off | G, fire, aim |
 | Toggle crouch / go prone | C / Ctrl |
 | Stand up or jump | Space |
 | Public / team chat | T / Y |

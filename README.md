@@ -4,7 +4,7 @@
 
 **Call of Duty 2's battlefields with the multiplayer of Call of Duty: WWII, running in a browser tab.**
 
-Create a Class · attachments · camouflage · S-Mine 44 and C4 · up to 32 bots · WWII combat HUD · real-time shadows
+Create a Class · attachments · camouflage · S-Mine 44 · up to 32 bots · WWII combat HUD · real-time shadows
 
 [![WebAssembly and WebGL 2](https://img.shields.io/badge/WebAssembly-WebGL_2-ccb777?style=for-the-badge&logo=webassembly&logoColor=white&labelColor=0d0d0d)](#how-it-runs)
 [![0 to 32 bots](https://img.shields.io/badge/bots-0%E2%80%9332-ccb777?style=for-the-badge&labelColor=0d0d0d)](#bots)
@@ -24,9 +24,9 @@ cached. Every match runs on a native dedicated server on the host, a desktop
 computer or a Raspberry Pi 5, and any player can create a room, fill it with
 bots and play.
 
-| 5 | 21 + 4 | 13 | 10 | 2 | 0–32 | 8 · 5 |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| custom classes | primaries + pistols | attachments | camouflages | placed explosives | bots per room | maps · modes |
+| 5 | 21 + 4 | 13 | 10 | 0–32 | 8 · 5 |
+| :---: | :---: | :---: | :---: | :---: | :---: |
+| custom classes | primaries + pistols | attachments | camouflages | bots per room | maps · modes |
 
 > **Unofficial community project, in active development.** Hosting requires the
 > owner's original CoD2 1.3 English game files. This repository contains the
@@ -57,7 +57,7 @@ commits that followed.
 | **Gunsmith** | None | [13 attachments](#attachments-with-real-tradeoffs) with real gains and costs; [10 camouflages](#ten-camouflages) |
 | **Sights** | Iron sights and sniper scopes | Plus [Reflex Sight, Lens Sight and 4x Optic](#sights-and-scopes), live coated scope glass, WWII reticles, scope glint |
 | **Rendering** | DX7/DX9 lighting, baked lens art, short draw distance | [1080p 4× MSAA, 4096² PCF sun shadows, oiled gunmetal, 35mm filmic grade, supersonic tracers & sparks](#rendering-beyond-the-first-browser-port) |
-| **Lethal equipment** | Frag grenades | Frags, plus the [S-Mine 44 and remote C4](#s-mine-44-and-c4) |
+| **Lethal equipment** | Frag grenades | Frags, plus the [S-Mine 44](#s-mine-44) |
 | **Opponents** | Human players only | [Up to 32 bots](#bots) at three difficulties, in all five modes |
 | **HUD** | Compass, score text, ammo box | [Minimap, kill feed with weapon silhouettes, score panel](#a-combat-hud-from-call-of-duty-wwii), match points |
 | **Movement** | Lean, crouch, prone, mantle | All of it, plus sprint |
@@ -87,7 +87,7 @@ the six marked above:
 ![Create a Class: five named classes, the loadout editor with three attachments, weapons listed by kind, and Select Class with Custom and Standard Issue tabs](docs/images/create-a-class.jpg)
 
 Every gametag gets **five named classes**. Each sets a primary with up to three
-attachments, a pistol with one, a lethal item (a frag, the S-Mine 44 or C4) and
+attachments, a pistol with one, a lethal item (a frag or the S-Mine 44) and
 a smoke grenade. Any team can carry any country's weapons: a British player can
 spawn with a Kar98k, a German one with an M1 Garand.
 
@@ -159,18 +159,15 @@ on the ground keeps its paint, attachments and rounds for whoever picks it up.
 - **Scope glint:** a rival's raised sniper scope gives a faint glint, weaker
   at range.
 
-## S-Mine 44 and C4
+## S-Mine 44
 
-![S-Mine 44: plant it, an enemy walks in, it springs to chest height. C4: throw and stick a charge, wait, and detonate with the aim input](docs/images/explosives.jpg)
+![S-Mine 44: plant it, an enemy walks in, it springs to chest height](docs/images/explosives.jpg)
 
-Two placed explosives join the frag as lethal choices. Both carry a pulsing star
-or iron cross that your squad sees through walls and the enemy never sees.
-
-- **S-Mine 44:** set it at your feet. An enemy a step beside it clicks it, and it
-  springs to chest height and bursts. Enemies can shoot it to set it off, and
-  you can take yours back by holding F.
-- **C4:** throw a charge and it sticks where it lands; aim detonates every
-  charge you placed, wherever you are.
+The S-Mine 44 joins the frag as a lethal choice. Set it at your feet, marked by a
+pulsing star or iron cross that your squad sees through walls and the enemy never
+sees. An enemy a step beside it clicks it, and it springs to chest height and
+bursts. Enemies can shoot it to set it off, and you can take yours back by
+holding F.
 
 ## Bots
 
@@ -351,7 +348,6 @@ from an HTTPS address or `localhost`, not from `http://HOST_LAN_IP:8088`.
 | Frag / smoke | G / 4 |
 | Cook or return a frag | Hold G, release to throw |
 | S-Mine: place / reclaim | G / hold F over your mine |
-| C4: equip / throw / detonate | G / fire / aim |
 | Public chat / team chat / quick messages | T / Y / H |
 | Pause / scoreboard / fullscreen | Escape / Tab / F10 |
 | Class selection / edit or rename / camouflage | Enter / F1 / F2 |

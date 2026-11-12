@@ -48,7 +48,7 @@ typedef gentity_t gentity_s;
 typedef struct {int weapType,offhandClass,bCookOffHold,bSemiAuto,iFuseTime,damage,iExplosionRadius,iExplosionOuterDamage,iExplosionInnerDamage,
  iProjectileSpeed,weapClass,projExplosion,iClipIndex,iFireTime,iFireDelay,quickRaiseTime,iHoldFireTime;
  float parallelBounce[32],perpendicularBounce[32],fAdsAimPitch,destabilizeDistance,destabilizationTimeReductionRatio,destabilizationBaseTime;const char *szProjExplosionEffect;
- int hasDetonator,stickiness,iProximityArmTime,iProximityDelay,iMaxAmmo;float proximityRadius;const char *szBounceSound,*szArmSound,*szTriggerSound,*szDetonateSound;}WeaponDef;
+ int iProximityArmTime,iProximityDelay,iMaxAmmo;float proximityRadius;const char *szBounceSound,*szArmSound,*szTriggerSound;}WeaponDef;
 static gentity_t g_entities[1024];static gclient_t clients[3];
 static struct {int time,previousTime,num_entities;}level;
 static struct {int grenade;}scr_const;
@@ -129,8 +129,7 @@ body = ''.join(function(missiles, n) for n in (
     'G_ResetHeldGrenades', 'G_GetHeldGrenade', 'G_HoldGrenade', 'G_CanPickUpGrenade',
     'G_FindNearbyGrenade', 'G_UpdateGrenadeHint', 'G_GrenadeCookOff', 'G_BeginGrenadeInput',
     'G_EndGrenadeInput', 'G_PlacedTeam', 'G_PlacedSound', 'G_PlacedOwner', 'G_SetDownMine', 'G_PlaceExplosive',
-    'G_StickMissile',
-    'G_LaunchMine', 'G_RunPlacedExplosive', 'G_DetonateExplosives', 'G_ExplodeMissile', 'fire_grenade', 'G_BounceMissile',
+    'G_LaunchMine', 'G_RunPlacedExplosive', 'G_ExplodeMissile', 'fire_grenade', 'G_BounceMissile',
     'G_RunMissile'))
 # Production functions are external; give the extracted grenade factory the same linkage.
 support = support.replace('static gentity_t *fire_grenade(', 'gentity_t *fire_grenade(')

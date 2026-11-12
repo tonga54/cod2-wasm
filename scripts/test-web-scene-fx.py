@@ -269,7 +269,7 @@ assert '"    highp float bz = bd < 0.2 ? 0.0 : u_near.x / max(u_dof.x - bd, 0.00
 assert '"      if (u_blastDepth[i] <= 0.0 || bz < 0.5 * u_blastDepth[i]) continue;\\n"' in compose_shader
 assert compose_shader.count('texture(u_scene, uv + vec2(0.0, u_px.y)).rgb') == 1 and \
     compose_shader.count('texture(u_scene, uv - vec2(u_px.x, 0.0)).rgb') == 1
-# The cgame hands every grenade, S-Mine, C4 and rocket blast over, with its
+# The cgame hands every grenade, S-Mine and rocket blast over, with its
 # radius, after the explosion's own effects and before its rumble.
 events = (root / 'src/PC/cgame_mp/cg_event_mp.c').read_text()
 assert events.count('#ifdef __EMSCRIPTEN__\n            CG_ExplosionShockwave((const vec_t *)position, es->weapon);\n#endif\n'

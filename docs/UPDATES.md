@@ -330,8 +330,8 @@ music already replaces. `check-private-assets.py` verifies the rows and that
 the packaged files are the owner's bytes. Without the folder the archive keeps
 the original sounds.
 
-The explosives' own aliases (`weap_mine_*`, `weap_c4_*`) start from retail
-rows and are listed like the originals. The S-Mine's click is
+The S-Mine's own aliases (`weap_mine_*`) start from retail
+rows and are listed like the originals. Its click is
 `weap_mine_click`, heard up to 750 units away; `minefield_click` is only the
 retail minefields' click.
 
@@ -396,7 +396,7 @@ to the generator on the build machine.
 
 On October 19, with the S-Mine 44 a class weapon, the owner's cut-out of it
 from the same captures (256 × 512) joined them as `mine_mp.png`, adding
-0.16 MB. The C4 keeps its generated icon.
+0.16 MB.
 
 A gun's attachments take two more kinds of file, under the same rules:
 

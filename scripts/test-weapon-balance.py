@@ -43,7 +43,7 @@ for path in sorted((root / 'data/main').glob('*.iwd')):
             if name in current:
                 original[name] = archive.read(name)
                 sources[name] = path.name
-# The mine and C4 are built from the frag's file and audited with the
+# The mine is built from the frag's file and audited with the
 # explosives; every other definition has its retail original.
 generated = {'weapons/mp/' + weapon for weapon in EXPLOSIVES}
 assert current.keys() - original.keys() == generated
@@ -211,6 +211,7 @@ static gentity_t *G_TempEntity(const vec_t *v,int event) {assert(0);return 0;}
 static byte DirToByte(const vec_t *v) {assert(0);return 0;}
 static int Dvar_GetInt(const char *name) {return 0;}
 static int OnSameTeam(gentity_t *a,gentity_t *b) {return 1;}
+static qboolean G_ShotTrace(void) {return 0;}
 '''
 checks = r'''
 typedef struct {WeaponDef retail,balanced;int changed,farDamage,damageChanged,automatic,pistol,reviewed,bodyShots,headShots,stomachShots,armShots;} Metric;
