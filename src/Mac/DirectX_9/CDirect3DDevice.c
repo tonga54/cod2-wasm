@@ -14,11 +14,13 @@ extern void WebPointLights_Draw(const float *view, int enabled, int worldShadowE
                                float reflection, float cavity, float variation, float detailRelief,
                                float sharpen, int viewmodel);
 extern float WebSceneFx_TextureLodBias(void);
+extern void WebEnvironment_Set(int texture);
 extern float WebSceneFx_WorldNearClip(void);
 extern void WebSceneFx_JitterProjection(float *projection);
 extern float g_webEntitySunVisibility;
 #include "web_materials.h"
 #include "web_effects.h"
+#include "web_planar.h"
 #include "headers/PC/gfx_d3d/r_weapon_camo.h"
 extern const dvar_t *r_materialLighting;
 extern const dvar_t *r_normalMap;
@@ -1946,6 +1948,7 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
     float textureWorldView[16];
     int textureWorldViewValid = 0;
     float pointLightView[16];
+    float drawWorld[16];
     int pointLightViewValid = 0;
     const D3DVERTEXELEMENT9 *element;
 
@@ -1969,6 +1972,10 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
 #endif
     WEB_STATE_CHECK("entry");
     (void)PrimitiveType;
+#ifdef __EMSCRIPTEN__
+    if (WebPlanar_IsDrawing() && (dev->alphaBlendEnable ||
+        dev->viewportMinZ != 0.0f || dev->viewportMaxZ != 1.0f)) return 0;
+#endif
 
     if (!dev->streams[0] || !dev->indexBuffer)
         return 0;
@@ -2114,6 +2121,9 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
     }
 
     WEB_STATE_CHECK("texture units");
+#ifdef __EMSCRIPTEN__
+    const unsigned short *cpuDrawIndices = drawIndices;
+#endif
     {
 
 #ifndef __EMSCRIPTEN__
@@ -2205,6 +2215,10 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                 /* D3D TCI_CAMERASPACEPOSITION is generated before the GL
                  * handedness conversion, then transformed by the material's
                  * texture matrix. Sky cube maps have no authored UV direction. */
+#ifdef __EMSCRIPTEN__
+                memcpy(drawWorld, world, sizeof(drawWorld));
+                WebPlanar_MirrorView(view);
+#endif
                 D3DXMatrixMultiply(textureWorldView, world, view);
                 textureWorldViewValid = 1;
                 view[2] = -view[2];
@@ -2301,6 +2315,14 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                 stage0Target = CDirect3DDevice_GetImageTextureTarget(materialImage);
             }
             if (glTexID && colorOp != D3DTOP_DISABLE) {
+#ifdef __EMSCRIPTEN__
+                if (!is2D && stage0Target == GL_TEXTURE_CUBE_MAP) {
+                    extern void *imp_tess;
+                    const Material *skyMaterial = ((materialCommands_t *)imp_tess)->material;
+                    if (skyMaterial && skyMaterial->info.name && !strncmp(skyMaterial->info.name, "sky_", 4))
+                        WebEnvironment_Set((int)glTexID);
+                }
+#endif
                 CDirect3DDevice_BindTextureTarget(stage0Target, glTexID);
                 CDirect3DDevice_ApplySamplerState(0, stage0Target);
                 if (usesLightmap) {
@@ -2465,6 +2487,16 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
     glEnableClientState(0x8074);
     glVertexPointer(positionComponents, 0x1406 , stride,
                     attributeBase + positionOffset);
+#ifdef __EMSCRIPTEN__
+    {
+        extern void WebWorldNormals_Draw(const void *, int);
+        /* Match both persistent indices and the rebased client-array path.
+         * The normal texture uses the original world stream's numbering. */
+        size_t vertexByte = staticVertexBuffer ? (size_t)attributeBase : (size_t)(attributeBase - vbData);
+        WebWorldNormals_Draw(!is2D && usesLightmap && stride == 32 ? dev->streams[0] : NULL,
+                             stride ? (int)(vertexByte / stride) : -1);
+    }
+#endif
     if (!is2D && dev->lighting && normalOffset >= 0) {
         glEnableClientState(0x8075);
         glNormalPointer(0x1406, stride, attributeBase + normalOffset);
@@ -2569,7 +2601,11 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                 stage0Target == 0x0DE1 && usesLightmap) || lightmappedBlend || staticShadow;
             unsigned int normalMap = 0, specularMap = 0, detailMap = 0, camoMap = 0, camoMask = 0;
             float detailScale[2] = {0, 0}, camoTiles = 0, camoReference = 0;
-            int materialLighting = (pointLight || lightmappedBlend) &&
+            /* Owner impact decals have normals and height without a lightmap.
+             * Other translucent particles retain their original unlit path. */
+            int impactDraw = !is2D && dev->alphaBlendEnable && !dev->zWriteEnable && stage0Target == 0x0DE1 &&
+                WebMaterials_IsImpact(((materialCommands_t *)imp_tess)->material);
+            int materialLighting = (pointLight || lightmappedBlend || impactDraw) &&
                 r_materialLighting && r_materialLighting->current.enabled;
             R_WeaponCamoDraw camo;
             /* A camouflaged gun's material takes its pattern where its mask paints. */
@@ -2595,8 +2631,8 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
                 }
             }
             WebPointLights_Draw(pointLightViewValid ? pointLightView : NULL,
-                pointLight || lightmappedBlend, worldShadow, webColorOrder, (int)normalMap, (int)specularMap,
-                (int)detailMap, detailScale[0], detailScale[1], materialLighting && stage1Bound == 1,
+                pointLight || lightmappedBlend || impactDraw, worldShadow, webColorOrder, (int)normalMap, (int)specularMap,
+                (int)detailMap, detailScale[0], detailScale[1], materialLighting && !impactDraw && stage1Bound == 1,
                 r_specularColorScale ? r_specularColorScale->current.value : 1.0f,
                 r_sunShading ? r_sunShading->current.value : 1.0f,
                 materialLighting && dev->lighting ? g_webEntitySunVisibility : 0.0f,
@@ -2625,6 +2661,11 @@ HRESULT CDirect3DDevice_DrawIndexedPrimitive(const CDirect3DDevice *_this,
             effectState.dstBlend = dev->destBlend;
             effectState.fullDepthRange = dev->viewportMinZ == 0.0f && dev->viewportMaxZ == 1.0f;
             WebEffects_Apply(((materialCommands_t *)imp_tess)->material, &effectState, WebSceneFx_WorldNearClip());
+            WebPlanar_Material(pointLightViewValid ? pointLightView : NULL);
+            if (!WebPlanar_IsDrawing() && usesLightmap && pointLightViewValid && effectState.fullDepthRange)
+                WebPlanar_Candidate(((materialCommands_t *)imp_tess)->material,
+                    (const float *)(vertBase + positionOffset), stride, drawVertexCount,
+                    cpuDrawIndices, indexCount, staticIndexRange ? firstVertex : 0, drawWorld, pointLightView);
         }
 #endif
 #ifdef __EMSCRIPTEN__

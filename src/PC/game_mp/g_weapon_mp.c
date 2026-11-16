@@ -357,7 +357,7 @@ static float Bullet_PenetrationDepth(const WeaponDef *weapon, int surfaceFlags)
     if (surfaceFlags & 0x14) /* sky or noimpact */
         return 0.0f;
     switch ((surfaceFlags >> 20) & 31) {
-    case 1: depth = 12.0f; break; /* bark */
+    case 1: depth = 20.0f; break; /* small trunks; rifles reach 40 units */
     case 2: depth = weapon->bRifleBullet ? 4.0f : 0.0f; break; /* brick */
     case 3: depth = 8.0f; break; /* carpet */
     case 4: case 8: depth = 32.0f; break; /* cloth, foliage */

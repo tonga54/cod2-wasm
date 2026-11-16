@@ -10,6 +10,36 @@
 /* The DX7 techniques sample only a material's color map and lightmap. The
  * browser keeps the original normal, specular and detail maps of the same
  * material for the per-pixel lighting its generated GL shaders add. */
+int WebMaterials_IsImpact(const Material *material)
+{
+    if (!material || !material->info.name || !material->textures ||
+        strncmp(material->info.name, "gfx_bullethit_", sizeof("gfx_bullethit_") - 1))
+        return 0;
+    for (int i = 0; i < material->textureCount; ++i) {
+        const MaterialTextureDef *def = &material->textures[i];
+        if (def->semantic == 2 && def->name && !strcmp(def->name, "colorMap") &&
+            def->u.image && def->u.image->name &&
+            !strncmp(def->u.image->name, "browser_remix/impact_", sizeof("browser_remix/impact_") - 1))
+            return 1;
+    }
+    return 0;
+}
+
+/* Use the authored physical surface, shared with footsteps/impacts, rather
+ * than guessing from texture names. Legacy masonry's white specular masks
+ * describe variation, not a conductor's near-unity reflectance. */
+float WebMaterials_MasonryRoughness(const Material *material)
+{
+    if (!material) return 0.0f;
+    switch (((unsigned)material->info.surfaceFlags >> 20) & 31) {
+    case 2: return 0.78f;  /* brick */
+    case 5: return 0.82f;  /* concrete */
+    case 16: return 0.90f; /* plaster */
+    case 17: return 0.72f; /* rock/stone */
+    default: return 0.0f;
+    }
+}
+
 void WebMaterials_Select(const Material *material, int normalMaps, int specularMaps, WebMaterialMaps *maps)
 {
     GfxImage *detail = NULL;

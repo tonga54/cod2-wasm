@@ -182,9 +182,18 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
           var pointLights = this.usedTexUnitList.indexOf(0) !== -1 &&
             GLImmediate.TexEnvJIT.getTexUnitType(0) == 0x0DE1;
           var pointNormal = pointLights && GLEmulation.lightingEnabled;
-          var pointVarying = pointLights ? "varying highp vec3 v_cod2Eye;" : "";
+          var pointVarying = pointLights ? "varying highp vec3 v_cod2Eye; varying highp vec3 v_cod2WorldNormal;" : "";
+          var worldNormalDefs = pointLights ? "uniform highp sampler2D u_cod2WorldNormals; uniform highp ivec3 u_cod2WorldNormalParams;" : "";
+          var worldNormalVertex = pointLights ?
+            "v_cod2WorldNormal = vec3(0.0);\n" +
+            "if (u_cod2WorldNormalParams.z > 0) {\n" +
+            "  int index = gl_VertexID + u_cod2WorldNormalParams.x;\n" +
+            "  if (index >= 0 && index < u_cod2WorldNormalParams.z) {\n" +
+            "    vec3 normal = texelFetch(u_cod2WorldNormals, ivec2(index % u_cod2WorldNormalParams.y, index / u_cod2WorldNormalParams.y), 0).xyz;\n" +
+            "    v_cod2WorldNormal = mat3(u_modelView) * normal;\n}\n}\n" : "";
           if (pointNormal) pointVarying += "varying mediump vec3 v_cod2Normal;";
           var pointDefs = pointLights ? pointVarying +
+            "uniform highp vec4 u_cod2PlanarClip;" +
             "uniform int u_cod2LightCount; uniform highp vec4 u_cod2LightEye[4]; uniform vec4 u_cod2LightColor[4];" +
             (pointNormal ? "" : "uniform int u_cod2ShadowCount; uniform highp vec4 u_cod2ShadowEye[4];") : "";
           var pointPass = "";
@@ -210,6 +219,27 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
               // lines samples a finer mip by the scale's octaves (u_cod2Detail.w,
               // web_scene_fx.c), so its color maps keep the canvas's detail.
               fsTexEnvPass = "vec4 cod2BaseTexel = texture2D(u_texUnit0, " + pointUV + ", u_cod2Detail.w);\n" +
+                // A shared olive-green albedo range joins donor foliage to
+                // retail LODs. Lighting still varies naturally; dry brown
+                // leaves and bark keep their own color.
+                "if (u_cod2Model.z > 0.5) {\n" +
+                "  vec3 leaf = cod2BaseTexel.rgb;\n" +
+                "  float green = smoothstep(0.02, 0.24, (leaf.g - max(leaf.r, leaf.b)) / max(leaf.g, 0.08));\n" +
+                "  float value = dot(leaf, vec3(0.299, 0.587, 0.114));\n" +
+                "  vec3 olive = vec3(0.78, 0.88, 0.57);\n" +
+                "  olive *= value / dot(olive, vec3(0.299, 0.587, 0.114));\n" +
+                "  cod2BaseTexel.rgb = mix(leaf, olive, green * 0.72);\n" +
+                "  if (u_cod2Model.z > 1.5) cod2BaseTexel.rgb *= 1.0 - green * 0.14;\n}\n" +
+                // The imported stock has a very orange base under the legacy
+                // lighting. Calibrate its warm dielectric pixels before any
+                // lighting or camouflage, leaving neutral paint and metal.
+                (pointNormal ? "if (u_cod2Finish.x > 1.5 && u_cod2Detail.z > 0.5) {\n" +
+                  "  vec3 stock = cod2BaseTexel.rgb;\n" +
+                  "  float warm = smoothstep(0.04, 0.16, stock.r - stock.b) * smoothstep(0.02, 0.09, stock.r - stock.g);\n" +
+                  "  float wood = (1.0 - texture2D(u_cod2DetailMap, " + pointUV + ", u_cod2Detail.w).a) * warm;\n" +
+                  "  float value = dot(stock, vec3(0.2126, 0.7152, 0.0722));\n" +
+                  "  vec3 oiled = mix(vec3(value), stock, 0.78) * vec3(0.86, 0.90, 0.96);\n" +
+                  "  cod2BaseTexel.rgb = mix(stock, oiled, wood);\n}\n" : "") +
                 (camoPaint ? "float cod2Paint = 0.0;\nif (u_cod2Camo.x > 0.5) cod2BaseTexel.rgb = cod2Camouflage(" +
                   "cod2BaseTexel.rgb, " + pointUV + ", cod2Paint);\n" : "") +
                 fsTexEnvPass.split(pointSample).join("cod2BaseTexel");
@@ -224,23 +254,75 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "  vec3 camo = texture2D(u_cod2CamoMap, uv * u_cod2Camo.y).rgb;\n" +
                 "  float wear = clamp(dot(base, vec3(0.299, 0.587, 0.114)) / u_cod2Camo.z, 0.5, 1.5);\n" +
                 "  return mix(base, camo * (1.0 + 0.4 * (wear - 1.0)), paint);\n}\n";
+            var materialLightmap = !pointNormal && this.usedTexUnitList.indexOf(1) !== -1 &&
+              GLImmediate.TexEnvJIT.getTexUnitType(1) == 0x0DE1;
             pointPass = "if (u_cod2LightCount > 0) {\n" +
               (pointNormal ? "highp vec3 n = v_cod2Normal;\n" :
-                "highp vec3 n = cross(dFdx(v_cod2Eye), dFdy(v_cod2Eye));\n") +
-              "n *= inversesqrt(max(dot(n,n), 0.00000001));\nvec3 lightSum = vec3(0.0);\n";
+                "bool cod2OrientedWorld = u_cod2Model.z < 0.5 && dot(v_cod2WorldNormal, v_cod2WorldNormal) > 0.01;\n" +
+                "highp vec3 n = cod2OrientedWorld ? v_cod2WorldNormal : cross(dFdx(v_cod2Eye), dFdy(v_cod2Eye));\n" +
+                "if (cod2OrientedWorld && dot(n, v_cod2Eye) > 0.0) n = -n;\n") +
+              "n *= inversesqrt(max(dot(n,n), 0.00000001));\nvec3 lightSum = vec3(0.0);\n" +
+              (pointNormal ? "" : "highp vec3 cod2LightFace = n;\n");
+            // Local lights follow the same tangent relief as the baked sun.
+            // Unlit particles and materials without normal maps stay unchanged.
+            if (materialLightmap) pointPass +=
+              "if (u_cod2Surface.x > 0.5) n = cod2Bump(n, " + pointUV + ", max(u_cod2Environment.w, 0.0));\n";
+            if (pointNormal) pointPass +=
+              "bool authoredLight = u_cod2Finish.x > 0.5 && u_cod2Detail.z > 0.5 && u_cod2Surface.y > 0.5;\n" +
+              "bool finishLight = authoredLight || (u_cod2Finish.x < -0.5 && u_cod2Detail.z > 0.5 && u_cod2Surface.y > 0.5);\n" +
+              // Legacy vehicles and props carry RGB reflectance, not an
+              // authored metalness mask. Keep that interpretation and leave
+              // vegetation's existing local-light response untouched.
+              "bool legacyLight = abs(u_cod2Finish.x) < 0.5 && u_cod2Surface.y > 0.5 && u_cod2Model.z < 0.5;\n" +
+              "float lightMetal = 0.0; highp float lightPower = 1.0; vec3 lightF0 = vec3(0.0), reflected = vec3(0.0);\n" +
+              "if (finishLight) {\n" +
+              "  lightMetal = authoredLight ? texture2D(u_cod2DetailMap, " + pointUV + ", u_cod2Detail.w).a : 0.0;\n" +
+              (camoPaint ? "  lightMetal *= 1.0 - cod2Paint;\n" : "") +
+              "  lightF0 = mix(vec3(0.04), " + pointAlbedo + ".rgb, lightMetal);\n" +
+              (camoPaint ? "  lightF0 *= 1.0 - 0.5 * cod2Paint;\n" : "") +
+              "  if (u_cod2Surface.x > 0.5) n = cod2Bump(n, " + pointUV + ", 1.0);\n" +
+              "  vec4 lightSpec = texture2D(u_cod2SpecMap, " + pointUV + ", u_cod2Detail.w);\n" +
+              "  lightPower = cod2SpecPower(lightSpec.a, n);\n" +
+              "  if (!authoredLight) {\n" +
+              "    vec4 character = cod2CharacterFinish(" + pointUV + ", lightSpec, lightPower);\n" +
+              "    finishLight = character.x > 0.5; lightF0 = vec3(character.y); lightPower = character.z;\n" +
+              "    if (!finishLight) n = normalize(v_cod2Normal);\n" +
+              "  }\n} else if (legacyLight) {\n" +
+              "  if (u_cod2Surface.x > 0.5) n = cod2Bump(n, " + pointUV + ", 1.0);\n" +
+              "  vec4 lightSpec = texture2D(u_cod2SpecMap, " + pointUV + ", u_cod2Detail.w);\n" +
+              "  vec4 finish = cod2MasonrySpec(lightSpec, cod2SpecPower(lightSpec.a, n));\n" +
+              "  lightF0 = finish.rgb; lightPower = finish.a;\n" +
+              (camoPaint ? "  lightF0 *= 1.0 - 0.5 * cod2Paint;\n" : "") +
+              "}\n";
             for (var light = 0; light < 4; ++light) {
               pointPass += "if (u_cod2LightCount > " + light + ") {\n" +
                 "highp vec3 delta = u_cod2LightEye[" + light + "].xyz - v_cod2Eye;\n" +
                 "highp float distance2 = dot(delta,delta);\n" +
                 "float attenuation = max(1.0 - distance2 * u_cod2LightEye[" + light + "].w, 0.0);\n" +
-                // Models have authored outward normals; flashes must not
-                // light their back side. Derivative world normals lack a
-                // guaranteed orientation, so retain two-sided world lighting.
-                "float incidence = " + (pointNormal ? "max(dot(n,delta), 0.0)" : "abs(dot(n,delta))") +
+                // Opaque BSP faces reflect light on the visible side. Their
+                // base normal also gates bumped/specular lobes: a tilted
+                // texel must not admit light through the back of the wall.
+                // Unoriented legacy streams and foliage retain their path.
+                (pointNormal ? "" : "if (cod2OrientedWorld && dot(cod2LightFace, delta) <= 0.0) attenuation = 0.0;\n") +
+                "float incidence = " + (pointNormal ? "max(dot(n,delta), 0.0)" :
+                  "(cod2OrientedWorld ? max(dot(n,delta), 0.0) : abs(dot(n,delta)))") +
                 " * inversesqrt(max(distance2, 0.0001));\n" +
-                "lightSum += u_cod2LightColor[" + light + "].rgb * attenuation * attenuation * incidence;\n}\n";
+              "lightSum += u_cod2LightColor[" + light + "].rgb * attenuation * attenuation * incidence;\n" +
+              (pointNormal ?
+                "if (finishLight || legacyLight) reflected += lightF0 * u_cod2LightColor[" + light + "].rgb *\n" +
+                "  (attenuation * attenuation * 2.0 * u_cod2Surface.w * cod2Phong(n, delta * inversesqrt(max(distance2, 0.0001)), lightPower));\n" : "") +
+              (materialLightmap ?
+                "if (u_cod2Surface.z > 0.5 && u_cod2Model.z < 0.5) {\n" +
+                "  highp vec3 direction = delta * inversesqrt(max(distance2, 0.0001));\n" +
+                "  vec3 shine = cod2LocalF0 * cod2Phong(cod2LocalN, direction, cod2LocalPower);\n" +
+                "  if (cod2LocalWaterF > 0.0) shine += vec3(cod2LocalWaterF * cod2Phong(cod2LocalWaterN, direction, cod2LocalWaterPower));\n" +
+                "  gl_FragColor.rgb += shine * u_cod2LightColor[" + light + "].rgb * (2.0 * u_cod2Surface.w * attenuation * attenuation);\n}\n" : "") +
+              "}\n";
             }
-            pointPass += "gl_FragColor.rgb += " + pointAlbedo + ".rgb * lightSum;\n}\n";
+            pointPass += (pointNormal ?
+              "if (finishLight) gl_FragColor.rgb += " + pointAlbedo + ".rgb * lightSum * (1.0 - lightMetal) * (1.0 - lightF0) + reflected;\nelse " : "") +
+              "gl_FragColor.rgb += " + pointAlbedo + ".rgb * lightSum" + (materialLightmap ? " * (u_cod2Model.z > 0.5 ? 1.0 : cod2LocalDiffuse)" : "") + ";\n" +
+              (pointNormal ? "if (legacyLight) gl_FragColor.rgb += reflected;\n" : "") + "}\n";
             if (!pointNormal) {
               pointPass += "if (u_cod2ShadowCount > 0) {\nfloat cod2Shadow = 1.0;\n";
               for (var shadow = 0; shadow < 4; ++shadow) {
@@ -254,20 +336,36 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
             // COD2_MATERIAL_LIGHTING: the original normal, specular and detail
             // maps, bound by the device on units 5-7. Uniform flags select them
             // per draw, so materials never add shader variants.
-            var materialLightmap = !pointNormal && this.usedTexUnitList.indexOf(1) !== -1 &&
-              GLImmediate.TexEnvJIT.getTexUnitType(1) == 0x0DE1;
             // Derivatives of fp16 UVs are noise on GPUs that honor mediump.
             texUnitVaryingList = texUnitVaryingList.replace(/varying vec4 v_texCoord([01]);/g,
               "varying highp vec4 v_texCoord$1;");
             // Effects: multisample coverage, the signed feather scale (negative
             // fades the color), the heat and the near clip the depth needs.
             pointDefs += "uniform sampler2D u_cod2DetailMap; uniform sampler2D u_cod2NormalMap; uniform sampler2D u_cod2SpecMap;\n" +
-              "uniform vec4 u_cod2Surface; uniform vec4 u_cod2Detail; uniform vec4 u_cod2Model; uniform highp vec4 u_cod2Effect;\n" +
+              "uniform vec4 u_cod2Surface; uniform vec4 u_cod2Detail; uniform vec4 u_cod2Model; uniform highp vec4 u_cod2Effect; uniform float u_cod2FireExtinction;\n" +
               // x: how much a lightmapped surface's folds shade it (r_cavity).
               "uniform vec4 u_cod2Relief;\n" +
+              "uniform vec4 u_cod2Finish;\n" +
+              "uniform vec4 u_cod2Masonry;\n" +
+              // Physical stone/brick/plaster/concrete: use the legacy map as
+              // local variation within a dielectric range, not white metal.
+              "vec4 cod2MasonrySpec(vec4 spec, float power) {\n" +
+              "  if (u_cod2Masonry.x <= 0.0) return vec4(spec.rgb, power);\n" +
+              "  float mask = clamp(dot(spec.rgb, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);\n" +
+              "  float f0 = mix(0.02, 0.045, sqrt(mask));\n" +
+              "  float broad = max(2.0 / pow(u_cod2Masonry.x, 4.0) - 2.0, 1.0);\n" +
+              "  return vec4(vec3(f0), min(power, broad));\n}\n" +
               // The sky's direction in eye space; w is 1 while surfaces with a
               // specular map mirror their surroundings (r_reflections).
               "uniform highp vec3 u_cod2SunEye; uniform highp vec4 u_cod2SkyEye; uniform vec4 u_cod2SunColor;\n" +
+              "uniform samplerCube u_cod2EnvironmentMap; uniform vec4 u_cod2Environment; uniform highp mat4 u_cod2EnvironmentView;\n" +
+              "vec3 cod2Environment(vec3 direction, float power, vec3 fallback) {\n" +
+              "  if (u_cod2Environment.x < 0.5) return fallback;\n" +
+              "  highp vec3 world = transpose(mat3(u_cod2EnvironmentView)) * direction;\n" +
+              "  float roughness = pow(2.0 / (power + 2.0), 0.25);\n" +
+              "  float levels = log2(float(textureSize(u_cod2EnvironmentMap, 0).x));\n" +
+              "  vec3 sky = textureLod(u_cod2EnvironmentMap, world, roughness * max(levels - 1.5, 0.0)).rgb;\n" +
+              "  return fallback * mix(vec3(0.3), sky * 2.1, 0.82);\n}\n" +
               // Tangent frame from screen derivatives: DX7 vertices have no tangents.
               // The map decodes as CoD2's DX9 shaders do, N + x T + y B, where the
               // BSP's tangents follow +u and +v. Relief flattens by world pixel size
@@ -280,7 +378,19 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
               "  highp float px = 0.5 * (length(dp1) + length(dp2));\n" +
               "  float bias = u_cod2Detail.w + (px < 0.08 ? 0.9 * (1.0 - px * 12.5) : 0.0);\n" +
               "  float atten = min(clamp(1.6 - 0.38 * texels, 0.2, 1.0), clamp(1.35 - 0.22 * px, 0.2, 1.0));\n" +
-              "  vec2 t = (texture2D(u_cod2NormalMap, uv, bias).ag * 2.0 - 1.0) * (strength * atten);\n" +
+              "  vec2 slope = texture2D(u_cod2NormalMap, uv, bias).ag * 2.0 - 1.0;\n" +
+              // Mineral pores must not light like full-size mortar joints.
+              // Separate fine slopes at a world-space scale, preserving the
+              // broad authored shape and the original color/height maps.
+              "  if (u_cod2Masonry.x > 0.0 && u_cod2Model.z < 0.5) {\n" +
+              "    highp float det = du1.x * du2.y - du1.y * du2.x;\n" +
+              "    if (abs(det) > 1e-20) {\n" +
+              "      highp vec2 metric = max(vec2(length(dp1 * du2.y - dp2 * du1.y), length(dp2 * du1.x - dp1 * du2.x)) / abs(det), vec2(1e-8));\n" +
+              "      highp float grainFootprint = max(size.x / metric.x, size.y / metric.y) * 0.75;\n" +
+              "      highp float lod = max(log2(max(texels, 1e-6)) + bias, log2(max(grainFootprint, 1.0)));\n" +
+              "      vec2 broad = textureLod(u_cod2NormalMap, uv, lod).ag * 2.0 - 1.0;\n" +
+              "      slope = broad + 0.35 * (slope - broad);\n}\n}\n" +
+              "  vec2 t = slope * (strength * atten);\n" +
               "  highp vec3 a = cross(dp2, n), b = cross(n, dp1);\n" +
               "  highp vec3 tu = a * du1.x + b * du2.x, tv = a * du1.y + b * du2.y;\n" +
               "  highp float s = inversesqrt(max(max(dot(tu, tu), dot(tv, tv)), 1e-30));\n" +
@@ -299,6 +409,29 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
               "  highp vec3 dbx = dFdx(b), dby = dFdy(b);\n" +
               "  highp float var = dot(dbx, dbx) + dot(dby, dby);\n" +
               "  return max(power / (1.0 + 0.5 * power * var), 1.0);\n}\n" +
+              // Integrated environment response: Karis/Lazarov's analytic
+              // split-sum fit (Physically Based Shading on Mobile, Epic 2014).
+              // A blurred environment times mirror Fresnel still turns rough
+              // receiver faces chrome at grazing angles. Include the lobe's
+              // visibility/Fresnel integral, not just its lookup footprint.
+              "vec3 cod2EnvironmentBRDF(vec3 f0, float power, float NoV) {\n" +
+              "  float roughness = clamp(pow(2.0 / (power + 2.0), 0.25), 0.0, 1.0);\n" +
+              "  vec4 r = roughness * vec4(-1.0, -0.0275, -0.572, 0.022) + vec4(1.0, 0.0425, 1.04, -0.04);\n" +
+              "  float a = min(r.x * r.x, exp2(-9.28 * clamp(NoV, 0.0, 1.0))) * r.x + r.y;\n" +
+              "  vec2 ab = vec2(-1.04, 1.04) * a + r.zw;\n" +
+              "  return clamp(f0 * ab.x + vec3(ab.y), 0.0, 1.0);\n}\n" +
+              // Character atlas alpha classifies UV islands explicitly: bright
+              // frost on wool remains fabric, while the watch retains metal.
+              // Return active, neutral dielectric F0, broad lobe, and roughness.
+              "vec4 cod2CharacterFinish(vec2 uv, vec4 spec, float power) {\n" +
+              "  if (u_cod2Finish.x > -0.5 || u_cod2Detail.z < 0.5) return vec4(0.0, 0.0, power, 0.0);\n" +
+              "  float kind = texture2D(u_cod2DetailMap, uv, u_cod2Detail.w).a * 3.0;\n" +
+              "  if (kind > 2.5) return vec4(0.0, 0.0, power, 0.0);\n" +
+              "  float skin = step(0.5, kind) * (1.0 - step(1.5, kind));\n" +
+              "  float leather = step(1.5, kind);\n" +
+              "  float f0 = (0.018 + 0.017 * skin + 0.022 * leather) * clamp(dot(spec.rgb, vec3(2.0)), 0.3, 1.0);\n" +
+              "  float broad = min(power, 6.0 + 26.0 * skin + 58.0 * leather);\n" +
+              "  return vec4(1.0, f0, broad, pow(2.0 / (broad + 2.0), 0.25));\n}\n" +
               // Indirect light comes mostly from the sky: a normal map shades it
               // relative to the surface's own normal.
               "float cod2Sky(highp vec3 n) { return 1.0 + 0.5 * dot(n, u_cod2SkyEye.xyz); }\n" +
@@ -308,35 +441,41 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
               // models relief where it shines, so only the shade takes it.
               "float cod2Cavity(highp vec3 b, highp vec3 n, float sunlit) {\n" +
               "  return 1.0 - 0.5 * (1.0 - max(dot(b, n), 0.0)) * (1.0 - clamp(sunlit, 0.0, 1.0));\n}\n" +
-              // COD2_RELIEF_CREASE: the map's slopes a pixel's footprint further
-              // along +u and +v. Where they converge the surface folds in, a joint
-              // between stones or a groove between planks; where they part it
-              // folds out, an edge. The fold is per world unit, so a map at half
-              // resolution folds as one at full does, and it fades out as pixels
-              // grow past a unit and a half of the world, 0.75 to 2.25.
+              // COD2_RELIEF_CREASE: curvature at a physical scale, separate from
+              // the normal map's grain. A texel-wide forward difference turns
+              // high-resolution pores into black scratches. Average the slopes
+              // over at least 0.75 world units and sample symmetrically about
+              // the shaded point, so joints stay centered and don't depend on
+              // texture resolution, UV aspect ratio or the camera's distance.
               "float cod2Crease(highp vec2 uv) {\n" +
               "  highp vec2 du1 = dFdx(uv), du2 = dFdy(uv);\n" +
               "  highp vec3 dp1 = dFdx(v_cod2Eye), dp2 = dFdy(v_cod2Eye);\n" +
-              "  if (0.5 * (length(dp1) + length(dp2)) >= 2.25) return 0.0;\n" +
+              "  highp float pixel = 0.5 * (length(dp1) + length(dp2));\n" +
+              "  highp float det = du1.x * du2.y - du1.y * du2.x;\n" +
+              "  if (pixel >= 2.25 || abs(det) < 1e-20) return 0.0;\n" +
               "  highp vec2 size = vec2(textureSize(u_cod2NormalMap, 0));\n" +
-              "  highp vec2 t1 = du1 * size, t2 = du2 * size;\n" +
-              "  highp float span = max(sqrt(max(dot(t1, t1), dot(t2, t2))), 1.0);\n" +
-              "  highp float units = 0.5 * span * (sqrt(dot(dp1, dp1) / max(dot(t1, t1), 1e-12)) +\n" +
-              "    sqrt(dot(dp2, dp2) / max(dot(t2, t2), 1e-12)));\n" +
-              "  vec2 m = texture2D(u_cod2NormalMap, uv).ag;\n" +
-              "  vec2 mu = texture2D(u_cod2NormalMap, uv + vec2(span / size.x, 0.0)).ag;\n" +
-              "  vec2 mv = texture2D(u_cod2NormalMap, uv + vec2(0.0, span / size.y)).ag;\n" +
-              "  return 2.0 * (mu.x - m.x + mv.y - m.y) / max(units, 0.25) *\n" +
-              "    (1.0 - smoothstep(0.75, 2.25, 0.5 * (length(dp1) + length(dp2))));\n}\n" +
+              "  highp vec2 metric = max(vec2(length(dp1 * du2.y - dp2 * du1.y),\n" +
+              "    length(dp2 * du1.x - dp1 * du2.x)) / abs(det), vec2(1e-8));\n" +
+              "  highp vec2 span = max(max(vec2(0.75) / metric, 1.0 / size), max(abs(du1), abs(du2)));\n" +
+              "  highp vec2 texels = span * size;\n" +
+              "  highp float footprint = max(length(du1 * size), length(du2 * size));\n" +
+              "  float lod = log2(max(max(max(texels.x, texels.y) * 0.5, footprint), 1.0));\n" +
+              "  float left = textureLod(u_cod2NormalMap, uv - vec2(0.5 * span.x, 0.0), lod).a;\n" +
+              "  float right = textureLod(u_cod2NormalMap, uv + vec2(0.5 * span.x, 0.0), lod).a;\n" +
+              "  float down = textureLod(u_cod2NormalMap, uv - vec2(0.0, 0.5 * span.y), lod).g;\n" +
+              "  float up = textureLod(u_cod2NormalMap, uv + vec2(0.0, 0.5 * span.y), lod).g;\n" +
+              "  float strength = u_cod2Environment.w > 0.0 ? u_cod2Environment.w : 1.0;\n" +
+              "  return 2.0 * strength * dot(vec2(right - left, up - down), 1.0 / (span * metric)) *\n" +
+              "    (1.0 - smoothstep(0.75, 2.25, pixel));\n}\n" +
               "float cod2Phong(highp vec3 n, highp vec3 l, highp float power) {\n" +
               "  highp vec3 v = -v_cod2Eye * inversesqrt(max(dot(v_cod2Eye, v_cod2Eye), 1e-30));\n" +
               "  highp float h = max(dot(n, normalize(l + v)), 0.0);\n" +
               "  return pow(h, power) * step(0.0001, dot(n, l));\n}\n";
-            var materialPass = "if (u_cod2Detail.z > 0.5)\n" +
+            var materialPass = "if (u_cod2Detail.z > 0.5 && abs(u_cod2Finish.x) < 0.5)\n" +
               "  gl_FragColor.rgb *= texture2D(u_cod2DetailMap, " + pointUV + " * u_cod2Detail.xy).rgb * 2.0;\n";
             if (pointNormal || materialLightmap) {
               // COD2_SUN_SHADOW: moving models' shadow in the sun's depth map
-              // (web_sun_shadows.c, unit 18). Eight filtered comparisons on a
+              // (web_sun_shadows.c, unit 18). Twelve filtered comparisons on a
               // per-pixel rotated Vogel disk soften its solar penumbra.
               pointDefs += "uniform highp mat4 u_cod2SunShadowEye; uniform highp vec4 u_cod2SunShadow; uniform highp vec4 u_cod2SunShadowRect;\n" +
                 "uniform mediump sampler2DShadow u_cod2SunShadowMap;\n" +
@@ -349,17 +488,18 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "  if (fade <= 0.0 || p.z >= 1.0) return 1.0;\n" +
                 "  highp float d = p.z - u_cod2SunShadow.w, t = u_cod2SunShadow.y * 2.0;\n" +
                 "  float a0 = 6.2831853 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));\n" +
-                "  const vec2 kVogel[8] = vec2[8](\n" +
+                "  const vec2 kVogel[12] = vec2[12](\n" +
                 "    vec2(-0.319251, 0.292528), vec2(0.402472, 0.524938), vec2(0.699672, -0.445005), vec2(-0.446348, -0.859212),\n" +
-                "    vec2(0.250000, 0.000000), vec2(0.048879, -0.556876), vec2(-0.738547, -0.130633), vec2(-0.234048, 0.870472));\n" +
+                "    vec2(0.250000, 0.000000), vec2(0.048879, -0.556876), vec2(-0.738547, -0.130633), vec2(-0.234048, 0.870472),\n" +
+                "    vec2(0.847000, 0.174000), vec2(-0.112000, -0.230000), vec2(-0.621000, 0.584000), vec2(0.390000, -0.755000));\n" +
                 "  float s0 = sin(a0), c0 = cos(a0);\n" +
                 "  mat2 rot = mat2(c0, s0, -s0, c0) * t;\n" +
                 "  float lit = 0.0;\n" +
-                "  for (int i = 0; i < 8; ++i) {\n" +
+                "  for (int i = 0; i < 12; ++i) {\n" +
                 "    lit += textureLod(u_cod2SunShadowMap, vec3(p.xy + rot * kVogel[i], d), 0.0);\n" +
-                "    if (i == 3 && (lit <= 0.001 || lit >= 3.999)) { lit *= 2.0; break; }\n" +
+                "    if (i == 3 && (lit <= 0.001 || lit >= 3.999)) { lit *= 3.0; break; }\n" +
                 "  }\n" +
-                "  return 1.0 - u_cod2SunShadow.x * fade * (1.0 - 0.125 * lit);\n}\n";
+                "  return 1.0 - u_cod2SunShadow.x * fade * (1.0 - lit / 12.0);\n}\n";
               // COD2_TEXTURE_SHARPEN: a magnified color map against itself a mip
               // and a half blurrier, on both lightmapped surfaces and lit models
               // (weapons, hands, soldiers, props). Past 2.5 texels/px it turns off.
@@ -378,6 +518,33 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                   "    cod2BaseTexel.rgb = max(cod2BaseTexel.rgb + cod2Sharpen * (cod2BaseTexel.rgb - cod2Soft), vec3(0.0));\n" +
                   "  }\n}\n");
             }
+            if (!pointNormal) {
+              // COD2_HEIGHT_PARALLAX: follow the eye ray into the owner's
+              // height field. All surface maps share the displaced UV; baked
+              // lightmaps and collision retain their original coordinates.
+              pointDefs +=
+                "highp vec2 cod2ReliefUV(highp vec2 uv) {\n" +
+                "  highp vec2 dx = dFdx(uv), dy = dFdy(uv);\n" +
+                "  highp vec3 px = dFdx(v_cod2Eye), py = dFdy(v_cod2Eye);\n" +
+                "  float depth = u_cod2Environment.y * (1.0 - smoothstep(180.0, 650.0, length(v_cod2Eye)));\n" +
+                "  if (depth <= 0.0 || (u_cod2Surface.z < 0.5 && u_cod2Surface.x < 0.5) || u_cod2Detail.z < 0.5) return uv;\n" +
+                "  highp vec3 n = normalize(cross(px, py)), v = normalize(-v_cod2Eye);\n" +
+                "  if (dot(n, v) < 0.0) n = -n;\n" +
+                "  highp vec3 a = cross(py, n), b = cross(n, px);\n" +
+                "  highp vec3 t = a * dx.x + b * dy.x, s = a * dx.y + b * dy.y;\n" +
+                "  highp float scale = inversesqrt(max(max(dot(t,t), dot(s,s)), 1e-20));\n" +
+                "  highp vec2 ray = vec2(dot(t,v), dot(s,v)) * scale / max(dot(n,v), 0.22) * depth;\n" +
+                "  highp vec2 p = uv, stepUV = ray / 12.0;\n" +
+                "  float layer = 0.0, previous = 0.0;\n" +
+                "  float height = 1.0 - textureGrad(u_cod2DetailMap, p, dx, dy).a;\n" +
+                "  for (int i = 0; i < 12; ++i) {\n" +
+                "    if (layer >= height) break;\n" +
+                "    previous = height - layer; p -= stepUV; layer += 1.0 / 12.0;\n" +
+                "    height = 1.0 - textureGrad(u_cod2DetailMap, p, dx, dy).a;\n" +
+                "  }\n" +
+                "  float over = max(layer - height, 0.0);\n" +
+                "  return p + stepUV * over / max(over + previous, 0.00001);\n}\n";
+            }
             if (pointNormal) {
               var materialLights = [];
               for (var materialLight = 0; materialLight < GLEmulation.MAX_LIGHTS; ++materialLight)
@@ -394,9 +561,20 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "highp vec3 cod2B = cod2N;\n" +
                 "if (u_cod2Surface.x > 0.5) cod2B = cod2Bump(cod2N, " + pointUV + ", 1.0);\n" +
                 "vec4 cod2S = u_cod2Surface.y > 0.5 ? texture2D(u_cod2SpecMap, " + pointUV + ", u_cod2Detail.w) : vec4(0.0);\n" +
+                // COD2_AUTHORED_METALNESS: the owner's metal/wood mask is not
+                // a brighter gray specular map. Bare metal takes its color from
+                // reflected light; dielectric wood keeps its diffuse color.
+                "bool cod2Finished = u_cod2Finish.x > 0.5 && u_cod2Detail.z > 0.5 && u_cod2Surface.y > 0.5;\n" +
+                "bool cod2GridFinish = cod2Finished && u_cod2Model.z < 0.5;\n" +
+                "float cod2Metal = cod2Finished ? texture2D(u_cod2DetailMap, " + pointUV + ", u_cod2Detail.w).a : 0.0;\n" +
+                (camoPaint ? "cod2Metal *= 1.0 - cod2Paint;\n" : "") +
+                "if (cod2Finished) cod2S.rgb = mix(vec3(0.04), " + pointAlbedo + ".rgb, cod2Metal);\n" +
                 // Paint is duller than the bare steel or varnish under it.
                 (camoPaint ? "cod2S.rgb *= 1.0 - 0.5 * cod2Paint;\n" : "") +
                 "highp float cod2P = cod2SpecPower(cod2S.a, cod2B);\n" +
+                "vec4 cod2Character = cod2CharacterFinish(" + pointUV + ", cod2S, cod2P);\n" +
+                "cod2S.rgb = mix(cod2S.rgb, vec3(cod2Character.y), cod2Character.x);\n" +
+                "cod2P = cod2Character.z;\n" +
                 // Relight the vertex color with the bumped normal: the ratio
                 // keeps the original grid lights, clamp and tint.
                 "vec3 cod2Ambient = u_lightModelAmbient.rgb, cod2Diffuse = vec3(0.0);\n" +
@@ -408,43 +586,62 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                   "cod2Ambient += u_lightAmbient" + id + ".rgb; cod2Diffuse += d;\n" +
                   "cod2Flat += d * max(dot(cod2N, l), 0.0); cod2Bumped += d * max(dot(cod2B, l), 0.0); }\n";
               }
+              pointDefs += "uniform highp mat4 u_cod2VmShadowEye; uniform highp vec4 u_cod2VmShadow;\n" +
+                "uniform mediump sampler2DShadow u_cod2VmShadowMap;\n" +
+                "float cod2WeaponShadow() {\n" +
+                "  if (u_cod2Model.y < 0.5 || u_cod2VmShadow.x <= 0.0) return 1.0;\n" +
+                "  highp vec3 p = (u_cod2VmShadowEye * vec4(v_cod2Eye, 1.0)).xyz;\n" +
+                "  if (any(lessThan(p, vec3(0.0))) || any(greaterThan(p, vec3(1.0)))) return 1.0;\n" +
+                "  highp float bias = u_cod2VmShadow.z + min(fwidth(p.z), 0.004);\n" +
+                "  float lit = 0.0;\n" +
+                "  for (int y = -1; y <= 1; ++y) for (int x = -1; x <= 1; ++x)\n" +
+                "    lit += textureLod(u_cod2VmShadowMap, vec3(p.xy + vec2(float(x), float(y)) * u_cod2VmShadow.y, p.z - bias), 0.0);\n" +
+                "  return lit / 9.0;\n}\n";
               // The grid's strongest light leads, the sun comes last; DX7
               // colors are half scale for MODULATE2X.
               var specularLights = materialLights.length > 1 ?
                 [materialLights[0], materialLights[materialLights.length - 1]] : materialLights;
+              materialPass += "float cod2ModelShadow = cod2SunShadow(u_cod2Model.x);\n" +
+                "float cod2VmVisibility = cod2WeaponShadow();\n" +
+                "float cod2DirectVisibility = cod2ModelShadow * (u_cod2Model.y > 0.5 ? cod2VmVisibility : 1.0);\n";
               for (var lightIndex = 0; lightIndex < specularLights.length; ++lightIndex) {
                 var id = specularLights[lightIndex];
-                materialPass += "cod2Spec += u_lightDiffuse" + id + ".rgb * cod2Phong(cod2B, normalize(u_lightPosition" + id + ".xyz), cod2P);\n";
+                // RB_DeriveEntityLights reserves the last slot for sunlight.
+                // Only that direct lobe takes the close weapon shadow; grid
+                // light must remain when the receiver is hidden from the sun.
+                var directShadow = id === materialLights[materialLights.length - 1] ?
+                  " * (u_cod2Model.y > 0.5 ? cod2DirectVisibility : 1.0)" : "";
+                // Grid directions fit diffuse irradiance; they are not small
+                // lamps. Authored finishes reflect their broad field below.
+                var gridGuard = id !== materialLights[materialLights.length - 1] ? "if (!cod2GridFinish) " : "";
+                materialPass += gridGuard + "cod2Spec += u_lightDiffuse" + id + ".rgb * cod2Phong(cod2B, normalize(u_lightPosition" + id + ".xyz), cod2P)" + directShadow + ";\n";
               }
               // Most models get only the grid's average: the engine folds the
               // sun into that ambient at full strength, whatever the angle.
               // Static and loose models also take moving models' sun shadow.
               materialPass += "cod2Ambient *= u_materialAmbient.rgb;\n" +
                 "vec3 cod2Sun = dot(cod2Diffuse, vec3(1.0)) < 0.0001 ? u_cod2SunColor.rgb * u_cod2Model.x * u_materialAmbient.rgb : vec3(0.0);\n" +
-                "float cod2ModelShadow = cod2SunShadow(u_cod2Model.x);\n" +
                 "float cod2NLG = max(dot(cod2N, u_cod2SunEye), 0.0), cod2NLB = max(dot(cod2B, u_cod2SunEye), 0.0);\n" +
                 "float cod2Incidence = mix(1.0 + cod2NLB - cod2NLG, cod2NLB, u_cod2SunColor.a);\n" +
                 "cod2Flat += cod2Ambient;\n" +
                 "cod2Bumped += (cod2Ambient - cod2Sun) * (cod2Sky(cod2B) / cod2Sky(cod2N) * cod2Cavity(cod2B, cod2N, u_cod2Model.x)) +\n" +
-                "  cod2Sun * (cod2ModelShadow * cod2Incidence);\n" +
-                "if (dot(cod2Diffuse, vec3(1.0)) >= 0.0001 && cod2ModelShadow < 1.0)\n" +
-                "  cod2Bumped = max(cod2Bumped - u_cod2SunColor.rgb * (u_cod2Model.x * (1.0 - cod2ModelShadow) * cod2NLB), vec3(0.0));\n" +
+                "  cod2Sun * (cod2DirectVisibility * cod2Incidence);\n" +
+                "if (dot(cod2Diffuse, vec3(1.0)) >= 0.0001 && cod2DirectVisibility < 1.0)\n" +
+                "  cod2Bumped = max(cod2Bumped - u_cod2SunColor.rgb * (u_cod2Model.x * (1.0 - cod2DirectVisibility) * cod2NLB), vec3(0.0));\n" +
                 "if (u_cod2Surface.x > 0.5 && u_cod2Relief.x > 0.0 && u_cod2Model.y < 0.5) {\n" +
                 "float cod2Fold = cod2Crease(" + pointUV + ");\n" +
                 "cod2Bumped *= (1.0 - 0.22 * u_cod2Relief.x * smoothstep(0.2, 1.0, -cod2Fold)) *\n" +
                 "  (1.0 + 0.06 * u_cod2Relief.x * smoothstep(0.2, 1.0, cod2Fold));\n}\n" +
                 "gl_FragColor.rgb *= max(cod2Bumped, vec3(0.0)) / max(cod2Flat, vec3(0.004));\n" +
-                // COD2_VIEWMODEL_LIGHT: the arms and weapon, held under the open
-                // sky, take its light from above the left shoulder (eye space,
-                // toward the light): faces turned up and toward it brighten and
-                // faces turned down and away darken, so the weapon reads by its
-                // form in flat shade too, and the specular map catches it.
-                "if (u_cod2Model.y > 0.5) {\n" +
-                "const highp vec3 cod2Shoulder = vec3(-0.454, 0.655, 0.605);\n" +
-                "gl_FragColor.rgb *= mix(0.68, 1.28, smoothstep(-0.5, 0.9, dot(cod2B, cod2Shoulder)));\n" +
-                "cod2Spec += cod2Flat * 0.6 * cod2Phong(cod2B, cod2Shoulder, cod2P);\n}\n" +
-                "cod2Spec += cod2Sun * cod2ModelShadow * cod2Phong(cod2B, u_cod2SunEye, cod2P);\n" +
-                "vec3 cod2SpecTint = u_cod2Model.y > 0.5 ? mix(cod2S.rgb, vec3(dot(cod2S.rgb, vec3(0.299, 0.587, 0.114))), 0.68) : cod2S.rgb;\n" +
+                // COD2_VIEWMODEL_LIGHT: the restored directional grid and sun
+                // already shape the gun. A camera-fixed shoulder key added a
+                // second highlight and inflated skin/wood even in baked shade.
+                "cod2Spec += cod2Sun * cod2DirectVisibility * cod2Phong(cod2B, u_cod2SunEye, cod2P);\n" +
+                "if (cod2Finished) gl_FragColor.rgb *= (1.0 - cod2Metal) * (1.0 - cod2S.rgb);\n" +
+                "gl_FragColor.rgb *= 1.0 - cod2Character.x * cod2Character.y;\n" +
+                "vec3 cod2SpecTint = u_cod2Model.y > 0.5 && !cod2Finished ? mix(cod2S.rgb, vec3(dot(cod2S.rgb, vec3(0.299, 0.587, 0.114))), 0.68) : cod2S.rgb;\n" +
+                // Leaves have a soft wax sheen, not the steel's white glints.
+                "if (u_cod2Model.z > 0.5) cod2SpecTint *= 0.25;\n" +
                 "gl_FragColor.rgb += cod2SpecTint * cod2Spec * (2.0 * u_cod2Surface.w);\n" +
                 // Physical dielectric sheen and sky rim on normal-mapped wood,
                 // cloth, soldiers and metal models that ship without a specular map.
@@ -453,19 +650,51 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "float cod2SkyWrap = clamp(dot(cod2B, u_cod2SkyEye.xyz) * 0.5 + 0.5, 0.0, 1.0);\n" +
                 "if (u_cod2Model.y < 0.5 && u_cod2Model.x > 0.0) gl_FragColor.rgb *= mix(0.90, 1.08, cod2SkyWrap);\n" +
                 "float cod2DFres = 0.035 + 0.24 * pow(1.0 - max(dot(cod2B, cod2DV), 0.0), 3.8);\n" +
-                "gl_FragColor.rgb += cod2Spec * (0.14 * u_cod2Surface.w) +\n" +
-                "  (cod2Ambient - cod2Sun) * (cod2DFres * cod2SkyWrap);\n}\n" +
+                "gl_FragColor.rgb += (cod2Spec * (0.14 * u_cod2Surface.w) +\n" +
+                "  (cod2Ambient - cod2Sun) * (cod2DFres * cod2SkyWrap)) * (u_cod2Model.z > 0.5 ? 0.25 : 1.0);\n}\n" +
                 // A broad reflection of the sky and ground, stronger at grazing
                 // angles: keeps dark oiled blued steel rich on flat faces while
                 // rounded receiver caps, bolts and barrels catch WWII steel sheen.
-                "if (u_cod2Surface.y > 0.5 && u_cod2SkyEye.w > 0.0) {\n" +
+                "if (u_cod2Surface.y > 0.5 && (u_cod2SkyEye.w > 0.0 || cod2Finished)) {\n" +
                 "highp vec3 cod2V = -v_cod2Eye * inversesqrt(max(dot(v_cod2Eye, v_cod2Eye), 1e-30));\n" +
                 "float cod2Up = dot(reflect(-cod2V, cod2B), u_cod2SkyEye.xyz);\n" +
                 "float cod2Fresnel = (u_cod2Model.y > 0.5 ? 0.14 : 0.2) + (u_cod2Model.y > 0.5 ? 0.86 : 0.8) * pow(1.0 - max(dot(cod2B, cod2V), 0.0), u_cod2Model.y > 0.5 ? 3.2 : 5.0);\n" +
                 "vec3 cod2Env = (cod2Ambient - cod2Sun) * 2.0 * mix(0.35, 1.0, smoothstep(-0.3, 0.7, cod2Up));\n" +
                 "if (u_cod2Model.y > 0.5)\n" +
                 "  cod2Env = max(cod2Env * 1.45, vec3(0.16, 0.165, 0.175) * mix(0.28, 1.15, smoothstep(-0.25, 0.72, cod2Up)));\n" +
-                "gl_FragColor.rgb += cod2SpecTint * cod2Env * (cod2Fresnel * clamp(cod2P / 48.0, 0.25, 1.0) * (u_cod2Model.y > 0.5 ? 1.35 : 1.0) * u_cod2Surface.w);\n}\n}\n";
+                // Rough leaves take the broad sky/ground average, avoiding
+                // sharp reflected patches and two cube samples per layer.
+                "if (u_cod2Model.z < 0.5) cod2Env = cod2Environment(reflect(-cod2V, cod2B), cod2P, cod2Env);\n";
+              // COD2_GRID_REFLECTION: retain L0/L1 of each fitted irradiance
+              // lobe D*max(N.L,0): D/4 + (D/2)*N.L. Undo the cosine
+              // convolution on L1 (factor 3/2) to approximate incident light.
+              // A normalized reflection cosine-power kernel attenuates L1 by
+              // (q+1)/(q+2), q=P/4 (Blinn half-angle approximation). DX7's
+              // stored colors are half scale. Clamp after summing the field,
+              // because truncating to L1 can ring below zero opposite a window.
+              // This is low-frequency baked light, not a new scene projection.
+              materialPass += "if (cod2GridFinish) {\n" +
+                "  highp vec3 cod2GridR = reflect(-cod2V, cod2B);\n" +
+                "  float cod2GridBand = (cod2P + 4.0) / (cod2P + 8.0);\n";
+              for (var lightIndex = 0; lightIndex + 1 < materialLights.length; ++lightIndex) {
+                var id = materialLights[lightIndex];
+                materialPass += "  cod2Env += u_lightDiffuse" + id + ".rgb * (0.5 + 1.5 * cod2GridBand * dot(cod2GridR, normalize(u_lightPosition" + id + ".xyz)));\n";
+              }
+              materialPass += "  cod2Env = max(cod2Env, vec3(0.0));\n}\n" +
+                // A camera-centered image is not a valid local reflection
+                // probe for the nearby weapon: projecting it onto grazing
+                // metal makes the background look visible through the gun.
+                // Solid models use the sky/grid environment and real lights;
+                // only the explicitly bounded scope glass samples the scene.
+                "if (cod2Finished || cod2Character.x > 0.5) {\n" +
+                "  float rim = cod2Character.x > 0.5 ? max(cod2Character.y, 1.0 - cod2Character.w) : 1.0;\n" +
+                "  vec3 fresnel = mix(cod2SpecTint, vec3(rim), pow(1.0 - max(dot(cod2B, cod2V), 0.0), 5.0));\n" +
+                "  if (cod2Finished) fresnel = cod2EnvironmentBRDF(cod2SpecTint, cod2P, max(dot(cod2B, cod2V), 0.0));\n" +
+                // Authored finishes use the integrated lobe above. Characters
+                // retain their separately calibrated skin/leather/cloth model.
+                // A sun shadow does not occlude the entire sky/room reflection.
+                "  gl_FragColor.rgb += fresnel * cod2Env * u_cod2Surface.w;\n" +
+                "} else gl_FragColor.rgb += cod2SpecTint * cod2Env * (cod2Fresnel * clamp(cod2P / 48.0, 0.25, 1.0) * (u_cod2Model.y > 0.5 ? 1.35 : 1.0) * u_cod2Surface.w);\n}\n}\n";
               // COD2_SCOPE_GLASS: a scope's glass in the hands (web_effects.c
               // names its disc in the color map) mirrors the world drawn before
               // it, as a convex lens shows what faces it: upright, turned left
@@ -507,6 +736,78 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "cod2LensColor *= 1.0 - 0.52 * smoothstep(0.76, 1.0, cod2LensR);\n" +
                 "gl_FragColor.rgb = mix(gl_FragColor.rgb, cod2LensColor, 1.0 - smoothstep(0.92, 1.0, cod2LensR));\n}\n}\n";
             } else if (materialLightmap) {
+              // Trace only authored standing water. The captured world is one
+              // frame old; eye-space reprojection includes camera motion and
+              // TAA jitter, while disoccluded origins retain their sky probe.
+              pointDefs += "uniform sampler2D u_cod2LensScene; uniform highp sampler2D u_cod2WaterDepth;\n" +
+                "uniform highp mat4 u_cod2WaterView; uniform highp vec4 u_cod2WaterProjection, u_cod2WaterJitter;\n" +
+                "highp vec2 cod2WaterUv(highp vec3 p) {\n" +
+                "  return 0.5 + 0.5 * (u_cod2WaterProjection.xy * p.xy / -p.z + u_cod2WaterJitter.xy);\n}\n" +
+                "highp float cod2WaterZ(highp vec2 uv) {\n" +
+                "  highp float d = textureLod(u_cod2WaterDepth, uv, 0.0).r;\n" +
+                "  return d >= 0.9999 || d < 0.2 ? 1e7 : u_cod2WaterProjection.z / max(0.9995002746582031 - d, 1e-7);\n}\n" +
+                "vec3 cod2ScreenWaterReflection(highp vec3 normal, highp vec3 ray, float power, vec3 fallback) {\n" +
+                "  if (u_cod2WaterProjection.w < 0.5) return fallback;\n" +
+                "  highp vec3 p = (u_cod2WaterView * vec4(v_cod2Eye, 1.0)).xyz;\n" +
+                "  highp vec3 r = mat3(u_cod2WaterView) * ray;\n" +
+                "  highp vec2 origin = cod2WaterUv(p);\n" +
+                "  if (p.z >= -1.0 || any(lessThan(origin, vec2(0.0))) || any(greaterThan(origin, vec2(1.0)))) return fallback;\n" +
+                "  if (abs(cod2WaterZ(origin) + p.z) > max(2.0, -p.z * 0.006)) return fallback;\n" +
+                "  p += mat3(u_cod2WaterView) * normal * 1.25;\n" +
+                "  highp float previous = 0.0, distance = 3.0, stride = 3.0, previousDelta = -1e7;\n" +
+                "  for (int stepIndex = 0; stepIndex < 40; ++stepIndex) {\n" +
+                "    highp vec3 q = p + r * distance;\n" +
+                "    if (q.z >= -1.0) break;\n" +
+                "    highp vec2 uv = cod2WaterUv(q);\n" +
+                "    if (any(lessThanEqual(uv, vec2(0.001))) || any(greaterThanEqual(uv, vec2(0.999)))) break;\n" +
+                "    highp float z = cod2WaterZ(uv), delta = -q.z - z;\n" +
+                // A depth discontinuity is not necessarily a ray hit: the ray
+                // can pass behind a nearer pillar without intersecting it.
+                // Resume after an invalid crossing, and refine only a new
+                // front-to-back crossing, not every step behind that pillar.
+                "    bool crossing = delta >= 0.0 && previousDelta < 0.0;\n" +
+                "    previousDelta = delta;\n" +
+                "    if (crossing) {\n" +
+                "      highp float lo = previous, hi = distance;\n" +
+                "      for (int refine = 0; refine < 6; ++refine) {\n" +
+                "        highp float mid = (lo + hi) * 0.5;\n" +
+                "        highp vec3 b = p + r * mid;\n" +
+                "        if (-b.z > cod2WaterZ(cod2WaterUv(b))) hi = mid; else lo = mid;\n" +
+                "      }\n" +
+                "      q = p + r * hi; uv = cod2WaterUv(q); z = cod2WaterZ(uv); delta = -q.z - z;\n" +
+                "      highp float thickness = 1.5 + z * 0.003;\n" +
+                "      float edge = min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y));\n" +
+                "      float confidence = smoothstep(0.0, 0.08, edge) * (1.0 - smoothstep(thickness, thickness * 2.0, delta));\n" +
+                "      confidence *= smoothstep(3.0, 10.0, hi) * (1.0 - smoothstep(1100.0, 1536.0, hi));\n" +
+                "      if (delta >= 0.0 && delta < thickness * 2.0) {\n" +
+                "      float roughness = pow(2.0 / (power + 2.0), 0.25);\n" +
+                "      float lod = clamp(log2(max(float(textureSize(u_cod2LensScene, 0).x), 1.0) / 1024.0) + roughness * 3.0, 0.0, 5.0);\n" +
+                "      return mix(fallback, textureLod(u_cod2LensScene, uv, lod).rgb, confidence);\n" +
+                "      }\n    }\n" +
+                "    previous = distance; stride *= 1.12; distance += stride;\n" +
+                "    if (distance > 1536.0) break;\n" +
+                "  }\n" +
+                "  return fallback;\n}\n" +
+                "uniform sampler2D u_cod2PlanarScene; uniform highp mat4 u_cod2PlanarView;\n" +
+                "uniform highp vec4 u_cod2PlanarPlane, u_cod2PlanarProjection, u_cod2PlanarJitter;\n" +
+                "vec3 cod2WaterReflection(highp vec3 normal, highp vec3 ray, float power, vec3 fallback) {\n" +
+                "  float coverage = 0.0; vec3 reflected = fallback;\n" +
+                "  if (u_cod2PlanarProjection.w > 0.5) {\n" +
+                "    highp float height = abs(dot(u_cod2PlanarPlane, vec4(v_cod2Eye, 1.0)));\n" +
+                "    highp vec3 q = (u_cod2PlanarView * vec4(v_cod2Eye, 1.0)).xyz;\n" +
+                "    if (height < 1.0 && q.z < -1.0) {\n" +
+                "      highp vec2 uv = 0.5 + 0.5 * (u_cod2PlanarProjection.xy * q.xy / -q.z + u_cod2PlanarJitter.xy);\n" +
+                "      float edge = min(min(uv.x, uv.y), min(1.0-uv.x, 1.0-uv.y));\n" +
+                "      float roughness = pow(2.0 / (power + 2.0), 0.25);\n" +
+                "      float lod = clamp(roughness * 3.0, 0.0, u_cod2PlanarProjection.z);\n" +
+                "      vec4 sampleColor = textureLod(u_cod2PlanarScene, uv, lod);\n" +
+                // Clear pixels have alpha zero. Un-premultiply the filtered
+                // coverage before mixing, so missing geometry has no dark rim.
+                "      reflected = sampleColor.rgb / max(sampleColor.a, 0.001);\n" +
+                "      coverage = sampleColor.a * smoothstep(0.0, 0.06, edge) * (1.0-smoothstep(0.25, 1.0, height));\n" +
+                "      if (coverage > 0.999) return reflected;\n" +
+                "    }\n  }\n" +
+                "  return mix(cod2ScreenWaterReflection(normal, ray, power, fallback), reflected, coverage);\n}\n";
               var lightmapUV = GLImmediate.useTextureMatrix ? "(u_textureMatrix1 * v_texCoord1).xy" : "v_texCoord1.xy";
               var lightmapSample = "texture2D(u_texUnit1, " + lightmapUV + ")";
               var lightmapTexel = lightmapSample;
@@ -561,8 +862,13 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                   "  tej_env0_alpha = mix(cod2Blend, smoothstep(0.0, 1.0, cod2Blend), 0.6 * min(u_cod2Relief.y, 1.0)) * tej_env0_texload0.a;\n}\n");
               // The browser stores the sun's visibility in the lightmap alpha;
               // the DX7 bake added the sun at full strength whatever the angle.
-              materialPass += "if (u_cod2Surface.z > 0.5) {\n" +
-                "highp vec3 cod2N = cross(dFdx(v_cod2Eye), dFdy(v_cod2Eye));\n" +
+              // Reuse the evaluated finish for local lights: matching UVs,
+              // masonry roughness, damp film and the level water surface.
+              materialPass += "highp vec3 cod2LocalN = vec3(0.0, 0.0, 1.0), cod2LocalWaterN = cod2LocalN;\n" +
+                "vec3 cod2LocalF0 = vec3(0.0); highp float cod2LocalPower = 1.0, cod2LocalWaterPower = 1.0;\n" +
+                "float cod2LocalWaterF = 0.0, cod2LocalDiffuse = 1.0;\n" +
+                "if (u_cod2Surface.z > 0.5) {\n" +
+                "highp vec3 cod2N = u_cod2Model.z < 0.5 && dot(v_cod2WorldNormal, v_cod2WorldNormal) > 0.01 ? v_cod2WorldNormal : cross(dFdx(v_cod2Eye), dFdy(v_cod2Eye));\n" +
                 "cod2N *= inversesqrt(max(dot(cod2N, cod2N), 1e-30));\n" +
                 "if (dot(cod2N, v_cod2Eye) > 0.0) cod2N = -cod2N;\n" +
                 // COD2_SURFACE_VARIATION: two octaves of noise a few repeats of the
@@ -578,12 +884,44 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "gl_FragColor.rgb *= 1.0 + u_cod2Relief.y * mix(0.08, 0.22, cod2Floor * cod2Floor) * (2.0 * cod2Var - 1.0);\n" +
                 "gl_FragColor.rgb *= 1.0 + 0.6 * min(u_cod2Relief.y, 1.5) * (cod2Var - 0.5) * vec3(0.05, -0.01, -0.16);\n}\n" +
                 "highp vec3 cod2B = cod2N;\n" +
-                "if (u_cod2Surface.x > 0.5) cod2B = cod2Bump(cod2N, " + pointUV + ", 1.0);\n" +
+                "if (u_cod2Surface.x > 0.5) cod2B = cod2Bump(cod2N, " + pointUV + ", u_cod2Environment.w > 0.0 ? u_cod2Environment.w : 1.0);\n" +
                 "highp vec3 cod2MacroB = cod2B;\n" +
                 // COD2_DETAIL_RELIEF: the detail map's grain lifts the surface it
                 // darkens and lightens, so the sun catches sand, stone and plaster.
                 "if (u_cod2Detail.z > 0.5 && u_cod2Relief.z > 0.0) cod2B = cod2DetailBump(cod2B, cod2N, " + pointUV +
                   " * u_cod2Detail.xy, 6.0 * u_cod2Relief.z);\n" +
+                // Damp film follows low soil; still water fills only shallow,
+                // nearly horizontal pockets. The owner's wet road instead
+                // carries aligned pool boundaries in its roughness map.
+                "float cod2Wet = 0.0, cod2Pool = 0.0;\n" +
+                "if (u_cod2Environment.z != 0.0 && u_cod2Detail.z > 0.5) {\n" +
+                "  float up = dot(cod2N, u_cod2SkyEye.xyz);\n" +
+                "  float h = texture2D(u_cod2DetailMap, " + pointUV + ").a;\n" +
+                "  if (u_cod2Environment.z > 0.0) {\n" +
+                "    float amount = clamp(u_cod2Environment.z, 0.0, 1.0);\n" +
+                "    float basin = cod2Noise(" + pointUV + " * 0.37 + vec2(23.0, 11.0));\n" +
+                "    float level = mix(0.08, 0.18, basin);\n" +
+                "    cod2Wet = amount * (1.0 - smoothstep(0.24, 0.52, h)) * smoothstep(0.65, 0.95, up);\n" +
+                "    cod2Pool = min(amount * 2.0, 1.0) * (1.0 - smoothstep(level - 0.035, level + 0.035, h)) *\n" +
+                "      smoothstep(0.70, 0.85, basin) * smoothstep(0.93, 0.995, up);\n" +
+                "    gl_FragColor.rgb *= (1.0 - 0.32 * cod2Wet) * (1.0 - 0.12 * cod2Pool);\n" +
+                "  } else if (u_cod2Surface.y > 0.5) {\n" +
+                "    float gloss = texture2D(u_cod2SpecMap, " + pointUV + ", u_cod2Detail.w).a;\n" +
+                // The donor's wet atlas marks broad flooded regions. Retain
+                // its boundaries, but fill only sparse patches of that area.
+                "    float basin = cod2Noise(" + pointUV + " * 0.37 + vec2(23.0, 11.0));\n" +
+                "    cod2Pool = smoothstep(0.64, 0.88, gloss) * smoothstep(0.66, 0.84, basin) * smoothstep(0.93, 0.995, up);\n" +
+                "  }\n}\n" +
+                "highp vec3 cod2WaterN = cod2MacroB; float cod2WaterF = 0.0; highp float cod2WaterP = 1.0;\n" +
+                "highp vec3 cod2WaterV = vec3(0.0, 0.0, 1.0);\n" +
+                "if (u_cod2Environment.z != 0.0) {\n" +
+                "  cod2WaterN = normalize(u_cod2SkyEye.xyz);\n" +
+                "  cod2WaterV = -v_cod2Eye * inversesqrt(max(dot(v_cod2Eye, v_cod2Eye), 1e-30));\n" +
+                "  cod2WaterF = 0.02 + 0.98 * pow(1.0 - max(dot(cod2WaterN, cod2WaterV), 0.0), 5.0);\n" +
+                "  cod2WaterP = cod2SpecPower(0.97, cod2WaterN);\n}\n" +
+                "cod2LocalN = cod2MacroB; cod2LocalWaterN = cod2WaterN;\n" +
+                "cod2LocalWaterPower = cod2WaterP; cod2LocalWaterF = cod2Pool * cod2WaterF;\n" +
+                "cod2LocalDiffuse = (1.0 - cod2Pool * cod2WaterF) * (u_cod2Environment.z > 0.0 ? (1.0 - 0.32 * cod2Wet) * (1.0 - 0.12 * cod2Pool) : 1.0);\n" +
                 "vec4 cod2L = " + lightmapTexel + ";\n" +
                 "vec3 cod2SunPart = u_cod2SunColor.rgb * cod2L.a;\n" +
                 "float cod2NLG = max(dot(cod2N, u_cod2SunEye), 0.0), cod2NLB = max(dot(cod2B, u_cod2SunEye), 0.0);\n" +
@@ -606,9 +944,19 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "cod2Lit *= (1.0 - 0.34 * u_cod2Relief.x * smoothstep(0.2, 1.0, -cod2Fold)) *\n" +
                 "  (1.0 + 0.09 * u_cod2Relief.x * smoothstep(0.2, 1.0, cod2Fold));\n}\n" +
                 "gl_FragColor.rgb *= max(cod2Lit, vec3(0.0)) / max(cod2L.rgb, vec3(0.004));\n" +
+                "gl_FragColor.rgb *= 1.0 - cod2Pool * cod2WaterF;\n" +
                 "if (u_cod2Surface.y > 0.5) {\n" +
                 "vec4 cod2S = texture2D(u_cod2SpecMap, " + pointUV + ", u_cod2Detail.w);\n" +
+                // Areas no longer covered by standing water must not retain
+                // the atlas's mirror-smooth water gloss as polished stone.
+                "if (u_cod2Environment.z < 0.0) {\n" +
+                "  float drained = smoothstep(0.64, 0.88, cod2S.a);\n" +
+                "  cod2S.rgb = mix(cod2S.rgb, min(cod2S.rgb, vec3(0.045)), drained);\n" +
+                "  cod2S.a = mix(cod2S.a, min(cod2S.a, 0.60), drained);\n}\n" +
+                "cod2S.rgb = mix(cod2S.rgb, vec3(0.045), cod2Wet) * (1.0 - cod2Pool); cod2S.a = mix(cod2S.a, 0.75, cod2Wet);\n" +
                 "highp float cod2P = cod2SpecPower(cod2S.a, cod2MacroB);\n" +
+                "vec4 cod2Stone = cod2MasonrySpec(cod2S, cod2P); cod2S.rgb = cod2Stone.rgb; cod2P = cod2Stone.a;\n" +
+                "cod2LocalF0 = cod2S.rgb * (u_cod2Masonry.x > 0.0 ? 1.0 - cod2Pool : 1.0); cod2LocalPower = cod2P;\n" +
                 "gl_FragColor.rgb += cod2S.rgb * cod2SunPart * (2.0 * u_cod2Surface.w * cod2Phong(cod2MacroB, u_cod2SunEye, cod2P));\n" +
                 // COD2_WORLD_REFLECTION: the light around the surface, the
                 // lightmap's indirect share, mirrored as models mirror their
@@ -621,7 +969,20 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "float cod2Up = dot(reflect(-cod2V, cod2MacroB), u_cod2SkyEye.xyz);\n" +
                 "float cod2Fresnel = 0.2 + 0.8 * cod2Gloss * pow(1.0 - max(dot(cod2MacroB, cod2V), 0.0), 5.0);\n" +
                 "vec3 cod2Env = cod2Indirect * 2.0 * mix(0.35, 1.0, smoothstep(-0.3, 0.7, cod2Up));\n" +
+                "cod2Env = cod2Environment(reflect(-cod2V, cod2MacroB), cod2P, cod2Env);\n" +
                 "gl_FragColor.rgb += cod2S.rgb * cod2Env * (cod2Fresnel * cod2Gloss * u_cod2Surface.w);\n}\n}\n" +
+                // A separate water surface: its reflection is not multiplied
+                // by the brown soil's color. Bed relief stays visible beneath
+                // it; water reflects a level sky instead of every mud clump.
+                "if (cod2Pool > 0.0) {\n" +
+                "  gl_FragColor.rgb += cod2SunPart * (2.0 * cod2Pool * cod2WaterF * u_cod2Surface.w * cod2Phong(cod2WaterN, u_cod2SunEye, cod2WaterP));\n" +
+                "  if (u_cod2SkyEye.w > 0.0) {\n" +
+                "    vec3 ray = reflect(-cod2WaterV, cod2WaterN);\n" +
+                "    vec3 fallback = cod2Indirect * 2.0 * mix(0.35, 1.0, smoothstep(-0.3, 0.7, dot(ray, u_cod2SkyEye.xyz)));\n" +
+                "    vec3 waterEnvironment = cod2Environment(ray, cod2WaterP, fallback);\n" +
+                "    waterEnvironment = cod2WaterReflection(cod2WaterN, ray, cod2WaterP, waterEnvironment);\n" +
+                "    gl_FragColor.rgb += waterEnvironment * (cod2Pool * cod2WaterF * u_cod2Surface.w);\n" +
+                "  }\n}\n" +
                 // Physical dielectric micro-specular and grazing sky sheen on
                 // normal-mapped cobbles, stone, brick and wood without a spec map,
                 // evaluated on the macro normal so detail grain never shimmers.
@@ -641,13 +1002,47 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "if (cod2Shade > 0.0) gl_FragColor.rgb *= max(cod2L.rgb - u_cod2SunColor.rgb * (cod2L.a * cod2Shade), vec3(0.0)) /\n" +
                 "  max(cod2L.rgb, vec3(0.004));\n}\n";
             }
+            if (!pointNormal && !materialLightmap) {
+              // Owner bullet marks use their authored normal/height fields.
+              // The mark's vertex light and alpha remain intact; only the rim
+              // and cavity shade relative to the flat supporting surface.
+              materialPass += "if (u_cod2Environment.y > 0.0 && u_cod2Surface.x > 0.5 && u_cod2Detail.z > 0.5) {\n" +
+                "  highp vec3 markN = normalize(cross(dFdx(v_cod2Eye), dFdy(v_cod2Eye)));\n" +
+                "  if (dot(markN, -v_cod2Eye) < 0.0) markN = -markN;\n" +
+                "  highp vec3 markB = cod2Bump(markN, " + pointUV + ", 1.2);\n" +
+                "  float markSun = clamp(dot(u_cod2SunColor.rgb, vec3(0.3333)), 0.0, 1.0) * u_cod2SunColor.a;\n" +
+                "  float markFlat = 0.55 + 0.45 * cod2Sky(markN) + max(dot(markN, u_cod2SunEye), 0.0) * markSun;\n" +
+                "  float markLit = 0.55 + 0.45 * cod2Sky(markB) + max(dot(markB, u_cod2SunEye), 0.0) * markSun;\n" +
+                "  float markHeight = texture2D(u_cod2DetailMap, " + pointUV + ").a;\n" +
+                "  float markCavity = mix(0.68, 1.0, smoothstep(0.02, 0.55, markHeight));\n" +
+                "  gl_FragColor.rgb *= clamp(markLit / max(markFlat, 0.1), 0.55, 1.5) * mix(1.0, markCavity, clamp(u_cod2Relief.x, 0.0, 1.0));\n}\n";
+            }
             pointPass = materialPass + pointPass;
+            if (!pointNormal) {
+              fsTexEnvPass = "highp vec2 cod2ReliefCoord = cod2ReliefUV(" + pointUV + ");\n" +
+                fsTexEnvPass.split(pointUV).join("cod2ReliefCoord");
+              pointPass = pointPass.split(pointUV).join("cod2ReliefCoord");
+            }
+            // Thin leaf transmission: only identified cutout vegetation takes
+            // the backlight. Wood, wire, skin and the HUD never acquire it.
+            pointPass += "if (u_cod2Model.z > 0.5) {\n" +
+              "  highp vec3 leafV = normalize(-v_cod2Eye);\n" +
+              "  float leafBack = pow(max(dot(-leafV, u_cod2SunEye), 0.0), 4.0);\n" +
+              "  float leafGreen = smoothstep(0.0, 0.12, gl_FragColor.g - gl_FragColor.b);\n" +
+              "  gl_FragColor.rgb += gl_FragColor.rgb * vec3(0.72, 0.78, 0.48) *\n" +
+              "    (0.08 + 0.32 * leafBack) * leafGreen * clamp(dot(u_cod2SunColor.rgb, vec3(0.4)), 0.0, 1.0);\n}\n";
             if (!pointNormal && !materialLightmap) {
               // The DX9 zfeather: an effect fades where the scene's depth
               // (unit 19, copied before the first feathered draw) comes within
               // 1 / featherParms.x units of it, and as close to the eye.
               pointDefs += "uniform highp sampler2D u_cod2FeatherDepth;\n";
-              cod2EffectPass = "if (u_cod2Effect.y != 0.0) {\n" +
+              cod2EffectPass = "if (u_cod2FireExtinction > 0.0) {\n" +
+                // Atlas RGB already carries emission/coverage and the particle
+                // fade. Derive attenuation from it, so black edges and expired
+                // particles cannot become opaque rectangles. This runs before
+                // depth feathering, which fades emission and extinction alike.
+                "  gl_FragColor.a = clamp(max(gl_FragColor.r, max(gl_FragColor.g, gl_FragColor.b)) * u_cod2FireExtinction, 0.0, 1.0);\n}\n" +
+                "if (u_cod2Effect.y != 0.0) {\n" +
                 "highp float cod2Z = -v_cod2Eye.z, cod2Scale = abs(u_cod2Effect.y);\n" +
                 "highp float cod2SceneZ = u_cod2Effect.w / max(0.9995002746582031 -\n" +
                 "  texelFetch(u_cod2FeatherDepth, ivec2(gl_FragCoord.xy), 0).r, 0.000001);\n" +
@@ -655,24 +1050,74 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "  clamp((cod2Z - u_cod2Effect.w / 0.9995002746582031) * cod2Scale, 0.0, 1.0);\n" +
                 "if (u_cod2Effect.y > 0.0) gl_FragColor.a *= cod2Feather; else gl_FragColor *= cod2Feather;\n}\n" +
                 // Fire burns hotter the brighter it already is.
-                "if (u_cod2Effect.z > 0.0)\n" +
-                "  gl_FragColor.rgb *= 1.0 + u_cod2Effect.z * dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114));\n";
+                "if (u_cod2Effect.z > 0.0) {\n" +
+                "  float core = smoothstep(0.22, 0.95, max(gl_FragColor.r, max(gl_FragColor.g, gl_FragColor.b)));\n" +
+                "  gl_FragColor.rgb *= 1.0 + u_cod2Effect.z * dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114));\n" +
+                "  gl_FragColor.rgb = mix(gl_FragColor.rgb, max(gl_FragColor.rgb, vec3(1.0, 0.72, 0.32)), core * 0.18 * u_cod2Effect.z);\n}\n";
+              var cod2SmokePass =
+                "if (u_cod2Model.w > 0.5) {\n" +
+                "  float forwardScatter = pow(max(dot(normalize(v_cod2Eye), u_cod2SunEye), 0.0), 5.0);\n" +
+                "  vec3 smokeLight = vec3(0.78, 0.83, 0.90) + u_cod2SunColor.rgb * (0.18 + forwardScatter * 0.48);\n" +
+                // Smoke grenades scatter pale neutral light. Their inherited
+                // dark-soot atlas and particle tints must not make a black wall.
+                // Preserve alpha, timing and sight blocking exactly.
+                "  if (u_cod2Model.w > 1.5) {\n" +
+                "    float shape = dot(" + pointAlbedo + ".rgb, vec3(0.299, 0.587, 0.114));\n" +
+                "    float shade = mix(0.68, 0.96, smoothstep(0.0, 0.75, shape));\n" +
+                // Dedicated donor maps store the billow field at full range,
+                // retaining smooth shading instead of compressed soot bands.
+                "    if (u_cod2Model.w > 2.5) {\n" +
+                "      shade = mix(0.68, 0.96, clamp(shape, 0.0, 1.0));\n" +
+                // Re-light the donor billows in the projected sun direction.
+                // The UV/eye Jacobian follows rotated and mirrored particles;
+                // sampling stays inside this frame of the 256px-cell atlas.
+                // This is bounded particle relief, not volume self-shadowing.
+                "      highp vec2 smokeUV = " + pointUV + ";\n" +
+                "      highp vec2 ex = dFdx(v_cod2Eye.xy), ey = dFdy(v_cod2Eye.xy);\n" +
+                "      highp float det = ex.x * ey.y - ex.y * ey.x;\n" +
+                "      highp vec2 lightUV = vec2(0.0);\n" +
+                "      highp vec2 ux = dFdx(smokeUV), uy = dFdy(smokeUV);\n" +
+                "      if (abs(det) > 1e-8) {\n" +
+                "        highp vec2 ray = u_cod2SunEye.xy;\n" +
+                "        lightUV = (ux * (ray.x * ey.y - ray.y * ey.x) + uy * (ex.x * ray.y - ex.y * ray.x)) / det;\n}\n" +
+                "      highp vec2 atlasSize = vec2(textureSize(u_texUnit0, 0));\n" +
+                "      highp vec2 cell = min(vec2(1.0), vec2(256.0) / atlasSize);\n" +
+                "      highp float smokeLod = clamp(log2(max(max(length(ux * atlasSize), length(uy * atlasSize)), 1e-6)) + u_cod2Detail.w, 0.0, log2(min(cell.x * atlasSize.x, cell.y * atlasSize.y)));\n" +
+                "      highp vec2 inset = 0.5 * exp2(ceil(smokeLod)) / atlasSize;\n" +
+                "      highp vec2 lo = floor(smokeUV / cell) * cell + inset;\n" +
+                "      highp vec2 hi = lo + cell - 2.0 * inset;\n" +
+                "      highp vec2 stepUV = lightUV / max(length(lightUV / cell), 1e-6) * 0.04;\n" +
+                "      float toward = dot(textureLod(u_texUnit0, clamp(smokeUV + stepUV, lo, hi), smokeLod).rgb, vec3(0.299, 0.587, 0.114));\n" +
+                "      float away = dot(textureLod(u_texUnit0, clamp(smokeUV - stepUV, lo, hi), smokeLod).rgb, vec3(0.299, 0.587, 0.114));\n" +
+                "      float sideLight = length(u_cod2SunEye.xy) * clamp(dot(u_cod2SunColor.rgb, vec3(0.3333)), 0.0, 1.0);\n" +
+                "      shade = clamp(shade + clamp((away - toward) * 0.65, -0.12, 0.10) * sideLight, 0.64, 0.96);\n}\n" +
+                "    float tint = clamp(dot(v_color.rgb, vec3(0.3333)), 0.0, 1.0);\n" +
+                // White screening smoke keeps diffuse skylight even in shade;
+                // inherited soot tints must not multiply it back to charcoal.
+                "    gl_FragColor.rgb = vec3(shade * mix(0.94, 1.0, tint));\n" +
+                "    smokeLight = vec3(clamp(dot(smokeLight, vec3(0.299, 0.587, 0.114)), 0.94, 1.08));\n}\n" +
+                "  gl_FragColor.rgb *= smokeLight;\n}\n";
+              cod2EffectPass = cod2SmokePass + cod2EffectPass;
             }
           }
+          if (pointLights) pointPass = "if (dot(u_cod2PlanarClip, vec4(v_cod2Eye, 1.0)) < 0.0) discard;\n" + pointPass;
           var vsSource = ['''
 POINT_VERTEX_ORIGINAL = 'vsPointSizeDefs, vsClipPlaneDefs, vsLightingDefs, "void main()"'
 POINT_VERTEX_LEGACY = 'vsPointSizeDefs, vsClipPlaneDefs, vsLightingDefs, pointVarying, "void main()"'
 POINT_POSITION_ORIGINAL = '"  gl_Position = u_projection * ecPosition;", "  v_color = a_color;"'
 POINT_POSITION_LEGACY = '"  gl_Position = u_projection * ecPosition;", (pointLights ? "v_cod2Eye = ecPosition.xyz;" : ""), (pointNormal ? "v_cod2Normal = u_normalMatrix * a_normal;" : ""), "  v_color = a_color;"'
-POINT_VERTEX_REPLACEMENT = POINT_VERTEX_LEGACY.replace('pointVarying,', 'pointVarying, "uniform lowp int u_cod2ColorOrder;",')
-POINT_POSITION_REPLACEMENT = POINT_POSITION_LEGACY.replace('"  v_color = a_color;"',
+POINT_VERTEX_COLOR = POINT_VERTEX_LEGACY.replace('pointVarying,', 'pointVarying, "uniform lowp int u_cod2ColorOrder;",')
+POINT_VERTEX_REPLACEMENT = POINT_VERTEX_COLOR.replace('pointVarying,', 'pointVarying, worldNormalDefs,')
+POINT_POSITION_COLOR = POINT_POSITION_LEGACY.replace('"  v_color = a_color;"',
     '"  vec4 cod2VertexColor = u_cod2ColorOrder == 2 ? a_color.yzwx : (u_cod2ColorOrder == 1 ? a_color.zyxw : a_color);", "  v_color = cod2VertexColor;"')
+
+POINT_POSITION_REPLACEMENT = POINT_POSITION_COLOR.replace('(pointLights ? "v_cod2Eye = ecPosition.xyz;" : ""),', '(pointLights ? "v_cod2Eye = ecPosition.xyz;" : ""), worldNormalVertex,')
 
 POINT_FRAGMENT_ORIGINAL = 'fogHeaderIfNeeded, fsClipPlaneDefs, fsAlphaTestDefs, "void main()"'
 POINT_FRAGMENT_REPLACEMENT = 'fogHeaderIfNeeded, fsClipPlaneDefs, fsAlphaTestDefs, pointDefs, "void main()"'
 POINT_PASS_ORIGINAL = 'fsClipPlanePass, fsTexEnvPass, fogPass, fsAlphaTestPass'
 POINT_PASS_LEGACY = 'fsClipPlanePass, fsTexEnvPass, pointPass, fogPass, fsAlphaTestPass'
-POINT_PASS_REPLACEMENT = 'fsClipPlanePass, fsTexEnvPass, pointPass, cod2EffectPass, fogPass, fsAlphaTestPass'
+POINT_PASS_REPLACEMENT = 'fsClipPlanePass, fsTexEnvPass, pointPass, cod2EffectPass, fogPass, fsAlphaTestPass, (pointLights ? "if (dot(u_cod2PlanarClip.xyz, u_cod2PlanarClip.xyz) > 0.5) gl_FragColor.a = 1.0;" : "")'
 
 COVERAGE_MARKER = '          // COD2_ALPHA_COVERAGE:'
 COVERAGE_ORIGINAL = '          var fsSource = [ "precision mediump float;",'
@@ -692,6 +1137,13 @@ COVERAGE_REPLACEMENT = r'''          // COD2_ALPHA_COVERAGE: an alpha-tested sur
               "  gl_FragColor.a = min(gl_FragColor.a, 1.0);\n" +
               "} else {\n" + fsAlphaTestPass + "\n}\n";
           }
+          // Cutout models never change alpha in their lighting pass. Resolve
+          // their original mip-aware coverage before the costly normal, shadow
+          // and reflection work. Particles keep the final test after feathering.
+          if (pointNormal && fsAlphaTestPass) {
+            fsTexEnvPass += "\n" + fsAlphaTestPass;
+            fsAlphaTestPass = "";
+          }
           var fsSource = [ "precision mediump float;",'''
 POINT_UNIFORMS_LEGACY = r'''        this.normalMatrixLocation = GLctx.getUniformLocation(this.program, "u_normalMatrix");
         this.cod2LightCountLocation = GLctx.getUniformLocation(this.program, "u_cod2LightCount");
@@ -703,6 +1155,9 @@ POINT_UNIFORMS_ORIGINAL = '        this.normalMatrixLocation = GLctx.getUniformL
 POINT_UNIFORMS_REPLACEMENT = r'''        this.normalMatrixLocation = GLctx.getUniformLocation(this.program, "u_normalMatrix");
         this.cod2ColorOrderLocation = GLctx.getUniformLocation(this.program, "u_cod2ColorOrder");
         this.cod2ColorOrder = -1;
+        this.cod2WorldNormalsLocation = GLctx.getUniformLocation(this.program, "u_cod2WorldNormals");
+        this.cod2WorldNormalParamsLocation = GLctx.getUniformLocation(this.program, "u_cod2WorldNormalParams");
+        this.cod2WorldNormalBase = this.cod2WorldNormalCount = -1;
         this.cod2LightCountLocation = GLctx.getUniformLocation(this.program, "u_cod2LightCount");
         this.cod2LightEyeLocation = GLctx.getUniformLocation(this.program, "u_cod2LightEye[0]");
         this.cod2LightColorLocation = GLctx.getUniformLocation(this.program, "u_cod2LightColor[0]");
@@ -720,14 +1175,33 @@ POINT_UNIFORMS_REPLACEMENT = r'''        this.normalMatrixLocation = GLctx.getUn
         this.cod2CamoLocation = GLctx.getUniformLocation(this.program, "u_cod2Camo");
         this.cod2CamoMapLocation = GLctx.getUniformLocation(this.program, "u_cod2CamoMap");
         this.cod2CamoMaskLocation = GLctx.getUniformLocation(this.program, "u_cod2CamoMask");
+        this.cod2VmShadowEyeLocation = GLctx.getUniformLocation(this.program, "u_cod2VmShadowEye");
+        this.cod2VmShadowLocation = GLctx.getUniformLocation(this.program, "u_cod2VmShadow");
+        this.cod2VmShadowMapLocation = GLctx.getUniformLocation(this.program, "u_cod2VmShadowMap");
         this.cod2SunShadowEyeLocation = GLctx.getUniformLocation(this.program, "u_cod2SunShadowEye");
         this.cod2SunShadowLocation = GLctx.getUniformLocation(this.program, "u_cod2SunShadow");
         this.cod2SunShadowRectLocation = GLctx.getUniformLocation(this.program, "u_cod2SunShadowRect");
         this.cod2SunShadowMapLocation = GLctx.getUniformLocation(this.program, "u_cod2SunShadowMap");
+        this.cod2FireExtinctionLocation = GLctx.getUniformLocation(this.program, "u_cod2FireExtinction");
         this.cod2EffectLocation = GLctx.getUniformLocation(this.program, "u_cod2Effect");
         this.cod2ReliefLocation = GLctx.getUniformLocation(this.program, "u_cod2Relief");
+        this.cod2FinishLocation = GLctx.getUniformLocation(this.program, "u_cod2Finish");
+        this.cod2MasonryLocation = GLctx.getUniformLocation(this.program, "u_cod2Masonry");
         this.cod2LensLocation = GLctx.getUniformLocation(this.program, "u_cod2Lens");
         this.cod2LensSceneLocation = GLctx.getUniformLocation(this.program, "u_cod2LensScene");
+        this.cod2WaterDepthLocation = GLctx.getUniformLocation(this.program, "u_cod2WaterDepth");
+        this.cod2WaterViewLocation = GLctx.getUniformLocation(this.program, "u_cod2WaterView");
+        this.cod2WaterProjectionLocation = GLctx.getUniformLocation(this.program, "u_cod2WaterProjection");
+        this.cod2WaterJitterLocation = GLctx.getUniformLocation(this.program, "u_cod2WaterJitter");
+        this.cod2PlanarClipLocation = GLctx.getUniformLocation(this.program, "u_cod2PlanarClip");
+        this.cod2PlanarSceneLocation = GLctx.getUniformLocation(this.program, "u_cod2PlanarScene");
+        this.cod2PlanarViewLocation = GLctx.getUniformLocation(this.program, "u_cod2PlanarView");
+        this.cod2PlanarPlaneLocation = GLctx.getUniformLocation(this.program, "u_cod2PlanarPlane");
+        this.cod2PlanarProjectionLocation = GLctx.getUniformLocation(this.program, "u_cod2PlanarProjection");
+        this.cod2PlanarJitterLocation = GLctx.getUniformLocation(this.program, "u_cod2PlanarJitter");
+        this.cod2EnvironmentLocation = GLctx.getUniformLocation(this.program, "u_cod2Environment");
+        this.cod2EnvironmentViewLocation = GLctx.getUniformLocation(this.program, "u_cod2EnvironmentView");
+        this.cod2EnvironmentMapLocation = GLctx.getUniformLocation(this.program, "u_cod2EnvironmentMap");
         this.cod2FeatherDepthLocation = GLctx.getUniformLocation(this.program, "u_cod2FeatherDepth");
         this.cod2MaterialUniforms = null;
         this.cod2LightCount = -1;
@@ -756,6 +1230,17 @@ POINT_UPLOAD_REPLACEMENT = r'''        // COD2_POINT_LIGHT_UNIFORMS: cache per p
         // Subsequent generic GL draws retain their normal RGBA interpretation.
         var colorOrder = Module.cod2VertexColorOrder || 0;
         Module.cod2VertexColorOrder = 0;
+        var worldNormals = Module.cod2WorldNormalDraw;
+        Module.cod2WorldNormalDraw = null;
+        if (this.cod2WorldNormalParamsLocation !== null && this.cod2WorldNormalParamsLocation !== undefined) {
+          var normalBase = worldNormals ? Module.cod2WorldNormalBase : 0;
+          var normalCount = worldNormals ? worldNormals.count : 0;
+          if (this.cod2WorldNormalBase !== normalBase || this.cod2WorldNormalCount !== normalCount) {
+            GLctx.uniform1i(this.cod2WorldNormalsLocation, 27);
+            GLctx.uniform3i(this.cod2WorldNormalParamsLocation, normalBase, worldNormals ? worldNormals.width : 1, normalCount);
+            this.cod2WorldNormalBase = normalBase; this.cod2WorldNormalCount = normalCount;
+          }
+        }
         if (this.cod2ColorOrderLocation !== null && this.cod2ColorOrderLocation !== undefined &&
             this.cod2ColorOrder !== colorOrder) {
           GLctx.uniform1i(this.cod2ColorOrderLocation, colorOrder);
@@ -789,20 +1274,29 @@ POINT_UPLOAD_REPLACEMENT = r'''        // COD2_POINT_LIGHT_UNIFORMS: cache per p
               GLctx.uniform1i(this.cod2CamoMaskLocation, 17);
             }
             // Only lightmapped world programs take the sun's depth map.
+            if (this.cod2VmShadowMapLocation) GLctx.uniform1i(this.cod2VmShadowMapLocation, 24);
             if (this.cod2SunShadowMapLocation) GLctx.uniform1i(this.cod2SunShadowMapLocation, 18);
             // Only unlit programs feather effects into the scene's depth.
             if (this.cod2FeatherDepthLocation) GLctx.uniform1i(this.cod2FeatherDepthLocation, 19);
             // Only lit model programs mirror the world in a scope's glass.
             if (this.cod2LensSceneLocation) GLctx.uniform1i(this.cod2LensSceneLocation, 22);
+            if (this.cod2WaterDepthLocation) GLctx.uniform1i(this.cod2WaterDepthLocation, 25);
+            if (this.cod2PlanarSceneLocation) GLctx.uniform1i(this.cod2PlanarSceneLocation, 26);
+            if (this.cod2EnvironmentMapLocation) GLctx.uniform1i(this.cod2EnvironmentMapLocation, 23);
             // Values are compared per program: world and model draws
             // alternate, but each program mostly sees the same ones.
             materialUniforms = this.cod2MaterialUniforms = [];
             var materialNames = ["surface", "detail", "sunEye", "sunColor", "skyEye", "model", "camo",
-              "sunShadowEye", "sunShadow", "sunShadowRect", "effect", "relief", "lens"];
+              "sunShadowEye", "sunShadow", "sunShadowRect", "effect", "relief", "lens", "environment", "view", "vmShadowEye", "vmShadow", "finish",
+              "waterView", "waterProjection", "waterJitter", "planarClip", "planarView", "planarPlane", "planarProjection", "planarJitter", "masonry"];
             var materialLocations = [this.cod2SurfaceLocation, this.cod2DetailLocation, this.cod2SunEyeLocation,
               this.cod2SunColorLocation, this.cod2SkyEyeLocation, this.cod2ModelLocation, this.cod2CamoLocation,
               this.cod2SunShadowEyeLocation, this.cod2SunShadowLocation, this.cod2SunShadowRectLocation,
-              this.cod2EffectLocation, this.cod2ReliefLocation, this.cod2LensLocation];
+              this.cod2EffectLocation, this.cod2ReliefLocation, this.cod2LensLocation,
+              this.cod2EnvironmentLocation, this.cod2EnvironmentViewLocation, this.cod2VmShadowEyeLocation, this.cod2VmShadowLocation, this.cod2FinishLocation,
+              this.cod2WaterViewLocation, this.cod2WaterProjectionLocation, this.cod2WaterJitterLocation,
+              this.cod2PlanarClipLocation, this.cod2PlanarViewLocation, this.cod2PlanarPlaneLocation,
+              this.cod2PlanarProjectionLocation, this.cod2PlanarJitterLocation, this.cod2MasonryLocation];
             for (var materialIndex = 0; materialIndex < materialNames.length; ++materialIndex) {
               if (!materialLocations[materialIndex]) continue;
               materialUniforms.push({name: materialNames[materialIndex], location: materialLocations[materialIndex],
@@ -822,6 +1316,13 @@ POINT_UPLOAD_REPLACEMENT = r'''        // COD2_POINT_LIGHT_UNIFORMS: cache per p
             if (materialLast.length === 3) GLctx.uniform3fv(materialUniform.location, materialValue);
             else if (materialLast.length === 16) GLctx.uniformMatrix4fv(materialUniform.location, false, materialValue);
             else GLctx.uniform4fv(materialUniform.location, materialValue);
+          }
+        }
+        if (this.cod2FireExtinctionLocation !== null && this.cod2FireExtinctionLocation !== undefined) {
+          var fireExtinction = Module.cod2Material ? Module.cod2Material.fireExtinction || 0 : 0;
+          if (this.cod2FireExtinction !== fireExtinction) {
+            GLctx.uniform1f(this.cod2FireExtinctionLocation, fireExtinction);
+            this.cod2FireExtinction = fireExtinction;
           }
         }
         if (this.cod2ShadowCountLocation !== null && this.cod2ShadowCountLocation !== undefined) {
@@ -938,12 +1439,16 @@ def main():
         end = source.index(COVERAGE_ORIGINAL, start)
         source = source[:start] + source[end:]
     for legacy, original in ((LIGHT_COLOR_LEGACY, LIGHT_COLOR_ORIGINAL),
+                             (POINT_VERTEX_COLOR, POINT_VERTEX_ORIGINAL),
                              (POINT_VERTEX_LEGACY, POINT_VERTEX_ORIGINAL),
+                             (POINT_POSITION_COLOR, POINT_POSITION_ORIGINAL),
                              (POINT_POSITION_LEGACY, POINT_POSITION_ORIGINAL),
                              (POINT_DEFS_LEGACY, POINT_DEFS_ORIGINAL),
                              (POINT_UNIFORMS_LEGACY, POINT_UNIFORMS_ORIGINAL),
                              (POINT_UPLOAD_LEGACY, POINT_UPLOAD_ORIGINAL),
-                             (POINT_PASS_LEGACY, POINT_PASS_ORIGINAL)):
+                             (POINT_PASS_REPLACEMENT, POINT_PASS_ORIGINAL),
+                             (POINT_PASS_LEGACY, POINT_PASS_ORIGINAL),
+                             ('fsClipPlanePass, fsTexEnvPass, pointPass, cod2EffectPass, fogPass, fsAlphaTestPass', POINT_PASS_ORIGINAL)):
         if source.count(legacy) == 1:
             source = source.replace(legacy, original, 1)
     for original, replacement in ((ORIGINAL, REPLACEMENT), (DRAW_ORIGINAL, DRAW_REPLACEMENT),

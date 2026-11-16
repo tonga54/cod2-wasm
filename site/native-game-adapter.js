@@ -1126,7 +1126,7 @@
         native.callMain([
           '+set', 'fs_basepath', '/game', '+set', 'fs_homepath', '/profile',
           '+set', 'dedicated', '0', '+set', 'r_rendererPreference', 'dx7',
-          '+set', 'com_hunkMegs', '128', '+set', 'r_fullscreen', '0',
+          '+set', 'com_hunkMegs', '192', '+set', 'r_fullscreen', '0',
           '+set', 'ui_browserVersion', `"${browserVersion}"`
         ]);
         const state = native._web_client_state();

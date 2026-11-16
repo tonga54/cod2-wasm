@@ -735,7 +735,7 @@ static int R_PreSkinXSurface(GfxSceneEntity *sceneEnt, const struct DObj_s *obj,
                 }
                 if (*(int *)fed != warnCount) {
                     warnCount = *(int *)fed;
-                    (*(int (**)(int, const char *, ...))&ri)(2, "MAX_SKINNED_CACHE_VERTICES exceeded\n");
+                    ri.Printf(2, "MAX_SKINNED_CACHE_VERTICES exceeded\n");
                 }
                 offset = -1;
             }
@@ -764,7 +764,7 @@ static int R_PreSkinXSurface(GfxSceneEntity *sceneEnt, const struct DObj_s *obj,
             GfxBackEndData *fed = frontEndDataOut;
             if (*(int *)fed != warnCount) {
                 warnCount = *(int *)fed;
-                (*(int (**)(int, const char *, ...))&ri)(2, "Exceeded dynamic vertex buffer limit\n");
+                ri.Printf(2, "Exceeded dynamic vertex buffer limit\n");
             }
             return 0;
         }
@@ -1042,7 +1042,7 @@ no_smc:
                     InterlockedExchange((volatile int *)lockPtr, offset);
                 if (*(int *)fed != warnCount) {
                     warnCount = *(int *)fed;
-                    (*(int (**)(int, const char *, ...))&ri)(2, "MAX_SKINNED_CACHE_VERTICES exceeded\n");
+                    ri.Printf(2, "MAX_SKINNED_CACHE_VERTICES exceeded\n");
                 }
                 offset = -1;
             }
@@ -1067,7 +1067,7 @@ no_smc:
             GfxBackEndData *fed = frontEndDataOut;
             if (*(int *)fed != warnCount) {
                 warnCount = *(int *)fed;
-                (*(int (**)(int, const char *, ...))&ri)(2, "Exceeded dynamic vertex buffer limit\n");
+                ri.Printf(2, "Exceeded dynamic vertex buffer limit\n");
             }
             return 0;
         }
@@ -1147,7 +1147,7 @@ void R_SkinXModel(GfxSceneEntity *sceneEnt, GfxEntity *ent, int smodelIndex)
             GfxBackEndData *fed = frontEndDataOut;
             if (*(int *)fed != warnCount) {
                 warnCount = *(int *)fed;
-                (*(int (**)(int, const char *, ...))&ri)(2, "MAX_SCENE_SURFS_PLUS_ENTITIES exceeded\n");
+                ri.Printf(2, "MAX_SCENE_SURFS_PLUS_ENTITIES exceeded\n");
             }
             ((GfxSceneEntity *)se)->cullState = 4;
             return;
@@ -1177,7 +1177,7 @@ void R_SkinXModel(GfxSceneEntity *sceneEnt, GfxEntity *ent, int smodelIndex)
                 fed->surfPos = 0x20000;
                 if (*(int *)fed != warnCount) {
                     warnCount = *(int *)fed;
-                    (*(int (**)(int, const char *, ...))&ri)(2, "MAX_SKINNED_CACHE exceeded\n");
+                    ri.Printf(2, "MAX_SKINNED_CACHE exceeded\n");
                 }
                 ((GfxSceneEntity *)se)->cullState = 4;
                 return;

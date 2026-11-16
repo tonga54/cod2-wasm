@@ -1472,6 +1472,7 @@ static int sprintViewTime;
 #ifdef __EMSCRIPTEN__
 extern void AngleVectors(const vec_t *angles, vec_t *forward, vec_t *right, vec_t *up);
 extern void CG_TraceCapsule(trace_t *result, const vec_t *start, const vec_t *mins, const vec_t *maxs, const vec_t *end, int skipNumber, int mask);
+extern void CM_PointTraceStaticModels(trace_t *result, const vec_t *start, const vec_t *end, int mask);
 extern void BG_GetSpreadForWeapon(const playerState_t *ps, int weaponIndex, float *minSpread, float *maxSpread);
 extern float BG_GetShotSpread(const playerState_t *ps, const WeaponDef *weapDef, float minSpread, float maxSpread,
                               float aimSpreadScale, qboolean exactAim);
@@ -1695,6 +1696,11 @@ static void CG_UpdateWebWeaponPresentation(playerState_t *ps, int weaponIndex, q
                 }
                 CG_TraceCapsule(&trace, cg->refdef.vieworg, zeroBounds, zeroBounds,
                                 end, ps->clientNum, 0x2802831);
+                /* Movement traces omit static model triangles. Bullets must
+                 * hit the actual vehicle/tree surface and its material, as
+                 * SV_Trace does, before predicting the sound and particles. */
+                if (trace.fraction > 0.0f)
+                    CM_PointTraceStaticModels(&trace, cg->refdef.vieworg, end, 0x2802831);
                 for (int i = 0; i < 3; ++i)
                     hitPos[i] = cg->refdef.vieworg[i] + trace.fraction * (end[i] - cg->refdef.vieworg[i]);
                 CG_WebLocalImpact(&trace, cg->refdef.vieworg, end, hitPos, weapDef);
@@ -2324,8 +2330,7 @@ unsigned int CG_TracerSeed(const trajectory_t *pos)
 }
 
 #ifdef __EMSCRIPTEN__
-#define CG_TRACER_SEGMENTS 8
-#define CG_TRACER_BEND 0.07f
+#define CG_TRACER_SEGMENTS 4
 
 static void CG_SetTracerVertex(GfxWorldVertex *vert, const vec_t *center, const vec_t *axis, float offset,
                                unsigned int color, float s, float t)
@@ -2339,36 +2344,17 @@ static void CG_SetTracerVertex(GfxWorldVertex *vert, const vec_t *center, const 
     vert->lmapCoord[1] = t;
 }
 
-/* -1 to 1. */
-static float CG_TracerRandom(unsigned int seed, unsigned int index)
-{
-    return (float)(CG_TracerHash(seed + index * 0x9e3779b9u) >> 8) * (1.0f / 8388608.0f) - 1.0f;
-}
-
-/* How far the streak bends across itself at frac of the way along it as seen,
- * in shares of its length on screen: a bow one way or the other, a smaller S
- * and a ripple, mixed by the round's seed. Both ends stay on the shot's line. */
-static float CG_TracerBend(unsigned int seed, float frac)
-{
-    const float pi = 3.14159265f;
-    const float bow = CG_TracerRandom(seed, 0);
-    const float s = CG_TracerRandom(seed, 1);
-    const float ripple = CG_TracerRandom(seed, 2);
-
-    return CG_TRACER_BEND * ((bow < 0.0f ? 0.4f * bow - 0.6f : 0.4f * bow + 0.6f) * sinf(pi * frac) +
-                             0.5f * s * sinf(2.0f * pi * frac) + 0.25f * ripple * sinf(3.0f * pi * frac));
-}
-
-/* Packed RGBA along the round's wake: incandescent white-hot at the round
- * (along = 1), staying bright white-gold right out of the muzzle (along = 0)
- * so the additive tracer image blazes into the bloom along its entire streak. */
+/* A short exposure streak: the rear fades into transparent black so both
+ * additive and alpha-weighted techniques taper it, with a warm-white head.
+ * Geometry stays on the ballistic line; no screen-space bow or flame ripple. */
 static unsigned int CG_TracerColor(float along)
 {
     float t = along < 0.0f ? 0.0f : (along > 1.0f ? 1.0f : along);
-    unsigned int r = (unsigned int)(252.0f + 3.0f * sqrtf(t) + 0.5f);
-    unsigned int g = (unsigned int)(215.0f + 40.0f * t + 0.5f);
-    unsigned int b = (unsigned int)(155.0f + 100.0f * t * t + 0.5f);
-    unsigned int a = (unsigned int)(240.0f + 15.0f * t + 0.5f);
+    float energy = t * (2.0f - t);
+    unsigned int r = (unsigned int)((220.0f + 35.0f * t) * energy + 0.5f);
+    unsigned int g = (unsigned int)((170.0f + 68.0f * t) * energy + 0.5f);
+    unsigned int b = (unsigned int)((110.0f + 95.0f * t) * energy + 0.5f);
+    unsigned int a = (unsigned int)(255.0f * energy + 0.5f);
 
     return r | (g << 8) | (b << 16) | (a << 24);
 }
@@ -2421,73 +2407,30 @@ void CG_DrawTracer(vec_t *start, vec_t *finish, unsigned int seed)
     startWidth *= 0.35f;
 
 #ifdef __EMSCRIPTEN__
-    /* The additive tracer image is a white-hot radial blob. Its centre
-     * column gives the streak a hot core across its width, cooling from
-     * incandescent white-gold at the round to warm orange along its wake, and
-     * a warm corona marks the round itself. */
-    {
-        vec3_t points[CG_TRACER_SEGMENTS + 1];
-        vec3_t sides[CG_TRACER_SEGMENTS + 1];
-        float widths[CG_TRACER_SEGMENTS + 1];
-        unsigned int colors[CG_TRACER_SEGMENTS + 1];
-        vec3_t toFinish, normal;
-        const float startDist = Vec3Distance(start, viewOrg);
-        const float finishDist = Vec3Distance(finish, viewOrg);
-        float angle;
-
-        for (int i = 0; i < 3; ++i)
-            toFinish[i] = finish[i] - viewOrg[i];
-        Vec3Cross(toBeam, toFinish, normal);
-        angle = atan2f(sqrtf(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]),
-                       toBeam[0] * toFinish[0] + toBeam[1] * toFinish[1] + toBeam[2] * toFinish[2]);
-        for (int k = 0; k <= CG_TRACER_SEGMENTS; ++k) {
-            const float frac = (float)k / CG_TRACER_SEGMENTS;
-            /* Joints evenly spaced as seen: from the gun the streak runs away
-             * from the eye, so evenly spaced in the world most of them would
-             * crowd its far end on screen. */
-            const float nearPart = startDist * sinf(frac * angle);
-            const float farPart = finishDist * sinf((1.0f - frac) * angle);
-            const float along = nearPart + farPart > 0.0f ? nearPart / (nearPart + farPart) : frac;
-            float offset;
-
-            for (int i = 0; i < 3; ++i)
-                points[k][i] = start[i] + along * dir[i];
-            /* right is perpendicular to every ray from the eye to the straight
-             * streak, so the bend is a share of the streak's length on screen
-             * whether it is seen end-on from the gun or side-on. */
-            offset = CG_TracerBend(seed, frac) * angle * Vec3Distance(points[k], viewOrg);
-            for (int i = 0; i < 3; ++i)
-                points[k][i] += offset * right[i];
-            widths[k] = startWidth + along * (finishWidth - startWidth);
-            colors[k] = CG_TracerColor(along);
+    /* Straight, tapered exposure streaks. Four joined sections interpolate
+     * the soft tail without the former curved flame ribbon. The small head
+     * glow is a luminous projectile, not an explosion-sized corona. */
+    (void)seed;
+    for (int k = 0; k < CG_TRACER_SEGMENTS; ++k) {
+        const float rear = (float)k / CG_TRACER_SEGMENTS;
+        const float front = (float)(k + 1) / CG_TRACER_SEGMENTS;
+        const float rearWidth = startWidth + rear * (finishWidth - startWidth);
+        const float frontWidth = startWidth + front * (finishWidth - startWidth);
+        vec3_t rearPoint, frontPoint;
+        for (int i = 0; i < 3; ++i) {
+            rearPoint[i] = start[i] + rear * dir[i];
+            frontPoint[i] = start[i] + front * dir[i];
         }
-        for (int k = 0; k <= CG_TRACER_SEGMENTS; ++k) {
-            const vec_t *ahead = points[k < CG_TRACER_SEGMENTS ? k + 1 : k];
-            const vec_t *behind = points[k > 0 ? k - 1 : k];
-            vec3_t tangent, toPoint;
-
-            for (int i = 0; i < 3; ++i) {
-                tangent[i] = ahead[i] - behind[i];
-                toPoint[i] = points[k][i] - viewOrg[i];
-            }
-            Vec3Cross(tangent, toPoint, sides[k]);
-            if (Vec3Normalize(sides[k]) < 0.0001f)
-                for (int i = 0; i < 3; ++i)
-                    sides[k][i] = right[i];
-        }
-        for (int k = 0; k < CG_TRACER_SEGMENTS; ++k) {
-            CG_SetTracerVertex(&verts[0], points[k + 1], sides[k + 1], widths[k + 1], colors[k + 1], 0.5f, 1.0f);
-            CG_SetTracerVertex(&verts[1], points[k + 1], sides[k + 1], -widths[k + 1], colors[k + 1], 0.5f, 0.0f);
-            CG_SetTracerVertex(&verts[2], points[k], sides[k], -widths[k], colors[k], 0.5f, 0.0f);
-            CG_SetTracerVertex(&verts[3], points[k], sides[k], widths[k], colors[k], 0.5f, 1.0f);
-            CL_DefaultVertexFrames(4, verts);
-            CL_AddPolyToScene(cgs->media.tracerMaterial, 0x1f, 4, verts);
-        }
+        CG_SetTracerVertex(&verts[0], frontPoint, right, frontWidth, CG_TracerColor(front), 0.5f, 1.0f);
+        CG_SetTracerVertex(&verts[1], frontPoint, right, -frontWidth, CG_TracerColor(front), 0.5f, 0.0f);
+        CG_SetTracerVertex(&verts[2], rearPoint, right, -rearWidth, CG_TracerColor(rear), 0.5f, 0.0f);
+        CG_SetTracerVertex(&verts[3], rearPoint, right, rearWidth, CG_TracerColor(rear), 0.5f, 1.0f);
+        CL_DefaultVertexFrames(4, verts);
+        CL_AddPolyToScene(cgs->media.tracerMaterial, 0x1f, 4, verts);
     }
-
     {
-        const float glow = finishWidth * 2.8f;
-        const unsigned int glowColor = 0xf2e8ffffu;
+        const float glow = finishWidth * 1.1f;
+        const unsigned int glowColor = 0x805e7480u;
         vec3_t corner;
         for (int i = 0; i < 3; ++i)
             corner[i] = finish[i] + cg->refdef.viewaxis[2][i] * glow;

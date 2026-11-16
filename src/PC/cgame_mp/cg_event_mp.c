@@ -1051,23 +1051,11 @@ void CG_EntityEvent(centity_t *cent, int event)
 
         case 0xc5:
         {
-
-            dir[0] = 0.0f;
-            dir[1] = 0.0f;
-            dir[2] = 1.0f;
-
-            CG_PlaySoundAlias(0x3fe, position,
-                              cgs->media.grenadeExplodeSound[0]);
-
-            {
-                char *fxLookup = (char *)cgs->media.fx;
-                char *fxData = *(char **)(fxLookup + 4);
-                int fxId = *(int *)(fxData + 0x33c) ;
-                if (fxId != 0) {
-
-                    FX_PlayEffect(fxId, position, dir);
-                }
-            }
+            /* This predictable event tells the server to expire the held
+             * grenade. G_GrenadeCookOff now creates/explodes a real missile,
+             * whose 0xbc event carries the authoritative position/material
+             * to every client. Playing FX here as well doubles its fire,
+             * light and sound, once at the feet and once at the hand. */
             return;
         }
 

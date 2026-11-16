@@ -4,7 +4,20 @@ extern GfxBackEndData *backEndData;
 
 extern float floorf(float x);
 
-static vec3_t gridBasisDirs[8];
+/* The eight irradiance samples are cube corners in light-grid space, rotated
+ * back to world space by lightGridLookupMatrix (rb_shade.c). Keep the packed
+ * x/y/z sign-bit order: sample 0 faces down and sample 7 faces up. Leaving this
+ * table in BSS made the directional fit collapse to a uniform ambient light. */
+static const vec3_t gridBasisDirs[8] = {
+    { 0.0f,          0.0f,         -1.0f },
+    { 0.942809045f,  0.0f,         -0.333333333f },
+    {-0.471404523f,  0.816496581f, -0.333333333f },
+    { 0.471404523f,  0.816496581f,  0.333333333f },
+    {-0.471404523f, -0.816496581f, -0.333333333f },
+    { 0.471404523f, -0.816496581f,  0.333333333f },
+    {-0.942809045f,  0.0f,          0.333333333f },
+    { 0.0f,          0.0f,          1.0f }
+};
 static int s_vc_log;
 
 static int s_vc_logCount_00c96c84;
@@ -308,7 +321,12 @@ fallback:
             goto deriveLightDone;
         }
 
-        Vec3Normalize(errorDirAvg);
+        /* Opposite lobes cancel under uniform illumination. Do not normalize
+         * their floating-point cancellation residue into a fictitious light. */
+        if (VecDot(errorDirAvg, errorDirAvg) > 1e-12f * (1.0f + errorTotal))
+            Vec3Normalize(errorDirAvg);
+        else
+            errorDirAvg[0] = errorDirAvg[1] = errorDirAvg[2] = 0.0f;
 
         lightColor[0] = 0.0f;
         lightColor[1] = 0.0f;

@@ -3,6 +3,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include "web_planar.h"
 
 /* The first full-screen 3D view of a frame renders into an offscreen target
  * (multisampled when r_aaSamples > 1). Before the first 2D draw it is composed
@@ -43,6 +44,7 @@ extern const dvar_t *r_taa;
 
 /* Draws the sun's shadow map of the frame's moving models (web_sun_shadows.c). */
 void WebSunShadows_Render(void);
+void WebViewmodelShadows_Render(const float *, int, const unsigned int *, int, const float *);
 
 /* The explosions whose shockwaves can travel at once. */
 #define SCENE_FX_BLASTS 4
@@ -137,7 +139,7 @@ enum {
     /* Local contrast (r_clarity): how far each pixel's light moves from its
      * surroundings', 0 for none. */
     SCENE_FX_CLARITY = SCENE_FX_BLAST_DEPTH + SCENE_FX_BLASTS,
-    /* How much the film grade lifts the shade, 0 for none. */
+    /* Photographic luminance response, 0 for the legacy menu grade. */
     SCENE_FX_TONE,
     /* Temporal antialiasing (r_taa): how much of each pixel this frame gives,
      * 1 when there is nothing to keep and 0 for none; the rotation, then
@@ -162,7 +164,10 @@ enum {
  * thinnest map's whole fog (Dawnville's own is the thickest), thickest at
  * the eye's height and below and thinning above it over the scale height
  * in units; toward the sun the haze takes up to this share of its light. */
-#define SCENE_FX_HAZE_SHARE 0.85f
+/* The DX7 material pass already applies the map's distance fog. This adds
+ * only a restrained height-dependent contribution, rather than nearly
+ * doubling that extinction across every street and interior. */
+#define SCENE_FX_HAZE_SHARE 0.35f
 #define SCENE_FX_HAZE_MAX_DENSITY 0.00016f
 #define SCENE_FX_HAZE_SCALE_HEIGHT 640.0f
 #define SCENE_FX_HAZE_SUN_GLOW 0.62f
@@ -198,8 +203,9 @@ enum {
  * surroundings' further from them. */
 #define SCENE_FX_CLARITY_GAIN 0.28f
 
-/* The film grade lifts deep shade steadily without frame-to-frame exposure swings. */
-#define SCENE_FX_SHADE_LIFT 0.34f
+/* Neutral photographic contrast: preserve black/white and a stable middle
+ * gray, without raising every shadow or changing exposure from frame to frame. */
+#define SCENE_FX_PHOTO_GRADE 1.0f
 
 /* Temporal antialiasing keeps this share of each pixel from the frames
  * before; the view moves within its pixels through this many points of the
@@ -240,14 +246,18 @@ enum {
 
 /* The viewmodel surfaces skinned in one frame. */
 #define SCENE_FX_VM_MAX_SURFACES 64
-#define SCENE_FX_VM_MAX_VERTICES 16384
-#define SCENE_FX_VM_MAX_TRIANGLES 32768
+#define SCENE_FX_VM_MAX_VERTICES 65536
+#define SCENE_FX_VM_MAX_TRIANGLES 131072
 #define SCENE_FX_VM_MAX_TILES 8192
 /* The mesh texture the viewmodel's motion is drawn from: rows of 1024 RGBA
  * float texels. A vertex takes two (its clip position, then its smear), an
  * index a quarter and a tile one. These rows hold the most of each. */
 #define SCENE_FX_VM_MESH_WIDTH 1024
-#define SCENE_FX_VM_MESH_ROWS 64
+#define SCENE_FX_VM_MESH_ROWS 256
+_Static_assert(SCENE_FX_VM_MESH_ROWS * SCENE_FX_VM_MESH_WIDTH * 4 >=
+               SCENE_FX_VM_MAX_VERTICES * 8 + SCENE_FX_VM_MAX_TRIANGLES * 3 + SCENE_FX_VM_MAX_TILES * 4,
+               "Viewmodel motion storage must cover vertices, indices and tiles");
+_Static_assert(SCENE_FX_VM_MESH_ROWS == 256, "Keep the JS viewmodel mesh allocation in sync");
 /* A surface whose vertices moved further on average than this, in normalized
  * device coordinates, between two frames was swapped for another pose. */
 #define SCENE_FX_VM_MAX_JUMP 1.0f
@@ -683,6 +693,13 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "    }\n" +
                 "  o = vec4(weight > 0.0 ? sum / weight : centre.r, 0.0, 0.0, 1.0);\n}\n",
                 ["u_src"], []);
+            /* Multiply the opaque scene before airborne effects are blended.
+             * Otherwise a wall's occlusion is stamped onto smoke in front of it. */
+            link("aoApply", "uniform sampler2D u_ao;\nuniform highp sampler2D u_depth;\n" +
+                "uniform vec2 u_offset;\nvoid main() {\n" +
+                "  float d = texelFetch(u_depth, ivec2(gl_FragCoord.xy), 0).r;\n" +
+                "  float shade = d >= 0.2 ? texture(u_ao, v_uv + u_offset).r : 1.0;\n" +
+                "  o = vec4(vec3(shade), 1.0);\n}\n", ["u_ao", "u_depth"], ["u_offset"]);
             /* Shafts of sunlight at a quarter of the scene's resolution, after
              * Mitchell's light scattering as a post-process (GPU Gems 3, 13):
              * the sky seen about the sun, the brighter the more, as a disk
@@ -787,7 +804,13 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "    weight = max(weight, 0.25);\n" +
                 "  }\n" +
                 "  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) weight = 1.0;\n" +
-                "  vec3 h = toYCoCg(history(uv)) - m1;\n" +
+                "  vec3 historyColor = toYCoCg(history(uv));\n" +
+                /* Muzzle flashes, embers and moving leaf edges must not leave
+                 * their old light in the next frame. Retain the normal history
+                 * weight on stable surfaces, react to real luminance changes. */
+                "  float reactive = smoothstep(0.06, 0.28, abs(toYCoCg(c).x - historyColor.x));\n" +
+                "  weight = max(weight, reactive * 0.82);\n" +
+                "  vec3 h = historyColor - m1;\n" +
                 "  vec3 a = abs(h) / spread;\n" +
                 "  float k = max(a.x, max(a.y, a.z));\n" +
                 "  h = m1 + (k > 1.0 ? h / k : h);\n" +
@@ -1019,10 +1042,8 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "      float hf = abs(hk) > 0.001 ? (1.0 - exp(-hk)) / hk : 1.0;\n" +
                 "      float haze = 1.0 - exp(-u_haze.a * hdist * clamp(hf, 0.25, 3.0));\n" +
                 "      vec3 hazeCol = u_haze.rgb;\n" +
-                "      if (u_film.w > 0.0 && u_tone.x > 0.0) {\n" +
-                "        haze = max(haze, 1.0 - exp(-0.000155 * max(hdist - 120.0, 0.0) * clamp(hf, 0.35, 2.2)));\n" +
-                "        hazeCol = mix(hazeCol, max(hazeCol, vec3(0.52, 0.55, 0.58)), 0.28);\n" +
-                "      }\n" +
+                /* Respect the map's authored air. Film grading must not add a
+                 * second minimum fog density or recolor clear air gray. */
                 "      float glow = pow(max(dot(hp / hdist, u_hazeSun), 0.0), 6.0);\n" +
                 "      col = mix(col, hazeCol + u_hazeSunColor * glow, haze);\n" +
                 "    }\n" +
@@ -1069,13 +1090,25 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 "    }\n" +
                 "    float l = dot(col, vec3(0.2126, 0.7152, 0.0722));\n" +
                 "    col = mix(vec3(l), col, u_film.y);\n" +
-                "    col = clamp(col * mix(vec3(0.955, 0.985, 1.045), vec3(1.035, 1.008, 0.955), smoothstep(0.05, 0.75, l)), 0.0, 1.0);\n" +
-                "    col += u_tone.x * col * (1.0 - col) * (1.0 - col);\n" +
-                "    col = clamp(col + 0.35 * u_tone.x * col * (1.0 - col) * (col - 0.36), 0.0, 1.0);\n" +
-                "    col = col / (1.0 + 0.12 * col) * 1.12;\n" +
+                "    vec3 menuGrade = clamp(col * mix(vec3(0.955, 0.985, 1.045), vec3(1.035, 1.008, 0.955), smoothstep(0.05, 0.75, l)), 0.0, 1.0);\n" +
+                "    menuGrade = menuGrade / (1.0 + 0.12 * menuGrade) * 1.12;\n" +
                 "    if (u_tone.x > 0.0) {\n" +
+                /* One monotonic curve on luminance retains hue and keeps
+                 * neutral materials neutral. Its toe retains dark detail;
+                 * black, white and middle gray remain fixed. Compress chroma
+                 * toward that same luminance when highlights leave the gamut,
+                 * rather than clipping individual red/green/blue channels. */
+                "      float y = dot(col, vec3(0.2126, 0.7152, 0.0722));\n" +
+                "      float mapped = y + 0.9 * y * (1.0 - y) * (y - 0.42);\n" +
+                "      col *= mapped / max(y, 0.00001);\n" +
+                "      float peak = max(col.r, max(col.g, col.b));\n" +
+                "      if (peak > 1.0) col = mix(vec3(mapped), col, max(1.0 - mapped, 0.0) / max(peak - mapped, 0.00001));\n" +
                 "      vec2 vig = v_uv - 0.5;\n" +
                 "      col *= 1.0 - 0.11 * dot(vig, vig);\n" +
+                "      col = mix(menuGrade, col, clamp(u_tone.x, 0.0, 1.0));\n" +
+                "    } else {\n" +
+                /* Preserve the existing grade used by grayscale menu views. */
+                "      col = menuGrade;\n" +
                 "    }\n" +
                 "    col += u_film.z * col * (1.0 - col) * (col - 0.35) * 1.5384615;\n" +
                 "  }\n" +
@@ -1150,6 +1183,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
         fx.scale = function(screenWidth, screenHeight) {
             var sx = fx.width / screenWidth, sy = fx.height / screenHeight;
             var viewport = gl.viewport;
+            fx.viewportDirect = viewport;
             fx.screenWidth = screenWidth;
             fx.screenHeight = screenHeight;
             fx.ownViewport = Object.getOwnPropertyDescriptor(gl, "viewport");
@@ -1292,7 +1326,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 return id;
             };
             vm.smear = texture(gl.RGBA8, fx.width, fx.height);
-            vm.mesh = texture(gl.RGBA32F, 1024, 64);
+            vm.mesh = texture(gl.RGBA32F, 1024, 256);
             fx.texture(0, null);
             vm.depth = gl.createRenderbuffer();
             t.renderbuffers.push(vm.depth);
@@ -1351,14 +1385,67 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             }
             return true;
         };
-        /* The world as drawn so far, for a scope's glass in the hands to mirror
-         * (web_effects.c): copied once a view at its first lens draw, before
-         * the glass, with its mips, so a lens a few dozen pixels wide reads the
-         * world softened rather than shimmering. It stays bound on unit 22,
+        fx.beforeEffects = function(near, px, py, strength, radius, sx, sy, sz, sun) {
+            var t = fx.t, P = fx.programs;
+            if (!t || !P || !fx.drawing || fx.planarDrawing || t.aoApplied ||
+                !(strength > 0 && px > 0 && py > 0) || !fx.featherDepth()) return;
+            var scaled = fx.unscale();
+            var program = gl.getParameter(gl.CURRENT_PROGRAM), vao = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
+            var unit = gl.getParameter(gl.ACTIVE_TEXTURE), viewport = gl.getParameter(gl.VIEWPORT);
+            var mask = gl.getParameter(gl.COLOR_WRITEMASK);
+            var blend = [gl.getParameter(gl.BLEND_SRC_RGB), gl.getParameter(gl.BLEND_DST_RGB),
+                gl.getParameter(gl.BLEND_SRC_ALPHA), gl.getParameter(gl.BLEND_DST_ALPHA)];
+            var equation = [gl.getParameter(gl.BLEND_EQUATION_RGB), gl.getParameter(gl.BLEND_EQUATION_ALPHA)];
+            var caps = [gl.SCISSOR_TEST, gl.BLEND, gl.DEPTH_TEST, gl.CULL_FACE, gl.STENCIL_TEST,
+                gl.POLYGON_OFFSET_FILL, gl.SAMPLE_ALPHA_TO_COVERAGE];
+            var enabled = caps.map(function(cap) { var on = gl.isEnabled(cap); gl.disable(cap); return on; });
+            var textures = [];
+            for (var i = 0; i < 2; ++i) {
+                gl.activeTexture(gl.TEXTURE8 + i);
+                textures.push(gl.getParameter(gl.TEXTURE_BINDING_2D));
+            }
+            gl.bindVertexArray(fx.vao);
+            gl.colorMask(true, true, true, true);
+            var A = P.ao;
+            gl.useProgram(A.program);
+            gl.uniform4f(A.u_aoView, near, 0.9995002746582031, px, py);
+            gl.uniform4f(A.u_aoParams, radius, strength, fx.width, fx.height);
+            gl.uniform4f(A.u_aoSun, sx, sy, sz, sun);
+            fx.texture(0, t.feather.depth);
+            fx.pass(A, t.aoFbo[0], t.hw, t.hh);
+            fx.texture(0, t.ao[0]);
+            fx.pass(P.aoBlur, t.aoFbo[1], t.hw, t.hh);
+            gl.useProgram(P.aoApply.program);
+            gl.uniform2f(P.aoApply.u_offset, 0.5 / t.hw, 0.5 / t.hh);
+            fx.texture(0, t.ao[1]);
+            fx.texture(1, t.feather.depth);
+            gl.enable(gl.BLEND);
+            gl.blendEquationSeparate(gl.FUNC_ADD, gl.FUNC_ADD);
+            gl.blendFuncSeparate(gl.ZERO, gl.SRC_COLOR, gl.ZERO, gl.ONE);
+            fx.pass(P.aoApply, t.ms || t.scene, fx.width, fx.height);
+            t.aoApplied = true;
+            for (var j = 0; j < 2; ++j) fx.texture(j, textures[j]);
+            gl.blendFuncSeparate(blend[0], blend[1], blend[2], blend[3]);
+            gl.blendEquationSeparate(equation[0], equation[1]);
+            gl.colorMask(mask[0], mask[1], mask[2], mask[3]);
+            for (var c = 0; c < caps.length; ++c) {
+                if (enabled[c]) gl.enable(caps[c]); else gl.disable(caps[c]);
+            }
+            gl.bindVertexArray(vao);
+            gl.useProgram(program);
+            gl.activeTexture(unit);
+            gl.viewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+            if (scaled) fx.scale(fx.screenWidth, fx.screenHeight);
+        };
+        /* The world as drawn so far, for weapon finishes, scope glass and
+         * next frame's depth-tested puddle reflections
+         * (web_effects.c): copied once a view before the first viewmodel draw,
+         * with mips for rough surfaces and small lenses to read a softened
+         * image rather than shimmer. Color stays bound on unit 22, depth on 25,
          * clear of the units the compositor binds and unbinds. */
         fx.lensScene = function() {
             var t = fx.t;
-            if (!t || !fx.drawing) return false;
+            if (!t || !fx.drawing || fx.planarDrawing) return false;
             var l = t.lens;
             if (!l) {
                 l = t.lens = { ok: false, ready: false };
@@ -1373,11 +1460,23 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+                // A separate world-only depth copy: feather depth may be
+                // refreshed later, and the main depth includes the weapon.
+                l.depth = gl.createTexture();
+                t.textures.push(l.depth);
+                gl.activeTexture(gl.TEXTURE25);
+                gl.bindTexture(gl.TEXTURE_2D, l.depth);
+                gl.texStorage2D(gl.TEXTURE_2D, 1, gl.DEPTH24_STENCIL8, fx.width, fx.height);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
                 gl.activeTexture(unit);
                 l.fbo = gl.createFramebuffer();
                 t.framebuffers.push(l.fbo);
                 gl.bindFramebuffer(gl.FRAMEBUFFER, l.fbo);
                 gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, l.color, 0);
+                gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT, gl.TEXTURE_2D, l.depth, 0);
                 l.ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
                 gl.bindFramebuffer(gl.FRAMEBUFFER, t.ms || t.scene);
                 if (!l.ok) console.warn("[scene-fx] the world's copy for scope glass is unavailable; scopes keep their painted glass");
@@ -1388,7 +1487,8 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 if (scissor) gl.disable(gl.SCISSOR_TEST);
                 gl.bindFramebuffer(gl.READ_FRAMEBUFFER, t.ms || t.scene);
                 gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, l.fbo);
-                gl.blitFramebuffer(0, 0, fx.width, fx.height, 0, 0, fx.width, fx.height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+                gl.blitFramebuffer(0, 0, fx.width, fx.height, 0, 0, fx.width, fx.height,
+                    gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT, gl.NEAREST);
                 if (t.feather && t.feather.ok && !t.feather.ready) {
                     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, t.feather.fbo);
                     gl.blitFramebuffer(0, 0, fx.width, fx.height, 0, 0, fx.width, fx.height, gl.DEPTH_BUFFER_BIT, gl.NEAREST);
@@ -1401,8 +1501,34 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
                 gl.bindFramebuffer(gl.FRAMEBUFFER, t.ms || t.scene);
                 if (scissor) gl.enable(gl.SCISSOR_TEST);
                 l.ready = true;
+                l.frame = fx.frame;
+                var camera = Module.cod2WaterCamera;
+                l.camera = camera && camera.valid ? {
+                    view: new Float32Array(camera.view), projection: new Float32Array(camera.projection),
+                    jitter: new Float32Array(camera.jitter), time: camera.time
+                } : null;
             }
             return true;
+        };
+        // Reproject a current water ray into the last captured world's view.
+        // History is one frame old, discarded on gaps/cuts, and never sampled
+        // after this frame overwrites the copy for the weapon's reflections.
+        fx.waterHistory = function(material) {
+            fx.waterUsed = true;
+            var l = fx.t.lens, now = Module.cod2WaterCamera;
+            if (!l || !l.ok || !l.camera || l.frame !== fx.frame - 1 || !now || !now.valid ||
+                now.time < l.camera.time || now.time - l.camera.time > 100) return;
+            var then = l.camera, v = material.view, p = then.view, m = material.waterView;
+            for (var c = 0; c < 3; ++c)
+                for (var r = 0; r < 3; ++r)
+                    m[c * 4 + r] = p[r] * v[c] + p[4 + r] * v[4 + c] + p[8 + r] * v[8 + c];
+            for (var r = 0; r < 3; ++r)
+                m[12 + r] = p[12 + r] - m[r] * v[12] - m[4 + r] * v[13] - m[8 + r] * v[14];
+            m[3] = m[7] = m[11] = 0; m[15] = 1;
+            if (Math.hypot(m[12], m[13], m[14]) > 64 || m[0] + m[5] + m[10] < 2.7) return;
+            material.waterProjection.set(then.projection);
+            material.waterProjection[3] = 1;
+            material.waterJitter.set(then.jitter);
         };
         /* Normalized Gaussian over texels 0..2 * pairs, folded into bilinear taps:
          * [center weight, pair weights...] and [pair offsets...]. */
@@ -1422,6 +1548,8 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
         };
         fx.compose = function(o, mesh) {
             var t = fx.t, P = fx.programs, H = HEAPF32;
+            // Spectating/no weapon still supplies a world copy for next frame.
+            if (fx.waterUsed && (!t.lens || !t.lens.ready)) fx.lensScene();
             var scaled = fx.unscale();
             fx.drawing = false;
             if (!t || !P) return;
@@ -1432,7 +1560,7 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
             /* Any window the stencil cut also needs its glass. */
             var lens = lensPresence > 0, scopeBlur = lens && lensBlur > 0.004;
             var glow = glow0 > 0 || glow1 > 0, blurBehind = backdrop > 0.004, dof = ads > 0.004 || blurBehind || lens;
-            var ao = H[o + 55] > 0, haze = H[o + 62] > 0, shafts = H[o + 73] > 0;
+            var ao = H[o + 55] > 0 && !t.aoApplied, haze = H[o + 62] > 0, shafts = H[o + 73] > 0;
             var blast = H[o + 96] > 0 || H[o + 97] > 0 || H[o + 98] > 0 || H[o + 99] > 0;
             var clarity = H[o + 100] > 0, taa = H[o + 102] > 0;
             var lines = h / 480;
@@ -1679,6 +1807,9 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
     gl.bindFramebuffer(gl.FRAMEBUFFER, fx.t.ms || fx.t.scene);
     if (width !== screenWidth || height !== screenHeight) fx.scale(screenWidth, screenHeight);
     fx.drawing = true;
+    fx.frame = (fx.frame || 0) + 1;
+    fx.waterUsed = false;
+    fx.t.aoApplied = false;
     if (fx.t.feather) fx.t.feather.ready = false;
     if (fx.t.lens) fx.t.lens.ready = false;
     return 1;
@@ -1688,6 +1819,12 @@ EM_JS(void, WebSceneFx_Compose, (const float *params, const float *mesh), {
     var fx = Module.cod2SceneFx;
     if (fx && fx.t) fx.compose(params >>> 2, mesh >>> 2);
     else if (fx) { fx.unscale(); fx.drawing = false; }
+});
+
+EM_JS(void, WebSceneFx_EffectOcclusion, (float near, float px, float py, float strength, float radius,
+                                      float sx, float sy, float sz, int sun), {
+    var fx = Module.cod2SceneFx;
+    if (fx && fx.beforeEffects) fx.beforeEffects(near, px, py, strength, radius, sx, sy, sz, sun);
 });
 
 /* Marks the scope's glass in the scene's stencil, bit 0x80, before the
@@ -2151,16 +2288,44 @@ void WebSceneFx_EndViewmodel(void)
     s_scopeMasking = 0;
 }
 
+/* Reflection directions use the world's lens, never the weapon's wider FOV. */
+EM_JS(void, WebSceneFx_ReflectionCamera, (float x, float y), {
+    var camera = Module.cod2ReflectionCamera;
+    if (!camera) camera = Module.cod2ReflectionCamera = new Float32Array(2);
+    var valid = Number.isFinite(x) && Number.isFinite(y) && x > 0 && y > 0;
+    camera[0] = valid ? x : 0;
+    camera[1] = valid ? y : 0;
+});
+
+EM_JS(void, WebSceneFx_WaterCamera, (const float *view, float x, float y, float nearClip, float jitterX, float jitterY, int time), {
+    var camera = Module.cod2WaterCamera;
+    if (!camera) camera = Module.cod2WaterCamera = {
+        view: new Float32Array(16), projection: new Float32Array(4), jitter: new Float32Array(4)
+    };
+    camera.valid = !!view && x > 0 && y > 0 && nearClip > 0;
+    if (!camera.valid) return;
+    camera.view.set(HEAPF32.subarray(view >>> 2, (view >>> 2) + 16));
+    // Match the D3D-to-GL handedness conversion in CDirect3DDevice.
+    for (var i = 2; i < 16; i += 4) camera.view[i] = -camera.view[i];
+    // BeginView receives -projection[14], already scaled by the infinite projection.
+    camera.projection.set([x, y, nearClip, 1]);
+    camera.jitter.set([jitterX, jitterY, 0, 0]);
+    camera.time = time;
+});
+
 /* The D3D view and projection matrices of the view about to begin, and the
  * game's time it shows in milliseconds. */
 void WebSceneFx_SetCamera(const float *viewMatrix, const float *projectionMatrix, int time)
 {
-    if (!viewMatrix || !projectionMatrix)
+    if (!viewMatrix || !projectionMatrix) {
+        WebSceneFx_ReflectionCamera(0, 0);
         return;
+    }
     memcpy(s_cameraView, viewMatrix, sizeof(s_cameraView));
     memcpy(s_cameraLens, projectionMatrix, sizeof(s_cameraLens));
     s_cameraProjection[0] = projectionMatrix[0];
     s_cameraProjection[1] = projectionMatrix[5];
+    WebSceneFx_ReflectionCamera(s_cameraProjection[0], s_cameraProjection[1]);
     s_cameraTime = time;
     s_cameraPending = 1;
 }
@@ -2583,11 +2748,11 @@ static void WebSceneFx_FillParams(float *params)
     params[SCENE_FX_NEAR_BLUR] = 3.0f;
     /* Temporal antialiasing softens what it averages: sharpen its result more. */
     params[SCENE_FX_SHARPEN] = film ? (s_taaView ? 0.2f : 0.1f) : 0.0f;
-    /* Grounded 35mm WWII film saturation. */
-    params[SCENE_FX_SATURATION] = 1.06f;
+    /* Preserve the authored palette; illumination supplies its color. */
+    params[SCENE_FX_SATURATION] = 1.0f;
     params[SCENE_FX_CONTRAST] = 0.0f;
     params[SCENE_FX_FILM] = film ? 1.0f : 0.0f;
-    params[SCENE_FX_TONE] = film ? SCENE_FX_SHADE_LIFT * (1.0f - s_grayFrac) : 0.0f;
+    params[SCENE_FX_TONE] = film ? SCENE_FX_PHOTO_GRADE * (1.0f - s_grayFrac) : 0.0f;
     params[SCENE_FX_WORLD_NEAR_CLIP] = s_worldNearClip;
     params[SCENE_FX_NEAR_END] = s_nearEnd;
     params[SCENE_FX_WORLD_BLUR] = 1.0f;
@@ -2655,6 +2820,14 @@ float WebSceneFx_WorldNearClip(void)
     return s_active ? s_worldNearClip : 0.0f;
 }
 
+void WebSceneFx_BeforeEffects(void)
+{
+    if (s_active && WebSceneFx_AoEnabled())
+        WebSceneFx_EffectOcclusion(s_worldNearClip, s_viewProjection[0], s_viewProjection[1],
+            SCENE_FX_AO_STRENGTH, SCENE_FX_AO_WORLD_RADIUS, s_hazeSun[0], s_hazeSun[1], s_hazeSun[2],
+            s_hazeSunColor[0] + s_hazeSunColor[1] + s_hazeSunColor[2] > 0.0f);
+}
+
 void WebSceneFx_EndView(void)
 {
     float params[SCENE_FX_PARAM_COUNT];
@@ -2664,6 +2837,7 @@ void WebSceneFx_EndView(void)
         return;
     s_active = 0;
     WebSceneFx_FillParams(params);
+    WebPlanar_EndFrame();
     WebSceneFx_Compose(params, s_vmMesh);
 }
 
@@ -2682,6 +2856,20 @@ void WebSceneFx_BeginView(int x, int y, int width, int height, int screenWidth, 
     s_frameUsed = 1;
     s_scopeStencil = 0;
     WebSunShadows_Render();
+    {
+        static unsigned int shadowIndices[SCENE_FX_VM_MAX_TRIANGLES * 3];
+        int n = 0;
+        if (!s_vmOverflow && s_cameraPending && WebSceneFx_CameraValid())
+            for (int s = 0; s < s_vmSurfaceCount; ++s) {
+                const WebSceneFxVmSurface *surface = &s_vmSurfaces[s];
+                for (int t = 0; t < surface->triangles; ++t) {
+                    const unsigned short *tri = surface->indices + t * 3;
+                    if (tri[0] >= surface->count || tri[1] >= surface->count || tri[2] >= surface->count) continue;
+                    for (int k = 0; k < 3; ++k) shadowIndices[n++] = surface->first + tri[k];
+                }
+            }
+        WebViewmodelShadows_Render(s_vmWorld, s_vmVertexCount, shadowIndices, n, s_cameraView);
+    }
     WebSceneFx_SceneSize(width, height, &sceneWidth, &sceneHeight);
     nearClip = isfinite(depthHackNearClip) && depthHackNearClip > 0.0f ? depthHackNearClip : 0.1f;
     s_viewProjection[0] = s_viewProjection[1] = 0.0f;
@@ -2725,6 +2913,9 @@ void WebSceneFx_BeginView(int x, int y, int width, int height, int screenWidth, 
     /* Sampling a mip finer by the scale's octaves gives the color maps the
      * detail of the canvas the scene is scaled up to, as upscalers do. */
     s_lodBias = s_active && scaled ? WebSceneFx_Clamp(log2f((float)sceneHeight / (float)height), -1.0f, 0.0f) : 0.0f;
+    WebSceneFx_WaterCamera(s_active && WebSceneFx_CameraValid() ? s_cameraView : NULL,
+        s_cameraProjection[0], s_cameraProjection[1], s_worldNearClip, s_jitter[0], s_jitter[1], s_cameraTime);
+    WebPlanar_BeginFrame();
 }
 
 void WebSceneFx_EndFrame(void)

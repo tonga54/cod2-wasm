@@ -47,6 +47,7 @@ list(APPEND COD2_CLIENT_SOURCES
   "${CMAKE_CURRENT_LIST_DIR}/web_effects.c"
   "${CMAKE_CURRENT_LIST_DIR}/web_classes.c"
   "${CMAKE_CURRENT_LIST_DIR}/web_scene_fx.c"
+  "${CMAKE_CURRENT_LIST_DIR}/web_planar.c"
   "${CMAKE_CURRENT_LIST_DIR}/web_sun_shadows.c"
   "${CMAKE_CURRENT_LIST_DIR}/web_jpeg_compat.c")
 

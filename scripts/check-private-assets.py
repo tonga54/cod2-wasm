@@ -16,6 +16,14 @@ from browser_class_pictures import OWNER_PICTURES_DIR, PICTURE_FOLDER, load_owne
 from browser_attachment_models import attachment_model_assets
 from browser_muzzle_flashes import muzzle_flash_assets
 from browser_grenade_explosions import grenade_explosion_assets
+from browser_weather import weather_assets
+from browser_smoke_screen import smoke_screen_assets
+from browser_lantern_lights import lantern_light_assets
+from browser_character_materials import character_material_assets
+from browser_remix_model import PACK as REMIX_MODEL_PACK, MODEL, SURFACE, apply_model_pack
+from remix_static_models import PACK as REMIX_PROPS_PACK, apply_prop_pack
+from browser_remix_shutters import PACK as REMIX_SHUTTERS_PACK, apply_shutter_pack
+from browser_remix_windows import PACK as REMIX_WINDOWS_PACK, apply_window_pack
 from browser_explosives import (ALIAS_TABLE as EXPLOSIVE_ALIAS_TABLE, ALIASES as EXPLOSIVE_ALIASES,
                                 WEAPONS as EXPLOSIVE_WEAPONS, explosive_assets)
 from browser_settings_menu import apply_settings_menu
@@ -23,6 +31,7 @@ from browser_objective_assets import objective_asset_roots
 from browser_spawn_safety import apply_spawn_safety
 from browser_endgame import SCRIPTS as ENDGAME_SCRIPTS, apply_endgame_timing
 from browser_player_health import apply_player_health
+from browser_remix_assets import PACK as REMIX_PACK, apply_owner_pack, material_textures
 from browser_sound_assets import (ENDGAME_MUSIC_FILE, ENDGAME_MUSIC_OWNER_FILE, ENDGAME_MUSIC_TABLE,
                                   HIT_SOUND_ALIAS, HIT_SOUND_FILE, HIT_SOUND_OWNER_FILE, HIT_SOUND_TABLE,
                                   LASTMINUTE_MUSIC_FILE, LASTMINUTE_MUSIC_TABLE, lastminute_owner_file,
@@ -50,10 +59,48 @@ policy = json.loads(args.manifest.read_text())["variants"]["cod2-mp"]
 originals = [zipfile.ZipFile(p) for p in sorted((root / "data/main").glob("*.iwd"))]
 try:
     index = {n.lower(): (z, n) for z in originals for n in z.namelist() if not n.endswith("/")}
-    explosives = explosive_assets(lambda name: index[name][0].read(index[name][1]))
+    smoke_screen = smoke_screen_assets(lambda name: index[name][0].read(index[name][1]))
     attachment_models = attachment_model_assets(lambda name: index[name.lower()][0].read(index[name.lower()][1]))
-    muzzle_flashes = muzzle_flash_assets(lambda name: index[name][0].read(index[name][1]))
+    characters = character_material_assets(lambda name: index[name][0].read(index[name][1]))
     grenade_explosions = grenade_explosion_assets(lambda name: index[name][0].read(index[name][1]))
+    generated_materials = {**attachment_models, **smoke_screen, **characters, **grenade_explosions}
+    remix_expected = {}
+    remix_path = root / 'data/main' / REMIX_PACK
+    if remix_path.is_file():
+        with zipfile.ZipFile(remix_path) as pack:
+            report = json.loads(pack.read('remix-report.json'))
+        remix_expected = {name: generated_materials[name] if name in generated_materials else index[name][0].read(index[name][1])
+                          for name in report['materials']}
+        apply_owner_pack(remix_expected, remix_path)
+    if (root / 'data/main' / REMIX_MODEL_PACK).is_file():
+        models = {n: index[n][0].read(index[n][1]) for n in (MODEL, SURFACE)}
+        apply_model_pack(models, root / 'data/main' / REMIX_MODEL_PACK)
+        remix_expected.update(models)
+    prop_path = root / 'data/main' / REMIX_PROPS_PACK
+    if prop_path.is_file():
+        with zipfile.ZipFile(prop_path) as pack:
+            report = json.loads(pack.read('props-report.json'))
+        props = {n: index[n][0].read(index[n][1]) for n in report['originals']}
+        apply_prop_pack(props, prop_path)
+        remix_expected.update(props)
+    shutter_path = root / 'data/main' / REMIX_SHUTTERS_PACK
+    if shutter_path.is_file():
+        with zipfile.ZipFile(shutter_path) as pack:
+            report = json.loads(pack.read('shutters-report.json'))
+        shutters = {n: index[n][0].read(index[n][1]) for n in report['originals']}
+        apply_shutter_pack(shutters, shutter_path)
+        remix_expected.update(shutters)
+    window_path = root / 'data/main' / REMIX_WINDOWS_PACK
+    if window_path.is_file():
+        with zipfile.ZipFile(window_path) as pack:
+            report = json.loads(pack.read('windows-report.json'))
+        windows = {n: index[n][0].read(index[n][1]) for n in report['originals']}
+        apply_window_pack(windows, window_path)
+        remix_expected.update(windows)
+    explosives = explosive_assets(lambda name: index[name][0].read(index[name][1]))
+    muzzle_flashes = muzzle_flash_assets(lambda name: index[name][0].read(index[name][1]))
+    weather = weather_assets(lambda name: index[name][0].read(index[name][1]))
+    lanterns = lantern_light_assets(lambda name: index[name][0].read(index[name][1]))
     retail_alias_rows = {}
     for name, (source, original_name) in index.items():
         if name.startswith("soundaliases/") and name.endswith(".csv"):
@@ -72,6 +119,9 @@ try:
             for name in archive.namelist():
                 data = archive.read(name)
                 entries[name] = data
+                if name in remix_expected:
+                    assert data == remix_expected[name], 'Modified Carentan resource: '+name
+                    continue
                 if name in (HIT_SOUND_TABLE, "sound/" + HIT_SOUND_FILE, MENU_MUSIC_TABLE, "sound/" + MENU_MUSIC_FILE,
                             PREMATCH_MUSIC_TABLE, "sound/" + PREMATCH_MUSIC_FILE, ENDGAME_MUSIC_TABLE,
                             "sound/" + ENDGAME_MUSIC_FILE, LASTMINUTE_MUSIC_TABLE, "sound/" + LASTMINUTE_MUSIC_FILE):
@@ -86,6 +136,18 @@ try:
                     continue
                 if name in attachment_models:
                     assert data == attachment_models[name], name
+                    continue
+                if name in weather:
+                    assert data == weather[name], name
+                    continue
+                if name in smoke_screen:
+                    assert data == smoke_screen[name], name
+                    continue
+                if name in lanterns:
+                    assert data == lanterns[name], name
+                    continue
+                if name in characters:
+                    assert data == characters[name], name
                     continue
                 if name in muzzle_flashes:
                     assert data == muzzle_flashes[name], name
@@ -157,6 +219,11 @@ try:
                     assert all(tuple(row) in source_rows for row in selected_rows[1:]), name
                 else:
                     assert data == original, "Modified original resource: " + name
+    for name, data in remix_expected.items():
+        assert entries.get(name) == data, 'Missing Carentan resource: '+name
+        if name.startswith('materials/'):
+            for _, _, image in material_textures(data):
+                assert 'images/'+image+'.iwi' in entries, 'Missing Carentan image: '+image
     assert sorted(n for n in entries if n.endswith(".d3dbsp")) == sorted(
         f"maps/mp/{mapname}.d3dbsp" for mapname in maps)
     assert sorted(n for n in entries if n.endswith('.arena')) == sorted(
@@ -185,6 +252,8 @@ try:
         assert name in entries, "Missing explosive resource: " + name
     for name in attachment_models:
         assert name in entries, "Missing attachment model: " + name
+    for name in weather:
+        assert name in entries, "Missing winter weather resource: " + name
     for name, data in muzzle_flashes.items():
         assert name in entries, "Missing muzzle flash: " + name
         if name.endswith(".efx"):
@@ -200,7 +269,10 @@ try:
             for effect in re.findall(rb'\tplayfx\s*\[\s*/(\S+)', data):
                 assert effect.decode().lower() + ".efx" in grenade_explosions, "Missing explosion effect: " + effect.decode()
         elif name.startswith("materials/"):
-            assert "images/" + name[len("materials/"):] + ".iwi" in entries, "Missing explosion image: " + name
+            # The blast flash shares the muzzle glow image but has its own
+            # depth-feathered material. Follow actual bindings, not filenames.
+            for _, _, image in material_textures(data):
+                assert "images/" + image + ".iwi" in entries, "Missing explosion image: " + image
     for name, data in entries.items():
         if name.startswith("weapons/mp/"):
             fields = data.decode("latin-1").split("\\")

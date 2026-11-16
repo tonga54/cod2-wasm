@@ -157,6 +157,10 @@ HRESULT CDirect3DVertexBuffer_GetDesc(const CDirect3DVertexBuffer *_this, D3DVER
 
 void ZN21CDirect3DVertexBufferD1Ev(void *_this)
 {
+#ifdef __EMSCRIPTEN__
+    extern void WebWorldNormals_Release(const void *);
+    WebWorldNormals_Release(_this);
+#endif
     CDirect3DVertexBufferClean *vb = (CDirect3DVertexBufferClean *)_this;
     vb->vtable = vtbl_CDirect3DVertexBuffer;
 #ifdef __EMSCRIPTEN__
