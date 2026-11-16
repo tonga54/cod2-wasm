@@ -217,13 +217,37 @@ option explains itself.
 
 ## Rendering beyond the first browser port
 
+An optional **Carentan RTX Remix owner pack** now supplies replacement building
+and terrain materials, normal maps, converted roughness, height detail, skies
+and compatible smoke across all eight maps. It uses the browser's existing
+lighting, shadows and atmosphere, with view-dependent height relief and wet mud
+depressions. Bullet marks on stone, plaster and wood also use donor normals and
+view-dependent crater relief. An optional Enfield mesh pack transfers the donor's detailed rifle
+to the original animations; weapons cast their own first-person shadows.
+Their reflective surfaces also sample the visible environment, filtered by
+roughness, with a sky/light-grid fallback for directions outside the screen.
+An additional owner prop pack replaces nearby wooden barrels, crates, chairs,
+bramble bushes, four hedge variants, grass and three sizes of broadleaf tree with donor meshes while
+preserving map collision. Tree fitting retains the grounded trunk's position
+and width independently of the crown's asymmetric shape.
+The nearby trees now use the donor's complete source mesh, optimized locally,
+with finer leaves and more visible branching than its pre-reduced LOD.
+Complete donor doors and projected shutter surfaces add aligned wood grain,
+recesses and hardware to the five maps that share those materials. The optional
+shutter pack bakes the source mesh into color, normal, roughness and height maps;
+its runtime needs no USD library and retains the original collision.
+Projected window frames add worn paint and shaped moldings in Carentan,
+Burgundy and Dawnville; closed panes reflect as flat glass above their curtains.
+See [private import and limits](docs/GRAPHICS_2026-10-16.md#carentan-remix-owner-pack)
+for conversion; the RTX runtime and private textures are not distributed here.
+
 ![WWII 1080p graphics comparison: surface relief and filmic grade, live scope glass and oiled gunmetal, WWII foliage palette and 3x detail distance, and supersonic tracers with ballistic sparks](docs/images/wwii-graphics-before-after.jpg)
 
 ![Four 1080p captures across Burgundy, Toujane, Matmata and Carentan showing oiled blued steel, live coated scope reflections, dusk aerial depth and 140+ FPS at 1080p 4x MSAA](docs/images/wwii-showcase.jpg)
 
 ![Before and after: sun shadows from moving models, feathered fire and smoke, antialiased leaves and deeper surface relief](docs/images/rendering-before-after.jpg)
 
-![Camera and weapon motion blur, short bent tracers, ejected brass and a lit MP44 muzzle flash](docs/images/combat-effects.jpg)
+![Earlier combat-effects capture: camera and weapon motion blur, tracers, ejected brass and a lit MP44 muzzle flash](docs/images/combat-effects.jpg)
 
 | Area | Baseline port / DX7 | Current WWII 1080p renderer |
 | --- | --- | --- |
@@ -231,7 +255,7 @@ option explains itself.
 | **Weapons & optics** | Washed specular tint, static painted scope texture, close-up DXT bands on hands | Dark oiled blued steel, 35mm near-eye hip receiver bokeh, **live upright world reflection** in coated scope glass, filtered close-up skin normals |
 | **Shadows & relief** | 2048² 16-bit sun map for in-frustum casters only; flat cobbles and masonry | **4096 × 4096** 24-bit rotated Vogel PCF sun shadows (including off-frustum casters), per-unit stone creases, macro-filtered dielectric sheen and sun contact shadows |
 | **Atmosphere & color** | Saturated 2005 greens, single-map fog, frame-to-frame shimmer | **35mm WWII filmic grade** (olive/earth foliage, temporally steady shadow toe, window-safe sun shafts/bloom) and multi-map aerial perspective |
-| **Ballistics & impacts** | Dim 40% tracers, short-range dust impacts | **100% white-gold supersonic tracers** with nearby wall glow, gravity-arcing **ballistic spark showers**, impact corona flashes, **1.75×** impact debris and extended brass ejection |
+| **Ballistics & impacts** | Dim 40% tracers, short-range dust impacts | **Occasional, thin, straight tracers** with a fading tail and restrained local glow, gravity-arcing **ballistic spark showers**, impact corona flashes, **1.75×** impact debris and extended brass ejection |
 
 - **Light & materials:** the original normal, specular and detail maps shade
   lightmapped masonry, cobbles, wood and models per pixel (`r_sunShading 0.90`,

@@ -57,6 +57,7 @@ static float s_maxs[3];
 static int s_capturing;
 static int s_overflowWarned;
 static int s_viewReady;
+static int s_viewmodelSunReady;
 static float s_eye[3];
 static float s_forward[3];
 static float s_sun[3];
@@ -68,13 +69,15 @@ static int s_lastEyeValid;
  * the size x size depth map with the clip matrix (column-major, world to GL
  * clip space), and keeps the map bound on texture unit 18 for the world's
  * shaders. Returns whether the map holds this frame's casters. */
-EM_JS(int, WebSunShadows_Draw, (const float *positions, int vertexCount, const unsigned int *indices,
-                                int indexCount, const float *clip, int size), {
+EM_JS(int, WebShadowMap_Draw, (const float *positions, int vertexCount, const unsigned int *indices,
+                                int indexCount, const float *clip, int size, int viewmodel), {
     if (typeof GLctx === "undefined" || !GLctx || !GLctx.createVertexArray) return 0;
     var gl = GLctx;
-    var s = Module.cod2SunShadowPass;
+    var passName = viewmodel ? 'cod2ViewmodelShadowPass' : 'cod2SunShadowPass';
+    var textureUnit = gl.TEXTURE0 + (viewmodel ? 24 : 18);
+    var s = Module[passName];
     if (!s || s.gl !== gl) {
-        s = Module.cod2SunShadowPass = { gl: gl, failed: false, size: 0, texture: null, fbo: null, far: new Float32Array([1]) };
+        s = Module[passName] = { gl: gl, failed: false, size: 0, texture: null, fbo: null, far: new Float32Array([1]) };
         var vs = gl.createShader(gl.VERTEX_SHADER);
         gl.shaderSource(vs, "#version 300 es\nlayout(location = 0) in vec3 a_position;\nuniform highp mat4 u_clip;\n" +
             "void main() { gl_Position = u_clip * vec4(a_position, 1.0); }\n");
@@ -120,7 +123,7 @@ EM_JS(int, WebSunShadows_Draw, (const float *positions, int vertexCount, const u
         if (s.texture) gl.deleteTexture(s.texture);
         if (s.fbo) gl.deleteFramebuffer(s.fbo);
         s.size = 0;
-        gl.activeTexture(gl.TEXTURE18);
+        gl.activeTexture(textureUnit);
         s.texture = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D, s.texture);
         gl.texStorage2D(gl.TEXTURE_2D, 1, gl.DEPTH_COMPONENT24 || gl.DEPTH_COMPONENT16, size, size);
@@ -151,6 +154,10 @@ EM_JS(int, WebSunShadows_Draw, (const float *positions, int vertexCount, const u
     var vao = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
     var arrayBuffer = gl.getParameter(gl.ARRAY_BUFFER_BINDING);
     var viewport = gl.getParameter(gl.VIEWPORT);
+    var depthRange = gl.getParameter(gl.DEPTH_RANGE);
+    var depthFunc = gl.getParameter(gl.DEPTH_FUNC);
+    var depthMask = gl.getParameter(gl.DEPTH_WRITEMASK);
+    var colorMask = gl.getParameter(gl.COLOR_WRITEMASK);
     var caps = [gl.BLEND, gl.CULL_FACE, gl.SCISSOR_TEST, gl.STENCIL_TEST, gl.POLYGON_OFFSET_FILL, gl.DEPTH_TEST];
     var enabled = [];
     for (var c = 0; c < caps.length; ++c) {
@@ -161,6 +168,7 @@ EM_JS(int, WebSunShadows_Draw, (const float *positions, int vertexCount, const u
     WebGL2RenderingContext.prototype.viewport.call(gl, 0, 0, size, size);
     /* Every D3D9 clear and draw sets the write masks and depth function again. */
     gl.depthMask(true);
+    gl.depthRange(0, 1);
     gl.clearBufferfv(gl.DEPTH, 0, s.far);
     var drawn = 0;
     if (indexCount > 0 && vertexCount > 0) {
@@ -183,6 +191,10 @@ EM_JS(int, WebSunShadows_Draw, (const float *positions, int vertexCount, const u
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, drawFramebuffer);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, readFramebuffer);
     WebGL2RenderingContext.prototype.viewport.call(gl, viewport[0], viewport[1], viewport[2], viewport[3]);
+    gl.depthRange(depthRange[0], depthRange[1]);
+    gl.depthFunc(depthFunc);
+    gl.depthMask(depthMask);
+    gl.colorMask(colorMask[0], colorMask[1], colorMask[2], colorMask[3]);
     for (var r = 0; r < caps.length; ++r)
         if (enabled[r]) gl.enable(caps[r]);
         else gl.disable(caps[r]);
@@ -216,6 +228,7 @@ static int WebSunShadows_Finite3(const float *v)
 /* R_BeginFrame: the front end skins this frame's models from here on. */
 void WebSunShadows_BeginFrame(void)
 {
+    s_viewmodelSunReady = 0;
     s_vertexCount = 0;
     s_indexCount = 0;
     s_capturing = WebSunShadows_Enabled();
@@ -295,17 +308,16 @@ void WebSunShadows_EndCapture(const float *eye, const float *forward, const floa
     memcpy(s_lastEye, eye, sizeof(s_lastEye));
     s_lastEyeValid = 1;
     s_viewReady = 1;
+    s_viewmodelSunReady = 1;
 }
 
 /* The map's matrices: texture takes a world point to its map coordinates and
  * depth in [0, 1], clip to GL clip space for drawing the casters. Its square
  * is centred ahead of the eye and snapped to whole texels across the rays,
  * so shadows hold still as the eye moves. Returns 0 without a usable sun. */
-int WebSunShadows_Matrices(const float *eye, const float *forward, const float *sun, const float *sunColor,
-                           float *texture, float *clip)
+static int WebSunShadows_Basis(const float *sun, const float *sunColor, float *f, float *r, float *u)
 {
-    float f[3], r[3], u[3], ref[3] = {0.0f, 0.0f, 1.0f}, ahead[3] = {0.0f, 0.0f, 0.0f}, centre[3];
-    float length, texel, a, b, depth, inverseExtent, inverseDepth;
+    float ref[3] = {0.0f, 0.0f, 1.0f}, length;
     int i;
 
     length = sqrtf(sun[0] * sun[0] + sun[1] * sun[1] + sun[2] * sun[2]);
@@ -330,6 +342,17 @@ int WebSunShadows_Matrices(const float *eye, const float *forward, const float *
     u[0] = r[1] * f[2] - r[2] * f[1];
     u[1] = r[2] * f[0] - r[0] * f[2];
     u[2] = r[0] * f[1] - r[1] * f[0];
+    return 1;
+}
+
+int WebSunShadows_Matrices(const float *eye, const float *forward, const float *sun, const float *sunColor,
+                            float *texture, float *clip)
+{
+    float f[3], r[3], u[3], ahead[3] = {0.0f, 0.0f, 0.0f}, centre[3];
+    float length, texel, a, b, depth, inverseExtent, inverseDepth;
+    int i;
+    if (!WebSunShadows_Basis(sun, sunColor, f, r, u))
+        return 0;
     length = sqrtf(forward[0] * forward[0] + forward[1] * forward[1]);
     if (length > 0.001f) {
         ahead[0] = forward[0] / length;
@@ -405,7 +428,7 @@ void WebSunShadows_Render(void)
     memset(params, 0, sizeof(params));
     if (ready && WebSunShadows_Enabled() && s_indexCount > 0 &&
         WebSunShadows_Matrices(s_eye, s_forward, s_sun, s_sunColor, texture, clip) &&
-        WebSunShadows_Draw(s_positions, s_vertexCount, s_indices, s_indexCount, clip, SUN_SHADOW_SIZE)) {
+        WebShadowMap_Draw(s_positions, s_vertexCount, s_indices, s_indexCount, clip, SUN_SHADOW_SIZE, 0)) {
         params[SUN_SHADOW_STRENGTH] = 1.0f;
         params[SUN_SHADOW_TEXEL] = 1.0f / (float)SUN_SHADOW_SIZE;
         params[SUN_SHADOW_EDGE] = SUN_SHADOW_FADE;
@@ -413,4 +436,57 @@ void WebSunShadows_Render(void)
         WebSunShadows_Rect(texture, s_mins, s_maxs, 6.0f / (float)SUN_SHADOW_SIZE, params + SUN_SHADOW_RECT);
     }
     WebSunShadows_SetReceivers(texture, params);
+}
+
+/* A separate close-range map for the hands and gun, from their actual posed
+ * geometry. The world map's 0.75-unit texels cannot resolve a trigger or a
+ * finger. Use the captured world's sun, not a light fixed to the camera. */
+EM_JS(void, WebViewmodelShadows_Set, (const float *matrix, float bias, int enabled), {
+    var s = Module.cod2ViewmodelShadow;
+    if (!s) s = Module.cod2ViewmodelShadow = {world: new Float32Array(16), params: new Float32Array(4), revision: 0};
+    s.world.set(HEAPF32.subarray(matrix >>> 2, (matrix >>> 2) + 16));
+    s.params.set([enabled, 1 / 1024, bias, 0]);
+    ++s.revision;
+});
+
+void WebViewmodelShadows_Render(const float *positions, int vertexCount, const unsigned int *indices,
+                                int indexCount, const float *view)
+{
+    float texture[16] = {0}, clip[16], light[16] = {0};
+    float f[3], r[3], u[3], lo[3] = {INFINITY, INFINITY, INFINITY};
+    float hi[3] = {-INFINITY, -INFINITY, -INFINITY}, span[3];
+    int i, j;
+    int ready = s_viewmodelSunReady;
+    s_viewmodelSunReady = 0;
+    if (!ready || !WebSunShadows_Enabled() || !view || vertexCount <= 0 || indexCount <= 0 ||
+        !WebSunShadows_Basis(s_sun, s_sunColor, f, r, u)) {
+        WebViewmodelShadows_Set(texture, 0, 0);
+        return;
+    }
+    /* Captured posed vertices already use world coordinates. Camera rotation
+     * must not rotate the light; the tight bounds still follow the weapon. */
+    for (i = 0; i < 3; ++i)
+        for (j = 0; j < 3; ++j) {
+            const float *axis = j == 0 ? r : j == 1 ? u : f;
+            light[i*4+j] = axis[i];
+        }
+    light[15] = 1;
+    for (i = 0; i < vertexCount; ++i)
+        for (j = 0; j < 3; ++j) {
+            const float *p = positions + i*3;
+            float q = p[0]*light[j] + p[1]*light[4+j] + p[2]*light[8+j] + light[12+j];
+            if (!isfinite(q)) { WebViewmodelShadows_Set(texture, 0, 0); return; }
+            lo[j] = fminf(lo[j], q); hi[j] = fmaxf(hi[j], q);
+        }
+    for (j = 0; j < 3; ++j) {
+        lo[j] -= 1.0f; hi[j] += 1.0f;
+        span[j] = fmaxf(hi[j] - lo[j], 4.0f);
+        for (i = 0; i < 4; ++i) texture[i*4+j] = light[i*4+j] / span[j];
+        texture[12+j] -= lo[j] / span[j];
+    }
+    texture[15] = 1;
+    for (i = 0; i < 16; ++i)
+        clip[i] = i % 4 == 3 ? texture[i] : 2.0f * texture[i] - (i >= 12 ? 1.0f : 0.0f);
+    int drawn = WebShadowMap_Draw(positions, vertexCount, indices, indexCount, clip, 1024, 1);
+    WebViewmodelShadows_Set(texture, 0.035f / span[2], drawn);
 }

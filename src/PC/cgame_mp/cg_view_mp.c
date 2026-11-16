@@ -153,28 +153,91 @@ int CG_GetRespawnRemaining(void)
     return remaining > 0 ? remaining : 0;
 }
 
+static qboolean CG_IsLocalDeath(const playerState_t *ps)
+{
+    return (ps->pm_type == 6 || ps->pm_type == 7) && !(ps->pm_flags & 0x400000);
+}
+
+/* The normal third-person trace can collapse against a wall directly behind
+ * the player. Search nearby exterior viewpoints once, when death starts;
+ * never move a camera through the world just to recover its desired range. */
+static void CG_ClearDeathView(void)
+{
+    const playerState_t *ps = &cg->predictedPlayerState;
+    vec3_t focus, angles = {0, 0, 0}, forward, right, best;
+    float bestDistance = 0.0f;
+    static const float offsets[][3] = {
+        {-120, 0, 32}, {-85, 85, 32}, {-85, -85, 32},
+        {0, 120, 32}, {0, -120, 32}, {85, 85, 32},
+        {85, -85, 32}, {120, 0, 32}, {0, 0, 96}
+    };
+
+    memcpy(focus, ps->origin, sizeof(focus));
+    focus[2] += fminf(fmaxf(ps->viewHeightCurrent, 24.0f), 60.0f);
+    memcpy(best, cg->refdef.vieworg, sizeof(best));
+    for (int i = 0; i < 3; ++i) {
+        float delta = best[i] - focus[i];
+        bestDistance += delta * delta;
+    }
+    if (bestDistance >= 64.0f * 64.0f)
+        return;
+
+    angles[1] = cg->refdefViewAngles[1];
+    AngleVectors(angles, forward, right, NULL);
+    for (unsigned int n = 0; n < sizeof(offsets) / sizeof(offsets[0]); ++n) {
+        vec3_t target, candidate;
+        trace_t trace;
+        float distance = 0.0f;
+        for (int i = 0; i < 3; ++i)
+            target[i] = focus[i] + offsets[n][0] * forward[i] + offsets[n][1] * right[i];
+        target[2] += offsets[n][2];
+        CG_TraceCapsule(&trace, focus, mins, maxs, target, ps->clientNum, 0x811);
+        if (trace.startsolid || trace.allsolid)
+            continue;
+        float fraction = fminf(fmaxf(trace.fraction, 0.0f), 1.0f);
+        for (int i = 0; i < 3; ++i) {
+            float delta = fraction * (target[i] - focus[i]);
+            candidate[i] = focus[i] + delta;
+            distance += delta * delta;
+        }
+        if (distance > bestDistance) {
+            bestDistance = distance;
+            memcpy(best, candidate, sizeof(best));
+        }
+        if (bestDistance >= 96.0f * 96.0f)
+            break;
+    }
+    memcpy(cg->refdef.vieworg, best, sizeof(best));
+    float dx = focus[0] - best[0], dy = focus[1] - best[1], dz = focus[2] - best[2];
+    if (bestDistance > 1.0f) {
+        cg->refdefViewAngles[0] = -atan2f(dz, sqrtf(dx * dx + dy * dy)) * 57.29577951308232f;
+        cg->refdefViewAngles[1] = atan2f(dy, dx) * 57.29577951308232f;
+        cg->refdefViewAngles[2] = 0.0f;
+    }
+}
+
 static void CG_ApplyDeathView(void)
 {
     const playerState_t *ps = &cg->predictedPlayerState;
-    if ((ps->pm_type == 6 || ps->pm_type == 7) && !(ps->pm_flags & 0x400000)) {
-        if (deathView.valid) {
-            memcpy(cg->refdef.vieworg, deathView.origin, sizeof(vec3_t));
-            memcpy(cg->refdefViewAngles, deathView.angles, sizeof(vec3_t));
-            AnglesToAxis(cg->refdefViewAngles, &cg->refdef.viewaxis);
-            cg->refdef.fov_x = deathView.fovX;
-            cg->refdef.fov_y = deathView.fovY;
+    if (CG_IsLocalDeath(ps)) {
+        if (!deathView.valid) {
+            /* Keep the first collision-checked third-person view, not the last
+             * living eye: the dead player's complete body is now rendered. */
+            CG_ClearDeathView();
+            memcpy(deathView.origin, cg->refdef.vieworg, sizeof(vec3_t));
+            memcpy(deathView.angles, cg->refdefViewAngles, sizeof(vec3_t));
+            deathView.fovX = cg->refdef.fov_x;
+            deathView.fovY = cg->refdef.fov_y;
+            deathView.valid = 1;
         }
+        memcpy(cg->refdef.vieworg, deathView.origin, sizeof(vec3_t));
+        memcpy(cg->refdefViewAngles, deathView.angles, sizeof(vec3_t));
+        AnglesToAxis(cg->refdefViewAngles, &cg->refdef.viewaxis);
+        cg->refdef.fov_x = deathView.fovX;
+        cg->refdef.fov_y = deathView.fovY;
         return;
     }
-    if (ps->pm_type > 1 || (ps->pm_flags & 0x400000)) {
-        deathView.valid = 0;
-        return;
-    }
-    memcpy(deathView.origin, cg->refdef.vieworg, sizeof(vec3_t));
-    memcpy(deathView.angles, cg->refdefViewAngles, sizeof(vec3_t));
-    deathView.fovX = cg->refdef.fov_x;
-    deathView.fovY = cg->refdef.fov_y;
-    deathView.valid = 1;
+    deathView.valid = 0;
 }
 
 #ifdef __EMSCRIPTEN__
@@ -272,7 +335,7 @@ float CG_GetViewFov(void)
         } else {
             fov_x = cg_fov->current.value;
 
-            if (BG_IsAimDownSightWeapon(weapIndex)) {
+            if (!CG_IsLocalDeath(&cg->predictedPlayerState) && BG_IsAimDownSightWeapon(weapIndex)) {
                 float fPosLerp = cg->predictedPlayerState.fWeaponPosFrac;
                 float adsFov = ((WeaponDef *)weapDef)->fAdsZoomFov;
 
@@ -911,6 +974,48 @@ static void CG_UpdateViewKick(void)
     CG_SetUserCmdAim();
 }
 
+#ifdef __EMSCRIPTEN__
+/* A local volume of actual scene particles. Check each column against the
+ * sky before emission; physics kills the flakes on roofs and ground. */
+static void CG_WebSnowfall(void)
+{
+    static int nextTime, lastTime;
+    static unsigned int seed = 1977;
+    static const vec3_t zero = {0, 0, 0};
+    if (!strstr(cgs->mapname, "mp_railyard") && !strstr(cgs->mapname, "mp_leningrad")) {
+        nextTime = lastTime = 0;
+        return;
+    }
+    if (cg->time < lastTime) nextTime = 0;
+    lastTime = cg->time;
+    if (cg->time < nextTime) return;
+    nextTime = cg->time + 160;
+    int emitted = 0;
+    for (int i = 0; i < 4; ++i) {
+        vec3_t point, sky;
+        trace_t trace;
+        for (int axis = 0; axis < 2; ++axis) {
+            seed = seed * 1664525u + 1013904223u;
+            point[axis] = cg->refdef.vieworg[axis] + ((float)(seed >> 8) / 16777216.0f - .5f) * 700.0f;
+            sky[axis] = point[axis];
+        }
+        point[2] = cg->refdef.vieworg[2] + 180.0f;
+        sky[2] = point[2] + 4096.0f;
+        CG_TraceCapsule(&trace, point, zero, zero, sky, cg->predictedPlayerState.clientNum, 0x802831);
+        if (trace.startsolid || trace.allsolid || (trace.fraction < 1 && !(trace.surfaceFlags & 4))) continue;
+        int effect = FX_RegisterEffect("fx/misc/browser_snowfall.efx");
+        if (effect) {
+            FX_PlaySimpleEffect(effect, point);
+            ++emitted;
+        }
+    }
+    EM_ASM({
+        var weather = Module.cod2Weather || (Module.cod2Weather = {columns: 0, emitted: 0});
+        weather.columns += 4; weather.emitted += $0;
+    }, emitted);
+}
+#endif
+
 qboolean CG_DrawActiveFrame(int serverTime, DemoType demoType,
                             CubemapShot cubemapShot, int cubemapSize,
                             qboolean renderScreen)
@@ -1026,6 +1131,9 @@ qboolean CG_DrawActiveFrame(int serverTime, DemoType demoType,
     CG_AddLocalEntities();
     CG_DrawScopeGlints();
     CL_FX_AdjustCamera(&cg->refdef);
+#ifdef __EMSCRIPTEN__
+    CG_WebSnowfall();
+#endif
 
     if (cg->testFxRespawnTime > 0) {
         if (cg->time > cg->testFxRespawnTime + cg->testFxTime) {

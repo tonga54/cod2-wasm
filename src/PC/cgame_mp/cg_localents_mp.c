@@ -78,14 +78,17 @@ void CG_AddMovingTracer(localEntity_t *le)
     if (dist > cg_tracerLength->current.value)
         dist = cg_tracerLength->current.value;
 
+    if (dist <= 0.0f)
+        return;
+
     end[0] = start[0] + dist * dir[0];
     end[1] = start[1] + dist * dir[1];
     end[2] = start[2] + dist * dir[2];
 
     CG_DrawTracer(start, end, CG_TracerSeed(&le->pos));
 #ifdef __EMSCRIPTEN__
-    /* A flying tracer casts a warm glow onto nearby bunker walls and ground. */
-    CL_AddLightToScene(end, 165.0f, 0.85f, 0.54f, 0.22f);
+    /* A small luminous charge: the muzzle and impact supply the bright flash. */
+    CL_AddLightToScene(end, 60.0f, 0.18f, 0.10f, 0.04f);
 #endif
 }
 

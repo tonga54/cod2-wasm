@@ -9,6 +9,8 @@ typedef struct {
 } WebMaterialMaps;
 
 void WebMaterials_Select(const Material *material, int normalMaps, int specularMaps, WebMaterialMaps *maps);
+int WebMaterials_IsImpact(const Material *material);
+float WebMaterials_MasonryRoughness(const Material *material);
 void WebMaterials_SetSun(const GfxWorld *world);
 
 #endif

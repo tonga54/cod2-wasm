@@ -18,12 +18,21 @@ from browser_explosives import DEPENDENCIES as EXPLOSIVE_DEPENDENCIES, STRINGS a
 from browser_attachment_models import attachment_model_assets
 from browser_muzzle_flashes import muzzle_flash_assets
 from browser_grenade_explosions import grenade_explosion_assets
+from browser_weather import weather_assets
+from browser_smoke_screen import smoke_screen_assets
+from browser_lantern_lights import lantern_light_assets
+from browser_character_materials import character_material_assets
+from browser_remix_model import PACK as REMIX_MODEL_PACK, apply_model_pack
+from remix_static_models import PACK as REMIX_PROPS_PACK, apply_prop_pack
+from browser_remix_shutters import PACK as REMIX_SHUTTERS_PACK, apply_shutter_pack
+from browser_remix_windows import PACK as REMIX_WINDOWS_PACK, apply_window_pack
 from browser_settings_menu import apply_settings_menu
 from browser_objective_assets import objective_asset_roots
 from browser_spawn_safety import apply_spawn_safety
 from browser_endgame import apply_endgame_timing
 from browser_player_health import apply_player_health
 from weapon_balance import apply_weapon_balance, load_profile
+from browser_remix_assets import PACK as REMIX_PACK, apply_owner_pack
 
 root = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
@@ -367,6 +376,25 @@ try:
     print(f"Grenade explosions: {sum(name.startswith('fx/explosions/grenadeexp_') for name in grenade_explosions)} "
           f"surface effects rewritten, {sum(name.endswith('.efx') for name in grenade_explosions)} effects, "
           f"{sum(name.startswith('images/') for name in grenade_explosions)} textures")
+    renderer.update(weather_assets(lambda name: originals[asset_index[name][0]].read(asset_index[name][1])))
+    renderer.update(smoke_screen_assets(lambda name: originals[asset_index[name][0]].read(asset_index[name][1])))
+    renderer.update(lantern_light_assets(lambda name: originals[asset_index[name][0]].read(asset_index[name][1])))
+    renderer.update(character_material_assets(lambda name: originals[asset_index[name][0]].read(asset_index[name][1])))
+    remix = apply_owner_pack(renderer, root / "data/main" / REMIX_PACK)
+    if remix:
+        print(f"Carentan Remix: {len(remix['materials'])} materials and {len(remix['skies'])} skies across all maps")
+    model_pack = apply_model_pack(renderer, root / "data/main" / REMIX_MODEL_PACK)
+    if model_pack:
+        print(f"Carentan Enfield: {model_pack['vertices']} vertices, original animations retained")
+    prop_pack = apply_prop_pack(renderer, root / "data/main" / REMIX_PROPS_PACK)
+    if prop_pack:
+        print(f"Carentan props: {len(prop_pack['models'])} detailed models, original collision retained")
+    shutters = apply_shutter_pack(renderer, root / "data/main" / REMIX_SHUTTERS_PACK)
+    if shutters:
+        print(f"Carentan shutters: {len(shutters['originals'])} baked owner surfaces")
+    windows = apply_window_pack(renderer, root / "data/main" / REMIX_WINDOWS_PACK)
+    if windows:
+        print(f"Carentan windows: {len(windows['originals'])} projected owner frames")
     archives["cod2_browser_renderer.iwd"] = renderer
     hit_sound = root / "data/main" / HIT_SOUND_OWNER_FILE
     menu_music = root / "data/main" / MENU_MUSIC_OWNER_FILE
@@ -394,11 +422,13 @@ finally:
 files = []
 for archive_name, entries in archives.items():
     target = main / archive_name
-    with zipfile.ZipFile(target, "w") as output:
+    temporary = target.with_suffix('.tmp')
+    with zipfile.ZipFile(temporary, "w") as output:
         for name, data in sorted(entries.items()):
             info = zipfile.ZipInfo(name, (1980, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
             output.writestr(info, data)
+    temporary.replace(target)
     files.append({
         "key": Path(archive_name).stem.replace("_", "-"),
         "name": archive_name, "path": "main/" + archive_name,

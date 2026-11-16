@@ -13,7 +13,7 @@ crater held back until the flash and its light have passed, and runs two
 generated effects in place of its fire, light and smoke: the fire, shared by
 every surface, and a cloud of smoke and dust in its surface's color. Water
 keeps its splash. The textures are made here:
-- browser_blast_fireball, sixteen frames a fireball plays over its life:
+- browser_blast_fireball, sixty-four frames a fireball plays over its life:
   white-hot, swelling orange, then cooling red and breaking up into smoke;
 - browser_blast_smoke, sixteen shapes of dense smoke lit from above.
 
@@ -33,8 +33,11 @@ EXPLOSIONS = 'fx/explosions/'
 FIRE = 'fx/explosions/browser_grenade_fire.efx'
 SMOKE = 'fx/smoke/browser_grenade_smoke_{}.efx'
 FIREBALL, SMOKE_TEXTURE = 'browser_blast_fireball', 'browser_blast_smoke'
+FLASH = 'browser_blast_flash'
 # Each texture: frame width and height, columns, frames, and the material whose layout it takes.
-TEXTURES = {FIREBALL: (128, 128, 4, 16, 'materials/gfx_fire_ball'),
+# 64 phases keep a 320–480 ms blast moving at 120 Hz. The 128px cells
+# retain the same field/detail; only its temporal sampling is increased.
+TEXTURES = {FIREBALL: (128, 128, 8, 64, 'materials/gfx_fire_ball'),
             SMOKE_TEXTURE: (128, 128, 4, 16, 'materials/gfx_smokepuff_atlas')}
 
 # The dust a blast raises from each surface, multiplying the smoke texture's
@@ -51,11 +54,11 @@ SURFACES = {
                                         'rockychunks_high', 'rockychunks_out', 'chunks', 'grain')),
     'wood': Surface((0.55, 0.5, 0.42), ('decal', 'grain', 'wood_splinter')),
 }
-# CoD2's grit sprites, broad pebble masks in front of the fire, wait out the
-# flash and shrink so the fireball does not show through them as a mesh.
+# CoD2's grit sprites contain entire sheets of tiny stones. Keep these as
+# small ejecta clusters, not meter-wide masks over the fire and smoke.
 GRIT = 'gfx_dirtchunks'
 GRIT_DELAY_MS = 180
-GRIT_SIZE = 0.5
+GRIT_SIZE = 0.12
 # A crater shows once the blast's light has gone: lit by it, its frayed rim
 # glints across the ground.
 CRATER_DELAY_MS = 250
@@ -142,9 +145,9 @@ def fire_effect():
             ('cullrange', '4000'), ('origin', '12 0 0 20 0 0'), ('rotation', '0 360')),
             _channels(rgb=((0, 1, 1, 1), (1, 1, 0.72, 0.45)), alpha=((0, 1), (0.35, 0.75), (1, 0)),
                       size=((0, 0.6), (0.25, 1), (1, 0.85)), size_rand=((0, 0.5), (0.25, 0.85), (1, 0.75)),
-                      size_scale=115), (GLOW,)),
+                      size_scale=115), (FLASH,)),
         # The fireball: five to seven overlapping balls of fire rolling out
-        # from the blast and rising, each playing the sixteen frames from
+        # from the blast and rising, each playing the sixty-four phases from
         # white-hot to broken red over its life, turning slowly.
         _element('Particle', _sequence((
             ('name', 'fireball'),
@@ -458,11 +461,11 @@ def write_iwi_rgba(width, height, rgba):
             b''.join(reversed(blobs)))
 
 
-def feathered_material(template, name, width, height, rows, columns):
-    """An effect material for the image of its name, laid out as the
-    template's soft-edged one (effect_zfeather, blended, or
-    effect_zfeather_add_nofog, added) with its feather parameters, with the
-    atlas's rows and columns."""
+def feathered_material(template, name, width, height, rows, columns, *, image_name=None, feather_scale=None):
+    """A soft effect with the template's blend state and atlas layout.
+    By default it uses its own image and the template's feather distance;
+    a shared image and a different contact scale can be supplied explicitly.
+    """
     head = bytearray(template[:0x50])
     technique_at = struct.unpack_from('<I', template, 0x38)[0]
     technique = template[technique_at:template.index(b'\0', technique_at)]
@@ -473,16 +476,22 @@ def feathered_material(template, name, width, height, rows, columns):
     strings = technique + b'\0'
     material = 0x64 + len(strings)
     strings += name.encode('ascii') + b'\0'
+    picture = material
+    if image_name is not None:
+        picture = 0x64 + len(strings)
+        strings += image_name.encode('ascii') + b'\0'
     colour_map = 0x64 + len(strings)
     strings += b'colorMap\0'
     feather = 0x64 + len(strings)
     strings += b'featherParms\0'
-    struct.pack_into('<II', head, 0x00, material, material)
+    struct.pack_into('<II', head, 0x00, material, picture)
     head[14], head[15] = rows, columns
     struct.pack_into('<HH', head, 0x1c, width, height)
     struct.pack_into('<I', head, 0x38, 0x64)
-    struct.pack_into('<III', head, 0x44, colour_map, struct.unpack_from('<I', template, 0x48)[0], material)
+    struct.pack_into('<III', head, 0x44, colour_map, struct.unpack_from('<I', template, 0x48)[0], picture)
     struct.pack_into('<I', constant, 0, feather)
+    if feather_scale is not None:
+        struct.pack_into('<ff', constant, 4, feather_scale, 1.0 / feather_scale)
     return bytes(head) + bytes(constant) + strings
 
 
@@ -496,6 +505,13 @@ def grenade_explosion_assets(read):
         assets[name] = rewrite_surface(read(name).decode('latin-1'), surface)
         assets[SMOKE.format(surface)] = smoke_effect(SURFACES[surface].dust).replace('\n', '\r\n').encode('latin-1')
     assets[FIRE] = fire_effect().replace('\n', '\r\n').encode('latin-1')
+    # The large blast flash intersects walls and ground. Unlike the smaller
+    # viewmodel glow, it needs depth feathering: fade its additive color over
+    # 20 world units instead of showing a hard polygon at the intersection.
+    # Reuse the glow image; muzzle flashes and the blast's light stay intact.
+    assets['materials/' + FLASH] = feathered_material(
+        read('materials/gfx_fire_ball'), FLASH, 128, 128, 1, 1,
+        image_name=GLOW, feather_scale=0.05)
     for name, (frame_width, frame_height, columns, count, template) in TEXTURES.items():
         width, height, pixels = texture_pixels(name)
         assets['images/' + name + '.iwi'] = (write_iwi(width, height, pixels) if name == FIREBALL else

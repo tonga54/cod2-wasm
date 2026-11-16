@@ -24,6 +24,9 @@ typedef struct {
     float feather;
     /* The emissive gain of fire and explosions. */
     float heat;
+    /* Authored blast fire uses controlled additive compositing. Zero keeps
+     * the material's ordinary blend; positive values attenuate light behind it. */
+    float extinction;
     /* A scope's glass in the viewmodel: its disc's centre and radii in the
      * color map's coordinates; all 0 for anything else. */
     float lens[4];

@@ -4,6 +4,9 @@ extern int alwaysfails;
 #include "bytematch.h"
 #include "headers/PC/gfx_d3d/r_hud2d.h"
 #include "headers/PC/gfx_d3d/r_font_wwii.h"
+#ifdef __EMSCRIPTEN__
+#include "web_planar.h"
+#endif
 
 extern char *getenv(const char *name);
 
@@ -1542,6 +1545,11 @@ sort_changed:
     g_rdsl_sortchange++;
     prevSort = sortKey;
     R_DecomposeSort(sortKey, &entityIndex, &material, &lightmap);
+#ifdef __EMSCRIPTEN__
+    if (WebPlanar_IsDrawing() && entityIndex < 0x7fe &&
+        (backEnd.sceneDef.entities[entityIndex].renderFxFlags & 0x18))
+        goto ignore_surf;
+#endif
 
     if (!material) {
         g_rdsl_ignore_technull++;
@@ -1894,6 +1902,18 @@ static void RB_DrawSurfsCmd(GfxRenderCommandExecState *execState)
         ((GfxCmdDrawSurfs *)cmd)->drawSurfCount,
         ((GfxCmdDrawSurfs *)cmd)->techType,
         ((GfxCmdDrawSurfs *)cmd)->order);
+#ifdef __EMSCRIPTEN__
+    /* Render the same sorted surfaces as one reflected batch. Reuse original
+     * materials/lightmaps, with viewmodels filtered before their depth hack. */
+    if (WebPlanar_BeginDraw(backEnd.viewParms && !backEnd.projection2D)) {
+        RB_RenderDrawSurfList(
+            ((GfxCmdDrawSurfs *)cmd)->drawSurfs,
+            ((GfxCmdDrawSurfs *)cmd)->drawSurfCount,
+            ((GfxCmdDrawSurfs *)cmd)->techType,
+            ((GfxCmdDrawSurfs *)cmd)->order);
+        WebPlanar_EndDraw();
+    }
+#endif
 }
 
 static void RB_DrawSunPostEffectsCmd(GfxRenderCommandExecState *execState)

@@ -143,6 +143,13 @@ IDirect3DVertexBuffer9 *R_CreateWorldVertexBuffer(GfxWorldVertex *vertices, int 
     }
 
     R_FinishStaticVertexBuffer(worldVb);
+#ifdef __EMSCRIPTEN__
+    if (r_rendererInUse->current.integer == 2) {
+        extern void WebWorldNormals_Set(const void *, const float *, int, int, int);
+        WebWorldNormals_Set(worldVb, (const float *)vertices, vertexCount,
+                            sizeof(*vertices), (int)((byte *)&vertices[0].normal - (byte *)vertices));
+    }
+#endif
     return (IDirect3DVertexBuffer9 *)worldVb;
 }
 

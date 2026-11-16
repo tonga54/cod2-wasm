@@ -2,8 +2,79 @@
 #include <emscripten.h>
 #include <math.h>
 
-/* Use the original FX lights in the existing opaque pass. DX7 world vertices
- * have no normals: the fragment shader derives them from their eye position.
+/* Share the map's actual sky with every reflective material. A map change
+ * deletes its texture object; the draw checks that lifetime before using it. */
+EM_JS(void, WebEnvironment_Set, (int texture), {
+    if (texture && GL.textures[texture])
+        Module.cod2Environment = {id: texture, texture: GL.textures[texture]};
+});
+
+/* Preserve the BSP's authored vertex normals alongside the unchanged DX7
+ * position/color/UV stream. Vertex fetch retains shared slopes and hard seams
+ * without adding a geometry pass or changing the legacy vertex ABI. Unit 27
+ * is separate from water depth (25) and planar reflection color (26). */
+EM_JS(void, WebWorldNormals_Set, (const void *buffer, const float *vertices, int count, int stride, int normalOffset), {
+    var old = Module.cod2WorldNormals;
+    if (old) GLctx.deleteTexture(old.texture);
+    Module.cod2WorldNormals = null;
+    if (!buffer || count <= 0) return;
+    var width = Math.min(1024, GLctx.getParameter(GLctx.MAX_TEXTURE_SIZE));
+    var height = Math.ceil(count / width);
+    if (height > GLctx.getParameter(GLctx.MAX_TEXTURE_SIZE)) return;
+    var data = new Float32Array(width * height * 4);
+    for (var i = 0; i < count; ++i) {
+        var p = (vertices + i * stride + normalOffset) >>> 2;
+        var x = HEAPF32[p], y = HEAPF32[p + 1], z = HEAPF32[p + 2];
+        var length = Math.hypot(x, y, z);
+        if (Number.isFinite(length) && length > 1e-6) {
+            data[i * 4] = x / length; data[i * 4 + 1] = y / length; data[i * 4 + 2] = z / length;
+        }
+    }
+    var active = GLctx.getParameter(GLctx.ACTIVE_TEXTURE);
+    GLctx.activeTexture(GLctx.TEXTURE0 + 27);
+    var texture = GLctx.createTexture();
+    GLctx.bindTexture(GLctx.TEXTURE_2D, texture);
+    GLctx.texImage2D(GLctx.TEXTURE_2D, 0, GLctx.RGBA32F, width, height, 0, GLctx.RGBA, GLctx.FLOAT, data);
+    GLctx.texParameteri(GLctx.TEXTURE_2D, GLctx.TEXTURE_MIN_FILTER, GLctx.NEAREST);
+    GLctx.texParameteri(GLctx.TEXTURE_2D, GLctx.TEXTURE_MAG_FILTER, GLctx.NEAREST);
+    GLctx.activeTexture(active);
+    Module.cod2WorldNormals = {buffer, texture, width, count};
+});
+
+EM_JS(void, WebWorldNormals_Release, (const void *buffer), {
+    var world = Module.cod2WorldNormals;
+    if (world && world.buffer === buffer) {
+        GLctx.deleteTexture(world.texture);
+        Module.cod2WorldNormals = null;
+    }
+});
+
+EM_JS(void, WebWorldNormals_Draw, (const void *buffer, int baseVertex), {
+    var world = Module.cod2WorldNormals;
+    if (!Module.cod2WorldNormalDefault) {
+        var active = GLctx.getParameter(GLctx.ACTIVE_TEXTURE);
+        GLctx.activeTexture(GLctx.TEXTURE0 + 27);
+        var texture = Module.cod2WorldNormalDefault = GLctx.createTexture();
+        GLctx.bindTexture(GLctx.TEXTURE_2D, texture);
+        GLctx.texImage2D(GLctx.TEXTURE_2D, 0, GLctx.RGBA32F, 1, 1, 0, GLctx.RGBA, GLctx.FLOAT, new Float32Array(4));
+        GLctx.texParameteri(GLctx.TEXTURE_2D, GLctx.TEXTURE_MIN_FILTER, GLctx.NEAREST);
+        GLctx.texParameteri(GLctx.TEXTURE_2D, GLctx.TEXTURE_MAG_FILTER, GLctx.NEAREST);
+        GLctx.activeTexture(active);
+        Module.cod2WorldNormalBound = texture;
+    }
+    var selected = world ? world.texture : Module.cod2WorldNormalDefault;
+    if (Module.cod2WorldNormalBound !== selected) {
+        var active = GLctx.getParameter(GLctx.ACTIVE_TEXTURE);
+        GLctx.activeTexture(GLctx.TEXTURE0 + 27);
+        GLctx.bindTexture(GLctx.TEXTURE_2D, selected);
+        GLctx.activeTexture(active);
+        Module.cod2WorldNormalBound = selected;
+    }
+    Module.cod2WorldNormalDraw = world && world.buffer === buffer && baseVertex >= 0 ? world : null;
+    Module.cod2WorldNormalBase = baseVertex;
+});
+
+/* Use the original FX lights in the existing opaque pass.
  * Four lights bound the GPU work without repeating any geometry or uploads. */
 EM_JS(void, WebPointLights_Set, (const float *packed, int count), {
     var lights = Module.cod2PointLights;
@@ -66,6 +137,16 @@ EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShado
             effect: new Float32Array(4),
             // A scope's glass: its disc in the color map (web_effects.c).
             lens: new Float32Array(4),
+            environment: new Float32Array(4),
+            // Finish kind: authored metalness (+1), character classes (-1),
+            // or legacy (0); remaining fields hold scene reflection availability/FOV.
+            finish: new Float32Array(4),
+            masonry: new Float32Array(4),
+            // Puddle rays use the previous weapon-free world's color/depth.
+            waterView: new Float32Array(16), waterProjection: new Float32Array(4), waterJitter: new Float32Array(4),
+            planarClip: new Float32Array(4), planarView: new Float32Array(16), planarPlane: new Float32Array(4),
+            planarProjection: new Float32Array(4), planarJitter: new Float32Array(4),
+            vmShadowEye: new Float32Array(16), vmShadow: new Float32Array(4), vmShadowRevision: -1,
             sunShadowRevision: -1,
             bound: [null, null, null, null, null], present: [0, 0, 0, 0, 0], sunRevision: -1,
             // The detail, normal and specular maps, then the camouflage's pattern
@@ -75,9 +156,11 @@ EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShado
         // World shaders compare against the sun's depth map on unit 18
         // (web_sun_shadows.c). Until it exists, a one-texel map at the far
         // plane keeps that shadow sampler valid.
-        if (!Module.cod2SunShadowPass || !Module.cod2SunShadowPass.texture) {
+        for (var shadowSlot of [18, 24]) {
+          var shadowPass = Module[shadowSlot === 18 ? "cod2SunShadowPass" : "cod2ViewmodelShadowPass"];
+          if (!shadowPass || !shadowPass.texture) {
             var shadowUnit = GLctx.getParameter(GLctx.ACTIVE_TEXTURE);
-            GLctx.activeTexture(GLctx.TEXTURE18);
+            GLctx.activeTexture(GLctx.TEXTURE0 + shadowSlot);
             material.sunShadowDefault = GLctx.createTexture();
             GLctx.bindTexture(GLctx.TEXTURE_2D, material.sunShadowDefault);
             GLctx.texImage2D(GLctx.TEXTURE_2D, 0, GLctx.DEPTH_COMPONENT16, 1, 1, 0, GLctx.DEPTH_COMPONENT,
@@ -87,6 +170,7 @@ EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShado
             GLctx.texParameteri(GLctx.TEXTURE_2D, GLctx.TEXTURE_COMPARE_MODE, GLctx.COMPARE_REF_TO_TEXTURE);
             GLctx.texParameteri(GLctx.TEXTURE_2D, GLctx.TEXTURE_COMPARE_FUNC, GLctx.LEQUAL);
             GLctx.activeTexture(shadowUnit);
+          }
         }
     }
     // The engine sets sampler state only on the stages it binds itself:
@@ -117,6 +201,33 @@ EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShado
         rebound = true;
     }
     if (rebound) GLctx.activeTexture(GLctx.TEXTURE0 + GLImmediate.TexEnvJIT.getActiveTexture());
+    if (!material.environmentSampler) {
+        var savedUnit = GLctx.getParameter(GLctx.ACTIVE_TEXTURE);
+        GLctx.activeTexture(GLctx.TEXTURE0 + 23);
+        material.environmentDefault = GLctx.createTexture();
+        GLctx.bindTexture(GLctx.TEXTURE_CUBE_MAP, material.environmentDefault);
+        for (var face = 0; face < 6; ++face)
+            GLctx.texImage2D(GLctx.TEXTURE_CUBE_MAP_POSITIVE_X + face, 0, GLctx.RGBA, 1, 1, 0,
+                GLctx.RGBA, GLctx.UNSIGNED_BYTE, new Uint8Array([128, 128, 128, 255]));
+        var envSampler = material.environmentSampler = GLctx.createSampler();
+        GLctx.samplerParameteri(envSampler, GLctx.TEXTURE_MIN_FILTER, GLctx.LINEAR_MIPMAP_LINEAR);
+        GLctx.samplerParameteri(envSampler, GLctx.TEXTURE_MAG_FILTER, GLctx.LINEAR);
+        GLctx.samplerParameteri(envSampler, GLctx.TEXTURE_WRAP_S, GLctx.CLAMP_TO_EDGE);
+        GLctx.samplerParameteri(envSampler, GLctx.TEXTURE_WRAP_T, GLctx.CLAMP_TO_EDGE);
+        GLctx.samplerParameteri(envSampler, GLctx.TEXTURE_WRAP_R, GLctx.CLAMP_TO_EDGE);
+        GLctx.bindSampler(23, envSampler);
+        GLctx.activeTexture(savedUnit);
+    }
+    var environment = Module.cod2Environment;
+    var envTexture = environment && GL.textures[environment.id] === environment.texture ? environment.texture : null;
+    material.environment[0] = envTexture && reflection > 0 ? 1 : 0;
+    var selectedEnv = envTexture || material.environmentDefault;
+    if (material.environmentBound !== selectedEnv) {
+        GLctx.activeTexture(GLctx.TEXTURE0 + 23);
+        GLctx.bindTexture(GLctx.TEXTURE_CUBE_MAP, selectedEnv);
+        GLctx.activeTexture(GLctx.TEXTURE0 + GLImmediate.TexEnvJIT.getActiveTexture());
+        material.environmentBound = selectedEnv;
+    }
     var surface = material.surface, detail = material.detail;
     surface[0] = present[1]; surface[1] = present[2]; surface[2] = lightmapped ? 1 : 0; surface[3] = specularScale;
     detail[0] = present[0] ? detailX : 0; detail[1] = present[0] ? detailY : 0; detail[2] = present[0];
@@ -142,7 +253,7 @@ EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShado
             if (material.view[i] !== HEAPF32[viewOffset + i]) { viewChanged = true; break; }
         if (viewChanged) {
             material.view.set(HEAPF32.subarray(viewOffset, viewOffset + 16));
-            material.sunRevision = material.sunShadowRevision = -1;
+            material.sunRevision = material.sunShadowRevision = material.vmShadowRevision = -1;
         }
     }
     var sun = Module.cod2Sun;
@@ -182,6 +293,24 @@ EM_JS(void, WebPointLights_Draw, (const float *view, int enabled, int worldShado
         material.sunShadow.set(sunShadow.params);
     } else {
         material.sunShadow[0] = 0;
+    }
+    var vmShadow = Module.cod2ViewmodelShadow;
+    if (view && vmShadow && viewmodel && vmShadow.params[0] > 0) {
+        if (material.vmShadowRevision !== vmShadow.revision) {
+            var m = material.view, t = vmShadow.world, e = material.vmShadowEye;
+            for (var row = 0; row < 4; ++row) {
+                for (var column = 0; column < 3; ++column)
+                    e[column * 4 + row] = t[row] * m[column] + t[4 + row] * m[4 + column] + t[8 + row] * m[8 + column];
+                var move = t[12 + row];
+                for (var k = 0; k < 3; ++k)
+                    move -= t[k * 4 + row] * (m[k * 4] * m[12] + m[k * 4 + 1] * m[13] + m[k * 4 + 2] * m[14]);
+                e[12 + row] = move;
+            }
+            material.vmShadowRevision = vmShadow.revision;
+        }
+        material.vmShadow.set(vmShadow.params);
+    } else {
+        material.vmShadow[0] = 0;
     }
     var lights = Module.cod2PointLights;
     if (!lights) return;
