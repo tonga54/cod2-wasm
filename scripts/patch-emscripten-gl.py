@@ -893,25 +893,27 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 // Damp film follows low soil; still water fills only shallow,
                 // nearly horizontal pockets. The owner's wet road instead
                 // carries aligned pool boundaries in its roughness map.
+                "highp vec2 cod2PoolUv = cod2SurfaceUv;\n" +
                 "float cod2Wet = 0.0, cod2Pool = 0.0;\n" +
                 "if (u_cod2Environment.z != 0.0 && u_cod2Detail.z > 0.5) {\n" +
                 "  float up = dot(cod2N, u_cod2SkyEye.xyz);\n" +
-                "  float h = texture2D(u_cod2DetailMap, " + pointUV + ").a;\n" +
+                "  float h = texture2D(u_cod2DetailMap, cod2PoolUv).a;\n" +
                 "  if (u_cod2Environment.z > 0.0) {\n" +
                 "    float amount = clamp(u_cod2Environment.z, 0.0, 1.0);\n" +
-                "    float basin = cod2Noise(" + pointUV + " * 0.37 + vec2(23.0, 11.0));\n" +
+                "    float basin = cod2Noise(cod2PoolUv * 0.37 + vec2(23.0, 11.0));\n" +
                 "    float level = mix(0.08, 0.18, basin);\n" +
                 "    cod2Wet = amount * (1.0 - smoothstep(0.24, 0.52, h)) * smoothstep(0.65, 0.95, up);\n" +
                 "    cod2Pool = min(amount * 2.0, 1.0) * (1.0 - smoothstep(level - 0.035, level + 0.035, h)) *\n" +
                 "      smoothstep(0.70, 0.85, basin) * smoothstep(0.93, 0.995, up);\n" +
-                "    gl_FragColor.rgb *= (1.0 - 0.32 * cod2Wet) * (1.0 - 0.12 * cod2Pool);\n" +
+                "    gl_FragColor.rgb *= (1.0 - 0.32 * cod2Wet);\n" +
                 "  } else if (u_cod2Surface.y > 0.5) {\n" +
-                "    float gloss = texture2D(u_cod2SpecMap, " + pointUV + ", u_cod2Detail.w).a;\n" +
+                "    float gloss = texture2D(u_cod2SpecMap, cod2PoolUv, u_cod2Detail.w).a;\n" +
                 // The donor's wet atlas marks broad flooded regions. Retain
                 // its boundaries, but fill only sparse patches of that area.
-                "    float basin = cod2Noise(" + pointUV + " * 0.37 + vec2(23.0, 11.0));\n" +
+                "    float basin = cod2Noise(cod2PoolUv * 0.37 + vec2(23.0, 11.0));\n" +
                 "    cod2Pool = smoothstep(0.64, 0.88, gloss) * smoothstep(0.66, 0.84, basin) * smoothstep(0.93, 0.995, up);\n" +
                 "  }\n}\n" +
+                "gl_FragColor.rgb *= 1.0 - 0.24 * cod2Pool;\n" +
                 "highp vec3 cod2WaterN = cod2MacroB; float cod2WaterF = 0.0; highp float cod2WaterP = 1.0;\n" +
                 "highp vec3 cod2WaterV = vec3(0.0, 0.0, 1.0);\n" +
                 "if (u_cod2Environment.z != 0.0) {\n" +
@@ -921,7 +923,7 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
                 "  cod2WaterP = cod2SpecPower(0.97, cod2WaterN);\n}\n" +
                 "cod2LocalN = cod2MacroB; cod2LocalWaterN = cod2WaterN;\n" +
                 "cod2LocalWaterPower = cod2WaterP; cod2LocalWaterF = cod2Pool * cod2WaterF;\n" +
-                "cod2LocalDiffuse = (1.0 - cod2Pool * cod2WaterF) * (u_cod2Environment.z > 0.0 ? (1.0 - 0.32 * cod2Wet) * (1.0 - 0.12 * cod2Pool) : 1.0);\n" +
+                "cod2LocalDiffuse = (1.0 - cod2Pool * cod2WaterF) * (u_cod2Environment.z > 0.0 ? (1.0 - 0.32 * cod2Wet) : 1.0) * (1.0 - 0.24 * cod2Pool);\n" +
                 "vec4 cod2L = " + lightmapTexel + ";\n" +
                 "vec3 cod2SunPart = u_cod2SunColor.rgb * cod2L.a;\n" +
                 "float cod2NLG = max(dot(cod2N, u_cod2SunEye), 0.0), cod2NLB = max(dot(cod2B, u_cod2SunEye), 0.0);\n" +
@@ -1019,7 +1021,8 @@ POINT_DEFS_REPLACEMENT = r'''          // COD2_POINT_LIGHT_SHADER: compile once,
             }
             pointPass = materialPass + pointPass;
             if (!pointNormal) {
-              fsTexEnvPass = "highp vec2 cod2ReliefCoord = cod2ReliefUV(" + pointUV + ");\n" +
+              fsTexEnvPass = "highp vec2 cod2SurfaceUv = " + pointUV + ";\n" +
+                "highp vec2 cod2ReliefCoord = cod2ReliefUV(cod2SurfaceUv);\n" +
                 fsTexEnvPass.split(pointUV).join("cod2ReliefCoord");
               pointPass = pointPass.split(pointUV).join("cod2ReliefCoord");
             }

@@ -1388,7 +1388,12 @@ EM_JS(int, WebSceneFx_Bind, (int width, int height, int samples, int screenWidth
         fx.beforeEffects = function(near, px, py, strength, radius, sx, sy, sz, sun) {
             var t = fx.t, P = fx.programs;
             if (!t || !P || !fx.drawing || fx.planarDrawing || t.aoApplied ||
-                !(strength > 0 && px > 0 && py > 0) || !fx.featherDepth()) return;
+                !(strength > 0 && px > 0 && py > 0)) return;
+            // Lens/reflection capture can prime feather depth before the arms
+            // and weapon draw. AO must use the current depth: applying world
+            // contact shadows from that earlier copy makes the gun see-through.
+            if (t.feather) t.feather.ready = false;
+            if (!fx.featherDepth()) return;
             var scaled = fx.unscale();
             var program = gl.getParameter(gl.CURRENT_PROGRAM), vao = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
             var unit = gl.getParameter(gl.ACTIVE_TEXTURE), viewport = gl.getParameter(gl.VIEWPORT);
